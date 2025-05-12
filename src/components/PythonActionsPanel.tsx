@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import styles from "./PythonActionsPanel.module.css";
+import ValidationPanel from "./ValidationPanel";
 
 interface ActionButtonProps {
   label: string;
@@ -56,6 +57,9 @@ const PythonActionsPanel: React.FC = () => {
   const [serverStatus, setServerStatus] = useState<"unknown" | "connected" | "disconnected">(
     "unknown"
   );
+
+  const [showValidationPanel, setShowValidationPanel] = useState(false);
+  const [validationType, setValidationType] = useState<"track" | "playlist">("track");
 
   const [userMatchSelections, setUserMatchSelections] = useState<
     { fileName: string; trackId: string; confidence: number }[]
@@ -339,6 +343,17 @@ const PythonActionsPanel: React.FC = () => {
     });
 
     Spicetify.showNotification("Operation cancelled");
+  };
+
+  // ! Track validation
+  const openTrackValidation = () => {
+    setValidationType("track");
+    setShowValidationPanel(true);
+  };
+
+  const openPlaylistValidation = () => {
+    setValidationType("playlist");
+    setShowValidationPanel(true);
   };
 
   const getPagination = (section: string) => {
@@ -1483,6 +1498,22 @@ const PythonActionsPanel: React.FC = () => {
             </p>
           )}
         </div>
+
+        <div className={styles.actionGroup}>
+          <h4>Validation & Correction</h4>
+          <div className={styles.actionButtons}>
+            <ActionButton
+              label="Validate Track Metadata"
+              onClick={openTrackValidation}
+              disabled={serverStatus !== "connected"}
+            />
+            <ActionButton
+              label="Validate Playlists"
+              onClick={openPlaylistValidation}
+              disabled={serverStatus !== "connected"}
+            />
+          </div>
+        </div>
       </div>
 
       {renderConfirmation()}
@@ -1502,6 +1533,15 @@ const PythonActionsPanel: React.FC = () => {
             )
         )}
       </div>
+
+      {showValidationPanel && (
+        <ValidationPanel
+          serverUrl={serverUrl}
+          masterTracksDir={paths.masterTracksDir}
+          playlistsDir={paths.playlistsDir}
+          onClose={() => setShowValidationPanel(false)}
+        />
+      )}
     </div>
   );
 };

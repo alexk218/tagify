@@ -1,0 +1,345 @@
+.container {
+  padding: 20px;
+  background-color: var(--spice-card);
+  border-radius: 8px;
+  margin: 20px 0;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.tabs {
+  display: flex;
+  gap: 10px;
+}
+
+.tab {
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--spice-button-disabled);
+  background: transparent;
+  color: var(--spice-text);
+  cursor: pointer;
+}
+
+.tab.active {
+  background: var(--spice-button);
+  border-color: var(--spice-button);
+}
+
+.closeButton {
+  padding: 8px 16px;
+  border-radius: 4px;
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  cursor: pointer;
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+  background: var(--spice-card);
+  padding: 16px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.summaryItem {
+  display: flex;
+  flex-direction: column;
+}
+
+.label {
+  font-size: 0.9em;
+  color: var(--spice-subtext);
+}
+
+.value {
+  font-size: 1.2em;
+  font-weight: bold;
+}
+
+.warning {
+  color: #ff9800;
+}
+
+.error {
+  color: #f44336;
+}
+
+.splitView {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  height: calc(60vh - 200px);
+  min-height: 300px;
+}
+
+.mismatchList,
+.duplicatesList,
+.matchPanel,
+.duplicateDetail {
+  overflow-y: auto;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  padding: 10px;
+}
+
+.mismatchItem,
+.duplicateItem {
+  padding: 12px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  cursor: pointer;
+}
+
+.mismatchItem:hover,
+.duplicateItem:hover {
+  background-color: var(--spice-highlight);
+}
+
+.mismatchItem.selected,
+.duplicateItem.selected {
+  background-color: var(--spice-button-active);
+}
+
+.mismatchFile,
+.duplicateTrackId {
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.confidenceBar {
+  height: 6px;
+  width: 100%;
+  background: var(--spice-button-disabled);
+  border-radius: 3px;
+  margin-top: 6px;
+  position: relative;
+}
+
+.confidenceFill {
+  height: 100%;
+  background: linear-gradient(90deg, #f44336 0%, #ff9800 50%, #4caf50 100%);
+  border-radius: 3px;
+}
+
+.confidenceBar span {
+  position: absolute;
+  right: 0;
+  top: -16px;
+  font-size: 0.8em;
+}
+
+.matchPanel {
+  padding: 16px;
+}
+
+.currentInfo {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--spice-card);
+  border-radius: 4px;
+  border-left: 4px solid var(--spice-button);
+}
+
+.matchesList {
+  max-height: calc(100% - 120px);
+  overflow-y: auto;
+}
+
+.matchOption {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.matchTitle {
+  font-weight: bold;
+}
+
+.matchAlbum {
+  font-size: 0.9em;
+  color: var(--spice-subtext);
+}
+
+.matchConfidence {
+  font-size: 0.8em;
+  margin-top: 4px;
+}
+
+.applyButton {
+  padding: 6px 12px;
+  border-radius: 4px;
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  cursor: pointer;
+}
+
+.noMatches,
+.noSelection,
+.noIssues {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--spice-subtext);
+  font-style: italic;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 10px;
+  border-top: 1px solid var(--spice-button-disabled);
+}
+
+.filterContainer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 10px;
+  background: var(--spice-card);
+  border-radius: 4px;
+}
+
+.filterContainer label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.playlistsContainer {
+  overflow-y: auto;
+  flex-grow: 1;
+}
+
+.playlistItem {
+  margin-bottom: 16px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.playlistHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--spice-card);
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.playlistName {
+  font-weight: bold;
+}
+
+.playlistStatus {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.missing {
+  color: #f44336;
+}
+
+.mismatch {
+  color: #ff9800;
+}
+
+.regenerateButton {
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.playlistDetails {
+  padding: 16px;
+}
+
+.trackCounts {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.missingTracks,
+.unexpectedTracks {
+  margin-bottom: 16px;
+}
+
+.missingTracks h4,
+.unexpectedTracks h4 {
+  margin-bottom: 8px;
+}
+
+.missingTracks ul,
+.unexpectedTracks ul {
+  padding-left: 20px;
+}
+
+.moreItems {
+  font-style: italic;
+  color: var(--spice-subtext);
+}
+
+.actionButtons {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.primaryButton {
+  background: #1db954;
+}
+
+.duplicateCount {
+  background: var(--spice-notification);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.8em;
+}
+
+.filesList {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.fileItem {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.duplicateWarning {
+  margin-top: 20px;
+  padding: 12px;
+  background: rgba(255, 152, 0, 0.1);
+  border-left: 4px solid #ff9800;
+  border-radius: 4px;
+}
