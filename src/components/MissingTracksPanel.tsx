@@ -86,7 +86,7 @@ const MissingTracksPanel: React.FC = () => {
       <div className={styles.header}>
         <h2>Missing Tracks</h2>
         <div className={styles.headerButtons}>
-          <button className={styles.refreshButton} onClick={loadData} disabled={isLoading}>
+          <button className={styles.refreshButton} onClick={() => loadData()} disabled={isLoading}>
             {isLoading ? "Refreshing..." : "Refresh"}
           </button>
 
