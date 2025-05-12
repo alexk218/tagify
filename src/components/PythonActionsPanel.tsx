@@ -280,6 +280,26 @@ const PythonActionsPanel: React.FC = () => {
       confirmed: true,
     };
 
+    // For association sync, include the precomputed changes
+    if (name === "sync-database" && data.action === "associations" && analysisResults) {
+      // Include the precomputed changes in the confirmation data
+      confirmData.precomputed_changes = {
+        tracks_with_changes:
+          analysisResults.details?.tracks_with_changes ||
+          analysisResults.details?.all_changes ||
+          analysisResults.details?.samples ||
+          [],
+        tracks_with_playlists: analysisResults.stats?.tracks_with_playlists,
+        tracks_without_playlists: analysisResults.stats?.tracks_without_playlists,
+        total_associations: analysisResults.stats?.total_associations,
+      };
+
+      console.log(
+        "Passing precomputed changes to avoid redundant processing",
+        confirmData.precomputed_changes
+      );
+    }
+
     if (name === "embed-metadata") {
       // Include the user-selected matches for embed-metadata
       confirmData.userSelections = userMatchSelections;
@@ -923,28 +943,46 @@ const PythonActionsPanel: React.FC = () => {
               {analysisResults.analyses.associations.tracks_with_changes.length} tracks
             </p>
 
-            {/* Paginated Association Changes */}
-            {(analysisResults.details?.all_changes || analysisResults.details?.samples) && (
+            {/* Paginated association changes */}
+            {(analysisResults.analyses.associations.all_changes ||
+              analysisResults.analyses.associations.samples) && (
               <div className={styles.sampleChanges}>
-                <h5>Track Association Changes ({analysisResults.details.tracks_with_changes})</h5>
+                <h5>
+                  Track Association Changes (
+                  {analysisResults.analyses.associations.tracks_with_changes
+                    ? analysisResults.analyses.associations.tracks_with_changes.length
+                    : "Unknown"}
+                  )
+                </h5>
                 <div className={styles.trackList}>
                   {renderPaginatedList(
-                    analysisResults.details.all_changes || analysisResults.details.samples,
+                    analysisResults.analyses.associations.all_changes ||
+                      analysisResults.analyses.associations.samples ||
+                      [],
                     "associations",
                     (item) => (
                       <div className={styles.trackItem}>
-                        <div>{item.track}</div>
+                        {/* Clearly display the track info as a header */}
+                        <div className={styles.trackItemHeader}>
+                          <strong>{item.track_info || item.track}</strong>
+                        </div>
                         {item.add_to && item.add_to.length > 0 && (
-                          <div className={styles.addTo}>+ Adding to: {item.add_to.join(", ")}</div>
+                          <div className={styles.addTo}>
+                            <span className={styles.changeIcon}>+</span> Adding to playlists:{" "}
+                            {item.add_to.join(", ")}
+                          </div>
                         )}
                         {item.remove_from && item.remove_from.length > 0 && (
                           <div className={styles.removeFrom}>
-                            - Removing from: {item.remove_from.join(", ")}
+                            <span className={styles.changeIcon}>-</span> Removing from playlists:{" "}
+                            {item.remove_from.join(", ")}
                           </div>
                         )}
                       </div>
                     ),
-                    analysisResults.details.tracks_with_changes
+                    analysisResults.analyses.associations.tracks_with_changes
+                      ? analysisResults.analyses.associations.tracks_with_changes.length
+                      : undefined
                   )}
                 </div>
               </div>
@@ -1049,6 +1087,47 @@ const PythonActionsPanel: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* For association changes */}
+            {analysisResults.details.all_changes ||
+            analysisResults.details.samples ||
+            (analysisResults.details.tracks_with_changes &&
+              analysisResults.details.tracks_with_changes.length > 0) ? (
+              <div className={styles.sampleChanges}>
+                <h5>
+                  Track Association Changes ({analysisResults.details.associations_to_add || 0} to
+                  add, {analysisResults.details.associations_to_remove || 0} to remove)
+                </h5>
+                <div className={styles.trackList}>
+                  {renderPaginatedList(
+                    analysisResults.details.all_changes ||
+                      analysisResults.details.samples ||
+                      analysisResults.details.tracks_with_changes ||
+                      [],
+                    "associations-specific",
+                    (item) => (
+                      <div className={styles.trackItem}>
+                        <div className={styles.trackItemHeader}>
+                          <strong>{item.track_info || item.track}</strong>
+                        </div>
+                        {item.add_to && item.add_to.length > 0 && (
+                          <div className={styles.addTo}>
+                            <span className={styles.changeIcon}>+</span> Adding to playlists:{" "}
+                            {item.add_to.join(", ")}
+                          </div>
+                        )}
+                        {item.remove_from && item.remove_from.length > 0 && (
+                          <div className={styles.removeFrom}>
+                            <span className={styles.changeIcon}>-</span> Removing from playlists:{" "}
+                            {item.remove_from.join(", ")}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
 

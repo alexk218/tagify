@@ -450,3 +450,32 @@
 .matchText {
   flex: 1;
 }
+
+.trackItemHeader {
+  font-weight: 500;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.changeIcon {
+  display: inline-block;
+  min-width: 16px;
+  text-align: center;
+  font-weight: bold;
+  margin-right: 6px;
+}
+
+.addTo {
+  color: #2ecc71;
+  font-size: 0.9em;
+  margin-left: 12px;
+  padding: 2px 0;
+}
+
+.removeFrom {
+  color: #e74c3c;
+  font-size: 0.9em;
+  margin-left: 12px;
+  padding: 2px 0;
+}
