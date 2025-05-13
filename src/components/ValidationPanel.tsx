@@ -45,6 +45,7 @@ interface PlaylistIssue {
   unexpected_tracks_in_m3u: any[];
   expected_with_local_files: number;
   count_discrepancy: number;
+  not_downloaded_tracks: any[];
 }
 
 interface PlaylistValidationResult {
@@ -786,7 +787,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                 {playlistValidationResult.playlist_analysis.length > 0 ? (
                   <div className={styles.playlistList}>
                     {playlistValidationResult.playlist_analysis
-                      .filter((playlist) => playlist.needs_update)
+                      .filter(
+                        (playlist) =>
+                          // A playlist needs updating if:
+                          playlist.needs_update ||
+                          // The number of tracks in M3U doesn't match database associations
+                          (playlist.has_m3u &&
+                            playlist.m3u_track_count !== playlist.total_associations) ||
+                          // Or if the M3U is missing but should exist (playlist has associations)
+                          (!playlist.has_m3u && playlist.total_associations > 0)
+                      )
                       .map((playlist, index) => (
                         <div key={index} className={styles.playlistItem}>
                           <div className={styles.playlistHeader}>
@@ -812,9 +822,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                           {playlist.has_m3u && (
                             <div className={styles.playlistDetails}>
                               <div className={styles.trackCounts}>
-                                <div>
-                                  Track-playlist associations: {playlist.total_associations}
-                                </div>
+                                <div>Total tracks in database: {playlist.total_associations}</div>
                                 <div>
                                   Tracks with local files: {playlist.tracks_with_local_files}
                                 </div>
@@ -826,20 +834,12 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                       Math.abs(playlist.total_discrepancy) > 0 ? styles.warning : ""
                                     }`}
                                   >
-                                    <strong>Discrepancy:</strong>{" "}
+                                    <strong>Track Count Discrepancy:</strong>{" "}
                                     {playlist.total_discrepancy > 0
-                                      ? `${playlist.total_discrepancy} tracks missing from M3U file`
+                                      ? `${playlist.total_discrepancy} more tracks in database than in M3U file`
                                       : `${Math.abs(
                                           playlist.total_discrepancy
-                                        )} unexpected tracks in M3U file`}
-                                    {playlist.unidentified_discrepancy > 0 && (
-                                      <div className={styles.unidentifiedNote}>
-                                        <strong>Note:</strong> {playlist.unidentified_discrepancy}{" "}
-                                        tracks have discrepancies that couldn't be specifically
-                                        identified. This may be due to file format issues, metadata
-                                        mismatches, or other problems.
-                                      </div>
-                                    )}
+                                        )} more tracks in M3U file than in database`}
                                   </div>
                                 )}
                               </div>
@@ -891,6 +891,24 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                   </ul>
                                 </div>
                               )}
+
+                              {playlist.not_downloaded_tracks &&
+                                playlist.not_downloaded_tracks.length > 0 && (
+                                  <div className={styles.notDownloadedTracks}>
+                                    <h4>
+                                      Tracks in database but not downloaded (
+                                      {playlist.not_downloaded_tracks.length}):
+                                    </h4>
+                                    <ul>
+                                      {playlist.not_downloaded_tracks.map((track, idx) => (
+                                        <li key={idx}>
+                                          {track.artists} - {track.title}{" "}
+                                          {track.is_local ? "(Local File)" : ""}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
                             </div>
                           )}
                         </div>

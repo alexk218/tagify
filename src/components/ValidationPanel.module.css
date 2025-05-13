@@ -468,3 +468,21 @@ h3 button {
 .warning {
   color: #d32f2f;
 }
+
+.notDownloadedTracks {
+  margin-top: 8px;
+  padding: 8px;
+  /* background-color: #f8f4e3; */
+  border-radius: 4px;
+}
+
+.notDownloadedTracks h4 {
+  margin-top: 0;
+  margin-bottom: 4px;
+  color: #8b6e4e;
+}
+
+.notDownloadedTracks ul {
+  margin: 0;
+  padding-left: 20px;
+}
