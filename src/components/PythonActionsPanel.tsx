@@ -81,7 +81,6 @@ const PythonActionsPanel: React.FC = () => {
   const [paths, setPaths] = useState({
     masterTracksDir: localStorage.getItem("tagify:masterTracksDir") || "",
     playlistsDir: localStorage.getItem("tagify:playlistsDir") || "",
-    cacheDir: localStorage.getItem("tagify:cacheDir") || "",
   });
 
   const [matchPage, setMatchPage] = useState(1);
@@ -126,9 +125,6 @@ const PythonActionsPanel: React.FC = () => {
               masterTracksDir: data.env_vars.MASTER_TRACKS_DIRECTORY_SSD,
             }));
           }
-          if (data.env_vars.LOCAL_TRACKS_CACHE_DIRECTORY && !paths.cacheDir) {
-            setPaths((prev) => ({ ...prev, cacheDir: data.env_vars.LOCAL_TRACKS_CACHE_DIRECTORY }));
-          }
           if (data.env_vars.MASTER_PLAYLIST_ID && !masterPlaylistId) {
             setMasterPlaylistId(data.env_vars.MASTER_PLAYLIST_ID);
             localStorage.setItem("tagify:masterPlaylistId", data.env_vars.MASTER_PLAYLIST_ID);
@@ -151,11 +147,9 @@ const PythonActionsPanel: React.FC = () => {
     // Clean other paths as well
     const cleanMasterTracksDir = paths.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
     const cleanPlaylistsDir = paths.playlistsDir.replace(/^["'](.*)["']$/, "$1");
-    const cleanCacheDir = paths.cacheDir.replace(/^["'](.*)["']$/, "$1");
 
     localStorage.setItem("tagify:masterTracksDir", cleanMasterTracksDir);
     localStorage.setItem("tagify:playlistsDir", cleanPlaylistsDir);
-    localStorage.setItem("tagify:cacheDir", cleanCacheDir);
     localStorage.setItem("tagify:masterPlaylistId", masterPlaylistId);
 
     // Update state with cleaned values
@@ -163,7 +157,6 @@ const PythonActionsPanel: React.FC = () => {
     setPaths({
       masterTracksDir: cleanMasterTracksDir,
       playlistsDir: cleanPlaylistsDir,
-      cacheDir: cleanCacheDir,
     });
 
     Spicetify.showNotification("Settings saved!");
@@ -178,14 +171,12 @@ const PythonActionsPanel: React.FC = () => {
       // Clean up paths before sending
       const cleanMasterTracksDir = paths.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
       const cleanPlaylistsDir = paths.playlistsDir.replace(/^["'](.*)["']$/, "$1");
-      const cleanCacheDir = paths.cacheDir.replace(/^["'](.*)["']$/, "$1");
 
       // Add paths to the data
       const requestData = {
         ...data,
         masterTracksDir: cleanMasterTracksDir,
         playlistsDir: cleanPlaylistsDir,
-        outputDir: cleanCacheDir,
         master_playlist_id: masterPlaylistId,
       };
 
@@ -1364,15 +1355,6 @@ const PythonActionsPanel: React.FC = () => {
           />
         </div>
         <div className={styles.formGroup}>
-          <label>Cache Directory</label>
-          <input
-            type="text"
-            value={paths.cacheDir}
-            onChange={(e) => setPaths({ ...paths, cacheDir: e.target.value })}
-            placeholder="Path for cache files"
-          />
-        </div>
-        <div className={styles.formGroup}>
           <label>MASTER Playlist ID</label>
           <input
             type="text"
@@ -1390,11 +1372,6 @@ const PythonActionsPanel: React.FC = () => {
         <div className={styles.actionGroup}>
           <h4>File Management</h4>
           <div className={styles.actionButtons}>
-            <ActionButton
-              label="Generate Local Tracks Cache"
-              onClick={() => performAction("generate-cache")}
-              disabled={isLoading["generate-cache"] || serverStatus !== "connected"}
-            />
             <ActionButton
               label="Embed Track Metadata"
               onClick={() => performAction("embed-metadata")}
