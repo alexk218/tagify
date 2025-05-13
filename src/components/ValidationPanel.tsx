@@ -627,7 +627,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                             <div className={styles.matchTitle}>
                                               {match.artist} - {match.title}
                                             </div>
-                                            <div className={styles.matchAlbum}>{match.album}</div>
+                                            <div className={styles.matchTrackId}>{match.track_id}</div>
                                             <div className={styles.matchConfidence}>
                                               Confidence: {(match.ratio * 100).toFixed(2)}%
                                             </div>

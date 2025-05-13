@@ -1,12 +1,7 @@
 .container {
-  padding: 20px;
-  background-color: var(--spice-card);
-  border-radius: 8px;
-  margin: 20px 0;
-  max-height: 80vh;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  height: 80vh;
 }
 
 .header {
@@ -171,9 +166,10 @@
   font-weight: bold;
 }
 
-.matchAlbum {
+.matchTrackId {
   font-size: 0.9em;
   color: var(--spice-subtext);
+  user-select: text;
 }
 
 .matchConfidence {
@@ -230,9 +226,26 @@
   gap: 10px;
 }
 
+.playlistValidation {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.trackValidation,
+.playlistValidation {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .playlistsContainer {
+  flex: 1;
   overflow-y: auto;
-  flex-grow: 1;
+  padding-right: 10px;
+  margin-bottom: 10px;
 }
 
 .playlistItem {
