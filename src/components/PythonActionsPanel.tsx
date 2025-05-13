@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import styles from "./PythonActionsPanel.module.css";
 import ValidationPanel from "./ValidationPanel";
+import Portal from "../utils/Portal";
 
 interface ActionButtonProps {
   label: string;
@@ -43,17 +44,7 @@ const PythonActionsPanel: React.FC = () => {
   const [results, setResults] = useState<
     Record<string, { success: boolean; message: string } | null>
   >({});
-  const [serverUrl, setServerUrl] = useState(() => {
-    const savedUrl = localStorage.getItem("tagify:localServerUrl");
-    if (savedUrl) {
-      // Remove any extra quotes that might have been added
-      return savedUrl.replace(/^["'](.*)["']$/, "$1");
-    }
-    return "http://localhost:8765";
-  });
-  const [masterPlaylistId, setMasterPlaylistId] = useState(
-    () => localStorage.getItem("tagify:masterPlaylistId") || ""
-  );
+
   const [serverStatus, setServerStatus] = useState<"unknown" | "connected" | "disconnected">(
     "unknown"
   );
@@ -77,10 +68,13 @@ const PythonActionsPanel: React.FC = () => {
     isLoading: false,
   });
 
-  // Paths from localStorage or default values
-  const [paths, setPaths] = useState({
+  const [settingsVisible, setSettingsVisible] = useState<boolean>(false);
+  const [settings, setSettings] = useState({
+    serverUrl: localStorage.getItem("tagify:localServerUrl") || "http://localhost:8765",
     masterTracksDir: localStorage.getItem("tagify:masterTracksDir") || "",
     playlistsDir: localStorage.getItem("tagify:playlistsDir") || "",
+    masterPlaylistId: localStorage.getItem("tagify:masterPlaylistId") || "",
+    minTrackLengthMinutes: Number(localStorage.getItem("tagify:minTrackLengthMinutes") || "5"),
   });
 
   const [matchPage, setMatchPage] = useState(1);
@@ -103,11 +97,11 @@ const PythonActionsPanel: React.FC = () => {
   // Check server connection on load and when serverUrl changes
   useEffect(() => {
     checkServerConnection();
-  }, [serverUrl]);
+  }, [settings.serverUrl]);
 
   const checkServerConnection = async () => {
     try {
-      const response = await fetch(`${serverUrl}/status`, {
+      const response = await fetch(`${settings.serverUrl}/status`, {
         method: "GET",
         headers: {
           Accept: "application/json",
@@ -116,18 +110,28 @@ const PythonActionsPanel: React.FC = () => {
 
       if (response.ok) {
         setServerStatus("connected");
+
         // Get environment variables from server
         const data = await response.json();
         if (data.env_vars) {
-          if (data.env_vars.MASTER_TRACKS_DIRECTORY_SSD && !paths.masterTracksDir) {
-            setPaths((prev) => ({
-              ...prev,
-              masterTracksDir: data.env_vars.MASTER_TRACKS_DIRECTORY_SSD,
-            }));
+          // Apply environment variables to settings if they don't already have values
+          let updatedSettings = { ...settings };
+          let needsUpdate = false;
+
+          if (data.env_vars.MASTER_TRACKS_DIRECTORY_SSD && !settings.masterTracksDir) {
+            updatedSettings.masterTracksDir = data.env_vars.MASTER_TRACKS_DIRECTORY_SSD;
+            needsUpdate = true;
           }
-          if (data.env_vars.MASTER_PLAYLIST_ID && !masterPlaylistId) {
-            setMasterPlaylistId(data.env_vars.MASTER_PLAYLIST_ID);
+
+          if (data.env_vars.MASTER_PLAYLIST_ID && !settings.masterPlaylistId) {
+            updatedSettings.masterPlaylistId = data.env_vars.MASTER_PLAYLIST_ID;
             localStorage.setItem("tagify:masterPlaylistId", data.env_vars.MASTER_PLAYLIST_ID);
+            needsUpdate = true;
+          }
+
+          // Only update state if changes were made
+          if (needsUpdate) {
+            setSettings(updatedSettings);
           }
         }
       } else {
@@ -140,27 +144,17 @@ const PythonActionsPanel: React.FC = () => {
   };
 
   const saveSettings = () => {
-    // Remove any quotes before saving
-    const cleanUrl = serverUrl.replace(/^["'](.*)["']$/, "$1");
-    localStorage.setItem("tagify:localServerUrl", cleanUrl);
+    localStorage.setItem("tagify:localServerUrl", settings.serverUrl);
+    localStorage.setItem("tagify:masterTracksDir", settings.masterTracksDir);
+    localStorage.setItem("tagify:playlistsDir", settings.playlistsDir);
+    localStorage.setItem("tagify:masterPlaylistId", settings.masterPlaylistId);
+    localStorage.setItem("tagify:minTrackLengthMinutes", settings.minTrackLengthMinutes.toString());
 
-    // Clean other paths as well
-    const cleanMasterTracksDir = paths.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
-    const cleanPlaylistsDir = paths.playlistsDir.replace(/^["'](.*)["']$/, "$1");
-
-    localStorage.setItem("tagify:masterTracksDir", cleanMasterTracksDir);
-    localStorage.setItem("tagify:playlistsDir", cleanPlaylistsDir);
-    localStorage.setItem("tagify:masterPlaylistId", masterPlaylistId);
-
-    // Update state with cleaned values
-    setServerUrl(cleanUrl);
-    setPaths({
-      masterTracksDir: cleanMasterTracksDir,
-      playlistsDir: cleanPlaylistsDir,
-    });
-
-    Spicetify.showNotification("Settings saved!");
     checkServerConnection();
+
+    Spicetify.showNotification("Settings saved successfully");
+
+    setSettingsVisible(false);
   };
 
   const performAction = async (action: string, data: any = {}) => {
@@ -169,26 +163,29 @@ const PythonActionsPanel: React.FC = () => {
 
     try {
       // Clean up paths before sending
-      const cleanMasterTracksDir = paths.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
-      const cleanPlaylistsDir = paths.playlistsDir.replace(/^["'](.*)["']$/, "$1");
+      const cleanMasterTracksDir = settings.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
+      const cleanPlaylistsDir = settings.playlistsDir.replace(/^["'](.*)["']$/, "$1");
 
       // Add paths to the data
       const requestData = {
         ...data,
         masterTracksDir: cleanMasterTracksDir,
         playlistsDir: cleanPlaylistsDir,
-        master_playlist_id: masterPlaylistId,
+        master_playlist_id: settings.masterPlaylistId,
       };
 
       console.log(`Sending request to ${action}:`, requestData);
-      const response = await fetch(`${serverUrl.replace(/^["'](.*)["']$/, "$1")}/api/${action}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(requestData),
-      });
+      const response = await fetch(
+        `${settings.serverUrl.replace(/^["'](.*)["']$/, "$1")}/api/${action}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(requestData),
+        }
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
@@ -407,7 +404,7 @@ const PythonActionsPanel: React.FC = () => {
         setHasCalledAPI(true);
 
         try {
-          const sanitizedUrl = serverUrl.replace(/^["'](.*)["']$/, "$1").trim();
+          const sanitizedUrl = settings.serverUrl.replace(/^["'](.*)["']$/, "$1").trim();
 
           // Use a simpler fetch approach
           const response = await fetch(`${sanitizedUrl}/api/fuzzy-match-track`, {
@@ -417,7 +414,7 @@ const PythonActionsPanel: React.FC = () => {
             },
             body: JSON.stringify({
               fileName: currentFile,
-              masterTracksDir: paths.masterTracksDir,
+              masterTracksDir: settings.masterTracksDir,
             }),
           });
 
@@ -447,7 +444,7 @@ const PythonActionsPanel: React.FC = () => {
       };
 
       fetchMatches();
-    }, [currentFile]); // Only run when currentFile changes
+    }, [currentFile]);
 
     // Reset the hasCalledAPI flag when moving to a new file
     useEffect(() => {
@@ -503,16 +500,6 @@ const PythonActionsPanel: React.FC = () => {
     };
 
     const processedFilesCount = userMatchSelections.length + skippedFiles.length;
-
-    // Debug output to see what's happening
-    console.log("Current state:", {
-      currentFile,
-      isLocalLoading,
-      hasCalledAPI,
-      matchCount: localMatches.length,
-      currentFileIndex: fuzzyMatchingState.currentFileIndex,
-      filesLength: files.length,
-    });
 
     return (
       <div className={styles.fuzzyMatchContainer}>
@@ -1325,46 +1312,103 @@ const PythonActionsPanel: React.FC = () => {
         )}
       </div>
 
-      <div className={styles.settings}>
-        <h3>Settings</h3>
-        <div className={styles.formGroup}>
-          <label>Server URL</label>
-          <input
-            type="text"
-            value={serverUrl}
-            onChange={(e) => setServerUrl(e.target.value)}
-            placeholder="http://localhost:8765"
-          />
-        </div>
-        <div className={styles.formGroup}>
-          <label>Master Tracks Directory</label>
-          <input
-            type="text"
-            value={paths.masterTracksDir}
-            onChange={(e) => setPaths({ ...paths, masterTracksDir: e.target.value })}
-            placeholder="Path to your music files"
-          />
-        </div>
-        <div className={styles.formGroup}>
-          <label>Playlists Directory</label>
-          <input
-            type="text"
-            value={paths.playlistsDir}
-            onChange={(e) => setPaths({ ...paths, playlistsDir: e.target.value })}
-            placeholder="Path for M3U playlists"
-          />
-        </div>
-        <div className={styles.formGroup}>
-          <label>MASTER Playlist ID</label>
-          <input
-            type="text"
-            value={masterPlaylistId}
-            onChange={(e) => setMasterPlaylistId(e.target.value)}
-            placeholder="Spotify ID of your MASTER playlist"
-          />
-        </div>
-        <ActionButton label="Save Settings" onClick={saveSettings} />
+      <div className={styles.headerButtons}>
+        <button
+          className={styles.settingsButton}
+          onClick={() => setSettingsVisible(true)}
+          title="Settings"
+        >
+          ⚙️
+        </button>
       </div>
+
+      {settingsVisible && (
+        <Portal>
+          <div className={styles.modalOverlay}>
+            <div className={styles.settingsPanel}>
+              <div className={styles.settingsHeader}>
+                <h3>Tagify Settings</h3>
+              </div>
+
+              <div className={styles.settingsForm}>
+                <div className={styles.formGroup}>
+                  <label>Server URL</label>
+                  <input
+                    type="text"
+                    value={settings.serverUrl}
+                    onChange={(e) => setSettings({ ...settings, serverUrl: e.target.value })}
+                    placeholder="http://localhost:8765"
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>Master Tracks Directory</label>
+                  <input
+                    type="text"
+                    value={settings.masterTracksDir}
+                    onChange={(e) => setSettings({ ...settings, masterTracksDir: e.target.value })}
+                    placeholder="Path to your music files"
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>Playlists Directory</label>
+                  <input
+                    type="text"
+                    value={settings.playlistsDir}
+                    onChange={(e) => setSettings({ ...settings, playlistsDir: e.target.value })}
+                    placeholder="Path for M3U playlists"
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>MASTER Playlist ID</label>
+                  <input
+                    type="text"
+                    value={settings.masterPlaylistId}
+                    onChange={(e) => setSettings({ ...settings, masterPlaylistId: e.target.value })}
+                    placeholder="Spotify ID of your MASTER playlist"
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>Minimum Track Length (minutes)</label>
+                  <div className={styles.rangeGroup}>
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="0.5"
+                      value={settings.minTrackLengthMinutes}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          minTrackLengthMinutes: Number(e.target.value),
+                        })
+                      }
+                    />
+                    <span className={styles.rangeValue}>
+                      {settings.minTrackLengthMinutes} minutes
+                    </span>
+                  </div>
+                  <div className={styles.settingDescription}>
+                    Tracks shorter than this length will be highlighted in the validation interface
+                  </div>
+                </div>
+
+                <div className={styles.buttonGroup}>
+                  <button className={styles.saveButton} onClick={saveSettings}>
+                    Save Settings
+                  </button>
+                  <button className={styles.cancelButton} onClick={() => setSettingsVisible(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
 
       <div className={styles.actions}>
         <h3>Actions</h3>
@@ -1405,7 +1449,7 @@ const PythonActionsPanel: React.FC = () => {
                 performAction("sync-database", {
                   action: "all",
                   force_refresh: false,
-                  master_playlist_id: masterPlaylistId,
+                  master_playlist_id: settings.masterPlaylistId,
                 })
               }
               disabled={isLoading["sync-database"] || serverStatus !== "connected"}
@@ -1416,7 +1460,7 @@ const PythonActionsPanel: React.FC = () => {
                 performAction("sync-database", {
                   action: "all",
                   force_refresh: true,
-                  master_playlist_id: masterPlaylistId,
+                  master_playlist_id: settings.masterPlaylistId,
                 })
               }
               disabled={isLoading["sync-database"] || serverStatus !== "connected"}
@@ -1443,7 +1487,7 @@ const PythonActionsPanel: React.FC = () => {
                 performAction("sync-database", {
                   action: "tracks",
                   force_refresh: false,
-                  master_playlist_id: masterPlaylistId,
+                  master_playlist_id: settings.masterPlaylistId,
                 })
               }
               disabled={isLoading["sync-database"] || serverStatus !== "connected"}
@@ -1454,7 +1498,7 @@ const PythonActionsPanel: React.FC = () => {
                 performAction("sync-database", {
                   action: "associations",
                   force_refresh: false,
-                  master_playlist_id: masterPlaylistId,
+                  master_playlist_id: settings.masterPlaylistId,
                 })
               }
               disabled={isLoading["sync-database"] || serverStatus !== "connected"}
@@ -1469,7 +1513,9 @@ const PythonActionsPanel: React.FC = () => {
               label="Sync All Playlists to MASTER"
               onClick={() => performAction("sync-to-master")}
               disabled={
-                isLoading["sync-to-master"] || serverStatus !== "connected" || !masterPlaylistId
+                isLoading["sync-to-master"] ||
+                serverStatus !== "connected" ||
+                !settings.masterPlaylistId
               }
             />
           </div>
@@ -1517,10 +1563,11 @@ const PythonActionsPanel: React.FC = () => {
 
       {showValidationPanel && (
         <ValidationPanel
-          serverUrl={serverUrl}
-          masterTracksDir={paths.masterTracksDir}
-          playlistsDir={paths.playlistsDir}
           onClose={() => setShowValidationPanel(false)}
+          serverUrl={settings.serverUrl}
+          masterTracksDir={settings.masterTracksDir}
+          playlistsDir={settings.playlistsDir}
+          minTrackLengthMinutes={settings.minTrackLengthMinutes}
         />
       )}
     </div>

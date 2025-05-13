@@ -79,6 +79,7 @@ interface ValidationPanelProps {
   serverUrl: string;
   masterTracksDir: string;
   playlistsDir: string;
+  minTrackLengthMinutes: number;
   onClose: () => void;
 }
 
@@ -86,6 +87,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   serverUrl,
   masterTracksDir,
   playlistsDir,
+  minTrackLengthMinutes,
   onClose,
 }) => {
   const [currentTab, setCurrentTab] = useState<"track" | "playlist">("track");
@@ -171,7 +173,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          masterTracksDir,
+          masterTracksDir: masterTracksDir,
           confidence_threshold: confidenceThreshold,
         }),
       });
@@ -207,6 +209,10 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     setLoadingMore(false);
   };
 
+  const isShortTrack = (duration: number) => {
+    return duration < minTrackLengthMinutes * 60;
+  };
+
   const validatePlaylists = async () => {
     setIsLoading(true);
     try {
@@ -216,8 +222,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          masterTracksDir,
-          playlistsDir,
+          masterTracksDir: masterTracksDir,
+          playlistsDir: playlistsDir,
         }),
       });
 
@@ -320,12 +326,12 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          masterTracksDir,
-          playlistsDir,
+          masterTracksDir: masterTracksDir,
+          playlistsDir: playlistsDir,
           playlist_id: playlistId,
           extended: true,
           overwrite: true,
-          force: true, // Add force parameter to ensure regeneration
+          force: true,
         }),
       });
 
@@ -374,8 +380,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          masterTracksDir,
-          playlistsDir,
+          masterTracksDir: masterTracksDir,
+          playlistsDir: playlistsDir,
           extended: true,
           overwrite: true,
           confirmed: true,
@@ -498,7 +504,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          masterTracksDir,
+          masterTracksDir: masterTracksDir,
           query: searchQuery,
         }),
       });
@@ -596,10 +602,10 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           >
             Playlist Integrity
           </button>
+          <button className={styles.closeButton} onClick={onClose}>
+            Close
+          </button>
         </div>
-        <button className={styles.closeButton} onClick={onClose}>
-          Close
-        </button>
       </div>
 
       {isLoading ? (
@@ -655,7 +661,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   onClick={() => {
                     setCurrentSection("mismatches");
                     setSelectedDuplicateTrackId(null);
-                    setSelectedMismatch(null); // Reset selection
+                    setSelectedMismatch(null);
 
                     // Select first item if available
                     if (trackValidationResult?.potential_mismatches.length > 0) {
@@ -911,7 +917,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                   </div>
                                   <div
                                     className={
-                                      (selectedMismatch.duration ?? 0) < 5 * 60
+                                      isShortTrack(selectedMismatch.duration ?? 0)
                                         ? styles.fileDurationShort
                                         : styles.fileDuration
                                     }
@@ -1171,7 +1177,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                 </div>
                                 <div
                                   className={
-                                    (selectedMismatch.duration ?? 0) < 5 * 60
+                                    isShortTrack(selectedMismatch.duration ?? 0)
                                       ? styles.fileDurationShort
                                       : styles.fileDuration
                                   }
@@ -1322,7 +1328,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                     </div>
                                     <div
                                       className={
-                                        (selectedMismatch.duration ?? 0) < 5 * 60
+                                        isShortTrack(selectedMismatch.duration ?? 0)
                                           ? styles.fileDurationShort
                                           : styles.fileDuration
                                       }
