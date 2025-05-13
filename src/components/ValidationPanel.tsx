@@ -1,20 +1,14 @@
-// src/components/ValidationPanel.tsx
 import React, { useState, useEffect } from "react";
 import styles from "./ValidationPanel.module.css";
 
 interface PotentialMismatch {
   file: string;
-  track_id: string;
+  track_id: string | null;
   embedded_artist_title: string;
   filename: string;
   confidence: number;
   full_path: string;
   reason?: string;
-}
-
-interface DuplicateTrackId {
-  track_id: string;
-  files: string[];
 }
 
 interface TrackValidationResult {
@@ -58,6 +52,15 @@ interface PlaylistValidationResult {
   playlist_analysis: PlaylistIssue[];
 }
 
+interface SearchResult {
+  file: string;
+  track_id: string | null;
+  embedded_artist_title: string;
+  filename: string;
+  confidence: number;
+  full_path: string;
+}
+
 interface ValidationPanelProps {
   serverUrl: string;
   masterTracksDir: string;
@@ -94,8 +97,11 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [hasMoreItems, setHasMoreItems] = useState<boolean>(true);
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const [currentSection, setCurrentSection] = useState<
-    "mismatches" | "ignored" | "missing" | "duplicates"
+    "mismatches" | "ignored" | "missing" | "duplicates" | "search"
   >("mismatches");
   const [filesMissingTrackId, setFilesMissingTrackId] = useState<PotentialMismatch[]>([]);
 
@@ -356,7 +362,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     }
   };
 
-  const handleSelectMismatch = (mismatch: PotentialMismatch) => {
+  const handleSelectMismatch = (mismatch: PotentialMismatch | SearchResult) => {
     setSelectedMismatch(mismatch);
     findPossibleMatches(mismatch.file);
   };
@@ -435,6 +441,53 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     // Select first item if none is selected and there are items to select
     if (!selectedMismatch && filtered.length > 0) {
       handleSelectMismatch(filtered[0]);
+    }
+  };
+
+  const searchTracks = async () => {
+    if (!searchQuery.trim()) return;
+
+    setIsSearching(true);
+    setSearchResults([]);
+
+    try {
+      const response = await fetch(`${serverUrl}/api/search-tracks`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          masterTracksDir,
+          query: searchQuery,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          // Explicitly cast the results to the SearchResult type
+          const typedResults: SearchResult[] = data.results || [];
+          setSearchResults(typedResults);
+          if (typedResults.length > 0) {
+            handleSelectMismatch(typedResults[0]);
+          } else {
+            setSelectedMismatch(null);
+            setPossibleMatches([]);
+          }
+        } else {
+          console.error("Search error:", data.message);
+          Spicetify.showNotification(`Search error: ${data.message}`, true);
+        }
+      } else {
+        const error = await response.json();
+        console.error("Search error:", error);
+        Spicetify.showNotification(`Search error: ${error.message || "Unknown error"}`, true);
+      }
+    } catch (error) {
+      console.error("Search error:", error);
+      Spicetify.showNotification("Error searching tracks", true);
+    } finally {
+      setIsSearching(false);
     }
   };
 
@@ -592,6 +645,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   disabled={trackValidationResult?.summary.duplicate_track_ids === 0}
                 >
                   Duplicate TrackIds ({trackValidationResult?.summary.duplicate_track_ids || 0})
+                </button>
+                <button
+                  className={`${styles.tab} ${currentSection === "search" ? styles.active : ""}`}
+                  onClick={() => {
+                    setCurrentSection("search");
+                    setSelectedDuplicateTrackId(null);
+                    setSelectedMismatch(null);
+                  }}
+                >
+                  Search Tracks
                 </button>
               </div>
 
@@ -910,6 +973,135 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                       No ignored tracks found. Mark tracks as correctly embedded to see them here.
                     </div>
                   )}
+                </div>
+              ) : currentSection === "search" ? (
+                <div className={styles.searchContainer}>
+                  <h3>Search for Tracks</h3>
+                  <div className={styles.searchBox}>
+                    <input
+                      type="text"
+                      placeholder="Search by artist or title..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className={styles.searchInput}
+                    />
+                    <button
+                      className={styles.searchButton}
+                      onClick={searchTracks}
+                      disabled={isSearching || !searchQuery.trim()}
+                    >
+                      {isSearching ? "Searching..." : "Search"}
+                    </button>
+                  </div>
+
+                  <div className={styles.splitView}>
+                    <div className={styles.mismatchList}>
+                      {searchResults.length > 0 ? (
+                        <>
+                          {searchResults.map((result, index) => (
+                            <div
+                              key={index}
+                              className={`${styles.mismatchItem} ${
+                                selectedMismatch && selectedMismatch.file === result.file
+                                  ? styles.selected
+                                  : ""
+                              }`}
+                              onClick={() => handleSelectMismatch(result)}
+                            >
+                              <div className={styles.mismatchFile}>{result.file}</div>
+                              <div className={styles.mismatchDetails}>
+                                <div>
+                                  <strong>Embedded:</strong> {result.embedded_artist_title}
+                                </div>
+                                <div>
+                                  <strong>TrackId:</strong> {result.track_id || "No TrackId"}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </>
+                      ) : searchQuery && !isSearching ? (
+                        <div className={styles.noResults}>No results found for "{searchQuery}"</div>
+                      ) : !searchQuery ? (
+                        <div className={styles.noResults}>Enter a search term to find tracks</div>
+                      ) : (
+                        <div className={styles.loading}>Searching...</div>
+                      )}
+                    </div>
+
+                    <div className={styles.matchPanel}>
+                      {selectedMismatch ? (
+                        <>
+                          <h3>Selected Track: {selectedMismatch.file}</h3>
+                          {isFetchingMatches ? (
+                            <div className={styles.loading}>Finding potential matches...</div>
+                          ) : (
+                            <>
+                              <div className={styles.currentInfo}>
+                                <div>
+                                  <strong>Current TrackId:</strong>{" "}
+                                  {selectedMismatch.track_id || "No TrackId"}
+                                </div>
+                                <div>
+                                  <strong>Embedded as:</strong>{" "}
+                                  {selectedMismatch.embedded_artist_title}
+                                </div>
+                                <div>
+                                  <strong>Filename:</strong> {selectedMismatch.filename}
+                                </div>
+                              </div>
+
+                              <div className={styles.actionButtons}>
+                                {selectedMismatch.track_id && (
+                                  <button
+                                    className={styles.removeButton}
+                                    onClick={() => removeTrackId(selectedMismatch.full_path)}
+                                  >
+                                    Remove TrackId
+                                  </button>
+                                )}
+                              </div>
+
+                              <h4>Possible Matches:</h4>
+                              {possibleMatches.length > 0 ? (
+                                <div className={styles.matchesList}>
+                                  {possibleMatches.map((match, index) => (
+                                    <div key={index} className={styles.matchOption}>
+                                      <div className={styles.matchDetails}>
+                                        <div className={styles.matchTitle}>
+                                          {match.artist} - {match.title}
+                                        </div>
+                                        <div className={styles.matchTrackId}>{match.track_id}</div>
+                                        <div className={styles.matchConfidence}>
+                                          Confidence: {(match.ratio * 100).toFixed(2)}%
+                                        </div>
+                                      </div>
+                                      <button
+                                        className={styles.applyButton}
+                                        onClick={() =>
+                                          correctTrackId(selectedMismatch.full_path, match.track_id)
+                                        }
+                                      >
+                                        Apply
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className={styles.noMatches}>
+                                  No potential matches found. Try refining your search.
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <div className={styles.noSelection}>
+                          Select a track from the search results to see details and options.
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 // Default section - Potential Mismatches
