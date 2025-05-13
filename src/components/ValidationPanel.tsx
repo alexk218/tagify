@@ -334,6 +334,24 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   const regenerateAllPlaylists = async () => {
     try {
+      // Determine which playlists need updating
+      const playlistsToUpdate = playlistValidationResult?.playlist_analysis
+        .filter(
+          (playlist) =>
+            playlist.needs_update ||
+            (playlist.has_m3u && playlist.m3u_track_count !== playlist.total_associations) ||
+            (!playlist.has_m3u && playlist.total_associations > 0)
+        )
+        .map((playlist) => playlist.id);
+
+      if (playlistsToUpdate?.length === 0) {
+        Spicetify.showNotification("No playlists need updating");
+        return;
+      }
+
+      // Show loading state
+      setIsLoading(true);
+
       const response = await fetch(`${serverUrl}/api/generate-m3u`, {
         method: "POST",
         headers: {
@@ -344,11 +362,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           playlistsDir,
           extended: true,
           overwrite: true,
+          confirmed: true,
+          playlists_to_update: playlistsToUpdate, // Only send the playlists that need updating
         }),
       });
 
       if (response.ok) {
-        Spicetify.showNotification("All playlists regenerated successfully");
+        const data = await response.json();
+        Spicetify.showNotification(
+          `${data.stats.playlists_updated} playlists regenerated successfully`
+        );
         // Refresh playlist validation
         validatePlaylists();
       } else {
@@ -359,6 +382,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     } catch (error) {
       console.error("Error regenerating playlists:", error);
       Spicetify.showNotification("Error regenerating playlists", true);
+    } finally {
+      setIsLoading(false);
     }
   };
 
