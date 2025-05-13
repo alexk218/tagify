@@ -3,6 +3,51 @@ import styles from "./PythonActionsPanel.module.css";
 import ValidationPanel from "./ValidationPanel";
 import Portal from "../utils/Portal";
 
+interface AnalysisResults {
+  success: boolean;
+  message: string;
+  stats?: any;
+  requires_fuzzy_matching?: boolean;
+  analyses?: {
+    playlists?: {
+      added: number;
+      updated: number;
+      unchanged: number;
+      details: any;
+    };
+    tracks?: {
+      added: number;
+      updated: number;
+      unchanged: number;
+      to_add_sample: any[];
+      all_tracks_to_add: any[];
+      to_add_total: number;
+      to_update_sample: any[];
+      all_tracks_to_update: any[];
+      to_update_total: number;
+    };
+    associations?: any;
+  };
+  master_sync?: MasterSyncAnalysis;
+  details?: {
+    files_to_process?: string[];
+    playlists?: any[];
+    to_add?: any[];
+    to_add_total?: number;
+    all_items_to_add?: any[];
+    to_update?: any[];
+    to_update_total?: number;
+    all_items_to_update?: any[];
+    auto_matched_files?: any[];
+    tracks_with_changes?: any[];
+    associations_to_add?: number;
+    associations_to_remove?: number;
+    all_changes?: any[];
+    samples?: any[];
+  };
+  needs_confirmation?: boolean;
+}
+
 interface ActionButtonProps {
   label: string;
   onClick: () => void;
@@ -27,6 +72,26 @@ interface MatchSelection {
   fileName: string;
   trackId: string;
   confidence: number;
+}
+
+interface TrackItem {
+  id: string;
+  artists: string;
+  name: string;
+  title?: string;
+}
+
+interface PlaylistItem {
+  name: string;
+  track_count: number;
+  tracks: TrackItem[];
+}
+
+interface MasterSyncAnalysis {
+  total_tracks_to_add: number;
+  playlists_with_new_tracks: number;
+  playlists: PlaylistItem[];
+  needs_confirmation: boolean;
 }
 
 const ActionButton: React.FC<ActionButtonProps> = ({ label, onClick, disabled, className }) => (
@@ -87,7 +152,7 @@ const PythonActionsPanel: React.FC = () => {
     return items.slice(startIndex, startIndex + perPage);
   };
 
-  const [analysisResults, setAnalysisResults] = useState<any>(null);
+  const [analysisResults, setAnalysisResults] = useState<AnalysisResults | null>(null);
   const [isAwaitingConfirmation, setIsAwaitingConfirmation] = useState(false);
   const [currentAction, setCurrentAction] = useState<ActionInfo | null>(null);
   const [paginationState, setPaginationState] = useState<
@@ -838,7 +903,7 @@ const PythonActionsPanel: React.FC = () => {
       <div className={styles.confirmationPanel}>
         <h3>Confirm Changes</h3>
 
-        {analysisResults.analyses && (
+        {analysisResults.analyses && analysisResults.analyses.playlists && (
           // This is for the 'all' action
           <div className={styles.allAnalyses}>
             <h4>Playlist Changes</h4>
@@ -889,13 +954,13 @@ const PythonActionsPanel: React.FC = () => {
 
             <h4>Track Changes</h4>
             <p>
-              {analysisResults.analyses.tracks.added} tracks to add,
-              {analysisResults.analyses.tracks.updated} to update,
-              {analysisResults.analyses.tracks.unchanged} unchanged
+              {analysisResults.analyses.tracks?.added} tracks to add,
+              {analysisResults.analyses.tracks?.updated} to update,
+              {analysisResults.analyses.tracks?.unchanged} unchanged
             </p>
 
             {/* Paginated Tracks to Add */}
-            {analysisResults.analyses.tracks.to_add_total > 0 && (
+            {analysisResults.analyses.tracks && analysisResults.analyses.tracks.to_add_total > 0 && (
               <div className={styles.sampleChanges}>
                 <h5>Tracks to Add ({analysisResults.analyses.tracks.to_add_total})</h5>
                 <div className={styles.trackList}>
@@ -915,7 +980,7 @@ const PythonActionsPanel: React.FC = () => {
             )}
 
             {/* Paginated Tracks to Update */}
-            {analysisResults.analyses.tracks.to_update_total > 0 && (
+            {analysisResults.analyses.tracks && analysisResults.analyses.tracks.to_update_total > 0 && (
               <div className={styles.sampleChanges}>
                 <h5>Tracks to Update ({analysisResults.analyses.tracks.to_update_total})</h5>
                 <div className={styles.trackList}>
@@ -1142,59 +1207,7 @@ const PythonActionsPanel: React.FC = () => {
                 <h5>Tracks by Playlist</h5>
                 <div className={styles.accordion}>
                   {analysisResults.master_sync.playlists.map(
-                    (
-                      playlist: {
-                        name:
-                          | string
-                          | number
-                          | bigint
-                          | boolean
-                          | React.ReactElement<unknown, string | React.JSXElementConstructor<any>>
-                          | Iterable<React.ReactNode>
-                          | React.ReactPortal
-                          | Promise<
-                              | string
-                              | number
-                              | bigint
-                              | boolean
-                              | React.ReactPortal
-                              | React.ReactElement<
-                                  unknown,
-                                  string | React.JSXElementConstructor<any>
-                                >
-                              | Iterable<React.ReactNode>
-                              | null
-                              | undefined
-                            >
-                          | null
-                          | undefined;
-                        track_count:
-                          | string
-                          | number
-                          | bigint
-                          | boolean
-                          | React.ReactElement<unknown, string | React.JSXElementConstructor<any>>
-                          | Iterable<React.ReactNode>
-                          | Promise<
-                              | string
-                              | number
-                              | bigint
-                              | boolean
-                              | React.ReactPortal
-                              | React.ReactElement<
-                                  unknown,
-                                  string | React.JSXElementConstructor<any>
-                                >
-                              | Iterable<React.ReactNode>
-                              | null
-                              | undefined
-                            >
-                          | null
-                          | undefined;
-                        tracks: any[];
-                      },
-                      i: React.Key | null | undefined
-                    ) => (
+                    (playlist: PlaylistItem, i: React.Key | null | undefined) => (
                       <div key={i} className={styles.accordionItem}>
                         <div
                           className={styles.accordionHeader}
