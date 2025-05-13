@@ -54,6 +54,7 @@ interface PlaylistIssue {
   expected_with_local_files: number;
   count_discrepancy: number;
   not_downloaded_tracks: any[];
+  location?: string;
 }
 
 interface PlaylistValidationResult {
@@ -1505,7 +1506,14 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                       .map((playlist, index) => (
                         <div key={index} className={styles.playlistItem}>
                           <div className={styles.playlistHeader}>
-                            <div className={styles.playlistName}>{playlist.name}</div>
+                            <div className={styles.playlistName}>
+                              {playlist.name}
+                              {playlist.location && playlist.location !== "root" && (
+                                <span className={styles.playlistLocation}>
+                                  ({playlist.location})
+                                </span>
+                              )}
+                            </div>
                             <div className={styles.playlistStatus}>
                               {!playlist.has_m3u ? (
                                 <span className={styles.missing}>Missing M3U File</span>

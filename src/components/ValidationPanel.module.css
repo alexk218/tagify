@@ -600,3 +600,9 @@ h3 button {
 .deleteButton:hover {
   background-color: #ff1744;
 }
+
+.playlistLocation {
+  font-size: 0.85em;
+  color: #888;
+  margin-left: 8px;
+}
