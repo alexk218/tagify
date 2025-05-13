@@ -116,6 +116,16 @@
   margin-bottom: 6px;
 }
 
+.duplicateTrackTitle {
+  font-size: 0.9em;
+  color: #666;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
 .confidenceBar {
   height: 6px;
   width: 100%;
@@ -562,7 +572,13 @@ h3 button {
 
 .fileDuration {
   font-size: 0.9em;
-  color: #666;
+  color: #46ce6f;
+  margin-top: 4px;
+}
+
+.fileDurationShort {
+  font-size: 0.9em;
+  color: #ff5252;
   margin-top: 4px;
 }
 

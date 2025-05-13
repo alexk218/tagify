@@ -713,7 +713,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     }, 0);
                   }}
                 >
-                  Ignored Tracks ({ignoredTrackPaths.size})
+                  Confirmed Tracks ({ignoredTrackPaths.size})
                 </button>
                 <button
                   className={`${styles.tab} ${
@@ -782,7 +782,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                   <div key={index} className={styles.fileItem}>
                                     <div className={styles.fileInfo}>
                                       <span className={styles.fileName}>{file.filename}</span>
-                                      <span className={styles.fileDuration}>
+                                      <span
+                                        className={
+                                          file.duration < 5 * 60
+                                            ? styles.fileDurationShort
+                                            : styles.fileDuration
+                                        }
+                                      >
                                         {file.duration_formatted}
                                       </span>
                                     </div>
@@ -902,6 +908,15 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                       : selectedMismatch.reason === "error_reading_tags"
                                       ? "Error reading tags"
                                       : selectedMismatch.reason}
+                                  </div>
+                                  <div
+                                    className={
+                                      (selectedMismatch.duration ?? 0) < 5 * 60
+                                        ? styles.fileDurationShort
+                                        : styles.fileDuration
+                                    }
+                                  >
+                                    {selectedMismatch.duration_formatted}
                                   </div>
                                 </div>
 
@@ -1027,7 +1042,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                       <div className={styles.matchPanel}>
                         {selectedMismatch ? (
                           <>
-                            <h3>Ignored Track: {selectedMismatch.file}</h3>
+                            <h3>Confirmed Track: {selectedMismatch.file}</h3>
                             <div className={styles.currentInfo}>
                               <div>
                                 <strong>Current TrackId:</strong> {selectedMismatch.track_id}
@@ -1059,23 +1074,23 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                     true
                                   );
                                   setSelectedMismatch(null);
-                                  Spicetify.showNotification("Removed from ignored tracks");
+                                  Spicetify.showNotification("Removed from confirmed tracks");
                                 }}
                               >
-                                Remove from Ignored
+                                Remove from Confirmed
                               </button>
                             </div>
                           </>
                         ) : (
                           <div className={styles.noSelection}>
-                            Select an ignored track from the list to see details and options.
+                            Select a confirmed track from the list to see details and options.
                           </div>
                         )}
                       </div>
                     </div>
                   ) : (
                     <div className={styles.noIssues}>
-                      No ignored tracks found. Mark tracks as correctly embedded to see them here.
+                      No confirmed tracks found. Mark tracks as correctly embedded to see them here.
                     </div>
                   )}
                 </div>
@@ -1154,6 +1169,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                 <div>
                                   <strong>Filename:</strong> {selectedMismatch.filename}
                                 </div>
+                                <div
+                                  className={
+                                    (selectedMismatch.duration ?? 0) < 5 * 60
+                                      ? styles.fileDurationShort
+                                      : styles.fileDuration
+                                  }
+                                ></div>
                               </div>
 
                               <div className={styles.actionButtons}>
@@ -1298,7 +1320,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                       <strong>Confidence:</strong>{" "}
                                       {(selectedMismatch.confidence * 100).toFixed(2)}%
                                     </div>
-                                    <div>
+                                    <div
+                                      className={
+                                        (selectedMismatch.duration ?? 0) < 5 * 60
+                                          ? styles.fileDurationShort
+                                          : styles.fileDuration
+                                      }
+                                    >
                                       <strong>Track Length:</strong>{" "}
                                       {selectedMismatch.duration_formatted || "Unknown"}
                                     </div>
@@ -1338,7 +1366,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                             true
                                           );
                                           setSelectedMismatch(null);
-                                          Spicetify.showNotification("Removed from ignored tracks");
+                                          Spicetify.showNotification(
+                                            "Removed from confirmed tracks"
+                                          );
                                         }}
                                       >
                                         Remove from Ignored
@@ -1393,8 +1423,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                             </>
                           ) : (
                             <div className={styles.noSelection}>
-                              Select a {showIgnoredTracks ? "ignored track" : "potential mismatch"}{" "}
-                              from the list to see options for correction.
+                              Select a{" "}
+                              {showIgnoredTracks ? "confirmed track" : "potential mismatch"} from
+                              the list to see options for correction.
                             </div>
                           )}
                         </div>
@@ -1402,7 +1433,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     ) : (
                       <div className={styles.noIssues}>
                         {showIgnoredTracks
-                          ? "No ignored tracks found. Mark tracks as correctly embedded to see them here."
+                          ? "No confirmed tracks found. Mark tracks as correctly embedded to see them here."
                           : "No potential mismatches found! All track metadata appears to be correct."}
                       </div>
                     )}
