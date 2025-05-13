@@ -13,6 +13,18 @@ interface PotentialMismatch {
   duration_formatted?: string;
 }
 
+interface FileDetail {
+  filename: string;
+  path: string;
+  duration: number;
+  duration_formatted: string;
+}
+
+interface DuplicateTrackData {
+  track_title: string;
+  files: FileDetail[];
+}
+
 interface TrackValidationResult {
   success: boolean;
   summary: {
@@ -23,7 +35,7 @@ interface TrackValidationResult {
     duplicate_track_ids: number;
   };
   potential_mismatches: PotentialMismatch[];
-  duplicate_track_ids: Record<string, string[]>;
+  duplicate_track_ids: Record<string, DuplicateTrackData>;
 }
 
 interface PlaylistIssue {
@@ -520,6 +532,47 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     }
   };
 
+  const confirmDialog = (message: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const confirmed = window.confirm(message);
+      resolve(confirmed);
+    });
+  };
+
+  const deleteFile = async (filePath: string, fileName: string) => {
+    const confirmed = await confirmDialog(`Are you sure you want to delete ${fileName}?`);
+
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`${serverUrl}/api/delete-file`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ file_path: filePath }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          Spicetify.showNotification(`File deleted: ${fileName}`);
+          // Refresh the validation
+          validateTrackMetadata();
+        } else {
+          Spicetify.showNotification(`Error: ${data.message}`, true);
+        }
+      } else {
+        const error = await response.json();
+        console.error("Error deleting file:", error);
+        Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
+      }
+    } catch (error) {
+      console.error("Error deleting file:", error);
+      Spicetify.showNotification("Error deleting file", true);
+    }
+  };
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -694,29 +747,52 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   {Object.keys(getDuplicateTrackIds()).length > 0 ? (
                     <div className={styles.splitView}>
                       <div className={styles.duplicatesList}>
-                        {Object.entries(getDuplicateTrackIds()).map(([trackId, files], index) => (
-                          <div
-                            key={index}
-                            className={`${styles.duplicateItem} ${
-                              selectedDuplicateTrackId === trackId ? styles.selected : ""
-                            }`}
-                            onClick={() => setSelectedDuplicateTrackId(trackId)}
-                          >
-                            <div className={styles.duplicateTrackId}>{trackId}</div>
-                            <div className={styles.duplicateCount}>{files.length} files</div>
-                          </div>
-                        ))}
+                        {Object.entries(getDuplicateTrackIds()).map(
+                          ([trackId, trackData], index) => (
+                            <div
+                              key={index}
+                              className={`${styles.duplicateItem} ${
+                                selectedDuplicateTrackId === trackId ? styles.selected : ""
+                              }`}
+                              onClick={() => setSelectedDuplicateTrackId(trackId)}
+                            >
+                              <div className={styles.duplicateTrackId}>{trackId}</div>
+                              <div className={styles.duplicateTrackTitle}>
+                                {trackData.track_title}
+                              </div>
+                              <div className={styles.duplicateCount}>
+                                {trackData.files.length} files
+                              </div>
+                            </div>
+                          )
+                        )}
                       </div>
 
                       <div className={styles.duplicateDetail}>
                         {selectedDuplicateTrackId && (
                           <>
                             <h3>Files with TrackId: {selectedDuplicateTrackId}</h3>
+                            <h4>
+                              {getDuplicateTrackIds()[selectedDuplicateTrackId]?.track_title ||
+                                "Unknown Track"}
+                            </h4>
                             <div className={styles.filesList}>
-                              {getDuplicateTrackIds()[selectedDuplicateTrackId].map(
+                              {getDuplicateTrackIds()[selectedDuplicateTrackId]?.files.map(
                                 (file, index) => (
                                   <div key={index} className={styles.fileItem}>
-                                    {file}
+                                    <div className={styles.fileInfo}>
+                                      <span className={styles.fileName}>{file.filename}</span>
+                                      <span className={styles.fileDuration}>
+                                        {file.duration_formatted}
+                                      </span>
+                                    </div>
+                                    <button
+                                      className={styles.deleteButton}
+                                      onClick={() => deleteFile(file.path, file.filename)}
+                                      title="Delete file"
+                                    >
+                                      ×
+                                    </button>
                                   </div>
                                 )
                               )}
@@ -725,7 +801,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                               <p>
                                 Having multiple files with the same TrackId may cause inconsistent
                                 playlist behavior. Consider reassigning the correct TrackId to each
-                                file.
+                                file or delete duplicate files.
                               </p>
                             </div>
                           </>
