@@ -79,12 +79,34 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [pageSize, setPageSize] = useState<number>(10);
   const [selectedDuplicateTrackId, setSelectedDuplicateTrackId] = useState<string | null>(null);
 
+  const [ignoredTrackPaths, setIgnoredTrackPaths] = useState<Set<string>>(
+    new Set(JSON.parse(localStorage.getItem("tagify:ignoredTrackPaths") || "[]"))
+  );
+  const [showIgnoredTracks, setShowIgnoredTracks] = useState<boolean>(false);
+  const [filteredMismatches, setFilteredMismatches] = useState<PotentialMismatch[]>([]);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+  const [hasMoreItems, setHasMoreItems] = useState<boolean>(true);
+
   // Run validation when component mounts
   useEffect(() => {
     validateTrackMetadata();
   }, []);
 
-  const validateTrackMetadata = async () => {
+  useEffect(() => {
+    if (trackValidationResult) {
+      updateFilteredMismatches(
+        trackValidationResult.potential_mismatches,
+        ignoredTrackPaths,
+        showIgnoredTracks
+      );
+    }
+  }, [trackValidationResult, ignoredTrackPaths, showIgnoredTracks]);
+
+  const validateTrackMetadata = async (resetPageToOne = true) => {
+    if (resetPageToOne) {
+      setPage(1);
+    }
+
     setIsLoading(true);
     try {
       const response = await fetch(`${serverUrl}/api/validate-track-metadata`, {
@@ -101,6 +123,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       if (response.ok) {
         const data = await response.json();
         setTrackValidationResult(data);
+        updateFilteredMismatches(data.potential_mismatches, ignoredTrackPaths, showIgnoredTracks);
       } else {
         const error = await response.json();
         console.error("Error validating track metadata:", error);
@@ -112,6 +135,27 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const loadMoreItems = async () => {
+    if (loadingMore || !hasMoreItems) return;
+
+    setLoadingMore(true);
+    setPage(page + 1);
+    setLoadingMore(false);
+  };
+
+  const resetIgnoredTracks = () => {
+    setIgnoredTrackPaths(new Set());
+    localStorage.removeItem("tagify:ignoredTrackPaths");
+    if (trackValidationResult) {
+      updateFilteredMismatches(
+        trackValidationResult.potential_mismatches,
+        new Set(),
+        showIgnoredTracks
+      );
+    }
+    Spicetify.showNotification("Reset all ignored tracks");
   };
 
   const validatePlaylists = async () => {
@@ -216,7 +260,10 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   const regeneratePlaylist = async (playlistId: string) => {
     try {
-      const response = await fetch(`${serverUrl}/api/generate-m3u`, {
+      setIsLoading(true);
+      console.log(`Regenerating playlist ${playlistId}`);
+
+      const response = await fetch(`${serverUrl}/api/regenerate-playlist`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -227,21 +274,26 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           playlist_id: playlistId,
           extended: true,
           overwrite: true,
+          force: true, // Add force parameter to ensure regeneration
         }),
       });
 
-      if (response.ok) {
-        Spicetify.showNotification("Playlist regenerated successfully");
-        // Refresh playlist validation
-        validatePlaylists();
+      const data = await response.json();
+      console.log("Regeneration response:", data);
+
+      if (response.ok && data.success) {
+        Spicetify.showNotification(`Playlist regenerated successfully: ${data.message}`);
+        // Refresh playlist validation after a short delay to ensure file system updates
+        setTimeout(() => validatePlaylists(), 1000);
       } else {
-        const error = await response.json();
-        console.error("Error regenerating playlist:", error);
-        Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
+        console.error("Error regenerating playlist:", data);
+        Spicetify.showNotification(`Error: ${data.message || "Unknown error"}`, true);
       }
     } catch (error) {
       console.error("Error regenerating playlist:", error);
       Spicetify.showNotification("Error regenerating playlist", true);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -280,24 +332,76 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     findPossibleMatches(mismatch.file);
   };
 
-  const handlePageChange = (newPage: number) => {
-    setPage(newPage);
-  };
-
-  const getPageCount = () => {
-    if (!trackValidationResult) return 1;
-    return Math.ceil(trackValidationResult.potential_mismatches.length / pageSize);
-  };
-
-  const getPaginatedMismatches = () => {
-    if (!trackValidationResult) return [];
-    const start = (page - 1) * pageSize;
-    return trackValidationResult.potential_mismatches.slice(start, start + pageSize);
-  };
-
   const getDuplicateTrackIds = () => {
     if (!trackValidationResult) return {};
     return trackValidationResult.duplicate_track_ids;
+  };
+
+  const ignoreTrack = (filePath: string) => {
+    const newIgnoredPaths = new Set(ignoredTrackPaths);
+    newIgnoredPaths.add(filePath);
+    setIgnoredTrackPaths(newIgnoredPaths);
+    localStorage.setItem("tagify:ignoredTrackPaths", JSON.stringify([...newIgnoredPaths]));
+
+    // Update filtered mismatches
+    updateFilteredMismatches(
+      trackValidationResult?.potential_mismatches || [],
+      newIgnoredPaths,
+      showIgnoredTracks
+    );
+
+    // Close the selection panel
+    setSelectedMismatch(null);
+    setPossibleMatches([]);
+
+    Spicetify.showNotification("Track marked as correctly embedded");
+  };
+
+  const removeTrackId = async (filePath: string) => {
+    try {
+      const response = await fetch(`${serverUrl}/api/remove-track-id`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          file_path: filePath,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          Spicetify.showNotification("TrackId removed successfully");
+          // Refresh validation after removal
+          setSelectedMismatch(null);
+          setPossibleMatches([]);
+          validateTrackMetadata();
+        } else {
+          Spicetify.showNotification(`Error: ${data.message}`, true);
+        }
+      } else {
+        const error = await response.json();
+        console.error("Error removing track ID:", error);
+        Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
+      }
+    } catch (error) {
+      console.error("Error removing track ID:", error);
+      Spicetify.showNotification("Error removing track ID", true);
+    }
+  };
+
+  const updateFilteredMismatches = (
+    mismatches: PotentialMismatch[],
+    ignored: Set<string>,
+    showIgnored: boolean
+  ) => {
+    const filtered = mismatches.filter((mismatch) => {
+      const isIgnored = ignored.has(mismatch.full_path);
+      return showIgnored ? isIgnored : !isIgnored;
+    });
+    setFilteredMismatches(filtered);
+    setHasMoreItems(filtered.length > pageSize * page);
   };
 
   return (
@@ -408,17 +512,31 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                       />
                       <span>{confidenceThreshold.toFixed(2)}</span>
                     </label>
-                    <button onClick={validateTrackMetadata} disabled={isLoading}>
+                    <button onClick={() => validateTrackMetadata(true)} disabled={isLoading}>
                       Refresh Analysis
                     </button>
                   </div>
 
                   <div className={styles.mismatchesContainer}>
-                    <h3>Potential Mismatches</h3>
-                    {trackValidationResult.potential_mismatches.length > 0 ? (
+                    <h3>
+                      {showIgnoredTracks ? "Ignored Tracks" : "Potential Mismatches"}
+                      <button
+                        className={styles.toggleButton}
+                        onClick={() => setShowIgnoredTracks(!showIgnoredTracks)}
+                      >
+                        Show {showIgnoredTracks ? "Potential Mismatches" : "Ignored Tracks"}
+                      </button>
+                      {showIgnoredTracks && ignoredTrackPaths.size > 0 && (
+                        <button className={styles.resetButton} onClick={resetIgnoredTracks}>
+                          Reset All Ignored
+                        </button>
+                      )}
+                    </h3>
+
+                    {filteredMismatches.length > 0 ? (
                       <div className={styles.splitView}>
                         <div className={styles.mismatchList}>
-                          {getPaginatedMismatches().map((mismatch, index) => (
+                          {filteredMismatches.slice(0, page * pageSize).map((mismatch, index) => (
                             <div
                               key={index}
                               className={`${styles.mismatchItem} ${
@@ -446,22 +564,15 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                               </div>
                             </div>
                           ))}
-                          {trackValidationResult.potential_mismatches.length > pageSize && (
-                            <div className={styles.pagination}>
+
+                          {hasMoreItems && (
+                            <div className={styles.loadMoreContainer}>
                               <button
-                                onClick={() => handlePageChange(page - 1)}
-                                disabled={page === 1}
+                                className={styles.loadMoreButton}
+                                onClick={loadMoreItems}
+                                disabled={loadingMore}
                               >
-                                Previous
-                              </button>
-                              <span>
-                                Page {page} of {getPageCount()}
-                              </span>
-                              <button
-                                onClick={() => handlePageChange(page + 1)}
-                                disabled={page === getPageCount()}
-                              >
-                                Next
+                                {loadingMore ? "Loading..." : "Load More"}
                               </button>
                             </div>
                           )}
@@ -470,7 +581,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                         <div className={styles.matchPanel}>
                           {selectedMismatch ? (
                             <>
-                              <h3>Possible Matches for: {selectedMismatch.file}</h3>
+                              <h3>Options for: {selectedMismatch.file}</h3>
                               {isFetchingMatches ? (
                                 <div className={styles.loading}>Finding potential matches...</div>
                               ) : (
@@ -492,6 +603,22 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                     </div>
                                   </div>
 
+                                  <div className={styles.actionButtons}>
+                                    <button
+                                      className={styles.acceptButton}
+                                      onClick={() => ignoreTrack(selectedMismatch.full_path)}
+                                    >
+                                      Mark as Correctly Embedded
+                                    </button>
+                                    <button
+                                      className={styles.removeButton}
+                                      onClick={() => removeTrackId(selectedMismatch.full_path)}
+                                    >
+                                      Remove TrackId
+                                    </button>
+                                  </div>
+
+                                  <h4>Possible Matches:</h4>
                                   {possibleMatches.length > 0 ? (
                                     <div className={styles.matchesList}>
                                       {possibleMatches.map((match, index) => (
@@ -530,15 +657,17 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                             </>
                           ) : (
                             <div className={styles.noSelection}>
-                              Select a potential mismatch from the list to see options for
-                              correction.
+                              Select a {showIgnoredTracks ? "ignored track" : "potential mismatch"}{" "}
+                              from the list to see options for correction.
                             </div>
                           )}
                         </div>
                       </div>
                     ) : (
                       <div className={styles.noIssues}>
-                        No potential mismatches found! All track metadata appears to be correct.
+                        {showIgnoredTracks
+                          ? "No ignored tracks found. Mark tracks as correctly embedded to see them here."
+                          : "No potential mismatches found! All track metadata appears to be correct."}
                       </div>
                     )}
                   </div>

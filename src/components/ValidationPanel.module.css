@@ -343,3 +343,97 @@
   border-left: 4px solid #ff9800;
   border-radius: 4px;
 }
+
+.toggleButton,
+.resetButton,
+.acceptButton,
+.removeButton,
+.loadMoreButton,
+button[disabled="false"] {
+  padding: 8px 16px;
+  border-radius: 4px;
+  color: var(--spice-text);
+  border: none;
+  cursor: pointer;
+  margin-left: 10px;
+  font-size: 0.9em;
+}
+
+.toggleButton {
+  background: var(--spice-button);
+}
+
+.resetButton {
+  background: #f44336;
+}
+
+.acceptButton {
+  background: #4caf50;
+  margin-right: 10px;
+}
+
+.removeButton {
+  background: #ff9800;
+}
+
+.loadMoreButton {
+  background: var(--spice-button);
+  padding: 8px 16px;
+  margin: 10px auto;
+  display: block;
+  width: 80%;
+  max-width: 300px;
+}
+
+.loadMoreContainer {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.pagination button {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  padding: 5px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pagination button:disabled {
+  background: var(--spice-button-disabled);
+  cursor: not-allowed;
+}
+
+.actionButtons {
+  display: flex;
+  margin: 15px 0;
+}
+
+.filterContainer button {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Update mismatchList to handle continuous scrolling */
+.mismatchList {
+  overflow-y: auto;
+  height: 100%;
+  padding-right: 5px;
+}
+
+/* Styling for ignored tracks section */
+h3 {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+h3 button {
+  margin-left: 10px;
+  font-size: 0.8em;
+}
