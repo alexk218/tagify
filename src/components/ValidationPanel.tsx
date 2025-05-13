@@ -114,6 +114,30 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     }
   }, [trackValidationResult, ignoredTrackPaths, showIgnoredTracks]);
 
+  useEffect(() => {
+    // If we have a selected mismatch, check if it belongs to the current section
+    if (selectedMismatch) {
+      const isIgnored = ignoredTrackPaths.has(selectedMismatch.full_path);
+
+      // If we're in the ignored section but the track isn't ignored
+      // or if we're in the mismatches section but the track is ignored,
+      // deselect it and select an appropriate one
+      if (
+        (currentSection === "ignored" && !isIgnored) ||
+        (currentSection === "mismatches" && isIgnored)
+      ) {
+        setSelectedMismatch(null);
+
+        // Select first appropriate item
+        setTimeout(() => {
+          if (filteredMismatches.length > 0) {
+            handleSelectMismatch(filteredMismatches[0]);
+          }
+        }, 0);
+      }
+    }
+  }, [currentSection, selectedMismatch, ignoredTrackPaths, filteredMismatches]);
+
   const validateTrackMetadata = async (resetPageToOne = true) => {
     if (resetPageToOne) {
       setPage(1);
@@ -407,6 +431,11 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     });
     setFilteredMismatches(filtered);
     setHasMoreItems(filtered.length > pageSize * page);
+
+    // Select first item if none is selected and there are items to select
+    if (!selectedMismatch && filtered.length > 0) {
+      handleSelectMismatch(filtered[0]);
+    }
   };
 
   return (
@@ -491,6 +520,19 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   onClick={() => {
                     setCurrentSection("mismatches");
                     setSelectedDuplicateTrackId(null);
+                    setSelectedMismatch(null); // Reset selection
+
+                    // Select first item if available
+                    if (trackValidationResult?.potential_mismatches.length > 0) {
+                      // Create filtered list first
+                      const filtered = trackValidationResult.potential_mismatches.filter(
+                        (mismatch) => !ignoredTrackPaths.has(mismatch.full_path)
+                      );
+                      if (filtered.length > 0) {
+                        handleSelectMismatch(filtered[0]);
+                      }
+                    }
+
                     updateFilteredMismatches(
                       trackValidationResult?.potential_mismatches || [],
                       ignoredTrackPaths,
@@ -506,6 +548,11 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     setCurrentSection("missing");
                     setSelectedDuplicateTrackId(null);
                     setSelectedMismatch(null);
+
+                    // Select first item if available
+                    if (filesMissingTrackId.length > 0) {
+                      handleSelectMismatch(filesMissingTrackId[0]);
+                    }
                   }}
                 >
                   Missing TrackId ({trackValidationResult?.summary.files_without_track_id || 0})
@@ -515,11 +562,20 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   onClick={() => {
                     setCurrentSection("ignored");
                     setSelectedDuplicateTrackId(null);
+                    setSelectedMismatch(null);
+
                     updateFilteredMismatches(
                       trackValidationResult?.potential_mismatches || [],
                       ignoredTrackPaths,
                       true
                     );
+
+                    // Select first item after filteredMismatches has been updated
+                    setTimeout(() => {
+                      if (filteredMismatches.length > 0) {
+                        handleSelectMismatch(filteredMismatches[0]);
+                      }
+                    }, 0);
                   }}
                 >
                   Ignored Tracks ({ignoredTrackPaths.size})
@@ -530,6 +586,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   }`}
                   onClick={() => {
                     setCurrentSection("duplicates");
+                    setSelectedMismatch(null);
                     setSelectedDuplicateTrackId(Object.keys(getDuplicateTrackIds())[0] || null);
                   }}
                   disabled={trackValidationResult?.summary.duplicate_track_ids === 0}
@@ -947,20 +1004,53 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                   </div>
 
                                   <div className={styles.actionButtons}>
-                                    <button
-                                      className={styles.acceptButton}
-                                      onClick={() => ignoreTrack(selectedMismatch.full_path)}
-                                    >
-                                      Mark as Correctly Embedded
-                                    </button>
-                                    <button
-                                      className={styles.removeButton}
-                                      onClick={() => removeTrackId(selectedMismatch.full_path)}
-                                    >
-                                      Remove TrackId
-                                    </button>
+                                    {currentSection === "mismatches" ? (
+                                      <>
+                                        <button
+                                          className={styles.acceptButton}
+                                          onClick={() => ignoreTrack(selectedMismatch.full_path)}
+                                        >
+                                          Mark as Correctly Embedded
+                                        </button>
+                                        <button
+                                          className={styles.removeButton}
+                                          onClick={() => removeTrackId(selectedMismatch.full_path)}
+                                        >
+                                          Remove TrackId
+                                        </button>
+                                      </>
+                                    ) : currentSection === "ignored" ? (
+                                      <button
+                                        className={styles.removeButton}
+                                        onClick={() => {
+                                          // Remove from ignored tracks and refresh
+                                          const newIgnoredPaths = new Set(ignoredTrackPaths);
+                                          newIgnoredPaths.delete(selectedMismatch.full_path);
+                                          setIgnoredTrackPaths(newIgnoredPaths);
+                                          localStorage.setItem(
+                                            "tagify:ignoredTrackPaths",
+                                            JSON.stringify([...newIgnoredPaths])
+                                          );
+                                          updateFilteredMismatches(
+                                            trackValidationResult?.potential_mismatches || [],
+                                            newIgnoredPaths,
+                                            true
+                                          );
+                                          setSelectedMismatch(null);
+                                          Spicetify.showNotification("Removed from ignored tracks");
+                                        }}
+                                      >
+                                        Remove from Ignored
+                                      </button>
+                                    ) : currentSection === "missing" ? (
+                                      <button
+                                        className={styles.removeButton}
+                                        onClick={() => removeTrackId(selectedMismatch.full_path)}
+                                      >
+                                        Remove TrackId
+                                      </button>
+                                    ) : null}
                                   </div>
-
                                   <h4>Possible Matches:</h4>
                                   {possibleMatches.length > 0 ? (
                                     <div className={styles.matchesList}>
