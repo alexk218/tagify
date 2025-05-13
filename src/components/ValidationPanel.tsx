@@ -94,6 +94,11 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [hasMoreItems, setHasMoreItems] = useState<boolean>(true);
 
+  const [currentSection, setCurrentSection] = useState<"mismatches" | "ignored" | "missing">(
+    "mismatches"
+  );
+  const [filesMissingTrackId, setFilesMissingTrackId] = useState<PotentialMismatch[]>([]);
+
   // Run validation when component mounts
   useEffect(() => {
     validateTrackMetadata();
@@ -130,7 +135,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       if (response.ok) {
         const data = await response.json();
         setTrackValidationResult(data);
-        updateFilteredMismatches(data.potential_mismatches, ignoredTrackPaths, showIgnoredTracks);
+        // Store the files missing TrackId
+        setFilesMissingTrackId(data.files_missing_trackid || []);
+        updateFilteredMismatches(
+          data.potential_mismatches,
+          ignoredTrackPaths,
+          currentSection === "ignored"
+        );
       } else {
         const error = await response.json();
         console.error("Error validating track metadata:", error);
@@ -487,19 +498,53 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
               <div className={styles.tabs}>
                 <button
-                  className={`${styles.tab} ${!selectedDuplicateTrackId ? styles.active : ""}`}
-                  onClick={() => setSelectedDuplicateTrackId(null)}
+                  className={`${styles.tab} ${
+                    currentSection === "mismatches" ? styles.active : ""
+                  }`}
+                  onClick={() => {
+                    setCurrentSection("mismatches");
+                    setSelectedDuplicateTrackId(null);
+                    updateFilteredMismatches(
+                      trackValidationResult?.potential_mismatches || [],
+                      ignoredTrackPaths,
+                      false
+                    );
+                  }}
                 >
-                  Potential Mismatches ({trackValidationResult.summary.potential_mismatches})
+                  Potential Mismatches ({trackValidationResult?.summary.potential_mismatches || 0})
+                </button>
+                <button
+                  className={`${styles.tab} ${currentSection === "missing" ? styles.active : ""}`}
+                  onClick={() => {
+                    setCurrentSection("missing");
+                    setSelectedDuplicateTrackId(null);
+                  }}
+                >
+                  Missing TrackId ({trackValidationResult?.summary.files_without_track_id || 0})
+                </button>
+                <button
+                  className={`${styles.tab} ${currentSection === "ignored" ? styles.active : ""}`}
+                  onClick={() => {
+                    setCurrentSection("ignored");
+                    setSelectedDuplicateTrackId(null);
+                    updateFilteredMismatches(
+                      trackValidationResult?.potential_mismatches || [],
+                      ignoredTrackPaths,
+                      true
+                    );
+                  }}
+                >
+                  Ignored Tracks ({ignoredTrackPaths.size})
                 </button>
                 <button
                   className={`${styles.tab} ${selectedDuplicateTrackId ? styles.active : ""}`}
-                  onClick={() =>
-                    setSelectedDuplicateTrackId(Object.keys(getDuplicateTrackIds())[0] || null)
-                  }
-                  disabled={trackValidationResult.summary.duplicate_track_ids === 0}
+                  onClick={() => {
+                    setCurrentSection("mismatches");
+                    setSelectedDuplicateTrackId(Object.keys(getDuplicateTrackIds())[0] || null);
+                  }}
+                  disabled={trackValidationResult?.summary.duplicate_track_ids === 0}
                 >
-                  Duplicate TrackIds ({trackValidationResult.summary.duplicate_track_ids})
+                  Duplicate TrackIds ({trackValidationResult?.summary.duplicate_track_ids || 0})
                 </button>
               </div>
 
