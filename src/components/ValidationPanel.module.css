@@ -486,3 +486,15 @@ h3 button {
   margin: 0;
   padding-left: 20px;
 }
+
+.duplicatesContainer {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  height: calc(60vh - 200px);
+  min-height: 300px;
+}
+
+.duplicatesContainer h3 {
+  margin-bottom: 16px;
+}

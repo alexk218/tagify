@@ -94,9 +94,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [hasMoreItems, setHasMoreItems] = useState<boolean>(true);
 
-  const [currentSection, setCurrentSection] = useState<"mismatches" | "ignored" | "missing">(
-    "mismatches"
-  );
+  const [currentSection, setCurrentSection] = useState<
+    "mismatches" | "ignored" | "missing" | "duplicates"
+  >("mismatches");
   const [filesMissingTrackId, setFilesMissingTrackId] = useState<PotentialMismatch[]>([]);
 
   // Run validation when component mounts
@@ -161,19 +161,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     setLoadingMore(true);
     setPage(page + 1);
     setLoadingMore(false);
-  };
-
-  const resetIgnoredTracks = () => {
-    setIgnoredTrackPaths(new Set());
-    localStorage.removeItem("tagify:ignoredTrackPaths");
-    if (trackValidationResult) {
-      updateFilteredMismatches(
-        trackValidationResult.potential_mismatches,
-        new Set(),
-        showIgnoredTracks
-      );
-    }
-    Spicetify.showNotification("Reset all ignored tracks");
   };
 
   const validatePlaylists = async () => {
@@ -518,6 +505,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   onClick={() => {
                     setCurrentSection("missing");
                     setSelectedDuplicateTrackId(null);
+                    setSelectedMismatch(null);
                   }}
                 >
                   Missing TrackId ({trackValidationResult?.summary.files_without_track_id || 0})
@@ -537,9 +525,11 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   Ignored Tracks ({ignoredTrackPaths.size})
                 </button>
                 <button
-                  className={`${styles.tab} ${selectedDuplicateTrackId ? styles.active : ""}`}
+                  className={`${styles.tab} ${
+                    currentSection === "duplicates" ? styles.active : ""
+                  }`}
                   onClick={() => {
-                    setCurrentSection("mismatches");
+                    setCurrentSection("duplicates");
                     setSelectedDuplicateTrackId(Object.keys(getDuplicateTrackIds())[0] || null);
                   }}
                   disabled={trackValidationResult?.summary.duplicate_track_ids === 0}
@@ -548,8 +538,324 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                 </button>
               </div>
 
-              {!selectedDuplicateTrackId ? (
-                // Show potential mismatches
+              {selectedDuplicateTrackId || currentSection === "duplicates" ? (
+                // Show duplicate track IDs
+                <div className={styles.duplicatesContainer}>
+                  <h3>Duplicate TrackIds</h3>
+                  {Object.keys(getDuplicateTrackIds()).length > 0 ? (
+                    <div className={styles.splitView}>
+                      <div className={styles.duplicatesList}>
+                        {Object.entries(getDuplicateTrackIds()).map(([trackId, files], index) => (
+                          <div
+                            key={index}
+                            className={`${styles.duplicateItem} ${
+                              selectedDuplicateTrackId === trackId ? styles.selected : ""
+                            }`}
+                            onClick={() => setSelectedDuplicateTrackId(trackId)}
+                          >
+                            <div className={styles.duplicateTrackId}>{trackId}</div>
+                            <div className={styles.duplicateCount}>{files.length} files</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className={styles.duplicateDetail}>
+                        {selectedDuplicateTrackId && (
+                          <>
+                            <h3>Files with TrackId: {selectedDuplicateTrackId}</h3>
+                            <div className={styles.filesList}>
+                              {getDuplicateTrackIds()[selectedDuplicateTrackId].map(
+                                (file, index) => (
+                                  <div key={index} className={styles.fileItem}>
+                                    {file}
+                                  </div>
+                                )
+                              )}
+                            </div>
+                            <div className={styles.duplicateWarning}>
+                              <p>
+                                Having multiple files with the same TrackId may cause inconsistent
+                                playlist behavior. Consider reassigning the correct TrackId to each
+                                file.
+                              </p>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={styles.noIssues}>
+                      No duplicate TrackIds found! Each TrackId is assigned to only one file.
+                    </div>
+                  )}
+                </div>
+              ) : currentSection === "missing" ? (
+                // Missing TrackId section
+                <div className={styles.mismatchesContainer}>
+                  <div className={styles.filterContainer}>
+                    <label>
+                      Confidence Threshold:
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={confidenceThreshold}
+                        onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
+                      />
+                      <span>{confidenceThreshold.toFixed(2)}</span>
+                    </label>
+                    <button onClick={() => validateTrackMetadata(true)} disabled={isLoading}>
+                      Refresh Analysis
+                    </button>
+                  </div>
+
+                  <h3>Files Missing TrackId</h3>
+
+                  {filesMissingTrackId.length > 0 ? (
+                    <div className={styles.splitView}>
+                      <div className={styles.mismatchList}>
+                        {filesMissingTrackId.slice(0, page * pageSize).map((file, index) => (
+                          <div
+                            key={index}
+                            className={`${styles.mismatchItem} ${
+                              selectedMismatch && selectedMismatch.file === file.file
+                                ? styles.selected
+                                : ""
+                            }`}
+                            onClick={() => handleSelectMismatch(file)}
+                          >
+                            <div className={styles.mismatchFile}>{file.file}</div>
+                            <div className={styles.mismatchDetails}>
+                              <div>
+                                <strong>Reason:</strong>{" "}
+                                {file.reason === "missing_track_id"
+                                  ? "No TrackId embedded"
+                                  : file.reason === "error_reading_tags"
+                                  ? "Error reading tags"
+                                  : file.reason}
+                              </div>
+                              <div>
+                                <strong>Filename:</strong> {file.filename}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+
+                        {filesMissingTrackId.length > page * pageSize && (
+                          <div className={styles.loadMoreContainer}>
+                            <button
+                              className={styles.loadMoreButton}
+                              onClick={loadMoreItems}
+                              disabled={loadingMore}
+                            >
+                              {loadingMore ? "Loading..." : "Load More"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className={styles.matchPanel}>
+                        {selectedMismatch ? (
+                          <>
+                            <h3>Options for: {selectedMismatch.file}</h3>
+                            {isFetchingMatches ? (
+                              <div className={styles.loading}>Finding potential matches...</div>
+                            ) : (
+                              <>
+                                <div className={styles.currentInfo}>
+                                  <div>
+                                    <strong>Filename:</strong> {selectedMismatch.filename}
+                                  </div>
+                                  <div>
+                                    <strong>Full Path:</strong> {selectedMismatch.full_path}
+                                  </div>
+                                  <div>
+                                    <strong>Reason:</strong>{" "}
+                                    {selectedMismatch.reason === "missing_track_id"
+                                      ? "No TrackId embedded"
+                                      : selectedMismatch.reason === "error_reading_tags"
+                                      ? "Error reading tags"
+                                      : selectedMismatch.reason}
+                                  </div>
+                                </div>
+
+                                <h4>Possible Matches:</h4>
+                                {possibleMatches.length > 0 ? (
+                                  <div className={styles.matchesList}>
+                                    {possibleMatches.map((match, index) => (
+                                      <div key={index} className={styles.matchOption}>
+                                        <div className={styles.matchDetails}>
+                                          <div className={styles.matchTitle}>
+                                            {match.artist} - {match.title}
+                                          </div>
+                                          <div className={styles.matchTrackId}>
+                                            {match.track_id}
+                                          </div>
+                                          <div className={styles.matchConfidence}>
+                                            Confidence: {(match.ratio * 100).toFixed(2)}%
+                                          </div>
+                                        </div>
+                                        <button
+                                          className={styles.applyButton}
+                                          onClick={() =>
+                                            correctTrackId(
+                                              selectedMismatch.full_path,
+                                              match.track_id
+                                            )
+                                          }
+                                        >
+                                          Apply
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className={styles.noMatches}>
+                                    No potential matches found. Try manual search by artist/title in
+                                    the search bar.
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <div className={styles.noSelection}>
+                            Select a file missing TrackId from the list to see options for adding a
+                            TrackId.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={styles.noIssues}>
+                      No files missing TrackId found! All files have a TrackId embedded.
+                    </div>
+                  )}
+                </div>
+              ) : currentSection === "ignored" ? (
+                // Ignored Tracks section
+                <div className={styles.mismatchesContainer}>
+                  <div className={styles.filterContainer}>
+                    <label>
+                      Confidence Threshold:
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={confidenceThreshold}
+                        onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
+                      />
+                      <span>{confidenceThreshold.toFixed(2)}</span>
+                    </label>
+                    <button onClick={() => validateTrackMetadata(true)} disabled={isLoading}>
+                      Refresh Analysis
+                    </button>
+                  </div>
+
+                  {filteredMismatches.length > 0 ? (
+                    <div className={styles.splitView}>
+                      <div className={styles.mismatchList}>
+                        {filteredMismatches.slice(0, page * pageSize).map((mismatch, index) => (
+                          <div
+                            key={index}
+                            className={`${styles.mismatchItem} ${
+                              selectedMismatch && selectedMismatch.file === mismatch.file
+                                ? styles.selected
+                                : ""
+                            }`}
+                            onClick={() => handleSelectMismatch(mismatch)}
+                          >
+                            <div className={styles.mismatchFile}>{mismatch.file}</div>
+                            <div className={styles.mismatchDetails}>
+                              <div>
+                                <strong>Embedded:</strong> {mismatch.embedded_artist_title}
+                              </div>
+                              <div>
+                                <strong>Filename:</strong> {mismatch.filename}
+                              </div>
+                              <div className={styles.confidenceBar}>
+                                <div
+                                  className={styles.confidenceFill}
+                                  style={{ width: `${mismatch.confidence * 100}%` }}
+                                ></div>
+                                <span>{(mismatch.confidence * 100).toFixed(0)}%</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+
+                        {hasMoreItems && (
+                          <div className={styles.loadMoreContainer}>
+                            <button
+                              className={styles.loadMoreButton}
+                              onClick={loadMoreItems}
+                              disabled={loadingMore}
+                            >
+                              {loadingMore ? "Loading..." : "Load More"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className={styles.matchPanel}>
+                        {selectedMismatch ? (
+                          <>
+                            <h3>Ignored Track: {selectedMismatch.file}</h3>
+                            <div className={styles.currentInfo}>
+                              <div>
+                                <strong>Current TrackId:</strong> {selectedMismatch.track_id}
+                              </div>
+                              <div>
+                                <strong>Embedded as:</strong>{" "}
+                                {selectedMismatch.embedded_artist_title}
+                              </div>
+                              <div>
+                                <strong>Filename:</strong> {selectedMismatch.filename}
+                              </div>
+                            </div>
+
+                            <div className={styles.actionButtons}>
+                              <button
+                                className={styles.removeButton}
+                                onClick={() => {
+                                  // Remove from ignored tracks and refresh
+                                  const newIgnoredPaths = new Set(ignoredTrackPaths);
+                                  newIgnoredPaths.delete(selectedMismatch.full_path);
+                                  setIgnoredTrackPaths(newIgnoredPaths);
+                                  localStorage.setItem(
+                                    "tagify:ignoredTrackPaths",
+                                    JSON.stringify([...newIgnoredPaths])
+                                  );
+                                  updateFilteredMismatches(
+                                    trackValidationResult?.potential_mismatches || [],
+                                    newIgnoredPaths,
+                                    true
+                                  );
+                                  setSelectedMismatch(null);
+                                  Spicetify.showNotification("Removed from ignored tracks");
+                                }}
+                              >
+                                Remove from Ignored
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className={styles.noSelection}>
+                            Select an ignored track from the list to see details and options.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={styles.noIssues}>
+                      No ignored tracks found. Mark tracks as correctly embedded to see them here.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                // Default section - Potential Mismatches
                 <>
                   <div className={styles.filterContainer}>
                     <label>
@@ -570,21 +876,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   </div>
 
                   <div className={styles.mismatchesContainer}>
-                    <h3>
-                      {showIgnoredTracks ? "Ignored Tracks" : "Potential Mismatches"}
-                      <button
-                        className={styles.toggleButton}
-                        onClick={() => setShowIgnoredTracks(!showIgnoredTracks)}
-                      >
-                        Show {showIgnoredTracks ? "Potential Mismatches" : "Ignored Tracks"}
-                      </button>
-                      {showIgnoredTracks && ignoredTrackPaths.size > 0 && (
-                        <button className={styles.resetButton} onClick={resetIgnoredTracks}>
-                          Reset All Ignored
-                        </button>
-                      )}
-                    </h3>
-
                     {filteredMismatches.length > 0 ? (
                       <div className={styles.splitView}>
                         <div className={styles.mismatchList}>
@@ -726,57 +1017,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     )}
                   </div>
                 </>
-              ) : (
-                // Show duplicate track IDs
-                <div className={styles.duplicatesContainer}>
-                  <h3>Duplicate TrackIds</h3>
-                  {Object.keys(getDuplicateTrackIds()).length > 0 ? (
-                    <div className={styles.splitView}>
-                      <div className={styles.duplicatesList}>
-                        {Object.entries(getDuplicateTrackIds()).map(([trackId, files], index) => (
-                          <div
-                            key={index}
-                            className={`${styles.duplicateItem} ${
-                              selectedDuplicateTrackId === trackId ? styles.selected : ""
-                            }`}
-                            onClick={() => setSelectedDuplicateTrackId(trackId)}
-                          >
-                            <div className={styles.duplicateTrackId}>{trackId}</div>
-                            <div className={styles.duplicateCount}>{files.length} files</div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className={styles.duplicateDetail}>
-                        {selectedDuplicateTrackId && (
-                          <>
-                            <h3>Files with TrackId: {selectedDuplicateTrackId}</h3>
-                            <div className={styles.filesList}>
-                              {getDuplicateTrackIds()[selectedDuplicateTrackId].map(
-                                (file, index) => (
-                                  <div key={index} className={styles.fileItem}>
-                                    {file}
-                                  </div>
-                                )
-                              )}
-                            </div>
-                            <div className={styles.duplicateWarning}>
-                              <p>
-                                Having multiple files with the same TrackId may cause inconsistent
-                                playlist behavior. Consider reassigning the correct TrackId to each
-                                file.
-                              </p>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className={styles.noIssues}>
-                      No duplicate TrackIds found! Each TrackId is assigned to only one file.
-                    </div>
-                  )}
-                </div>
               )}
             </div>
           )}
@@ -936,7 +1176,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                   </ul>
                                 </div>
                               )}
-
                               {playlist.not_downloaded_tracks &&
                                 playlist.not_downloaded_tracks.length > 0 && (
                                   <div className={styles.notDownloadedTracks}>
