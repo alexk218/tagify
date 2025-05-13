@@ -9,6 +9,8 @@ interface PotentialMismatch {
   confidence: number;
   full_path: string;
   reason?: string;
+  duration?: number;
+  duration_formatted?: string;
 }
 
 interface TrackValidationResult {
@@ -224,8 +226,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     }
   };
 
-  const findPossibleMatches = async (filename: string) => {
+  const findPossibleMatches = async (mismatch: PotentialMismatch | SearchResult) => {
     setIsFetchingMatches(true);
+
     try {
       const response = await fetch(`${serverUrl}/api/fuzzy-match-track`, {
         method: "POST",
@@ -233,8 +236,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          fileName: filename,
-          masterTracksDir,
+          fileName: mismatch.file,
+          masterTracksDir: masterTracksDir,
+          currentTrackId: mismatch.track_id,
         }),
       });
 
@@ -389,7 +393,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   const handleSelectMismatch = (mismatch: PotentialMismatch | SearchResult) => {
     setSelectedMismatch(mismatch);
-    findPossibleMatches(mismatch.file);
+    findPossibleMatches(mismatch);
   };
 
   const getDuplicateTrackIds = () => {
@@ -1217,6 +1221,10 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                     <div>
                                       <strong>Confidence:</strong>{" "}
                                       {(selectedMismatch.confidence * 100).toFixed(2)}%
+                                    </div>
+                                    <div>
+                                      <strong>Track Length:</strong>{" "}
+                                      {selectedMismatch.duration_formatted || "Unknown"}
                                     </div>
                                   </div>
 
