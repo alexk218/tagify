@@ -284,6 +284,10 @@ const PythonActionsPanel: React.FC = () => {
       confirmed: true,
     };
 
+    if (name === "sync-database") {
+      console.log(`Confirming ${data.action} sync with:`, confirmData);
+    }
+
     // For association sync, include the precomputed changes
     if (name === "sync-database" && data.action === "associations" && analysisResults) {
       // Include the precomputed changes in the confirmation data
