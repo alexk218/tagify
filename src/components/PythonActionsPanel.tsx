@@ -1581,6 +1581,7 @@ const PythonActionsPanel: React.FC = () => {
           masterTracksDir={settings.masterTracksDir}
           playlistsDir={settings.playlistsDir}
           minTrackLengthMinutes={settings.minTrackLengthMinutes}
+          validationType={validationType}
         />
       )}
     </div>

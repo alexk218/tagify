@@ -81,6 +81,7 @@ interface ValidationPanelProps {
   playlistsDir: string;
   minTrackLengthMinutes: number;
   onClose: () => void;
+  validationType?: "track" | "playlist";
 }
 
 const ValidationPanel: React.FC<ValidationPanelProps> = ({
@@ -89,8 +90,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   playlistsDir,
   minTrackLengthMinutes,
   onClose,
+  validationType = "track",
 }) => {
-  const [currentTab, setCurrentTab] = useState<"track" | "playlist">("track");
+  const [currentTab, setCurrentTab] = useState<"track" | "playlist">(validationType);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [trackValidationResult, setTrackValidationResult] = useState<TrackValidationResult | null>(
     null
@@ -123,8 +125,18 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   // Run validation when component mounts
   useEffect(() => {
-    validateTrackMetadata();
-  }, []);
+    // Load the appropriate validation based on currentTab
+    if (currentTab === "track") {
+      validateTrackMetadata();
+    } else if (currentTab === "playlist") {
+      validatePlaylists();
+    }
+  }, [currentTab]);
+
+  useEffect(() => {
+    // Update currentTab when validationType prop changes
+    setCurrentTab(validationType);
+  }, [validationType]);
 
   useEffect(() => {
     if (trackValidationResult) {
@@ -583,29 +595,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     <div className={styles.container}>
       <div className={styles.header}>
         <h2>Track & Playlist Validation</h2>
-        <div className={styles.tabs}>
-          <button
-            className={`${styles.tab} ${currentTab === "track" ? styles.active : ""}`}
-            onClick={() => setCurrentTab("track")}
-          >
-            Track Metadata
-          </button>
-          <button
-            className={`${styles.tab} ${currentTab === "playlist" ? styles.active : ""}`}
-            onClick={() => {
-              if (!playlistValidationResult) {
-                validatePlaylists();
-              } else {
-                setCurrentTab("playlist");
-              }
-            }}
-          >
-            Playlist Integrity
-          </button>
-          <button className={styles.closeButton} onClick={onClose}>
-            Close
-          </button>
-        </div>
+        <button className={styles.closeButton} onClick={onClose}>
+          Close
+        </button>
       </div>
 
       {isLoading ? (
