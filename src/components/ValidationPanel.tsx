@@ -31,6 +31,10 @@ interface TrackValidationResult {
 }
 
 interface PlaylistIssue {
+  unidentified_discrepancy: number;
+  tracks_with_local_files: number;
+  total_discrepancy: number;
+  total_associations: number;
   name: string;
   id: string;
   has_m3u: boolean;
@@ -39,6 +43,8 @@ interface PlaylistIssue {
   m3u_track_count: number;
   tracks_missing_from_m3u: any[];
   unexpected_tracks_in_m3u: any[];
+  expected_with_local_files: number;
+  count_discrepancy: number;
 }
 
 interface PlaylistValidationResult {
@@ -627,7 +633,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                             <div className={styles.matchTitle}>
                                               {match.artist} - {match.title}
                                             </div>
-                                            <div className={styles.matchTrackId}>{match.track_id}</div>
+                                            <div className={styles.matchTrackId}>
+                                              {match.track_id}
+                                            </div>
                                             <div className={styles.matchConfidence}>
                                               Confidence: {(match.ratio * 100).toFixed(2)}%
                                             </div>
@@ -804,8 +812,36 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                           {playlist.has_m3u && (
                             <div className={styles.playlistDetails}>
                               <div className={styles.trackCounts}>
-                                <div>Expected tracks: {playlist.expected_track_count}</div>
+                                <div>
+                                  Track-playlist associations: {playlist.total_associations}
+                                </div>
+                                <div>
+                                  Tracks with local files: {playlist.tracks_with_local_files}
+                                </div>
                                 <div>Current tracks in M3U: {playlist.m3u_track_count}</div>
+
+                                {playlist.total_discrepancy !== 0 && (
+                                  <div
+                                    className={`${styles.discrepancy} ${
+                                      Math.abs(playlist.total_discrepancy) > 0 ? styles.warning : ""
+                                    }`}
+                                  >
+                                    <strong>Discrepancy:</strong>{" "}
+                                    {playlist.total_discrepancy > 0
+                                      ? `${playlist.total_discrepancy} tracks missing from M3U file`
+                                      : `${Math.abs(
+                                          playlist.total_discrepancy
+                                        )} unexpected tracks in M3U file`}
+                                    {playlist.unidentified_discrepancy > 0 && (
+                                      <div className={styles.unidentifiedNote}>
+                                        <strong>Note:</strong> {playlist.unidentified_discrepancy}{" "}
+                                        tracks have discrepancies that couldn't be specifically
+                                        identified. This may be due to file format issues, metadata
+                                        mismatches, or other problems.
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
 
                               {playlist.tracks_missing_from_m3u.length > 0 && (
@@ -819,7 +855,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                       .slice(0, 5)
                                       .map((track, idx) => (
                                         <li key={idx}>
-                                          {track.artists} - {track.title}
+                                          {track.artists} - {track.title}{" "}
+                                          {track.is_local ? "(Local File)" : ""}
                                         </li>
                                       ))}
                                     {playlist.tracks_missing_from_m3u.length > 5 && (
@@ -842,7 +879,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                       .slice(0, 5)
                                       .map((track, idx) => (
                                         <li key={idx}>
-                                          {track.artists} - {track.title}
+                                          {track.artists} - {track.title}{" "}
+                                          {track.is_local ? "(Local File)" : ""}
                                         </li>
                                       ))}
                                     {playlist.unexpected_tracks_in_m3u.length > 5 && (

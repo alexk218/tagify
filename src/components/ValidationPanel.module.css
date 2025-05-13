@@ -450,3 +450,21 @@ h3 button {
   margin-left: 10px;
   font-size: 0.8em;
 }
+
+.discrepancy {
+  margin-top: 10px;
+  padding: 8px;
+  border-radius: 4px;
+  background-color: rgba(255, 152, 0, 0.1);
+  border-left: 4px solid #ff9800;
+}
+
+.unidentifiedNote {
+  margin-top: 6px;
+  font-size: 0.9em;
+  color: #d32f2f;
+}
+
+.warning {
+  color: #d32f2f;
+}
