@@ -140,6 +140,7 @@ const PythonActionsPanel: React.FC = () => {
     playlistsDir: localStorage.getItem("tagify:playlistsDir") || "",
     masterPlaylistId: localStorage.getItem("tagify:masterPlaylistId") || "",
     minTrackLengthMinutes: Number(localStorage.getItem("tagify:minTrackLengthMinutes") || "5"),
+    rekordboxXmlPath: localStorage.getItem("tagify:rekordboxXmlPath") || "",
   });
 
   const [matchPage, setMatchPage] = useState(1);
@@ -180,7 +181,7 @@ const PythonActionsPanel: React.FC = () => {
         const data = await response.json();
         if (data.env_vars) {
           // Apply environment variables to settings if they don't already have values
-          let updatedSettings = { ...settings };
+          const updatedSettings = { ...settings };
           let needsUpdate = false;
 
           if (data.env_vars.MASTER_TRACKS_DIRECTORY_SSD && !settings.masterTracksDir) {
@@ -214,6 +215,7 @@ const PythonActionsPanel: React.FC = () => {
     localStorage.setItem("tagify:playlistsDir", settings.playlistsDir);
     localStorage.setItem("tagify:masterPlaylistId", settings.masterPlaylistId);
     localStorage.setItem("tagify:minTrackLengthMinutes", settings.minTrackLengthMinutes.toString());
+    localStorage.setItem("tagify:rekordboxXmlPath", settings.rekordboxXmlPath);
 
     checkServerConnection();
 
@@ -402,7 +404,6 @@ const PythonActionsPanel: React.FC = () => {
     Spicetify.showNotification("Operation cancelled");
   };
 
-  // ! Track validation
   const openTrackValidation = () => {
     setValidationType("track");
     setShowValidationPanel(true);
@@ -577,9 +578,12 @@ const PythonActionsPanel: React.FC = () => {
           analysisResults.details.auto_matched_files &&
           analysisResults.details.auto_matched_files.length > 0 && (
             <div className={styles.autoMatchedSection}>
+              {" "}
               <h4>Auto-matched Files ({analysisResults.details.auto_matched_files.length})</h4>
               <p>These files were automatically matched with high confidence (75%+):</p>
               <div className={styles.autoMatchedList}>
+                {" "}
+                {/* TODO: fix this */}
                 {analysisResults.details.auto_matched_files.slice(0, 5).map(
                   (
                     match: {
@@ -691,7 +695,7 @@ const PythonActionsPanel: React.FC = () => {
 
                 {/* Show debug info for easier troubleshooting */}
                 <div
-                  className={styles.debugInfo}
+                  className={styles.debugInfo} // TODO: add this styling. or just remove this div
                   style={{ marginTop: "20px", fontSize: "12px", color: "#999" }}
                 >
                   <p>
@@ -960,43 +964,45 @@ const PythonActionsPanel: React.FC = () => {
             </p>
 
             {/* Paginated Tracks to Add */}
-            {analysisResults.analyses.tracks && analysisResults.analyses.tracks.to_add_total > 0 && (
-              <div className={styles.sampleChanges}>
-                <h5>Tracks to Add ({analysisResults.analyses.tracks.to_add_total})</h5>
-                <div className={styles.trackList}>
-                  {renderPaginatedList(
-                    analysisResults.analyses.tracks.all_tracks_to_add ||
-                      analysisResults.analyses.tracks.to_add_sample,
-                    "tracks-add",
-                    (track) => (
-                      <div className={styles.trackItem}>
-                        {track.artists} - {track.title} {track.is_local ? "(LOCAL)" : ""}
-                      </div>
-                    ),
-                    analysisResults.analyses.tracks.to_add_total
-                  )}
+            {analysisResults.analyses.tracks &&
+              analysisResults.analyses.tracks.to_add_total > 0 && (
+                <div className={styles.sampleChanges}>
+                  <h5>Tracks to Add ({analysisResults.analyses.tracks.to_add_total})</h5>
+                  <div className={styles.trackList}>
+                    {renderPaginatedList(
+                      analysisResults.analyses.tracks.all_tracks_to_add ||
+                        analysisResults.analyses.tracks.to_add_sample,
+                      "tracks-add",
+                      (track) => (
+                        <div className={styles.trackItem}>
+                          {track.artists} - {track.title} {track.is_local ? "(LOCAL)" : ""}
+                        </div>
+                      ),
+                      analysisResults.analyses.tracks.to_add_total
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
             {/* Paginated Tracks to Update */}
-            {analysisResults.analyses.tracks && analysisResults.analyses.tracks.to_update_total > 0 && (
-              <div className={styles.sampleChanges}>
-                <h5>Tracks to Update ({analysisResults.analyses.tracks.to_update_total})</h5>
-                <div className={styles.trackList}>
-                  {renderPaginatedList(
-                    analysisResults.analyses.tracks.all_tracks_to_update || [],
-                    "tracks-update",
-                    (track) => (
-                      <div className={styles.trackItem}>
-                        {track.old_artists} - {track.old_title} → {track.artists} - {track.title}
-                      </div>
-                    ),
-                    analysisResults.analyses.tracks.to_update_total
-                  )}
+            {analysisResults.analyses.tracks &&
+              analysisResults.analyses.tracks.to_update_total > 0 && (
+                <div className={styles.sampleChanges}>
+                  <h5>Tracks to Update ({analysisResults.analyses.tracks.to_update_total})</h5>
+                  <div className={styles.trackList}>
+                    {renderPaginatedList(
+                      analysisResults.analyses.tracks.all_tracks_to_update || [],
+                      "tracks-update",
+                      (track) => (
+                        <div className={styles.trackItem}>
+                          {track.old_artists} - {track.old_title} → {track.artists} - {track.title}
+                        </div>
+                      ),
+                      analysisResults.analyses.tracks.to_update_total
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
             <h4>Association Changes</h4>
             <p>
@@ -1385,6 +1391,16 @@ const PythonActionsPanel: React.FC = () => {
                 </div>
 
                 <div className={styles.formGroup}>
+                  <label>rekordbox XML Path</label>
+                  <input
+                    type="text"
+                    value={settings.rekordboxXmlPath}
+                    onChange={(e) => setSettings({ ...settings, rekordboxXmlPath: e.target.value })}
+                    placeholder="Path to your generated rekordbox XML file"
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
                   <label>Minimum Track Length (minutes)</label>
                   <div className={styles.rangeGroup}>
                     <input
@@ -1449,6 +1465,15 @@ const PythonActionsPanel: React.FC = () => {
               label="Validate Tracks"
               onClick={() => performAction("validate-tracks")}
               disabled={isLoading["validate-tracks"] || serverStatus !== "connected"}
+            />
+            <ActionButton
+              label="Generate rekordbox XML"
+              onClick={() =>
+                performAction("generate-rekordbox-xml", {
+                  rekordboxXmlPath: settings.rekordboxXmlPath,
+                })
+              }
+              disabled={isLoading["generate-rekordbox-xml"] || serverStatus !== "connected"}
             />
           </div>
         </div>
