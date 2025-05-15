@@ -1396,7 +1396,7 @@ const PythonActionsPanel: React.FC = () => {
                     type="text"
                     value={settings.rekordboxXmlPath}
                     onChange={(e) => setSettings({ ...settings, rekordboxXmlPath: e.target.value })}
-                    placeholder="Path to your generated rekordbox XML file"
+                    placeholder="Path for rekordbox XML file (with .xml extension)"
                   />
                 </div>
 
@@ -1468,11 +1468,30 @@ const PythonActionsPanel: React.FC = () => {
             />
             <ActionButton
               label="Generate rekordbox XML"
-              onClick={() =>
+              onClick={() => {
+                const tagData = JSON.parse(localStorage.getItem("tagify:tagData") || "{}");
+                const tracks = tagData.tracks || {};
+
+                const ratingData: Record<string, { rating: number; energy: number }> = {};
+                Object.entries(tracks).forEach(([key, value]) => {
+                  // Only include tracks that have ratings or energy values
+                  const trackData = value as any;
+                  if (trackData.rating || trackData.energy) {
+                    ratingData[key] = {
+                      rating: trackData.rating || 0,
+                      energy: trackData.energy || 0,
+                    };
+                  }
+                });
+
+                console.log("Prepared ratingData to send:", ratingData);
+                console.log("Number of tracks with ratings:", Object.keys(ratingData).length);
+
                 performAction("generate-rekordbox-xml", {
                   rekordboxXmlPath: settings.rekordboxXmlPath,
-                })
-              }
+                  ratingData: ratingData,
+                });
+              }}
               disabled={isLoading["generate-rekordbox-xml"] || serverStatus !== "connected"}
             />
           </div>
