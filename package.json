@@ -8,10 +8,16 @@
     "watch": "spicetify-creator --watch"
   },
   "devDependencies": {
+    "@eslint/js": "^9.26.0",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
+    "eslint": "^9.26.0",
+    "eslint-plugin-css-modules": "^2.12.0",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^16.1.0",
     "spicetify-creator": "^1.0.17",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.32.1"
   },
   "dependencies": {
     "prop-types": "^15.8.1",
