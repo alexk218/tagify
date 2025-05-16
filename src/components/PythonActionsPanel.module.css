@@ -1,8 +1,21 @@
 .container {
+  position: relative;
   padding: 20px;
   background-color: var(--spice-card);
   border-radius: 8px;
   margin: 20px 0;
+}
+
+/* add vertical space between panels (ValidationPanel) */
+.container + .modalOverlay,
+.container + div {
+  margin-top: 24px;
+}
+
+.validationPanel {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .statusIndicator {
@@ -595,8 +608,9 @@
 }
 
 .headerButtons {
-  display: flex;
-  align-items: center;
+  position: absolute;
+  top: 10px;
+  right: 10px;
 }
 
 /* Styles for short tracks */

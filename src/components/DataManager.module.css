@@ -94,3 +94,18 @@
 .info p:last-child {
   margin-bottom: 0;
 }
+
+/* Style for active/selected buttons */
+.activeButton {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.activeButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Add a nice transition effect for button state changes */
+.actionButton {
+  transition: all 0.2s ease;
+}

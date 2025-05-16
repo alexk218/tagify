@@ -1,7 +1,7 @@
 .container {
-  display: flex;
-  flex-direction: column;
-  height: 80vh;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .header {

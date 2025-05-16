@@ -117,7 +117,6 @@ const PythonActionsPanel: React.FC = () => {
     "unknown"
   );
 
-  const [showValidationPanel, setShowValidationPanel] = useState(true);
   const [validationType, setValidationType] = useState<"track" | "playlist">("track");
 
   const [userMatchSelections, setUserMatchSelections] = useState<
@@ -1389,6 +1388,15 @@ const PythonActionsPanel: React.FC = () => {
 
   return (
     <div className={styles.container}>
+      <div className={styles.headerButtons}>
+        <button
+          className={styles.settingsButton}
+          onClick={() => setSettingsVisible(true)}
+          title="Settings"
+        >
+          ⚙️
+        </button>
+      </div>
       <h2>Tagify Python Actions</h2>
 
       <div className={styles.statusIndicator}>
@@ -1707,19 +1715,16 @@ const PythonActionsPanel: React.FC = () => {
         )}
       </div>
 
-      {showValidationPanel && (
-        <ValidationPanel
-          onClose={() => setShowValidationPanel(false)} // This might not be needed anymore
-          serverUrl={settings.serverUrl}
-          masterTracksDir={settings.masterTracksDir}
-          playlistsDir={settings.playlistsDir}
-          minTrackLengthMinutes={settings.minTrackLengthMinutes}
-          validationType={validationType}
-          cachedData={validationResults[validationType]}
-          lastUpdated={validationTimestamps[validationType]}
-          onRefresh={(forceRefresh) => fetchValidationData(validationType, forceRefresh)}
-        />
-      )}
+      <ValidationPanel
+        serverUrl={settings.serverUrl}
+        masterTracksDir={settings.masterTracksDir}
+        playlistsDir={settings.playlistsDir}
+        minTrackLengthMinutes={settings.minTrackLengthMinutes}
+        validationType={validationType}
+        cachedData={validationResults[validationType]}
+        lastUpdated={validationTimestamps[validationType]}
+        onRefresh={(forceRefresh) => fetchValidationData(validationType, forceRefresh)}
+      />
     </div>
   );
 };

@@ -81,7 +81,6 @@ interface ValidationPanelProps {
   masterTracksDir: string;
   playlistsDir: string;
   minTrackLengthMinutes: number;
-  onClose: () => void;
   validationType?: "track" | "playlist";
   cachedData?: any | null;
   lastUpdated?: number | null;
@@ -93,7 +92,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   masterTracksDir,
   playlistsDir,
   minTrackLengthMinutes,
-  onClose,
   validationType = "track",
   cachedData = null,
   lastUpdated = null,
@@ -735,9 +733,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     <div className={styles.container}>
       <div className={styles.header}>
         <h2>Track & Playlist Validation</h2>
-        <button className={styles.closeButton} onClick={onClose}>
-          Close
-        </button>
       </div>
 
       <div className={styles.subHeader}>
