@@ -981,9 +981,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                       />
                       <span>{confidenceThreshold.toFixed(2)}</span>
                     </label>
-                    <button onClick={() => validateTrackMetadata(true)} disabled={isLoading}>
-                      Refresh Analysis
-                    </button>
                   </div>
 
                   <h3>Files Missing TrackId</h3>
@@ -1134,9 +1131,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                       />
                       <span>{confidenceThreshold.toFixed(2)}</span>
                     </label>
-                    <button onClick={() => validateTrackMetadata(true)} disabled={isLoading}>
-                      Refresh Analysis
-                    </button>
                   </div>
 
                   {filteredMismatches.length > 0 ? (
@@ -1391,9 +1385,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                       />
                       <span>{confidenceThreshold.toFixed(2)}</span>
                     </label>
-                    <button onClick={() => validateTrackMetadata(true)} disabled={isLoading}>
-                      Refresh Analysis
-                    </button>
                   </div>
 
                   <div className={styles.mismatchesContainer}>

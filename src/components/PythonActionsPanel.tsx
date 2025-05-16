@@ -116,7 +116,6 @@ const PythonActionsPanel: React.FC = () => {
   const [serverStatus, setServerStatus] = useState<"unknown" | "connected" | "disconnected">(
     "unknown"
   );
-  const [showConfigInput, setShowConfigInput] = useState<boolean>(true);
 
   const [showValidationPanel, setShowValidationPanel] = useState(false);
   const [validationType, setValidationType] = useState<"track" | "playlist">("track");
