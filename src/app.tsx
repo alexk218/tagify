@@ -83,11 +83,13 @@ function App() {
 
   const [showTagManager, setShowTagManager] = useState(false);
   const [showExport, setShowExport] = useState(false);
+
   const [showMissingTracks, setShowMissingTracks] = useState(() => {
     return localStorage.getItem("tagify:activePanel") === "missingTracks";
   });
-
-  const [showPythonActions, setShowPythonActions] = useState(false);
+  const [showActions, setShowActions] = useState<boolean>(() => {
+    return localStorage.getItem("tagify:showActions") === "true";
+  });
 
   useFontAwesome();
 
@@ -120,6 +122,16 @@ function App() {
     dependencies: [],
   });
 
+  useCustomEvents({
+    eventName: "tagify:toggleActions",
+    handler: (event: Event) => {
+      // Fixed type casting to handle the custom event
+      const customEvent = event as CustomEvent<{ show: boolean }>;
+      setShowActions(customEvent.detail.show);
+    },
+    dependencies: [],
+  });
+
   // Helper functions moved to custom hooks, leaving only render-related code here
   const playTrackViaQueue = trackService.playTrackViaQueue;
   const getLegacyFormatTracks = () => trackService.getLegacyFormatTracksFromTagData(tagData);
@@ -136,6 +148,14 @@ function App() {
 
     if (showMissingTracks) {
       return <MissingTracksPanel />;
+    }
+
+    if (showActions) {
+      return (
+        <>
+          <PythonActionsPanel />
+        </>
+      );
     }
 
     return (
@@ -314,12 +334,9 @@ function App() {
         lastSaved={lastSaved}
         taggedTracks={tagData.tracks}
         onBackfillBPM={backfillBPMData}
+        showMissingTracks={showMissingTracks}
+        showActions={showActions}
       />
-
-      {showPythonActions && <PythonActionsPanel />}
-      <button onClick={() => setShowPythonActions(!showPythonActions)}>
-        {showPythonActions ? "Hide Python Actions" : "Show Python Actions"}
-      </button>
 
       {renderContent()}
 

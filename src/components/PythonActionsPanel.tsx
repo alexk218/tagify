@@ -117,7 +117,7 @@ const PythonActionsPanel: React.FC = () => {
     "unknown"
   );
 
-  const [showValidationPanel, setShowValidationPanel] = useState(false);
+  const [showValidationPanel, setShowValidationPanel] = useState(true);
   const [validationType, setValidationType] = useState<"track" | "playlist">("track");
 
   const [userMatchSelections, setUserMatchSelections] = useState<
@@ -203,7 +203,6 @@ const PythonActionsPanel: React.FC = () => {
 
       if (response.ok) {
         setServerStatus("connected");
-        Spicetify.showNotification("Connected to server successfully!");
 
         // Get environment variables from server
         const data = await response.json();
@@ -438,35 +437,10 @@ const PythonActionsPanel: React.FC = () => {
 
   const openTrackValidation = () => {
     setValidationType("track");
-    setShowValidationPanel(true);
-
-    // We'll pass the cached data first, then optionally refresh in the background
-    // if the data is older than a certain threshold
-    const currentTime = Date.now();
-    const dataAge = validationTimestamps.track
-      ? currentTime - validationTimestamps.track
-      : Infinity;
-
-    // If data is older than 5 minutes or doesn't exist, refresh it
-    if (!validationResults.track || dataAge > 5 * 60 * 1000) {
-      // We'll pass the function to refresh data to the ValidationPanel
-      // so it can decide when to call it
-    }
   };
 
   const openPlaylistValidation = () => {
     setValidationType("playlist");
-    setShowValidationPanel(true);
-
-    const currentTime = Date.now();
-    const dataAge = validationTimestamps.playlist
-      ? currentTime - validationTimestamps.playlist
-      : Infinity;
-
-    // If data is older than 5 minutes or doesn't exist, refresh it
-    if (!validationResults.playlist || dataAge > 5 * 60 * 1000) {
-      // We'll pass the function to refresh data to the ValidationPanel
-    }
   };
 
   const fetchValidationData = async (type: "track" | "playlist", forceRefresh = false) => {
@@ -1735,7 +1709,7 @@ const PythonActionsPanel: React.FC = () => {
 
       {showValidationPanel && (
         <ValidationPanel
-          onClose={() => setShowValidationPanel(false)}
+          onClose={() => setShowValidationPanel(false)} // This might not be needed anymore
           serverUrl={settings.serverUrl}
           masterTracksDir={settings.masterTracksDir}
           playlistsDir={settings.playlistsDir}

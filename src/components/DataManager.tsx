@@ -12,6 +12,8 @@ interface DataManagerProps {
   lastSaved: Date | null;
   taggedTracks: Record<string, any>;
   onBackfillBPM?: () => void;
+  showMissingTracks: boolean;
+  showActions: boolean;
 }
 
 const DataManager: React.FC<DataManagerProps> = ({
@@ -21,6 +23,8 @@ const DataManager: React.FC<DataManagerProps> = ({
   lastSaved,
   taggedTracks,
   onBackfillBPM,
+  showMissingTracks,
+  showActions,
 }) => {
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -131,7 +135,7 @@ const DataManager: React.FC<DataManagerProps> = ({
         <h3 className={styles.title}>Data Management</h3>
         <div className={styles.headerButtons}>
           <button
-            className={`${styles.actionButton} ${styles.missingTracksButton}`}
+            className={`${styles.actionButton} ${showMissingTracks ? styles.activeButton : ""}`}
             onClick={() => {
               // Get current state and toggle it
               const currentState = localStorage.getItem("tagify:activePanel") === "missingTracks";
@@ -144,11 +148,45 @@ const DataManager: React.FC<DataManagerProps> = ({
               window.dispatchEvent(
                 new CustomEvent("tagify:toggleMissingTracks", { detail: { show: newState } })
               );
+
+              // Reset actions panel if we're showing missing tracks
+              if (newState) {
+                localStorage.setItem("tagify:showActions", "false");
+                window.dispatchEvent(
+                  new CustomEvent("tagify:toggleActions", { detail: { show: false } })
+                );
+              }
             }}
           >
             {localStorage.getItem("tagify:activePanel") === "missingTracks"
               ? "Hide Missing Tracks"
               : "Show Missing Tracks"}
+          </button>
+          <button
+            className={`${styles.actionButton} ${showActions ? styles.activeButton : ""}`}
+            onClick={() => {
+              // Get current state and toggle it
+              const currentState = localStorage.getItem("tagify:showActions") === "true";
+              const newState = !currentState;
+
+              // Save new state to localStorage
+              localStorage.setItem("tagify:showActions", newState ? "true" : "false");
+
+              // Trigger app state change via custom event
+              window.dispatchEvent(
+                new CustomEvent("tagify:toggleActions", { detail: { show: newState } })
+              );
+
+              // Reset missing tracks panel if we're showing actions
+              if (newState) {
+                localStorage.setItem("tagify:activePanel", "main");
+                window.dispatchEvent(
+                  new CustomEvent("tagify:toggleMissingTracks", { detail: { show: false } })
+                );
+              }
+            }}
+          >
+            {localStorage.getItem("tagify:showActions") === "true" ? "Hide Actions" : "Actions"}
           </button>
           <button
             className={`${styles.actionButton} ${styles.rekordboxButton}`}
