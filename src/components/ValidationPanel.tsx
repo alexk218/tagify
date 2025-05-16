@@ -131,6 +131,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   >("mismatches");
   const [filesMissingTrackId, setFilesMissingTrackId] = useState<PotentialMismatch[]>([]);
 
+  const [playlistSearchQuery, setPlaylistSearchQuery] = useState<string>("");
+
   // Run validation when component mounts
   useEffect(() => {
     // Load data on tab change only if we don't have it already
@@ -250,6 +252,17 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       }
     }
   }, [currentSection, selectedMismatch, ignoredTrackPaths, filteredMismatches]);
+
+  const getFilteredPlaylists = () => {
+    if (!playlistSearchQuery.trim() || !playlistValidationResult) {
+      return playlistValidationResult?.playlist_analysis || [];
+    }
+
+    const query = playlistSearchQuery.toLowerCase().trim();
+    return playlistValidationResult.playlist_analysis.filter((playlist) =>
+      playlist.name.toLowerCase().includes(query)
+    );
+  };
 
   const validateTrackMetadata = async (resetPageToOne = true, forceRefresh = false) => {
     if (resetPageToOne) {
@@ -1619,9 +1632,27 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
               <div className={styles.playlistsContainer}>
                 <h3>Playlist Issues</h3>
+                <div className={styles.searchBox}>
+                  <input
+                    type="text"
+                    placeholder="Search playlists..."
+                    value={playlistSearchQuery}
+                    onChange={(e) => setPlaylistSearchQuery(e.target.value)}
+                    className={styles.searchInput}
+                  />
+                  {playlistSearchQuery && (
+                    <button
+                      className={styles.clearSearchButton}
+                      onClick={() => setPlaylistSearchQuery("")}
+                      title="Clear search"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
                 {playlistValidationResult.playlist_analysis.length > 0 ? (
                   <div className={styles.playlistList}>
-                    {playlistValidationResult.playlist_analysis
+                    {getFilteredPlaylists()
                       .filter(
                         (playlist) =>
                           // A playlist needs updating if:

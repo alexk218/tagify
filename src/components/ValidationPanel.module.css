@@ -531,6 +531,11 @@ h3 button {
   margin-right: 10px;
 }
 
+.searchInput:focus {
+  outline: none;
+  border-color: var(--spice-button);
+}
+
 .searchButton {
   padding: 10px 15px;
   background: #1db954;
@@ -543,6 +548,23 @@ h3 button {
 .searchButton:disabled {
   background: #444;
   cursor: not-allowed;
+}
+
+.clearSearchButton {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--spice-text);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.clearSearchButton:hover {
+  color: var(--spice-button-active);
 }
 
 .noResults {
