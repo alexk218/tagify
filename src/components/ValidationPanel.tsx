@@ -85,7 +85,7 @@ interface ValidationPanelProps {
   validationType?: "track" | "playlist";
   cachedData?: any | null;
   lastUpdated?: number | null;
-  onRefresh?: () => Promise<any>;
+  onRefresh?: (forceRefresh?: boolean) => Promise<any>;
 }
 
 const ValidationPanel: React.FC<ValidationPanelProps> = ({
@@ -135,25 +135,82 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   // Run validation when component mounts
   useEffect(() => {
-    // If we have cached data, we don't need to validate on mount
+    // Load data on tab change only if we don't have it already
     if (currentTab === "track") {
       if (!trackValidationResult) {
-        validateTrackMetadata();
+        validateTrackMetadata(true, false); // reset page, don't force refresh
       }
     } else if (currentTab === "playlist") {
       if (!playlistValidationResult) {
-        validatePlaylists();
+        validatePlaylists(false); // don't force refresh
       }
     }
   }, [currentTab]);
 
+  useEffect(() => {
+    // Handle initial cached data
+    if (validationType === "track" && cachedData && !trackValidationResult) {
+      setTrackValidationResult(cachedData);
+      if (cachedData.files_missing_trackid) {
+        setFilesMissingTrackId(cachedData.files_missing_trackid);
+      }
+      if (cachedData.potential_mismatches) {
+        updateFilteredMismatches(
+          cachedData.potential_mismatches,
+          ignoredTrackPaths,
+          currentSection === "ignored"
+        );
+      }
+    } else if (validationType === "playlist" && cachedData && !playlistValidationResult) {
+      setPlaylistValidationResult(cachedData);
+    }
+  }, [validationType, cachedData]);
+
   const handleManualRefresh = () => {
-    if (currentTab === "track") {
-      validateTrackMetadata(true); // true forces refresh
-    } else if (currentTab === "playlist") {
-      // Reset the state first
-      setPlaylistValidationResult(null);
-      validatePlaylists();
+    if (onRefresh) {
+      // When using the parent's refresh mechanism, pass forceRefresh=true
+      setIsLoading(true);
+
+      if (currentTab === "track") {
+        onRefresh(true)
+          .then((data) => {
+            if (data) {
+              setTrackValidationResult(data);
+              setFilesMissingTrackId(data.files_missing_trackid || []);
+              updateFilteredMismatches(
+                data.potential_mismatches,
+                ignoredTrackPaths,
+                currentSection === "ignored"
+              );
+            }
+          })
+          .catch((error) => {
+            console.error("Error refreshing data:", error);
+          })
+          .finally(() => {
+            setIsLoading(false);
+          });
+      } else if (currentTab === "playlist") {
+        onRefresh(true)
+          .then((data) => {
+            if (data) {
+              setPlaylistValidationResult(data);
+            }
+          })
+          .catch((error) => {
+            console.error("Error refreshing data:", error);
+          })
+          .finally(() => {
+            setIsLoading(false);
+          });
+      }
+    } else {
+      // Fall back to local refresh functions if onRefresh not provided
+      if (currentTab === "track") {
+        validateTrackMetadata(true, true); // reset page to 1, force refresh
+      } else if (currentTab === "playlist") {
+        validatePlaylists(true); // force refresh
+      }
     }
   };
 
@@ -196,29 +253,38 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     }
   }, [currentSection, selectedMismatch, ignoredTrackPaths, filteredMismatches]);
 
-  const validateTrackMetadata = async (resetPageToOne = true) => {
+  const validateTrackMetadata = async (resetPageToOne = true, forceRefresh = false) => {
     if (resetPageToOne) {
       setPage(1);
     }
 
-    if (trackValidationResult && !resetPageToOne) {
-      // If we have data and we're not explicitly refreshing, use cached data
+    if (trackValidationResult && !forceRefresh) {
+      // Make sure filtered mismatches are up to date with current settings
+      updateFilteredMismatches(
+        trackValidationResult.potential_mismatches,
+        ignoredTrackPaths,
+        currentSection === "ignored"
+      );
       return;
     }
+
+    setIsLoading(true);
 
     setIsLoading(true);
 
     try {
       if (onRefresh) {
         const data = await onRefresh();
-        setTrackValidationResult(data);
-        // Store the files missing TrackId
-        setFilesMissingTrackId(data.files_missing_trackid || []);
-        updateFilteredMismatches(
-          data.potential_mismatches,
-          ignoredTrackPaths,
-          currentSection === "ignored"
-        );
+        if (data) {
+          setTrackValidationResult(data);
+          // Store the files missing TrackId
+          setFilesMissingTrackId(data.files_missing_trackid || []);
+          updateFilteredMismatches(
+            data.potential_mismatches,
+            ignoredTrackPaths,
+            currentSection === "ignored"
+          );
+        }
       } else {
         const response = await fetch(`${serverUrl}/api/validate-track-metadata`, {
           method: "POST",
@@ -255,9 +321,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     }
   };
 
-  const validatePlaylists = async () => {
-    if (playlistValidationResult && !isLoading) {
-      // If we have data already and we're not already loading, no need to fetch again
+  const validatePlaylists = async (forceRefresh = false) => {
+    // If we have data and aren't forcing a refresh, use cached data
+    if (playlistValidationResult && !forceRefresh) {
       return;
     }
 
@@ -266,8 +332,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     try {
       if (onRefresh) {
         const data = await onRefresh();
-        setPlaylistValidationResult(data);
-        setCurrentTab("playlist");
+        if (data) {
+          setPlaylistValidationResult(data);
+        }
       } else {
         const response = await fetch(`${serverUrl}/api/validate-playlists`, {
           method: "POST",
@@ -1555,7 +1622,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
               </div>
 
               <div className={styles.actionButtons}>
-                <button onClick={validatePlaylists} disabled={isLoading}>
+                <button onClick={() => validatePlaylists(true)} disabled={isLoading}>
                   Refresh Analysis
                 </button>
                 <button

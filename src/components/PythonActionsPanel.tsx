@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import styles from "./PythonActionsPanel.module.css";
 import ValidationPanel from "./ValidationPanel";
 import Portal from "../utils/Portal";
+import { useLocalStorage } from "../hooks/useLocalStorage";
 
 interface AnalysisResults {
   success: boolean;
@@ -160,19 +161,18 @@ const PythonActionsPanel: React.FC = () => {
     Record<string, { page: number; pageSize: number }>
   >({});
 
-  const [validationResults, setValidationResults] = useState<{
+  const [validationResults, setValidationResults] = useLocalStorage<{
     track: any | null;
     playlist: any | null;
-  }>({
+  }>("tagify:validationResults", {
     track: null,
     playlist: null,
   });
 
-  // Add a timestamp to track when the data was last fetched
-  const [validationTimestamps, setValidationTimestamps] = useState<{
+  const [validationTimestamps, setValidationTimestamps] = useLocalStorage<{
     track: number | null;
     playlist: number | null;
-  }>({
+  }>("tagify:validationTimestamps", {
     track: null,
     playlist: null,
   });
@@ -454,7 +454,12 @@ const PythonActionsPanel: React.FC = () => {
     }
   };
 
-  const fetchValidationData = async (type: "track" | "playlist") => {
+  const fetchValidationData = async (type: "track" | "playlist", forceRefresh = false) => {
+    // If we have data and aren't forcing a refresh, return the cached data
+    if (!forceRefresh && validationResults[type]) {
+      return validationResults[type];
+    }
+
     try {
       setIsLoading((prev) => ({ ...prev, [`validate-${type}s`]: true }));
 
@@ -488,7 +493,9 @@ const PythonActionsPanel: React.FC = () => {
 
         return data;
       } else {
-        throw new Error(`Error fetching ${type} validation data`);
+        const error = await response.json();
+        console.error(`Error fetching ${type} validation data:`, error);
+        throw new Error(error.message || `Failed to validate ${type}s`);
       }
     } catch (error) {
       console.error(`Error in validation fetch: ${error}`);
@@ -1713,7 +1720,7 @@ const PythonActionsPanel: React.FC = () => {
           validationType={validationType}
           cachedData={validationResults[validationType]}
           lastUpdated={validationTimestamps[validationType]}
-          onRefresh={() => fetchValidationData(validationType)}
+          onRefresh={(forceRefresh) => fetchValidationData(validationType, forceRefresh)}
         />
       )}
     </div>
