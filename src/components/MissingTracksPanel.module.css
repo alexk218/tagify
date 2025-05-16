@@ -1,8 +1,8 @@
 .container {
+  background-color: var(--spice-card);
+  border-radius: 8px;
   padding: 20px;
-  width: 100%;
-  max-width: 1200px;
-  margin: 0 auto;
+  margin-bottom: 16px;
 }
 
 .header {
@@ -15,66 +15,44 @@
 .header h2 {
   margin: 0;
   font-size: 1.5rem;
+  font-weight: 700;
 }
 
-.headerButtons {
+/* .headerButtons {
   display: flex;
   gap: 10px;
-}
+} */
 
 .refreshButton,
-.settingsButton,
-.playlistButton,
-.connectButton {
-  padding: 8px 16px;
-  border-radius: 4px;
+.playlistButton {
+  background-color: rgba(0, 0, 0, 0.2);
+  color: white;
   border: none;
-  cursor: pointer;
+  border-radius: 4px;
+  padding: 8px 16px;
   font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
   transition: background-color 0.2s;
 }
 
-.refreshButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 80px;
-}
-
-.refreshButton:hover {
-  background-color: #1ed760;
+.refreshButton:hover:not(:disabled),
+.playlistButton:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .refreshButton:disabled,
-.playlistButton:disabled,
-.connectButton:disabled {
+.playlistButton:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.settingsButton {
-  background-color: #333;
-  color: white;
-}
-
-.settingsButton:hover {
-  background-color: #444;
-}
-
-.playlistButton {
-  background-color: #1db954;
-  color: white;
-}
-
-.playlistButton:hover {
-  background-color: #1ed760;
 }
 
 .stats {
   display: flex;
   justify-content: space-between;
   margin-bottom: 20px;
-  background-color: #282828;
+  color: var(--spice-subtext);
+  background-color: rgba(0, 0, 0, 0.1);
   padding: 15px;
   border-radius: 8px;
 }
@@ -94,6 +72,7 @@
 .statValue {
   font-size: 18px;
   font-weight: bold;
+  color: white;
 }
 
 .tracksList {

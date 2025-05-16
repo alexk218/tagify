@@ -27,18 +27,27 @@ interface DirectCompareResult {
 
 // Custom hook for missing tracks functionality
 export function useMissingTracks() {
+  const [cachedResults, setCachedResults] = useLocalStorage<{
+    masterTracks: SpotifyTrack[];
+    missingTracks: SpotifyTrack[];
+    localTracksCount: number;
+    lastUpdated: string | null;
+  }>("tagify:missingTracksData", {
+    masterTracks: [],
+    missingTracks: [],
+    localTracksCount: 0,
+    lastUpdated: null,
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [masterTracks, setMasterTracks] = useState<SpotifyTrack[]>([]);
-  const [missingTracks, setMissingTracks] = useState<SpotifyTrack[]>([]);
-  const [localTracksCount, setLocalTracksCount] = useState(0);
+  const [masterTracks, setMasterTracks] = useState<SpotifyTrack[]>(cachedResults.masterTracks);
+  const [missingTracks, setMissingTracks] = useState<SpotifyTrack[]>(cachedResults.missingTracks);
+  const [localTracksCount, setLocalTracksCount] = useState(cachedResults.localTracksCount);
   const [serverUrl, setServerUrl] = useLocalStorage<string>(
     "tagify:localServerUrl",
     "http://localhost:8765"
   );
   const [forceRefresh, setForceRefresh] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-
 
   // Load data from the direct comparison endpoint
   const loadData = async (silent = false) => {
@@ -74,7 +83,14 @@ export function useMissingTracks() {
         setMasterTracks(data.master_tracks);
         setMissingTracks(data.missing_tracks);
         setLocalTracksCount(data.local_tracks.count);
-        setLastUpdated(data.database_time);
+
+        // Update cached data in localStorage
+        setCachedResults({
+          masterTracks: data.master_tracks,
+          missingTracks: data.missing_tracks,
+          localTracksCount: data.local_tracks.count,
+          lastUpdated: data.database_time,
+        });
 
         // Store the master playlist ID if it was provided
         if (data.master_playlist_id && !playlistId) {
@@ -150,9 +166,17 @@ export function useMissingTracks() {
     }
   };
 
-  // Load data on mount
+  // Load data on mount, but only if cached data is old or empty
   useEffect(() => {
-    loadData();
+    const shouldRefresh =
+      !cachedResults.lastUpdated ||
+      new Date().getTime() - new Date(cachedResults.lastUpdated).getTime() > 3600000; // 1 hour
+
+    if (shouldRefresh || missingTracks.length === 0) {
+      loadData();
+    } else {
+      setIsLoading(false); // we're using cached data, so we're not loading
+    }
   }, []);
 
   return {
@@ -163,9 +187,9 @@ export function useMissingTracks() {
     missingTracks,
     loadData,
     createPlaylist,
-    cachedData: lastUpdated
+    cachedData: cachedResults.lastUpdated
       ? {
-          lastUpdated: new Date(lastUpdated).toLocaleString(),
+          lastUpdated: new Date(cachedResults.lastUpdated).toLocaleString(),
           tracksCount: masterTracks.length,
           missingCount: missingTracks.length,
           localCount: localTracksCount,
