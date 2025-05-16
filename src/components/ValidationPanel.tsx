@@ -105,7 +105,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [isFetchingMatches, setIsFetchingMatches] = useState<boolean>(false);
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.75);
   const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(10);
+  const [pageSize, setPageSize] = useState<number>(25);
   const [selectedDuplicateTrackId, setSelectedDuplicateTrackId] = useState<string | null>(null);
 
   const [ignoredTrackPaths, setIgnoredTrackPaths] = useState<Set<string>>(

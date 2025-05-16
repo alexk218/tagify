@@ -20,7 +20,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   // Generate a default name based on tags
   const defaultName =
     tags.length > 0
-      ? `Tagify: ${tags.join(", ")}`
+      ? `Tagify - ${tags.join(", ")}`
       : `Tagify Playlist ${new Date().toLocaleDateString()}`;
 
   // Generate a default description

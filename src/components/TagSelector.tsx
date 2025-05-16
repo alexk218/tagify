@@ -160,7 +160,6 @@ const TagSelector: React.FC<TagSelectorProps> = ({
             className={styles.manageButton}
             onClick={(e) => {
               e.stopPropagation();
-              console.log("Manage Tags clicked from TagSelector");
               onOpenTagManager();
             }}
           >
