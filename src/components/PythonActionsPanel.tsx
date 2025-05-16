@@ -14,16 +14,19 @@ interface AnalysisResults {
       added: number;
       updated: number;
       unchanged: number;
+      deleted: number;
       details: any;
     };
     tracks?: {
       added: number;
       updated: number;
       unchanged: number;
+      deleted?: number;
       to_add_sample: any[];
       all_tracks_to_add: any[];
       to_add_total: number;
       to_update_sample: any[];
+      to_delete_sample?: any[];
       all_tracks_to_update: any[];
       to_update_total: number;
     };
@@ -39,6 +42,9 @@ interface AnalysisResults {
     to_update?: any[];
     to_update_total?: number;
     all_items_to_update?: any[];
+    to_delete?: any[];
+    to_delete_total?: number;
+    all_items_to_delete?: any[];
     auto_matched_files?: any[];
     tracks_with_changes?: any[];
     associations_to_add?: number;
@@ -254,6 +260,30 @@ const PythonActionsPanel: React.FC = () => {
     setSettingsVisible(false);
   };
 
+  const getPlaylistSettings = () => {
+    try {
+      const settingsString = localStorage.getItem("tagify:playlistSettings");
+
+      if (settingsString) {
+        const settings = JSON.parse(settingsString);
+        return settings;
+      }
+    } catch (error) {
+      console.error("Error parsing playlist settings:", error);
+    }
+
+    // Default settings if none found
+    const defaultSettings = {
+      excludeNonOwnedPlaylists: true,
+      excludedKeywords: ["Daylist", "Unchartify", "Discover Weekly", "Release Radar"],
+      excludedPlaylistIds: [],
+      excludeByDescription: ["ignore"],
+    };
+
+    console.log("Using default playlist settings:", defaultSettings);
+    return defaultSettings;
+  };
+
   const performAction = async (action: string, data: any = {}) => {
     setIsLoading((prev) => ({ ...prev, [action]: true }));
     setResults((prev) => ({ ...prev, [action]: null }));
@@ -263,15 +293,17 @@ const PythonActionsPanel: React.FC = () => {
       const cleanMasterTracksDir = settings.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
       const cleanPlaylistsDir = settings.playlistsDir.replace(/^["'](.*)["']$/, "$1");
 
-      // Add paths to the data
+      const playlistSettings = getPlaylistSettings();
+
+      // Add paths and playlist settings to the data
       const requestData = {
         ...data,
         masterTracksDir: cleanMasterTracksDir,
         playlistsDir: cleanPlaylistsDir,
         master_playlist_id: settings.masterPlaylistId,
+        playlistSettings: playlistSettings,
       };
 
-      console.log(`Sending request to ${action}:`, requestData);
       const response = await fetch(
         `${settings.serverUrl.replace(/^["'](.*)["']$/, "$1")}/api/${action}`,
         {
@@ -992,9 +1024,10 @@ const PythonActionsPanel: React.FC = () => {
           <div className={styles.allAnalyses}>
             <h4>Playlist Changes</h4>
             <p>
-              {analysisResults.analyses.playlists.added} playlists to add,
-              {analysisResults.analyses.playlists.updated} to update,
-              {analysisResults.analyses.playlists.unchanged} unchanged
+              {analysisResults.analyses.playlists.added} playlists to add,{" "}
+              {analysisResults.analyses.playlists.updated} to update,{" "}
+              {analysisResults.analyses.playlists.unchanged} unchanged,{" "}
+              {analysisResults.analyses.playlists.details?.to_delete?.length || 0} to delete
             </p>
 
             {/* Paginated Playlists to Add */}
@@ -1030,6 +1063,24 @@ const PythonActionsPanel: React.FC = () => {
                       <div className={styles.item}>
                         {item.old_name} → {item.name}
                       </div>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
+
+            {analysisResults.analyses.playlists.details.to_delete.length > 0 && (
+              <div className={styles.sampleChanges}>
+                <h5>
+                  Playlists to Delete ({analysisResults.analyses.playlists.details.to_delete.length}
+                  )
+                </h5>
+                <div className={styles.itemList}>
+                  {renderPaginatedList(
+                    analysisResults.analyses.playlists.details.to_delete,
+                    "playlists-delete",
+                    (item) => (
+                      <div className={styles.item}>{item.name}</div>
                     )
                   )}
                 </div>
@@ -1197,6 +1248,33 @@ const PythonActionsPanel: React.FC = () => {
                       </div>
                     ),
                     analysisResults.details.to_update_total
+                  )}
+                </div>
+              </div>
+            )}
+
+            {analysisResults.details?.to_delete && analysisResults.details.to_delete.length > 0 && (
+              <div className={styles.sampleChanges}>
+                <h5 className={styles.deleteHeading}>
+                  Items to Delete (
+                  {analysisResults.details.to_delete_total ||
+                    analysisResults.details.to_delete.length}
+                  )
+                </h5>
+                <div className={styles.itemList}>
+                  {renderPaginatedList(
+                    analysisResults.details.all_items_to_delete ||
+                      analysisResults.details.to_delete,
+                    "items-delete",
+                    (item) => (
+                      <div className={`${styles.item} ${styles.deleteItem}`}>
+                        {item.name ||
+                          item.title ||
+                          item.artists ||
+                          (item.id ? `${item.artists} - ${item.title}` : JSON.stringify(item))}
+                      </div>
+                    ),
+                    analysisResults.details.to_delete_total
                   )}
                 </div>
               </div>

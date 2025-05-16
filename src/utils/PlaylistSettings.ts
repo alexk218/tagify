@@ -1,5 +1,3 @@
-// src/utils/PlaylistSettings.ts
-
 // Define the settings structure
 export interface PlaylistSettings {
   // Ownership filters
