@@ -83,6 +83,9 @@ interface ValidationPanelProps {
   minTrackLengthMinutes: number;
   onClose: () => void;
   validationType?: "track" | "playlist";
+  cachedData?: any | null;
+  lastUpdated?: number | null;
+  onRefresh?: () => Promise<any>;
 }
 
 const ValidationPanel: React.FC<ValidationPanelProps> = ({
@@ -92,14 +95,20 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   minTrackLengthMinutes,
   onClose,
   validationType = "track",
+  cachedData = null,
+  lastUpdated = null,
+  onRefresh,
 }) => {
   const [currentTab, setCurrentTab] = useState<"track" | "playlist">(validationType);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [trackValidationResult, setTrackValidationResult] = useState<TrackValidationResult | null>(
-    null
+    validationType === "track" && cachedData ? cachedData : null
   );
+
   const [playlistValidationResult, setPlaylistValidationResult] =
-    useState<PlaylistValidationResult | null>(null);
+    useState<PlaylistValidationResult | null>(
+      validationType === "playlist" && cachedData ? cachedData : null
+    );
   const [selectedMismatch, setSelectedMismatch] = useState<PotentialMismatch | null>(null);
   const [possibleMatches, setPossibleMatches] = useState<any[]>([]);
   const [isFetchingMatches, setIsFetchingMatches] = useState<boolean>(false);
@@ -126,13 +135,27 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   // Run validation when component mounts
   useEffect(() => {
-    // Load the appropriate validation based on currentTab
+    // If we have cached data, we don't need to validate on mount
     if (currentTab === "track") {
-      validateTrackMetadata();
+      if (!trackValidationResult) {
+        validateTrackMetadata();
+      }
     } else if (currentTab === "playlist") {
-      validatePlaylists();
+      if (!playlistValidationResult) {
+        validatePlaylists();
+      }
     }
   }, [currentTab]);
+
+  const handleManualRefresh = () => {
+    if (currentTab === "track") {
+      validateTrackMetadata(true); // true forces refresh
+    } else if (currentTab === "playlist") {
+      // Reset the state first
+      setPlaylistValidationResult(null);
+      validatePlaylists();
+    }
+  };
 
   useEffect(() => {
     // Update currentTab when validationType prop changes
@@ -178,21 +201,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       setPage(1);
     }
 
-    setIsLoading(true);
-    try {
-      const response = await fetch(`${serverUrl}/api/validate-track-metadata`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          masterTracksDir: masterTracksDir,
-          confidence_threshold: confidenceThreshold,
-        }),
-      });
+    if (trackValidationResult && !resetPageToOne) {
+      // If we have data and we're not explicitly refreshing, use cached data
+      return;
+    }
 
-      if (response.ok) {
-        const data = await response.json();
+    setIsLoading(true);
+
+    try {
+      if (onRefresh) {
+        const data = await onRefresh();
         setTrackValidationResult(data);
         // Store the files missing TrackId
         setFilesMissingTrackId(data.files_missing_trackid || []);
@@ -202,13 +220,79 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           currentSection === "ignored"
         );
       } else {
-        const error = await response.json();
-        console.error("Error validating track metadata:", error);
-        Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
+        const response = await fetch(`${serverUrl}/api/validate-track-metadata`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            masterTracksDir: masterTracksDir,
+            confidence_threshold: confidenceThreshold,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setTrackValidationResult(data);
+          // Store the files missing TrackId
+          setFilesMissingTrackId(data.files_missing_trackid || []);
+          updateFilteredMismatches(
+            data.potential_mismatches,
+            ignoredTrackPaths,
+            currentSection === "ignored"
+          );
+        } else {
+          const error = await response.json();
+          console.error("Error validating track metadata:", error);
+          Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
+        }
       }
     } catch (error) {
       console.error("Error validating track metadata:", error);
       Spicetify.showNotification("Error validating track metadata", true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const validatePlaylists = async () => {
+    if (playlistValidationResult && !isLoading) {
+      // If we have data already and we're not already loading, no need to fetch again
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      if (onRefresh) {
+        const data = await onRefresh();
+        setPlaylistValidationResult(data);
+        setCurrentTab("playlist");
+      } else {
+        const response = await fetch(`${serverUrl}/api/validate-playlists`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            masterTracksDir: masterTracksDir,
+            playlistsDir: playlistsDir,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setPlaylistValidationResult(data);
+          setCurrentTab("playlist");
+        } else {
+          const error = await response.json();
+          console.error("Error validating playlists:", error);
+          Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
+        }
+      }
+    } catch (error) {
+      console.error("Error validating playlists:", error);
+      Spicetify.showNotification("Error validating playlists", true);
     } finally {
       setIsLoading(false);
     }
@@ -222,39 +306,27 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     setLoadingMore(false);
   };
 
-  const isShortTrack = (duration: number) => {
-    return duration < minTrackLengthMinutes * 60;
+  const getLastUpdatedText = () => {
+    if (!lastUpdated) return "Never updated";
+
+    const date = new Date(lastUpdated);
+    const now = new Date();
+    const diffMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+
+    if (diffMinutes < 1) return "Updated just now";
+    if (diffMinutes === 1) return "Updated 1 minute ago";
+    if (diffMinutes < 60) return `Updated ${diffMinutes} minutes ago`;
+
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours === 1) return "Updated 1 hour ago";
+    if (diffHours < 24) return `Updated ${diffHours} hours ago`;
+
+    const diffDays = Math.floor(diffHours / 24);
+    return `Updated ${diffDays} ${diffDays === 1 ? "day" : "days"} ago`;
   };
 
-  const validatePlaylists = async () => {
-    setIsLoading(true);
-    try {
-      const response = await fetch(`${serverUrl}/api/validate-playlists`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          masterTracksDir: masterTracksDir,
-          playlistsDir: playlistsDir,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setPlaylistValidationResult(data);
-        setCurrentTab("playlist");
-      } else {
-        const error = await response.json();
-        console.error("Error validating playlists:", error);
-        Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
-      }
-    } catch (error) {
-      console.error("Error validating playlists:", error);
-      Spicetify.showNotification("Error validating playlists", true);
-    } finally {
-      setIsLoading(false);
-    }
+  const isShortTrack = (duration: number) => {
+    return duration < minTrackLengthMinutes * 60;
   };
 
   const findPossibleMatches = async (mismatch: PotentialMismatch | SearchResult) => {
@@ -598,6 +670,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         <h2>Track & Playlist Validation</h2>
         <button className={styles.closeButton} onClick={onClose}>
           Close
+        </button>
+      </div>
+
+      <div className={styles.subHeader}>
+        <div className={styles.lastUpdated}>{getLastUpdatedText()}</div>
+        <button className={styles.refreshButton} onClick={handleManualRefresh} disabled={isLoading}>
+          {isLoading ? "Refreshing..." : "Refresh Data"}
         </button>
       </div>
 

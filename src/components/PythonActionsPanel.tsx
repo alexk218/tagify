@@ -160,6 +160,23 @@ const PythonActionsPanel: React.FC = () => {
     Record<string, { page: number; pageSize: number }>
   >({});
 
+  const [validationResults, setValidationResults] = useState<{
+    track: any | null;
+    playlist: any | null;
+  }>({
+    track: null,
+    playlist: null,
+  });
+
+  // Add a timestamp to track when the data was last fetched
+  const [validationTimestamps, setValidationTimestamps] = useState<{
+    track: number | null;
+    playlist: number | null;
+  }>({
+    track: null,
+    playlist: null,
+  });
+
   // Check server connection on load and when serverUrl changes
   useEffect(() => {
     checkServerConnection();
@@ -407,11 +424,79 @@ const PythonActionsPanel: React.FC = () => {
   const openTrackValidation = () => {
     setValidationType("track");
     setShowValidationPanel(true);
+
+    // We'll pass the cached data first, then optionally refresh in the background
+    // if the data is older than a certain threshold
+    const currentTime = Date.now();
+    const dataAge = validationTimestamps.track
+      ? currentTime - validationTimestamps.track
+      : Infinity;
+
+    // If data is older than 5 minutes or doesn't exist, refresh it
+    if (!validationResults.track || dataAge > 5 * 60 * 1000) {
+      // We'll pass the function to refresh data to the ValidationPanel
+      // so it can decide when to call it
+    }
   };
 
   const openPlaylistValidation = () => {
     setValidationType("playlist");
     setShowValidationPanel(true);
+
+    const currentTime = Date.now();
+    const dataAge = validationTimestamps.playlist
+      ? currentTime - validationTimestamps.playlist
+      : Infinity;
+
+    // If data is older than 5 minutes or doesn't exist, refresh it
+    if (!validationResults.playlist || dataAge > 5 * 60 * 1000) {
+      // We'll pass the function to refresh data to the ValidationPanel
+    }
+  };
+
+  const fetchValidationData = async (type: "track" | "playlist") => {
+    try {
+      setIsLoading((prev) => ({ ...prev, [`validate-${type}s`]: true }));
+
+      const endpoint = type === "track" ? "validate-track-metadata" : "validate-playlists";
+
+      const response = await fetch(`${settings.serverUrl}/api/${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          masterTracksDir: settings.masterTracksDir,
+          playlistsDir: settings.playlistsDir,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+
+        // Update our cached results
+        setValidationResults((prev) => ({
+          ...prev,
+          [type]: data,
+        }));
+
+        // Update the timestamp
+        setValidationTimestamps((prev) => ({
+          ...prev,
+          [type]: Date.now(),
+        }));
+
+        return data;
+      } else {
+        throw new Error(`Error fetching ${type} validation data`);
+      }
+    } catch (error) {
+      console.error(`Error in validation fetch: ${error}`);
+      Spicetify.showNotification(`Error validating ${type}s`, true);
+      throw error;
+    } finally {
+      setIsLoading((prev) => ({ ...prev, [`validate-${type}s`]: false }));
+    }
   };
 
   const getPagination = (section: string) => {
@@ -1626,6 +1711,9 @@ const PythonActionsPanel: React.FC = () => {
           playlistsDir={settings.playlistsDir}
           minTrackLengthMinutes={settings.minTrackLengthMinutes}
           validationType={validationType}
+          cachedData={validationResults[validationType]}
+          lastUpdated={validationTimestamps[validationType]}
+          onRefresh={() => fetchValidationData(validationType)}
         />
       )}
     </div>
