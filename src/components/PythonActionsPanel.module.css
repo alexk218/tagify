@@ -608,3 +608,70 @@
 .fileDuration {
   color: #666;
 }
+
+.statusIndicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.statusDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
+
+.connected {
+  color: #1ed760; /* Spotify green */
+}
+
+.connected .statusDot {
+  background-color: #1ed760;
+}
+
+.disconnected {
+  color: #ff5555; /* Red */
+}
+
+.disconnected .statusDot {
+  background-color: #ff5555;
+}
+
+.unknown {
+  color: #b3b3b3; /* Gray */
+}
+
+.unknown .statusDot {
+  background-color: #b3b3b3;
+}
+
+.connectButton {
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+  background-color: #333;
+  border: 1px solid #666;
+  color: white;
+  transition: all 0.2s;
+}
+
+.connectButton:hover {
+  background-color: #444;
+}
+
+.connectButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.connectButton.connected {
+  border-color: #1ed760;
+}
+
+.connectButton.disconnected {
+  border-color: #ff5555;
+}

@@ -36,35 +36,9 @@ export function useMissingTracks() {
     "tagify:localServerUrl",
     "http://localhost:8765"
   );
-  const [serverConnected, setServerConnected] = useState(false);
-  const [showConfigInput, setShowConfigInput] = useState(false);
   const [forceRefresh, setForceRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  // Check if server is running on load and when URL changes
-  useEffect(() => {
-    checkServerConnection();
-  }, [serverUrl]);
-
-  const checkServerConnection = async () => {
-    try {
-      const response = await fetch(`${serverUrl}/status`, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-
-      if (response.ok) {
-        setServerConnected(true);
-      } else {
-        setServerConnected(false);
-      }
-    } catch (err) {
-      console.error("Error connecting to server:", err);
-      setServerConnected(false);
-    }
-  };
 
   // Load data from the direct comparison endpoint
   const loadData = async (silent = false) => {
@@ -128,51 +102,6 @@ export function useMissingTracks() {
     }
   };
 
-  // Set master playlist ID
-  const setMasterPlaylistId = () => {
-    const id = prompt(
-      "Enter your MASTER playlist ID:",
-      localStorage.getItem("tagify:masterPlaylistId") || ""
-    );
-
-    if (id) {
-      localStorage.setItem("tagify:masterPlaylistId", id);
-      // Force refresh when playlist changes
-      setForceRefresh(true);
-      loadData();
-    }
-  };
-
-  // Connect to server with new URL
-  const connectToServer = async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      // Sanitize the URL before saving
-      const sanitizedUrl = serverUrl.replace(/^["'](.*)["']$/, "$1");
-      if (sanitizedUrl !== serverUrl) {
-        setServerUrl(sanitizedUrl);
-      }
-
-      // Save server URL to localStorage
-      localStorage.setItem("tagify:localServerUrl", sanitizedUrl);
-
-      // Check connection
-      await checkServerConnection();
-
-      if (serverConnected) {
-        setShowConfigInput(false);
-        await loadData();
-      }
-    } catch (error) {
-      console.error("Error connecting to server:", error);
-      setError("Failed to connect to server.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // Create a playlist with missing tracks
   const createPlaylist = async () => {
     try {
@@ -229,17 +158,10 @@ export function useMissingTracks() {
   return {
     isLoading,
     error,
-    serverUrl,
-    setServerUrl,
-    serverConnected,
-    showConfigInput,
-    setShowConfigInput,
     masterTracks,
     localTracks: { size: localTracksCount },
     missingTracks,
     loadData,
-    connectToServer,
-    setMasterPlaylistId,
     createPlaylist,
     cachedData: lastUpdated
       ? {

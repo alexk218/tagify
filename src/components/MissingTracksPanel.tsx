@@ -7,17 +7,10 @@ const MissingTracksPanel: React.FC = () => {
   const {
     isLoading,
     error,
-    serverUrl,
-    setServerUrl,
-    serverConnected,
-    showConfigInput,
-    setShowConfigInput,
     masterTracks,
     localTracks,
     missingTracks,
     loadData,
-    connectToServer,
-    setMasterPlaylistId,
     createPlaylist,
     cachedData,
   } = useMissingTracks();
@@ -55,11 +48,6 @@ const MissingTracksPanel: React.FC = () => {
     }
   };
 
-  // Open local server settings
-  const openServerSettings = () => {
-    setShowConfigInput(true);
-  };
-
   // Format a date for display
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -90,14 +78,6 @@ const MissingTracksPanel: React.FC = () => {
             {isLoading ? "Refreshing..." : "Refresh"}
           </button>
 
-          <button className={styles.settingsButton} onClick={openServerSettings}>
-            Server Settings
-          </button>
-
-          <button className={styles.settingsButton} onClick={setMasterPlaylistId}>
-            Set MASTER Playlist
-          </button>
-
           <button
             className={styles.playlistButton}
             onClick={createPlaylist}
@@ -113,28 +93,6 @@ const MissingTracksPanel: React.FC = () => {
           <span className={styles.cacheDate}>
             Last updated: {formatDate(cachedData.lastUpdated)}
           </span>
-        </div>
-      )}
-
-      {showConfigInput && (
-        <div className={styles.configSection}>
-          <h3>Local Tracks Server Configuration</h3>
-          <div className={styles.configForm}>
-            <input
-              type="text"
-              value={serverUrl}
-              onChange={(e) => setServerUrl(e.target.value)}
-              placeholder="Server URL (e.g., http://localhost:8765)"
-              className={styles.urlInput}
-            />
-            <button onClick={connectToServer} disabled={isLoading} className={styles.connectButton}>
-              {isLoading ? "Connecting..." : "Connect"}
-            </button>
-          </div>
-          <p className={styles.configHelp}>
-            Make sure the local tracks server is running. See the readme for instructions.
-          </p>
-          {serverConnected && <p className={styles.serverConnected}>✅ Connected to server</p>}
         </div>
       )}
 

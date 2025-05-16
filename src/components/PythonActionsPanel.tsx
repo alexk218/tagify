@@ -106,7 +106,9 @@ const ActionButton: React.FC<ActionButtonProps> = ({ label, onClick, disabled, c
 );
 
 const PythonActionsPanel: React.FC = () => {
-  const [isLoading, setIsLoading] = useState<Record<string, boolean>>({});
+  const [isLoading, setIsLoading] = useState<Record<string, boolean>>({
+    "server-connect": false,
+  });
   const [results, setResults] = useState<
     Record<string, { success: boolean; message: string } | null>
   >({});
@@ -114,6 +116,7 @@ const PythonActionsPanel: React.FC = () => {
   const [serverStatus, setServerStatus] = useState<"unknown" | "connected" | "disconnected">(
     "unknown"
   );
+  const [showConfigInput, setShowConfigInput] = useState<boolean>(true);
 
   const [showValidationPanel, setShowValidationPanel] = useState(false);
   const [validationType, setValidationType] = useState<"track" | "playlist">("track");
@@ -184,7 +187,15 @@ const PythonActionsPanel: React.FC = () => {
 
   const checkServerConnection = async () => {
     try {
-      const response = await fetch(`${settings.serverUrl}/status`, {
+      setIsLoading((prev) => ({ ...prev, "server-connect": true }));
+
+      // Get server URL from localStorage
+      const serverUrl =
+        settings.serverUrl ||
+        localStorage.getItem("tagify:localServerUrl") ||
+        "http://localhost:8765";
+
+      const response = await fetch(`${serverUrl}/status`, {
         method: "GET",
         headers: {
           Accept: "application/json",
@@ -193,6 +204,7 @@ const PythonActionsPanel: React.FC = () => {
 
       if (response.ok) {
         setServerStatus("connected");
+        Spicetify.showNotification("Connected to server successfully!");
 
         // Get environment variables from server
         const data = await response.json();
@@ -219,10 +231,14 @@ const PythonActionsPanel: React.FC = () => {
         }
       } else {
         setServerStatus("disconnected");
+        Spicetify.showNotification("Failed to connect to server", true);
       }
     } catch (err) {
       console.error("Error connecting to server:", err);
       setServerStatus("disconnected");
+      Spicetify.showNotification("Error connecting to server", true);
+    } finally {
+      setIsLoading((prev) => ({ ...prev, "server-connect": false }));
     }
   };
 
@@ -1403,24 +1419,32 @@ const PythonActionsPanel: React.FC = () => {
       <h2>Tagify Python Actions</h2>
 
       <div className={styles.statusIndicator}>
-        {serverStatus === "connected" && (
+        {serverStatus === "connected" ? (
           <div className={styles.connected}>
             <span className={styles.statusDot}></span>
             Connected to server
           </div>
-        )}
-        {serverStatus === "disconnected" && (
+        ) : serverStatus === "disconnected" ? (
           <div className={styles.disconnected}>
             <span className={styles.statusDot}></span>
             Not connected to server
           </div>
-        )}
-        {serverStatus === "unknown" && (
+        ) : (
           <div className={styles.unknown}>
             <span className={styles.statusDot}></span>
             Checking server status...
           </div>
         )}
+
+        <button
+          className={`${styles.connectButton} ${
+            serverStatus === "connected" ? styles.connected : styles.disconnected
+          }`}
+          onClick={checkServerConnection}
+          disabled={isLoading["server-connect"]}
+        >
+          {isLoading["server-connect"] ? "Connecting..." : "Connect"}
+        </button>
       </div>
 
       <div className={styles.headerButtons}>
