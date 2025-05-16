@@ -1622,9 +1622,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
               </div>
 
               <div className={styles.actionButtons}>
-                <button onClick={() => validatePlaylists(true)} disabled={isLoading}>
-                  Refresh Analysis
-                </button>
                 <button
                   onClick={regenerateAllPlaylists}
                   disabled={playlistValidationResult.summary.playlists_needing_update === 0}
