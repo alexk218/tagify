@@ -49,7 +49,7 @@ export function parseLocalFileUri(uri: string): ParsedLocalFile {
       else if (parts[2] === "" && parts[3] === "") {
         // Format with empty artist/album slots but has artist:title at the end
         const potentialArtist = decodeURIComponent(parts[4].replace(/\+/g, " "));
-        let potentialTitle = decodeURIComponent(parts[5].replace(/\+/g, " "));
+        const potentialTitle = decodeURIComponent(parts[5].replace(/\+/g, " "));
 
         // Check if last part is just a number (duration)
         if (!isNaN(Number(potentialTitle))) {
