@@ -21,14 +21,16 @@ interface AnalysisResults {
       added: number;
       updated: number;
       unchanged: number;
-      deleted?: number;
+      deleted: number;
       to_add_sample: any[];
       all_tracks_to_add: any[];
       to_add_total: number;
       to_update_sample: any[];
-      to_delete_sample?: any[];
+      to_delete_sample: any[];
       all_tracks_to_update: any[];
       to_update_total: number;
+      all_tracks_to_delete: any[];
+      to_delete_total: number;
     };
     associations?: any;
   };
@@ -1089,9 +1091,10 @@ const PythonActionsPanel: React.FC = () => {
 
             <h4>Track Changes</h4>
             <p>
-              {analysisResults.analyses.tracks?.added} tracks to add,
-              {analysisResults.analyses.tracks?.updated} to update,
-              {analysisResults.analyses.tracks?.unchanged} unchanged
+              {analysisResults.analyses.tracks?.added} tracks to add,{" "}
+              {analysisResults.analyses.tracks?.updated} to update,{" "}
+              {analysisResults.analyses.tracks?.unchanged} unchanged,{" "}
+              {analysisResults.analyses.tracks?.deleted || 0} to delete
             </p>
 
             {/* Paginated Tracks to Add */}
@@ -1130,6 +1133,29 @@ const PythonActionsPanel: React.FC = () => {
                         </div>
                       ),
                       analysisResults.analyses.tracks.to_update_total
+                    )}
+                  </div>
+                </div>
+              )}
+
+            {analysisResults.analyses.tracks &&
+              analysisResults.analyses.tracks.to_delete_total > 0 && (
+                <div className={styles.sampleChanges}>
+                  <h5 className={styles.deleteHeading}>
+                    Tracks to Delete ({analysisResults.analyses.tracks.to_delete_total})
+                  </h5>
+                  <div className={styles.trackList}>
+                    {renderPaginatedList(
+                      analysisResults.analyses.tracks.all_tracks_to_delete ||
+                        analysisResults.analyses.tracks.to_delete_sample ||
+                        [],
+                      "tracks-delete",
+                      (track) => (
+                        <div className={`${styles.trackItem} ${styles.deleteItem}`}>
+                          {track.artists} - {track.title} {track.is_local ? "(LOCAL)" : ""}
+                        </div>
+                      ),
+                      analysisResults.analyses.tracks.to_delete_total
                     )}
                   </div>
                 </div>
