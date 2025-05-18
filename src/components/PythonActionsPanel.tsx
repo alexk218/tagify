@@ -408,7 +408,11 @@ const PythonActionsPanel: React.FC = () => {
     }
 
     // For association sync, include the precomputed changes
-    if (name === "sync-database" && data.action === "associations" && analysisResults) {
+    if (
+      name === "sync-database" &&
+      (data.action === "associations" || data.action === "all") &&
+      analysisResults
+    ) {
       // Include the precomputed changes in the confirmation data
       confirmData.precomputed_changes = {
         tracks_with_changes:
