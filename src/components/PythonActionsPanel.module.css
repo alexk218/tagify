@@ -689,3 +689,71 @@
 .connectButton.disconnected {
   border-color: #ff5555;
 }
+
+.sequentialHeader {
+  margin-bottom: 20px;
+  padding: 10px;
+  background-color: var(--spice-card);
+  border-radius: 4px;
+}
+
+.sequentialProgress {
+  display: flex;
+  justify-content: space-between;
+  position: relative;
+  padding: 10px 0;
+}
+
+.sequentialProgress::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--spice-button-disabled);
+  z-index: 0;
+}
+
+.sequentialStep {
+  background-color: var(--spice-card);
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--spice-button-disabled);
+  position: relative;
+  z-index: 1;
+}
+
+.sequentialStep.active {
+  background-color: var(--spice-button);
+  border-color: var(--spice-button);
+  color: var(--spice-text);
+  font-weight: bold;
+}
+
+.sequentialStep.completed {
+  background-color: var(--spice-notification-success);
+  border-color: var(--spice-notification-success);
+  color: white;
+}
+
+.sequentialStatus {
+  padding: 10px;
+  background-color: var(--spice-card);
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.progressBar {
+  height: 5px;
+  background-color: var(--spice-button-disabled);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 5px;
+}
+
+.progressFill {
+  height: 100%;
+  background-color: var(--spice-button);
+  transition: width 0.3s ease;
+}

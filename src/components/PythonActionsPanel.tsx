@@ -5,6 +5,7 @@ import Portal from "../utils/Portal";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 
 interface AnalysisResults {
+  stage: string;
   success: boolean;
   message: string;
   stats?: any;
@@ -64,10 +65,13 @@ interface ActionButtonProps {
   className?: string;
 }
 
-interface ActionInfo {
+type ActionInfo = {
   name: string;
   data: any;
-}
+} & (
+  | { name: "sequential-sync"; data: { stage: string; details?: any } }
+  | { name: string; data: any }
+);
 
 type Match = {
   track_id: string;
@@ -116,6 +120,10 @@ const ActionButton: React.FC<ActionButtonProps> = ({ label, onClick, disabled, c
 const PythonActionsPanel: React.FC = () => {
   const [isLoading, setIsLoading] = useState<Record<string, boolean>>({
     "server-connect": false,
+    "sequential-sync": false,
+    "sequential-playlists": false,
+    "sequential-tracks": false,
+    "sequential-associations": false,
   });
   const [results, setResults] = useState<
     Record<string, { success: boolean; message: string } | null>
@@ -185,6 +193,43 @@ const PythonActionsPanel: React.FC = () => {
     track: null,
     playlist: null,
   });
+
+  const [sequentialProcess, setSequentialProcess] = useState<{
+    active: boolean;
+    stage: string;
+    results: Record<string, any>;
+  }>({
+    active: false,
+    stage: "",
+    results: {},
+  });
+
+  // TODO
+  // For showing sequential progress visually
+  const stageOrder = ["playlists", "tracks", "associations", "complete"];
+  const stageLabels = {
+    playlists: "1. Playlists",
+    tracks: "2. Tracks",
+    associations: "3. Associations",
+    complete: "Complete",
+  };
+
+  const [sectionPagination, setSectionPagination] = useState<
+    Record<
+      string,
+      {
+        page: number;
+        pageSize: number;
+      }
+    >
+  >({});
+
+  // Optional: Add this if you want to persist details between stages
+  const [sequentialSyncDetails, setSequentialSyncDetails] = useState<{
+    playlists?: any;
+    tracks?: any;
+    associations?: any;
+  }>({});
 
   // Check server connection on load and when serverUrl changes
   useEffect(() => {
@@ -287,6 +332,11 @@ const PythonActionsPanel: React.FC = () => {
   };
 
   const performAction = async (action: string, data: any = {}) => {
+    if (action === "sync-database" && data.action === "all") {
+      await startSequentialSync();
+      return;
+    }
+
     setIsLoading((prev) => ({ ...prev, [action]: true }));
     setResults((prev) => ({ ...prev, [action]: null }));
 
@@ -391,11 +441,251 @@ const PythonActionsPanel: React.FC = () => {
     }
   };
 
+  const startSequentialSync = async () => {
+    // Initialize the sequential process
+    setSequentialProcess({
+      active: true,
+      stage: "start",
+      results: {},
+    });
+
+    const playlistSettings = getPlaylistSettings();
+
+    // Start the process - first API call just returns instructions
+    try {
+      const response = await fetch(`${settings.serverUrl}/api/sync-database`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          action: "all",
+          stage: "start",
+          force_refresh: false,
+          master_playlist_id: settings.masterPlaylistId,
+          playlistSettings: playlistSettings,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      // Start the first stage (should be 'playlists')
+      if (result.success && result.next_stage) {
+        await processSequentialStage(result.next_stage);
+      }
+    } catch (err) {
+      console.error("Error starting sequential sync:", err);
+      Spicetify.showNotification(`Error: ${err || String(err)}`, true);
+      setSequentialProcess({
+        active: false,
+        stage: "",
+        results: {},
+      });
+    }
+  };
+
+  const processSequentialStage = async (stage: string) => {
+    setSequentialProcess((prev) => ({
+      ...prev,
+      stage: stage,
+    }));
+
+    setIsLoading((prev) => ({ ...prev, [`sync-${stage}`]: true }));
+
+    const playlistSettings = getPlaylistSettings();
+
+    try {
+      // First analyze this stage
+      const analyzeResponse = await fetch(`${settings.serverUrl}/api/sync-database`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          action: "all",
+          stage: stage,
+          force_refresh: false,
+          confirmed: false,
+          master_playlist_id: settings.masterPlaylistId,
+          playlistSettings: playlistSettings,
+        }),
+      });
+
+      if (!analyzeResponse.ok) {
+        throw new Error(`HTTP error ${analyzeResponse.status}: ${analyzeResponse.statusText}`);
+      }
+
+      const analysisResult = await analyzeResponse.json();
+
+      // Store the result for this stage
+      setSequentialProcess((prev) => ({
+        ...prev,
+        results: { ...prev.results, [stage]: analysisResult },
+      }));
+
+      // If changes need confirmation, show confirmation UI
+      if (analysisResult.needs_confirmation) {
+        setAnalysisResults(analysisResult);
+        setIsAwaitingConfirmation(true);
+        setCurrentAction({
+          name: "sequential-sync",
+          data: { stage },
+        });
+      }
+      // If no changes or confirmation not needed, proceed to next stage
+      else {
+        await proceedToNextStage(analysisResult);
+      }
+    } catch (err) {
+      console.error(`Error processing stage ${stage}:`, err);
+      Spicetify.showNotification(`Error: ${err || String(err)}`, true);
+
+      setSequentialProcess({
+        active: false,
+        stage: "",
+        results: {},
+      });
+    } finally {
+      setIsLoading((prev) => ({ ...prev, [`sync-${stage}`]: false }));
+    }
+  };
+
+  const proceedToNextStage = async (result: any) => {
+    const stage = result.stage;
+    const nextStage = result.next_stage;
+
+    // If this stage is already complete or has no changes, move to next stage
+    if (nextStage && nextStage !== "complete") {
+      // Move to the next stage
+      await processSequentialStage(nextStage);
+    }
+    // If we're done with all stages
+    else if (nextStage === "complete") {
+      setSequentialProcess({
+        active: false,
+        stage: "",
+        results: {},
+      });
+
+      Spicetify.showNotification("Database sync completed successfully");
+    }
+  };
+
   // Handle confirmation
   const confirmAction = async () => {
     if (!currentAction) return;
 
     const { name, data } = currentAction;
+
+    // Handle sequential sync confirmations
+    if (name === "sequential-sync" && data.stage) {
+      const stage = data.stage;
+
+      // Clear the confirmation UI
+      setAnalysisResults(null);
+      setIsAwaitingConfirmation(false);
+      setCurrentAction(null);
+
+      try {
+        // Get the analysis result for this stage to use as precomputed changes
+        const stageResult = sequentialProcess.results[stage];
+        const playlistSettings = getPlaylistSettings();
+
+        // Prepare precomputed changes based on the stage
+        let formattedPrecomputedChanges = stageResult.details;
+
+        // Special handling for tracks stage to ensure all required fields are included
+        if (stage === "tracks") {
+          formattedPrecomputedChanges = {
+            tracks_to_add:
+              stageResult.details?.all_items_to_add?.map(
+                (track: {
+                  id: any;
+                  artists: any;
+                  title: any;
+                  album: any;
+                  is_local: any;
+                  added_at: any;
+                }) => ({
+                  id: track.id,
+                  artists: track.artists || "Unknown Artist",
+                  title: track.title || "Unknown Title",
+                  album: track.album || "Unknown Album",
+                  is_local: !!track.is_local,
+                  added_at: track.added_at || null,
+                })
+              ) || [],
+
+            tracks_to_update:
+              stageResult.details?.all_items_to_update?.map((track: { id: any; old_artists: any; old_title: any; old_album: any; artists: any; title: any; album: any; is_local: any; }) => ({
+                id: track.id,
+                old_artists: track.old_artists || "Unknown Artist",
+                old_title: track.old_title || "Unknown Title",
+                old_album: track.old_album || "Unknown Album",
+                artists: track.artists || "Unknown Artist",
+                title: track.title || "Unknown Title",
+                album: track.album || "Unknown Album",
+                is_local: !!track.is_local,
+              })) || [],
+
+            unchanged_tracks: stageResult.stats?.unchanged || 0,
+          };
+        }
+
+        // Apply the changes with confirmation
+        const response = await fetch(`${settings.serverUrl}/api/sync-database`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            action: "all",
+            stage: stage,
+            force_refresh: false,
+            confirmed: true,
+            precomputed_changes_from_analysis:
+              stage === "tracks" ? formattedPrecomputedChanges : stageResult.details,
+            master_playlist_id: settings.masterPlaylistId,
+            playlistSettings: playlistSettings,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        // Store the sync result
+        setSequentialProcess((prev) => ({
+          ...prev,
+          results: { ...prev.results, [`${stage}_sync`]: result },
+        }));
+
+        // Move to the next stage
+        if (result.next_stage) {
+          await processSequentialStage(result.next_stage);
+        }
+      } catch (err) {
+        console.error(`Error applying changes for stage ${stage}:`, err);
+        Spicetify.showNotification(`Error: ${err.message || String(err)}`, true);
+
+        setSequentialProcess({
+          active: false,
+          stage: "",
+          results: {},
+        });
+      }
+
+      return;
+    }
 
     // Add confirmation flag and user selections to the data
     const confirmData = {
@@ -407,14 +697,76 @@ const PythonActionsPanel: React.FC = () => {
       console.log(`Confirming ${data.action} sync with:`, confirmData);
     }
 
-    // For association sync, include the precomputed changes
-    if (
-      name === "sync-database" &&
-      (data.action === "associations" || data.action === "all") &&
-      analysisResults
-    ) {
-      // Include the precomputed changes in the confirmation data
-      confirmData.precomputed_changes = {
+    if (name === "sync-database" && data.action === "all" && analysisResults) {
+      // Include all precomputed data
+      confirmData.precomputed_changes_from_analysis = {
+        playlists: analysisResults.analyses?.playlists?.details,
+        tracks: {
+          tracks_to_add:
+            analysisResults.analyses?.tracks?.all_tracks_to_add?.map((track) => ({
+              id: track.id,
+              artists: track.artists || "Unknown Artist",
+              title: track.title || "Unknown Title",
+              album: track.album || "Unknown Album",
+              is_local: !!track.is_local,
+              added_at: track.added_at || null,
+            })) || [],
+
+          tracks_to_update:
+            analysisResults.analyses?.tracks?.all_tracks_to_update?.map((track) => ({
+              id: track.id,
+              old_artists: track.old_artists || "Unknown Artist",
+              old_title: track.old_title || "Unknown Title",
+              old_album: track.old_album || "Unknown Album",
+              artists: track.artists || "Unknown Artist",
+              title: track.title || "Unknown Title",
+              album: track.album || "Unknown Album",
+              is_local: !!track.is_local,
+            })) || [],
+
+          unchanged_tracks: analysisResults.analyses?.tracks?.unchanged || 0,
+        },
+        associations: {
+          tracks_with_changes:
+            analysisResults.details?.tracks_with_changes ||
+            analysisResults.details?.all_changes ||
+            analysisResults.details?.samples ||
+            [],
+          tracks_with_playlists: analysisResults.stats?.tracks_with_playlists,
+          tracks_without_playlists: analysisResults.stats?.tracks_without_playlists,
+          total_associations: analysisResults.stats?.total_associations,
+        },
+      };
+    } else if (name === "sync-database" && data.action === "playlists" && analysisResults) {
+      confirmData.precomputed_changes_from_analysis = analysisResults.details;
+    } else if (name === "sync-database" && data.action === "tracks" && analysisResults) {
+      confirmData.precomputed_changes_from_analysis = {
+        tracks_to_add:
+          analysisResults.details?.all_items_to_add?.map((track) => ({
+            id: track.id,
+            artists: track.artists || "Unknown Artist",
+            title: track.title || "Unknown Title",
+            album: track.album || "Unknown Album",
+            is_local: !!track.is_local,
+            added_at: track.added_at || null,
+          })) || [],
+
+        tracks_to_update:
+          analysisResults.details?.all_items_to_update?.map((track) => ({
+            id: track.id,
+            old_artists: track.old_artists || "Unknown Artist",
+            old_title: track.old_title || "Unknown Title",
+            old_album: track.old_album || "Unknown Album",
+            artists: track.artists || "Unknown Artist",
+            title: track.title || "Unknown Title",
+            album: track.album || "Unknown Album",
+            is_local: !!track.is_local,
+          })) || [],
+
+        unchanged_tracks: analysisResults.stats?.unchanged || 0,
+      };
+    } else if (name === "sync-database" && data.action === "associations" && analysisResults) {
+      confirmData.precomputed_changes_from_analysis = {
         tracks_with_changes:
           analysisResults.details?.tracks_with_changes ||
           analysisResults.details?.all_changes ||
@@ -424,11 +776,6 @@ const PythonActionsPanel: React.FC = () => {
         tracks_without_playlists: analysisResults.stats?.tracks_without_playlists,
         total_associations: analysisResults.stats?.total_associations,
       };
-
-      console.log(
-        "Passing precomputed changes to avoid redundant processing",
-        confirmData.precomputed_changes
-      );
     }
 
     if (name === "embed-metadata") {
@@ -1016,6 +1363,202 @@ const PythonActionsPanel: React.FC = () => {
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+      );
+    }
+    if (
+      isAwaitingConfirmation &&
+      analysisResults &&
+      analysisResults.stage &&
+      currentAction?.name === "sequential-sync"
+    ) {
+      return (
+        <div className={styles.confirmationPanel}>
+          <h3>
+            Database Sync -{" "}
+            {analysisResults.stage.charAt(0).toUpperCase() + analysisResults.stage.slice(1)} Stage
+          </h3>
+
+          {/* Show a header indicating this is part of the sequential process */}
+          <div className={styles.sequentialHeader}>
+            <div className={styles.sequentialProgress}>
+              <span
+                className={`${styles.sequentialStep} ${
+                  analysisResults.stage === "playlists" ? styles.active : ""
+                }`}
+              >
+                1. Playlists
+              </span>
+              <span
+                className={`${styles.sequentialStep} ${
+                  analysisResults.stage === "tracks" ? styles.active : ""
+                }`}
+              >
+                2. Tracks
+              </span>
+              <span
+                className={`${styles.sequentialStep} ${
+                  analysisResults.stage === "associations" ? styles.active : ""
+                }`}
+              >
+                3. Associations
+              </span>
+            </div>
+          </div>
+
+          {/* Render the analysis results based on the stage */}
+          {analysisResults.stage === "playlists" && analysisResults.details && (
+            <div className={styles.playlistChanges}>
+              <h4>Playlist Changes</h4>
+              {analysisResults.stats.added > 0 && analysisResults.details.to_add && (
+                <div className={styles.changesSection}>
+                  <h5>Playlists to Add ({analysisResults.stats.added})</h5>
+                  <div className={styles.itemList}>
+                    {renderPaginatedList(
+                      analysisResults.details.to_add || [],
+                      "playlists-add",
+                      (item) => (
+                        <div className={styles.item}>{item.name}</div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {analysisResults.stats.updated > 0 && analysisResults.details.to_update && (
+                <div className={styles.changesSection}>
+                  <h5>Playlists to Update ({analysisResults.stats.updated})</h5>
+                  <div className={styles.itemList}>
+                    {renderPaginatedList(
+                      analysisResults.details.to_update || [],
+                      "playlists-update",
+                      (item) => (
+                        <div className={styles.item}>
+                          {item.old_name} → {item.name}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {analysisResults.stats.deleted > 0 && analysisResults.details.to_delete && (
+                <div className={styles.changesSection}>
+                  <h5>Playlists to Delete ({analysisResults.stats.deleted})</h5>
+                  <div className={styles.itemList}>
+                    {renderPaginatedList(
+                      analysisResults.details.to_delete || [],
+                      "playlists-delete",
+                      (item) => (
+                        <div className={styles.item}>{item.name}</div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {analysisResults.stage === "tracks" && analysisResults.details && (
+            <div className={styles.trackChanges}>
+              <h4>Track Changes</h4>
+              {analysisResults.stats.added > 0 && analysisResults.details.all_items_to_add && (
+                <div className={styles.changesSection}>
+                  <h5>Tracks to Add ({analysisResults.stats.added})</h5>
+                  <div className={styles.itemList}>
+                    {renderPaginatedList(
+                      analysisResults.details.all_items_to_add || [],
+                      "tracks-add",
+                      (track) => (
+                        <div className={styles.trackItem}>
+                          {track.artists} - {track.title} {track.is_local ? "(LOCAL)" : ""}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {analysisResults.stats.updated > 0 && analysisResults.details.all_items_to_update && (
+                <div className={styles.changesSection}>
+                  <h5>Tracks to Update ({analysisResults.stats.updated})</h5>
+                  <div className={styles.trackList}>
+                    {renderPaginatedList(
+                      analysisResults.details.all_items_to_update || [],
+                      "tracks-update",
+                      (track) => (
+                        <div className={styles.trackItem}>
+                          {track.old_artists} - {track.old_title} → {track.artists} - {track.title}
+                          {track.is_local ? " (LOCAL)" : ""}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {analysisResults.stage === "associations" && analysisResults.details && (
+            <div className={styles.associationChanges}>
+              <h4>Association Changes</h4>
+              {(analysisResults.details.all_changes ||
+                analysisResults.details.samples ||
+                analysisResults.details.tracks_with_changes) && (
+                <div className={styles.changesSection}>
+                  <h5>
+                    Track Association Changes (
+                    {analysisResults.stats ? (
+                      <>
+                        {analysisResults.stats.associations_to_add || 0} to add,{" "}
+                        {analysisResults.stats.associations_to_remove || 0} to remove
+                      </>
+                    ) : (
+                      "Updating associations"
+                    )}
+                    )
+                  </h5>
+                  <div className={styles.trackList}>
+                    {renderPaginatedList(
+                      analysisResults.details.all_changes ||
+                        analysisResults.details.tracks_with_changes ||
+                        analysisResults.details.samples ||
+                        [],
+                      "associations",
+                      (item) => (
+                        <div className={styles.trackItem}>
+                          <div className={styles.trackItemHeader}>
+                            <strong>{item.track_info || item.track}</strong>
+                          </div>
+                          {item.add_to && item.add_to.length > 0 && (
+                            <div className={styles.addTo}>
+                              <span className={styles.changeIcon}>+</span> Adding to playlists:{" "}
+                              {item.add_to.join(", ")}
+                            </div>
+                          )}
+                          {item.remove_from && item.remove_from.length > 0 && (
+                            <div className={styles.removeFrom}>
+                              <span className={styles.changeIcon}>-</span> Removing from playlists:{" "}
+                              {item.remove_from.join(", ")}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className={styles.confirmationButtons}>
+            <button className={styles.confirmButton} onClick={confirmAction}>
+              Apply Changes and Continue
+            </button>
+            <button className={styles.cancelButton} onClick={cancelAction}>
+              Cancel Sync Process
+            </button>
           </div>
         </div>
       );
