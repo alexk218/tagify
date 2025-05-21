@@ -314,15 +314,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           );
         }
       } else {
-        const response = await fetch(`${serverUrl}/api/validate-track-metadata`, {
-          method: "POST",
+        const queryParams = new URLSearchParams({
+          masterTracksDir: masterTracksDir,
+          confidence_threshold: confidenceThreshold.toString(),
+        });
+
+        const response = await fetch(`${serverUrl}/api/validation/track-metadata?${queryParams}`, {
+          method: "GET", // Changed from POST to GET
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            masterTracksDir: masterTracksDir,
-            confidence_threshold: confidenceThreshold,
-          }),
         });
 
         if (response.ok) {
@@ -364,15 +365,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           setPlaylistValidationResult(data);
         }
       } else {
-        const response = await fetch(`${serverUrl}/api/validate-playlists`, {
-          method: "POST",
+        const queryParams = new URLSearchParams({
+          masterTracksDir: masterTracksDir,
+          playlistsDir: playlistsDir,
+        });
+
+        const response = await fetch(`${serverUrl}/api/validation/playlists?${queryParams}`, {
+          method: "GET",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            masterTracksDir: masterTracksDir,
-            playlistsDir: playlistsDir,
-          }),
         });
 
         if (response.ok) {
@@ -428,14 +430,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     setIsFetchingMatches(true);
 
     try {
-      const response = await fetch(`${serverUrl}/api/fuzzy-match-track`, {
+      const response = await fetch(`${serverUrl}/api/tracks/match`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           fileName: mismatch.file,
-          masterTracksDir: masterTracksDir,
           currentTrackId: mismatch.track_id,
         }),
       });
@@ -462,8 +463,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   const correctTrackId = async (filePath: string, newTrackId: string) => {
     try {
-      const response = await fetch(`${serverUrl}/api/correct-track-id`, {
-        method: "POST",
+      const response = await fetch(`${serverUrl}/api/tracks/metadata`, {
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
         },
@@ -500,7 +501,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       setIsLoading(true);
       console.log(`Regenerating playlist ${playlistId}`);
 
-      const response = await fetch(`${serverUrl}/api/regenerate-playlist`, {
+      const response = await fetch(`${serverUrl}/api/playlists/${playlistId}/regenerate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -554,7 +555,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       // Show loading state
       setIsLoading(true);
 
-      const response = await fetch(`${serverUrl}/api/generate-m3u`, {
+      const response = await fetch(`${serverUrl}/api/playlists/generate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -742,8 +743,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   const removeTrackId = async (filePath: string) => {
     try {
-      const response = await fetch(`${serverUrl}/api/remove-track-id`, {
-        method: "POST",
+      const response = await fetch(`${serverUrl}/api/tracks/metadata`, {
+        method: "DELETE",
         headers: {
           "Content-Type": "application/json",
         },
@@ -799,15 +800,14 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     setSearchResults([]);
 
     try {
-      const response = await fetch(`${serverUrl}/api/search-tracks`, {
-        method: "POST",
+      const url = `${serverUrl}/api/tracks/search?query=${encodeURIComponent(searchQuery)}${
+        masterTracksDir ? `&masterTracksDir=${encodeURIComponent(masterTracksDir)}` : ""
+      }`;
+      const response = await fetch(url, {
+        method: "GET",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          masterTracksDir: masterTracksDir,
-          query: searchQuery,
-        }),
       });
 
       if (response.ok) {
@@ -852,8 +852,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`${serverUrl}/api/delete-file`, {
-        method: "POST",
+      const response = await fetch(`${serverUrl}/api/tracks`, {
+        method: "DELETE",
         headers: {
           "Content-Type": "application/json",
         },

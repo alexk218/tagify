@@ -337,17 +337,62 @@ const PythonActionsPanel: React.FC = () => {
         playlistSettings: playlistSettings,
       };
 
-      const response = await fetch(
-        `${settings.serverUrl.replace(/^["'](.*)["']$/, "$1")}/api/${action}`,
-        {
+      // Map old action names to new API endpoints
+      const endpointMap: Record<string, { url: string; method: string }> = {
+        "embed-metadata": { url: "/api/tracks/metadata/embed", method: "POST" },
+        "sync-database": { url: "/api/sync/database", method: "POST" },
+        "sync-to-master": { url: "/api/sync/master", method: "POST" },
+        "generate-m3u": { url: "/api/playlists/generate", method: "POST" },
+        "validate-tracks": { url: "/api/validation/tracks", method: "GET" },
+        "validate-playlists": { url: "/api/validation/playlists", method: "GET" },
+        "validate-track-metadata": { url: "/api/validation/track-metadata", method: "GET" },
+        "generate-rekordbox-xml": { url: "/api/rekordbox/generate-xml", method: "POST" },
+        "regenerate-playlist": {
+          url: "/api/playlists/" + requestData.playlist_id + "/regenerate",
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify(requestData),
-        }
-      );
+        },
+        "direct-tracks-compare": { url: "/api/tracks/compare", method: "GET" },
+        "fuzzy-match-track": { url: "/api/tracks/match", method: "POST" },
+        "search-tracks": { url: "/api/tracks/search", method: "GET" },
+        "correct-track-id": { url: "/api/tracks/metadata", method: "PUT" },
+        "remove-track-id": { url: "/api/tracks/metadata", method: "DELETE" },
+        "delete-file": { url: "/api/tracks", method: "DELETE" },
+      };
+
+      // Get the endpoint info for this action
+      const endpoint = endpointMap[action] || { url: `/api/${action}`, method: "POST" };
+      let url = settings.serverUrl.replace(/^["'](.*)["']$/, "$1") + endpoint.url;
+
+      // For GET requests, convert request data to query parameters
+      const fetchOptions: RequestInit = {
+        method: endpoint.method,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+      };
+
+      if (endpoint.method === "GET") {
+        // Convert request data to query parameters
+        const params = new URLSearchParams();
+        Object.entries(requestData).forEach(([key, value]) => {
+          if (
+            typeof value === "string" ||
+            typeof value === "number" ||
+            typeof value === "boolean"
+          ) {
+            params.append(key, String(value));
+          }
+        });
+
+        // Append query parameters to URL
+        url += `?${params.toString()}`;
+      } else {
+        // For non-GET requests, include the data in the request body
+        fetchOptions.body = JSON.stringify(requestData);
+      }
+
+      const response = await fetch(url, fetchOptions);
 
       if (!response.ok) {
         throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
@@ -434,7 +479,7 @@ const PythonActionsPanel: React.FC = () => {
 
     // Start the process - first API call just returns instructions
     try {
-      const response = await fetch(`${settings.serverUrl}/api/sync-database`, {
+      const response = await fetch(`${settings.serverUrl}/api/sync/database`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -482,7 +527,7 @@ const PythonActionsPanel: React.FC = () => {
 
     try {
       // First analyze this stage
-      const analyzeResponse = await fetch(`${settings.serverUrl}/api/sync-database`, {
+      const analyzeResponse = await fetch(`${settings.serverUrl}/api/sync/database`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -564,6 +609,13 @@ const PythonActionsPanel: React.FC = () => {
 
     const { name, data } = currentAction;
 
+    // Map old action names to new API endpoints
+    const endpointMap: Record<string, { url: string; method: string }> = {
+      "embed-metadata": { url: "/api/tracks/metadata/embed", method: "POST" },
+      "sync-database": { url: "/api/sync/database", method: "POST" },
+      "sequential-sync": { url: "/api/sync/database", method: "POST" },
+    };
+
     // Handle sequential sync confirmations
     if (name === "sequential-sync" && data.stage) {
       const stage = data.stage;
@@ -630,9 +682,16 @@ const PythonActionsPanel: React.FC = () => {
           };
         }
 
-        // Apply the changes with confirmation
-        const response = await fetch(`${settings.serverUrl}/api/sync-database`, {
+        // Get the endpoint for this action
+        const endpoint = endpointMap["sync-database"] || {
+          url: "/api/sync-database",
           method: "POST",
+        };
+        const url = `${settings.serverUrl}/api/sync/database`;
+
+        // Apply the changes with confirmation
+        const response = await fetch(url, {
+          method: endpoint.method,
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
@@ -828,17 +887,18 @@ const PythonActionsPanel: React.FC = () => {
     try {
       setIsLoading((prev) => ({ ...prev, [`validate-${type}s`]: true }));
 
-      const endpoint = type === "track" ? "validate-track-metadata" : "validate-playlists";
+      const endpoint = type === "track" ? "track-metadata" : "playlists";
 
-      const response = await fetch(`${settings.serverUrl}/api/${endpoint}`, {
-        method: "POST",
+      const queryParams = new URLSearchParams({
+        masterTracksDir: settings.masterTracksDir,
+        playlistsDir: settings.playlistsDir,
+      });
+
+      const response = await fetch(`${settings.serverUrl}/api/validation/${endpoint}?${queryParams}`, {
+        method: "GET",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          masterTracksDir: settings.masterTracksDir,
-          playlistsDir: settings.playlistsDir,
-        }),
       });
 
       if (response.ok) {
@@ -930,14 +990,13 @@ const PythonActionsPanel: React.FC = () => {
           const sanitizedUrl = settings.serverUrl.replace(/^["'](.*)["']$/, "$1").trim();
 
           // Use a simpler fetch approach
-          const response = await fetch(`${sanitizedUrl}/api/fuzzy-match-track`, {
+          const response = await fetch(`${sanitizedUrl}/api/tracks/match`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
               fileName: currentFile,
-              masterTracksDir: settings.masterTracksDir,
             }),
           });
 

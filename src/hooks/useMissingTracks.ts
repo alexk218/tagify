@@ -65,7 +65,7 @@ export function useMissingTracks() {
       const sanitizedUrl = serverUrl.replace(/^["'](.*)["']$/, "$1");
 
       // Build the query URL with parameters
-      const queryUrl = new URL(`${sanitizedUrl}/api/direct-tracks-compare`);
+      const queryUrl = new URL(`${sanitizedUrl}/api/tracks/compare`);
       if (playlistId) queryUrl.searchParams.append("master_playlist_id", playlistId);
       if (masterTracksDir) queryUrl.searchParams.append("master_tracks_dir", masterTracksDir);
 
