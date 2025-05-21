@@ -794,8 +794,34 @@ export function useTagData() {
       if (updatedTags.length === 1 && trackData.rating === 0 && trackData.energy === 0) {
         scheduleAddToTaggedPlaylist(trackUri);
 
-        // Fetch BPM if this is the first time we're tagging this track
-        updateBPM(trackUri);
+        // Instead of immediately updating BPM, we'll only get it
+        // but not update the state directly to avoid race conditions
+        fetchBPM(trackUri)
+          .then((bpm) => {
+            if (bpm !== null) {
+              // We need to get the CURRENT state at this point in time
+              // and ensure we preserve any tags that were added
+              setTagData((prevState) => {
+                const currentTrackData = prevState.tracks[trackUri];
+                // If the track doesn't exist anymore, don't do anything
+                if (!currentTrackData) return prevState;
+
+                return {
+                  ...prevState,
+                  tracks: {
+                    ...prevState.tracks,
+                    [trackUri]: {
+                      ...currentTrackData,
+                      bpm: bpm,
+                    },
+                  },
+                };
+              });
+            }
+          })
+          .catch((error) => {
+            console.error("Error fetching BPM:", error);
+          });
       }
     }
 
