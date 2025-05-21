@@ -204,26 +204,7 @@ const PythonActionsPanel: React.FC = () => {
     results: {},
   });
 
-  // TODO
-  // For showing sequential progress visually
-  const stageOrder = ["playlists", "tracks", "associations", "complete"];
-  const stageLabels = {
-    playlists: "1. Playlists",
-    tracks: "2. Tracks",
-    associations: "3. Associations",
-    complete: "Complete",
-  };
-
-  const [sectionPagination, setSectionPagination] = useState<
-    Record<
-      string,
-      {
-        page: number;
-        pageSize: number;
-      }
-    >
-  >({});
-
+  // TODO: have a summary page at the end of all operations - shows everything that's been modified. saves to a txt or json file?
   // Optional: Add this if you want to persist details between stages
   const [sequentialSyncDetails, setSequentialSyncDetails] = useState<{
     playlists?: any;
@@ -623,16 +604,27 @@ const PythonActionsPanel: React.FC = () => {
               ) || [],
 
             tracks_to_update:
-              stageResult.details?.all_items_to_update?.map((track: { id: any; old_artists: any; old_title: any; old_album: any; artists: any; title: any; album: any; is_local: any; }) => ({
-                id: track.id,
-                old_artists: track.old_artists || "Unknown Artist",
-                old_title: track.old_title || "Unknown Title",
-                old_album: track.old_album || "Unknown Album",
-                artists: track.artists || "Unknown Artist",
-                title: track.title || "Unknown Title",
-                album: track.album || "Unknown Album",
-                is_local: !!track.is_local,
-              })) || [],
+              stageResult.details?.all_items_to_update?.map(
+                (track: {
+                  id: any;
+                  old_artists: any;
+                  old_title: any;
+                  old_album: any;
+                  artists: any;
+                  title: any;
+                  album: any;
+                  is_local: any;
+                }) => ({
+                  id: track.id,
+                  old_artists: track.old_artists || "Unknown Artist",
+                  old_title: track.old_title || "Unknown Title",
+                  old_album: track.old_album || "Unknown Album",
+                  artists: track.artists || "Unknown Artist",
+                  title: track.title || "Unknown Title",
+                  album: track.album || "Unknown Album",
+                  is_local: !!track.is_local,
+                })
+              ) || [],
 
             unchanged_tracks: stageResult.stats?.unchanged || 0,
           };
@@ -675,7 +667,7 @@ const PythonActionsPanel: React.FC = () => {
         }
       } catch (err) {
         console.error(`Error applying changes for stage ${stage}:`, err);
-        Spicetify.showNotification(`Error: ${err.message || String(err)}`, true);
+        Spicetify.showNotification(`Error: ${err || String(err)}`, true);
 
         setSequentialProcess({
           active: false,

@@ -108,9 +108,10 @@
   margin-bottom: 3px;
 }
 
-.trackAlbum {
+.trackDate {
   font-size: 12px;
-  color: #b3b3b3;
+  color: white;
+  margin-bottom: 3px;
 }
 
 .trackActions {

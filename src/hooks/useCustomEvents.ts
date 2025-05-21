@@ -25,6 +25,5 @@ export function useCustomEvents({ eventName, handler, dependencies = [] }: UseCu
     return () => {
       window.removeEventListener(eventName, handler);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, dependencies);
 }
