@@ -583,12 +583,10 @@ const PythonActionsPanel: React.FC = () => {
   };
 
   const proceedToNextStage = async (result: any) => {
-    const stage = result.stage;
     const nextStage = result.next_stage;
 
-    // If this stage is already complete or has no changes, move to next stage
+    // If no changes were needed, move directly to next stage
     if (nextStage && nextStage !== "complete") {
-      // Move to the next stage
       await processSequentialStage(nextStage);
     }
     // If we're done with all stages
@@ -598,7 +596,6 @@ const PythonActionsPanel: React.FC = () => {
         stage: "",
         results: {},
       });
-
       Spicetify.showNotification("Database sync completed successfully");
     }
   };
@@ -721,8 +718,24 @@ const PythonActionsPanel: React.FC = () => {
         }));
 
         // Move to the next stage
-        if (result.next_stage) {
+        if (result.next_stage && result.next_stage !== "complete") {
           await processSequentialStage(result.next_stage);
+        } else if (result.next_stage === "complete" || result.stage === "sync_complete") {
+          setSequentialProcess({
+            active: false,
+            stage: "",
+            results: {},
+          });
+          Spicetify.showNotification("Database sync completed successfully");
+        } else {
+          // If no next_stage is provided, end the process
+          console.warn("No next_stage provided in result:", result);
+          setSequentialProcess({
+            active: false,
+            stage: "",
+            results: {},
+          });
+          Spicetify.showNotification("Database sync completed");
         }
       } catch (err) {
         console.error(`Error applying changes for stage ${stage}:`, err);
@@ -894,12 +907,15 @@ const PythonActionsPanel: React.FC = () => {
         playlistsDir: settings.playlistsDir,
       });
 
-      const response = await fetch(`${settings.serverUrl}/api/validation/${endpoint}?${queryParams}`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
+      const response = await fetch(
+        `${settings.serverUrl}/api/validation/${endpoint}?${queryParams}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
       if (response.ok) {
         const data = await response.json();
