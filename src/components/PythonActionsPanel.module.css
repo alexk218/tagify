@@ -757,3 +757,82 @@
   background-color: var(--spice-button);
   transition: width 0.3s ease;
 }
+
+.syncOptionsPanel {
+  background: var(--spice-card);
+  border-radius: 8px;
+  padding: 24px;
+  width: 500px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  border: 1px solid var(--spice-border);
+}
+
+.syncOptionsHeader {
+  margin-bottom: 20px;
+}
+
+.syncOptionsHeader h3 {
+  margin: 0 0 8px 0;
+  color: var(--spice-text);
+}
+
+.syncOptionsHeader p {
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+.syncOptionsContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.syncOption {
+  display: flex;
+}
+
+.syncOptionButton {
+  width: 100%;
+  padding: 16px;
+  border: 2px solid var(--spice-border);
+  border-radius: 8px;
+  background: var(--spice-main);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+}
+
+.syncOptionButton:hover {
+  border-color: var(--spice-accent);
+  background: var(--spice-highlight);
+}
+
+.syncOptionButton.normalSync:hover {
+  border-color: var(--spice-button);
+}
+
+.syncOptionButton.forceSync:hover {
+  border-color: #ffa500;
+}
+
+.syncOptionTitle {
+  font-weight: bold;
+  color: var(--spice-text);
+  margin-bottom: 4px;
+  font-size: 16px;
+}
+
+.syncOptionDescription {
+  color: var(--spice-subtext);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.syncOptionsFooter {
+  display: flex;
+  justify-content: flex-end;
+}

@@ -178,6 +178,12 @@ const PythonActionsPanel: React.FC = () => {
     Record<string, { page: number; pageSize: number }>
   >({});
 
+  const [showSyncOptionsPopup, setShowSyncOptionsPopup] = useState<boolean>(false);
+  const [pendingSyncAction, setPendingSyncAction] = useState<{
+    action: string;
+    data: any;
+  } | null>(null);
+
   const [validationResults, setValidationResults] = useLocalStorage<{
     track: any | null;
     playlist: any | null;
@@ -286,6 +292,34 @@ const PythonActionsPanel: React.FC = () => {
     Spicetify.showNotification("Settings saved successfully");
 
     setSettingsVisible(false);
+  };
+
+  const handleDatabaseAction = (action: string, baseData: any) => {
+    // Store the action and data for later execution
+    setPendingSyncAction({
+      action,
+      data: baseData,
+    });
+    setShowSyncOptionsPopup(true);
+  };
+
+  const executeSyncAction = (forceRefresh: boolean) => {
+    if (!pendingSyncAction) return;
+
+    // Execute the action with the chosen force_refresh option
+    performAction(pendingSyncAction.action, {
+      ...pendingSyncAction.data,
+      force_refresh: forceRefresh,
+    });
+
+    // Clean up state
+    setShowSyncOptionsPopup(false);
+    setPendingSyncAction(null);
+  };
+
+  const cancelSyncAction = () => {
+    setShowSyncOptionsPopup(false);
+    setPendingSyncAction(null);
   };
 
   const getPlaylistSettings = () => {
@@ -2104,6 +2138,63 @@ const PythonActionsPanel: React.FC = () => {
     }));
   };
 
+  const SyncOptionsPopup = () => {
+    if (!showSyncOptionsPopup || !pendingSyncAction) return null;
+
+    const getActionDisplayName = (action: string, data: any) => {
+      if (data.action === "all") return "Sync All Database";
+      if (data.action === "playlists") return "Sync Playlists Only";
+      if (data.action === "tracks") return "Sync Tracks Only";
+      if (data.action === "associations") return "Sync Associations Only";
+      return "Database Sync";
+    };
+
+    return (
+      <Portal>
+        <div className={styles.modalOverlay}>
+          <div className={styles.syncOptionsPanel}>
+            <div className={styles.syncOptionsHeader}>
+              <h3>{getActionDisplayName(pendingSyncAction.action, pendingSyncAction.data)}</h3>
+              <p>Choose how to perform this sync operation:</p>
+            </div>
+
+            <div className={styles.syncOptionsContent}>
+              <div className={styles.syncOption}>
+                <button
+                  className={`${styles.syncOptionButton} ${styles.normalSync}`}
+                  onClick={() => executeSyncAction(false)}
+                >
+                  <div className={styles.syncOptionTitle}>Normal Sync</div>
+                  <div className={styles.syncOptionDescription}>
+                    Use cached data when possible. Faster and recommended for regular use.
+                  </div>
+                </button>
+              </div>
+
+              <div className={styles.syncOption}>
+                <button
+                  className={`${styles.syncOptionButton} ${styles.forceSync}`}
+                  onClick={() => executeSyncAction(true)}
+                >
+                  <div className={styles.syncOptionTitle}>Force Full Refresh</div>
+                  <div className={styles.syncOptionDescription}>
+                    Ignore cached data and fetch everything fresh. Slower but ensures latest data.
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <div className={styles.syncOptionsFooter}>
+              <button className={styles.cancelButton} onClick={cancelSyncAction}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </Portal>
+    );
+  };
+
   return (
     <div className={styles.container}>
       <div className={styles.headerButtons}>
@@ -2155,6 +2246,8 @@ const PythonActionsPanel: React.FC = () => {
           ⚙️
         </button>
       </div>
+
+      <SyncOptionsPopup />
 
       {settingsVisible && (
         <Portal>
@@ -2318,20 +2411,8 @@ const PythonActionsPanel: React.FC = () => {
             <ActionButton
               label="Sync All Database"
               onClick={() =>
-                performAction("sync-database", {
+                handleDatabaseAction("sync-database", {
                   action: "all",
-                  force_refresh: false,
-                  master_playlist_id: settings.masterPlaylistId,
-                })
-              }
-              disabled={isLoading["sync-database"] || serverStatus !== "connected"}
-            />
-            <ActionButton
-              label="Force Full Refresh"
-              onClick={() =>
-                performAction("sync-database", {
-                  action: "all",
-                  force_refresh: true,
                   master_playlist_id: settings.masterPlaylistId,
                 })
               }
@@ -2346,9 +2427,8 @@ const PythonActionsPanel: React.FC = () => {
             <ActionButton
               label="Sync Playlists Only"
               onClick={() =>
-                performAction("sync-database", {
+                handleDatabaseAction("sync-database", {
                   action: "playlists",
-                  force_refresh: false,
                 })
               }
               disabled={isLoading["sync-database"] || serverStatus !== "connected"}
@@ -2356,9 +2436,8 @@ const PythonActionsPanel: React.FC = () => {
             <ActionButton
               label="Sync Tracks Only"
               onClick={() =>
-                performAction("sync-database", {
+                handleDatabaseAction("sync-database", {
                   action: "tracks",
-                  force_refresh: false,
                   master_playlist_id: settings.masterPlaylistId,
                 })
               }
@@ -2367,9 +2446,8 @@ const PythonActionsPanel: React.FC = () => {
             <ActionButton
               label="Sync Associations Only"
               onClick={() =>
-                performAction("sync-database", {
+                handleDatabaseAction("sync-database", {
                   action: "associations",
-                  force_refresh: false,
                   master_playlist_id: settings.masterPlaylistId,
                 })
               }
