@@ -1,228 +1,143 @@
 .container {
   margin-top: 24px;
   padding-top: 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--spice-button-disabled);
 }
 
 .header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
   margin-bottom: 20px;
   flex-wrap: wrap;
 }
 
+.titleWithStatus {
+  display: flex;
+  align-items: baseline;
+  gap: 12px; /* Space between title and "updated" text */
+  flex: 1;
+}
+
+.header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--spice-text);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.refreshButton {
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.refreshButton:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.refreshButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.lastUpdated {
+  font-size: 12px;
+  color: var(--spice-subtext);
+}
+
+/* ===== TABS SYSTEM ===== */
 .tabs {
   display: flex;
   gap: 10px;
+  margin-bottom: 20px;
 }
 
 .tab {
-  padding: 8px 16px;
-  border-radius: 4px;
-  border: 1px solid var(--spice-button-disabled);
-  background: transparent;
+  background-color: rgba(0, 0, 0, 0.2);
   color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.tab:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .tab.active {
-  background: var(--spice-button);
-  border-color: var(--spice-button);
+  background-color: #1e90ff;
+  color: white;
 }
 
-.closeButton {
-  padding: 8px 16px;
-  border-radius: 4px;
-  background: var(--spice-button);
-  color: var(--spice-text);
-  border: none;
-  cursor: pointer;
+.tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
+/* ===== SUMMARY SECTION ===== */
 .summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 20px;
+  justify-content: center;
   margin-bottom: 20px;
-  background: var(--spice-card);
-  padding: 16px;
+  background: rgba(0, 0, 0, 0.15);
+  padding: 20px;
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .summaryItem {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  min-width: 140px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .label {
-  font-size: 0.9em;
+  font-size: 13px;
   color: var(--spice-subtext);
+  margin-bottom: 6px;
+  font-weight: 500;
+  text-align: center;
 }
 
 .value {
-  font-size: 1.2em;
+  font-size: 20px;
   font-weight: bold;
-}
-
-.warning {
-  color: #ff9800;
-}
-
-.error {
-  color: #f44336;
-}
-
-.splitView {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  height: calc(60vh - 200px);
-  min-height: 300px;
-}
-
-.mismatchList,
-.duplicatesList,
-.matchPanel,
-.duplicateDetail {
-  overflow-y: auto;
-  border: 1px solid var(--spice-button-disabled);
-  border-radius: 4px;
-  padding: 10px;
-  user-select: text;
-}
-
-.mismatchItem,
-.duplicateItem {
-  padding: 12px;
-  border-bottom: 1px solid var(--spice-button-disabled);
-  cursor: pointer;
-}
-
-.mismatchItem:hover,
-.duplicateItem:hover {
-  background-color: var(--spice-highlight);
-}
-
-.mismatchItem.selected,
-.duplicateItem.selected {
-  background-color: var(--spice-button-active);
-}
-
-.mismatchFile,
-.duplicateTrackId {
-  font-weight: bold;
-  margin-bottom: 6px;
-}
-
-.duplicateTrackTitle {
-  font-size: 0.9em;
-  color: #666;
-  margin-top: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 200px;
-}
-
-.confidenceBar {
-  height: 6px;
-  width: 100%;
-  background: var(--spice-button-disabled);
-  border-radius: 3px;
-  margin-top: 6px;
-  position: relative;
-}
-
-.confidenceFill {
-  height: 100%;
-  background: linear-gradient(90deg, #f44336 0%, #ff9800 50%, #4caf50 100%);
-  border-radius: 3px;
-}
-
-.confidenceBar span {
-  position: absolute;
-  right: 0;
-  top: -16px;
-  font-size: 0.8em;
-}
-
-.matchPanel {
-  padding: 16px;
-}
-
-.currentInfo {
-  margin-bottom: 16px;
-  padding: 12px;
-  background: var(--spice-card);
-  border-radius: 4px;
-  border-left: 4px solid var(--spice-button);
-  user-select: text;
-}
-
-.matchesList {
-  max-height: calc(100% - 120px);
-  overflow-y: auto;
-}
-
-.matchOption {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px;
-  border-bottom: 1px solid var(--spice-button-disabled);
-}
-
-.matchTitle {
-  font-weight: bold;
-  user-select: text;
-}
-
-.matchTrackId {
-  font-size: 0.9em;
-  color: var(--spice-subtext);
-  user-select: text;
-}
-
-.matchConfidence {
-  font-size: 0.8em;
-  margin-top: 4px;
-}
-
-.applyButton {
-  padding: 6px 12px;
-  border-radius: 4px;
-  background: var(--spice-button);
   color: var(--spice-text);
-  border: none;
-  cursor: pointer;
-}
-
-.noMatches,
-.noSelection,
-.noIssues {
   text-align: center;
-  padding: 40px 20px;
-  color: var(--spice-subtext);
-  font-style: italic;
 }
 
-.loading {
-  text-align: center;
-  padding: 40px 20px;
+.value.warning {
+  color: #ffa500;
 }
 
-.pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 10px;
-  margin-top: 16px;
-  padding: 10px;
-  border-top: 1px solid var(--spice-button-disabled);
+.value.error {
+  color: #e74c3c;
 }
-
+/* ===== FILTER CONTAINER ===== */
 .filterContainer {
   display: flex;
   justify-content: space-between;
@@ -237,8 +152,367 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  color: var(--spice-text);
+  font-size: 14px;
 }
 
+.filterContainer input[type="range"] {
+  margin: 0 8px;
+}
+
+.filterContainer span {
+  color: var(--spice-text);
+  font-weight: 600;
+}
+
+/* ===== SPLIT VIEW LAYOUT ===== */
+.splitView {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  height: calc(60vh - 200px);
+  min-height: 400px;
+}
+
+.mismatchList,
+.duplicatesList,
+.matchPanel,
+.duplicateDetail {
+  overflow-y: auto;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  padding: 10px;
+  background: var(--spice-card);
+  user-select: text;
+}
+
+/* ===== ITEM LISTS ===== */
+.mismatchItem,
+.duplicateItem {
+  padding: 12px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.mismatchItem:hover,
+.duplicateItem:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.mismatchItem.selected,
+.duplicateItem.selected {
+  background-color: rgba(30, 144, 255, 0.2);
+  border-color: #1e90ff;
+}
+
+.mismatchFile,
+.duplicateTrackId {
+  font-weight: bold;
+  margin-bottom: 6px;
+  color: var(--spice-text);
+}
+
+.mismatchDetails {
+  font-size: 13px;
+  color: var(--spice-subtext);
+}
+
+.duplicateTrackTitle {
+  font-size: 0.9em;
+  color: var(--spice-subtext);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.duplicateCount {
+  background: #1e90ff;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.8em;
+}
+
+/* ===== CONFIDENCE BAR ===== */
+.confidenceBar {
+  height: 6px;
+  width: 100%;
+  background: var(--spice-button-disabled);
+  border-radius: 3px;
+  margin-top: 6px;
+  position: relative;
+}
+
+.confidenceFill {
+  height: 100%;
+  background: linear-gradient(90deg, #e74c3c 0%, #ffa500 50%, #2ecc71 100%);
+  border-radius: 3px;
+}
+
+.confidenceBar span {
+  position: absolute;
+  right: 0;
+  top: -16px;
+  font-size: 0.8em;
+  color: var(--spice-text);
+}
+
+/* ===== MATCH PANEL ===== */
+.matchPanel {
+  padding: 16px;
+}
+
+.currentInfo {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: rgba(30, 144, 255, 0.1);
+  border-radius: 4px;
+  border-left: 4px solid #1e90ff;
+  user-select: text;
+}
+
+.currentInfo div {
+  margin-bottom: 4px;
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.currentInfo div:last-child {
+  margin-bottom: 0;
+}
+
+.currentInfo strong {
+  color: var(--spice-text);
+}
+
+/* ===== MATCHES LIST ===== */
+.matchesList {
+  max-height: calc(100% - 180px);
+  overflow-y: auto;
+}
+
+.matchOption {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  transition: background-color 0.2s ease;
+}
+
+.matchOption:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.matchDetails {
+  flex: 1;
+}
+
+.matchTitle {
+  font-weight: bold;
+  color: var(--spice-text);
+  user-select: text;
+  margin-bottom: 4px;
+}
+
+.matchTrackId {
+  font-size: 0.9em;
+  color: var(--spice-subtext);
+  user-select: text;
+  margin-bottom: 4px;
+}
+
+.matchConfidence {
+  font-size: 0.8em;
+  color: var(--spice-text);
+}
+
+.applyButton {
+  background-color: #1e90ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.applyButton:hover {
+  background-color: #1a7ee0;
+}
+
+/* ===== ACTION BUTTONS ===== */
+.actionButtons {
+  display: flex;
+  gap: 10px;
+  margin: 15px 0;
+}
+
+.acceptButton {
+  background-color: #2ecc71;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.acceptButton:hover {
+  background-color: #27ae60;
+}
+
+.removeButton {
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.removeButton:hover {
+  background-color: #c0392b;
+}
+
+.primaryButton {
+  background-color: #1e90ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background-color: #1a7ee0;
+}
+
+.primaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== LOADING & STATUS STATES ===== */
+.loading,
+.noMatches,
+.noSelection,
+.noIssues,
+.noResults {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--spice-subtext);
+  font-style: italic;
+}
+
+.noResults {
+  padding: 20px;
+}
+
+/* ===== PAGINATION ===== */
+.loadMoreContainer {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.loadMoreButton {
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.loadMoreButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ===== SEARCH FUNCTIONALITY ===== */
+.searchContainer {
+  margin-top: 20px;
+}
+
+.searchBox {
+  display: flex;
+  margin-bottom: 20px;
+  position: relative;
+}
+
+.searchInput {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  background: var(--spice-main);
+  color: var(--spice-text);
+  font-size: 14px;
+  margin-right: 10px;
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: #1e90ff;
+}
+
+.searchButton {
+  background-color: #1e90ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 10px 15px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.searchButton:hover:not(:disabled) {
+  background-color: #1a7ee0;
+}
+
+.searchButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.clearSearchButton {
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--spice-text);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.clearSearchButton:hover {
+  color: #1e90ff;
+}
+
+/* ===== PLAYLIST VALIDATION ===== */
 .playlistValidation {
   display: flex;
   flex-direction: column;
@@ -246,8 +520,7 @@
   overflow: hidden;
 }
 
-.trackValidation,
-.playlistValidation {
+.trackValidation {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -261,24 +534,56 @@
   margin-bottom: 10px;
 }
 
+.playlistHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.playlistHeader h3 {
+  margin: 0;
+  color: var(--spice-text);
+}
+
+.summaryButton {
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.summaryButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.summaryButton.active {
+  background-color: #1e90ff;
+  color: white;
+}
+
 .playlistItem {
   margin-bottom: 16px;
   border: 1px solid var(--spice-button-disabled);
   border-radius: 4px;
   overflow: hidden;
-}
-
-.playlistHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
   background: var(--spice-card);
-  border-bottom: 1px solid var(--spice-button-disabled);
 }
 
 .playlistName {
   font-weight: bold;
+  color: var(--spice-text);
+}
+
+.playlistLocation {
+  font-size: 0.85em;
+  color: var(--spice-subtext);
+  margin-left: 8px;
 }
 
 .playlistStatus {
@@ -288,21 +593,29 @@
 }
 
 .missing {
-  color: #f44336;
+  color: #e74c3c;
+  font-weight: 600;
 }
 
 .mismatch {
-  color: #ff9800;
+  color: #ffa500;
+  font-weight: 600;
 }
 
 .regenerateButton {
-  padding: 4px 10px;
-  border-radius: 4px;
-  background: var(--spice-button);
-  color: var(--spice-text);
+  background-color: #1e90ff;
+  color: white;
   border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
-  font-size: 0.9em;
+  transition: background-color 0.2s ease;
+}
+
+.regenerateButton:hover {
+  background-color: #1a7ee0;
 }
 
 .playlistDetails {
@@ -311,157 +624,11 @@
 
 .trackCounts {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 4px;
   margin-bottom: 16px;
-}
-
-.missingTracks,
-.unexpectedTracks {
-  margin-bottom: 16px;
-}
-
-.missingTracks h4,
-.unexpectedTracks h4 {
-  margin-bottom: 8px;
-}
-
-.missingTracks ul,
-.unexpectedTracks ul {
-  padding-left: 20px;
-}
-
-.moreItems {
-  font-style: italic;
-  color: var(--spice-subtext);
-}
-
-.actionButtons {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-
-.primaryButton {
-  background: #1db954;
-}
-
-.duplicateCount {
-  background: var(--spice-notification);
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 0.8em;
-}
-
-.filesList {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.fileItem {
-  padding: 8px 0;
-  border-bottom: 1px solid var(--spice-button-disabled);
-}
-
-.duplicateWarning {
-  margin-top: 20px;
-  padding: 12px;
-  background: rgba(255, 152, 0, 0.1);
-  border-left: 4px solid #ff9800;
-  border-radius: 4px;
-}
-
-.toggleButton,
-.resetButton,
-.acceptButton,
-.removeButton,
-.loadMoreButton,
-button[disabled="false"] {
-  padding: 8px 16px;
-  border-radius: 4px;
+  font-size: 14px;
   color: var(--spice-text);
-  border: none;
-  cursor: pointer;
-  margin-left: 10px;
-  font-size: 0.9em;
-}
-
-.toggleButton {
-  background: var(--spice-button);
-}
-
-.resetButton {
-  background: #f44336;
-}
-
-.acceptButton {
-  background: #4caf50;
-  margin-right: 10px;
-}
-
-.removeButton {
-  background: #ff9800;
-}
-
-.loadMoreButton {
-  background: var(--spice-button);
-  padding: 8px 16px;
-  margin: 10px auto;
-  display: block;
-  width: 80%;
-  max-width: 300px;
-}
-
-.loadMoreContainer {
-  display: flex;
-  justify-content: center;
-  padding: 10px 0;
-}
-
-.pagination button {
-  background: var(--spice-button);
-  color: var(--spice-text);
-  border: none;
-  padding: 5px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.pagination button:disabled {
-  background: var(--spice-button-disabled);
-  cursor: not-allowed;
-}
-
-.actionButtons {
-  display: flex;
-  margin: 15px 0;
-}
-
-.filterContainer button {
-  background: var(--spice-button);
-  color: var(--spice-text);
-  border: none;
-  padding: 6px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-/* Update mismatchList to handle continuous scrolling */
-.mismatchList {
-  overflow-y: auto;
-  height: 100%;
-  padding-right: 5px;
-}
-
-/* Styling for ignored tracks section */
-h3 {
-  display: flex;
-  align-items: center;
-  margin-bottom: 15px;
-}
-
-h3 button {
-  margin-left: 10px;
-  font-size: 0.8em;
 }
 
 .discrepancy {
@@ -469,108 +636,51 @@ h3 button {
   padding: 8px;
   border-radius: 4px;
   background-color: rgba(255, 152, 0, 0.1);
-  border-left: 4px solid #ff9800;
+  border-left: 4px solid #ffa500;
 }
 
-.unidentifiedNote {
-  margin-top: 6px;
-  font-size: 0.9em;
-  color: #d32f2f;
+.discrepancy.warning {
+  background-color: rgba(255, 152, 0, 0.1);
 }
 
-.warning {
-  color: #d32f2f;
-}
-
+.missingTracks,
+.unexpectedTracks,
 .notDownloadedTracks {
-  margin-top: 8px;
-  padding: 8px;
-  /* background-color: #f8f4e3; */
-  border-radius: 4px;
-}
-
-.notDownloadedTracks h4 {
-  margin-top: 0;
-  margin-bottom: 4px;
-  color: #8b6e4e;
-}
-
-.notDownloadedTracks ul {
-  margin: 0;
-  padding-left: 20px;
-}
-
-.duplicatesContainer {
-  display: flex;
-  flex-direction: column;
-  overflow: auto;
-  height: calc(60vh - 200px);
-  min-height: 300px;
-}
-
-.duplicatesContainer h3 {
   margin-bottom: 16px;
 }
 
-.searchContainer {
-  margin-top: 20px;
-}
-
-.searchBox {
-  display: flex;
-  margin-bottom: 20px;
-}
-
-.searchInput {
-  flex: 1;
-  padding: 10px;
-  border: 1px solid #333;
-  border-radius: 4px;
-  background: #181818;
-  color: white;
-  margin-right: 10px;
-}
-
-.searchInput:focus {
-  outline: none;
-  border-color: var(--spice-button);
-}
-
-.searchButton {
-  padding: 10px 15px;
-  background: #1db954;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.searchButton:disabled {
-  background: #444;
-  cursor: not-allowed;
-}
-
-.clearSearchButton {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: none;
-  border: none;
+.missingTracks h4,
+.unexpectedTracks h4,
+.notDownloadedTracks h4 {
+  margin: 0 0 8px 0;
   color: var(--spice-text);
-  font-size: 16px;
-  cursor: pointer;
-  padding: 0 4px;
+  font-size: 14px;
 }
 
-.clearSearchButton:hover {
-  color: var(--spice-button-active);
+.missingTracks ul,
+.unexpectedTracks ul,
+.notDownloadedTracks ul {
+  padding-left: 20px;
+  margin: 0;
 }
 
-.noResults {
-  padding: 20px;
-  text-align: center;
-  color: #888;
+.missingTracks li,
+.unexpectedTracks li,
+.notDownloadedTracks li {
+  margin-bottom: 4px;
+  color: var(--spice-text);
+  font-size: 13px;
+}
+
+.moreItems {
+  font-style: italic;
+  color: var(--spice-subtext);
+}
+
+/* ===== FILE MANAGEMENT ===== */
+.filesList {
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .fileItem {
@@ -579,7 +689,7 @@ h3 button {
   align-items: center;
   padding: 8px 12px;
   margin-bottom: 4px;
-  background-color: rgba(0, 0, 0, 0.05);
+  background-color: rgba(0, 0, 0, 0.1);
   border-radius: 4px;
 }
 
@@ -590,22 +700,24 @@ h3 button {
 
 .fileName {
   font-weight: 500;
+  color: var(--spice-text);
 }
 
 .fileDuration {
   font-size: 0.9em;
-  color: #46ce6f;
+  color: var(--spice-subtext);
   margin-top: 4px;
 }
 
 .fileDurationShort {
   font-size: 0.9em;
-  color: #ff5252;
+  color: #e74c3c;
   margin-top: 4px;
+  font-weight: 600;
 }
 
 .deleteButton {
-  background-color: #ff5252;
+  background-color: #e74c3c;
   color: white;
   border: none;
   border-radius: 50%;
@@ -620,71 +732,37 @@ h3 button {
 }
 
 .deleteButton:hover {
-  background-color: #ff1744;
+  background-color: #c0392b;
 }
 
-.playlistLocation {
-  font-size: 0.85em;
-  color: #888;
-  margin-left: 8px;
-}
-
-.subHeader {
+/* ===== DUPLICATES CONTAINER ===== */
+.duplicatesContainer {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  overflow: auto;
+  height: calc(60vh - 200px);
+  min-height: 300px;
+}
+
+.duplicatesContainer h3 {
   margin-bottom: 16px;
+  color: var(--spice-text);
 }
 
-.lastUpdated {
-  font-size: 12px;
-  color: #999;
-}
-
-.refreshButton {
-  padding: 6px 12px;
-  background-color: #1db954;
-  color: white;
-  border: none;
+.duplicateWarning {
+  margin-top: 20px;
+  padding: 12px;
+  background: rgba(255, 152, 0, 0.1);
+  border-left: 4px solid #ffa500;
   border-radius: 4px;
-  cursor: pointer;
 }
 
-.refreshButton:hover {
-  background-color: #1ed760;
+.duplicateWarning p {
+  margin: 0;
+  color: var(--spice-text);
 }
 
-.refreshButton:disabled {
-  background-color: #1db95480;
-  cursor: not-allowed;
-}
-
-.playlistHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.summaryButton {
-  background-color: var(--spice-button);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  padding: 8px 12px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.summaryButton:hover {
-  background-color: var(--spice-button-active);
-}
-
-.summaryButton.active {
-  background-color: var(--spice-notification-error);
-}
-
+/* ===== TRACK SUMMARY ===== */
 .trackSummaryContainer {
   margin-top: 16px;
   border: 1px solid var(--spice-button-disabled);
@@ -698,8 +776,8 @@ h3 button {
 }
 
 .summaryHeader h4 {
-  margin-top: 0;
-  margin-bottom: 12px;
+  margin: 0 0 12px 0;
+  color: var(--spice-text);
 }
 
 .summaryFilters {
@@ -713,6 +791,11 @@ h3 button {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.filterGroup label {
+  color: var(--spice-text);
+  font-size: 14px;
 }
 
 .filterSelect {
@@ -747,13 +830,14 @@ h3 button {
 
 .trackTitle {
   font-size: 14px;
+  color: var(--spice-text);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .localBadge {
-  background-color: var(--spice-notification-warning);
+  background-color: #ffa500;
   color: black;
   font-size: 10px;
   padding: 2px 4px;
@@ -764,7 +848,6 @@ h3 button {
 .trackAlbum {
   font-size: 12px;
   color: var(--spice-subtext);
-  margin-top: 2px;
 }
 
 .issueCount {
@@ -778,6 +861,7 @@ h3 button {
 .playlistCount {
   font-weight: bold;
   font-size: 13px;
+  color: var(--spice-text);
 }
 
 .issueTypes {
@@ -787,7 +871,7 @@ h3 button {
 }
 
 .issueType {
-  background-color: var(--spice-notification-error);
+  background-color: #e74c3c;
   color: white;
   font-size: 10px;
   padding: 2px 6px;
@@ -804,6 +888,7 @@ h3 button {
 
 .playlistsHeader {
   font-weight: bold;
+  color: var(--spice-text);
 }
 
 .playlistsNames {
@@ -820,4 +905,117 @@ h3 button {
   padding: 1px 4px;
   border-radius: 3px;
   margin-left: 4px;
+}
+
+/* ===== MISMATCHES CONTAINER ===== */
+.mismatchesContainer {
+  display: flex;
+  flex-direction: column;
+  height: calc(60vh - 200px);
+  min-height: 400px;
+}
+
+.mismatchesContainer h3 {
+  margin-bottom: 16px;
+  color: var(--spice-text);
+}
+
+/* ===== PLAYLIST LIST STYLING ===== */
+.playlistList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.playlistItem {
+  margin-bottom: 16px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--spice-card);
+  /* Ensure proper containment */
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.playlistHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--spice-card);
+  border-bottom: 1px solid var(--spice-button-disabled);
+  /* Ensure content stays within bounds */
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 48px; /* Minimum height for consistent layout */
+}
+
+.playlistName {
+  font-weight: bold;
+  color: var(--spice-text);
+  /* Prevent text overflow */
+  flex: 1;
+  margin-right: 12px;
+  min-width: 0; /* Allow flex item to shrink */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlistLocation {
+  font-size: 0.85em;
+  color: var(--spice-subtext);
+  margin-left: 8px;
+}
+
+.playlistStatus {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Prevent shrinking */
+  flex-shrink: 0;
+}
+
+.missing,
+.mismatch {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap; /* Prevent text wrapping */
+}
+
+.missing {
+  color: #e74c3c;
+}
+
+.mismatch {
+  color: #ffa500;
+}
+
+.regenerateButton {
+  background-color: #1e90ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  /* Ensure button doesn't overflow */
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.regenerateButton:hover {
+  background-color: #1a7ee0;
+}
+
+.playlistDetails {
+  padding: 16px;
+  /* Ensure details are properly contained */
+  width: 100%;
+  box-sizing: border-box;
 }

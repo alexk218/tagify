@@ -1011,14 +1011,19 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <h2>Track & Playlist Validation</h2>
-      </div>
-
-      <div className={styles.subHeader}>
-        <div className={styles.lastUpdated}>{getLastUpdatedText()}</div>
-        <button className={styles.refreshButton} onClick={handleManualRefresh} disabled={isLoading}>
-          {isLoading ? "Refreshing..." : "Refresh Data"}
-        </button>
+        <div className={styles.titleWithStatus}>
+          <h2>Track & Playlist Validation</h2>
+          <span className={styles.lastUpdated}>{getLastUpdatedText()}</span>
+        </div>
+        <div className={styles.headerActions}>
+          <button
+            className={styles.refreshButton}
+            onClick={handleManualRefresh}
+            disabled={isLoading}
+          >
+            {isLoading ? "Refreshing..." : "Refresh Data"}
+          </button>
+        </div>
       </div>
 
       {isLoading ? (

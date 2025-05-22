@@ -25,16 +25,6 @@
   color: var(--spice-text);
 }
 
-.missingTracksButton {
-  background-color: #1976d2; /* Slightly different blue */
-  color: white;
-}
-
-.missingTracksButton:hover {
-  background-color: #1565c0; /* Darker on hover */
-  opacity: 0.95;
-}
-
 .lastSaved {
   font-size: 14px;
   color: var(--spice-subtext);
@@ -48,6 +38,7 @@
   flex-wrap: wrap;
 }
 
+/* Base button style matching your app pattern */
 .actionButton {
   background-color: rgba(0, 0, 0, 0.2);
   color: var(--spice-text);
@@ -60,7 +51,7 @@
   transition: background-color 0.2s ease;
 }
 
-.actionButton:hover {
+.actionButton:hover:not(:disabled) {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
@@ -69,14 +60,19 @@
   cursor: not-allowed;
 }
 
+/* Specific button variants */
 .rekordboxButton {
-  background-color: #1e90ff; /* Dodger blue, consistent with other blue elements */
+  background-color: #1e90ff;
   color: white;
 }
 
-.rekordboxButton:hover {
-  background-color: #1a7ee0; /* Slightly darker blue on hover */
-  opacity: 0.95;
+.rekordboxButton:hover:not(:disabled) {
+  background-color: #1a7ee0;
+}
+
+.activeButton {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
 }
 
 .info {
@@ -93,19 +89,4 @@
 
 .info p:last-child {
   margin-bottom: 0;
-}
-
-/* Style for active/selected buttons */
-.activeButton {
-  background-color: rgba(255, 255, 255, 0.1);
-  color: white;
-}
-
-.activeButton:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-}
-
-/* Add a nice transition effect for button state changes */
-.actionButton {
-  transition: all 0.2s ease;
 }

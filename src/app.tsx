@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import styles from "./app.module.css";
+import "./styles/globals.css";
 import TrackDetails from "./components/TrackDetails";
 import TagSelector from "./components/TagSelector";
 import TrackList from "./components/TrackList";

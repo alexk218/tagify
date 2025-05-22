@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
 import styles from "./DataManager.module.css";
+import "../styles/globals.css";
 import { TagDataStructure } from "../hooks/useTagData";
 import { syncAllTaggedTracks } from "../utils/PlaylistManager";
 import { refreshPlaylistCache } from "../utils/PlaylistCache";

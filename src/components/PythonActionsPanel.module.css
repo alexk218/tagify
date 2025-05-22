@@ -6,30 +6,32 @@
   margin: 20px 0;
 }
 
-/* add vertical space between panels (ValidationPanel) */
-.container + .modalOverlay,
-.container + div {
-  margin-top: 24px;
+.headerButtons {
+  position: absolute;
+  top: 10px;
+  right: 10px;
 }
 
-.validationPanel {
-  margin-top: 30px;
-  padding-top: 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+.settingsButton {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--spice-text);
 }
 
+/* Status Indicator */
 .statusIndicator {
-  margin-bottom: 16px;
-  padding: 8px;
-  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
 }
 
 .statusDot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  margin-right: 8px;
 }
 
 .connected {
@@ -56,33 +58,35 @@
   background-color: #f39c12;
 }
 
-.settings,
-.actions,
-.results {
-  margin-bottom: 24px;
-}
-
-.formGroup {
-  margin-bottom: 12px;
-}
-
-.formGroup label {
-  display: block;
-  margin-bottom: 4px;
-  font-weight: 500;
-}
-
-.formGroup input {
-  width: 100%;
-  padding: 8px;
-  border-radius: 4px;
-  border: 1px solid var(--spice-button-disabled);
-  background: var(--spice-main);
+.connectButton {
+  background-color: rgba(0, 0, 0, 0.2);
   color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
 }
 
+.connectButton:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.connectButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Action Groups */
 .actionGroup {
   margin-bottom: 16px;
+}
+
+.actionGroup h4 {
+  margin-bottom: 8px;
+  color: var(--spice-text);
 }
 
 .actionButtons {
@@ -92,39 +96,50 @@
   margin-bottom: 8px;
 }
 
+/* Standardized button using your app pattern */
 .actionButton {
-  padding: 8px 16px;
-  border-radius: 4px;
-  background: var(--spice-button);
+  background-color: rgba(0, 0, 0, 0.2);
   color: var(--spice-text);
   border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background-color 0.2s ease;
 }
 
-.actionButton:hover {
-  background: var(--spice-button-active);
+.actionButton:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .actionButton:disabled {
-  background: var(--spice-button-disabled);
-  cursor: not-allowed;
   opacity: 0.7;
+  cursor: not-allowed;
 }
 
+/* Button variants */
 .dangerButton {
-  background: #e74c3c;
+  background-color: #e74c3c;
+  color: white;
 }
 
-.dangerButton:hover {
-  background: #c0392b;
+.dangerButton:hover:not(:disabled) {
+  background-color: #c0392b;
 }
 
-.warning {
-  color: #f39c12;
-  font-style: italic;
-  font-size: 0.9em;
-  margin-top: 4px;
+.primaryButton {
+  background-color: #1e90ff;
+  color: white;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background-color: #1a7ee0;
+}
+
+/* Results */
+.results {
+  margin-top: 24px;
 }
 
 .result {
@@ -143,391 +158,46 @@
   border-left: 4px solid #e74c3c;
 }
 
-/* Confirmation Panel Styles */
-.confirmationPanel {
-  margin-top: 20px;
-  padding: 20px;
-  background-color: var(--spice-highlight-elevated);
-  border-radius: 8px;
-  border: 1px solid var(--spice-button);
-}
-
-.confirmationPanel h3 {
-  margin-top: 0;
-  margin-bottom: 16px;
-  color: var(--spice-text);
-}
-
-.confirmationPanel h4 {
-  margin-top: 16px;
-  margin-bottom: 8px;
-  color: var(--spice-text);
-}
-
-.confirmationPanel h5 {
-  margin-top: 12px;
-  margin-bottom: 8px;
-  font-size: 0.9em;
-  color: var(--spice-text);
-}
-
-.confirmationButtons {
-  display: flex;
-  gap: 10px;
-  margin-top: 20px;
-}
-
-.confirmButton,
-.cancelButton {
-  padding: 8px 16px;
-  border-radius: 4px;
-  border: none;
-  cursor: pointer;
-  font-weight: bold;
-  transition: background-color 0.2s;
-}
-
-.confirmButton {
-  background-color: #1db954;
-  color: white;
-}
-
-.confirmButton:hover {
-  background-color: #1ed760;
-}
-
-.cancelButton {
-  background-color: #e3e3e3;
-  color: #333;
-}
-
-.cancelButton:hover {
-  background-color: #d1d1d1;
-}
-
-.sampleChanges {
-  margin-bottom: 16px;
-}
-
-.trackList,
-.itemList {
-  max-height: 400px;
-  overflow-y: auto;
-  border: 1px solid var(--spice-button-disabled);
-  border-radius: 4px;
-  padding: 8px;
-  background-color: var(--spice-card);
-}
-
-.trackItem:last-child,
-.item:last-child,
-.moreTracks,
-.moreItems {
-  border-bottom: none;
-}
-
-.moreTracks,
-.moreItems {
-  color: var(--spice-subtext);
+.warning {
+  color: #f39c12;
   font-style: italic;
-  padding: 4px 8px;
-}
-
-.allAnalyses,
-.specificAnalysis {
-  margin-bottom: 16px;
-}
-
-.loadMoreContainer {
-  display: flex;
-  justify-content: center;
-  padding: 8px 0;
-  border-top: 1px solid var(--spice-button-disabled);
-  margin-top: 8px;
-}
-
-.loadMoreButton {
-  background-color: transparent;
-  border: 1px solid var(--spice-button);
-  color: var(--spice-text);
-  padding: 4px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.loadMoreButton:hover {
-  background-color: var(--spice-button);
-}
-
-.trackItem,
-.item {
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--spice-button-disabled);
-}
-
-.addTo {
-  color: #2ecc71;
   font-size: 0.9em;
-  margin-left: 12px;
-}
-
-.removeFrom {
-  color: #e74c3c;
-  font-size: 0.9em;
-  margin-left: 12px;
-}
-
-/* Accordion styles */
-.accordion {
-  border: 1px solid var(--spice-button-disabled);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.accordionItem {
-  border-bottom: 1px solid var(--spice-button-disabled);
-}
-
-.accordionItem:last-child {
-  border-bottom: none;
-}
-
-.accordionHeader {
-  padding: 10px 15px;
-  background-color: var(--spice-card);
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: 500;
-}
-
-.accordionHeader:hover {
-  background-color: var(--spice-highlight);
-}
-
-.accordionContent {
-  padding: 0;
-  background-color: var(--spice-card);
-  overflow: hidden;
-}
-
-.accordionExpanded,
-.accordionCollapsed {
-  font-size: 0.8em;
-  transition: transform 0.3s;
-}
-
-.fuzzyMatchContainer {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.fileInfo {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.fileName {
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-
-.progress {
-  font-size: 0.9em;
-  color: var(--spice-subtext);
-}
-
-.matchesList {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 400px;
-  overflow-y: auto;
-  padding: 8px;
-  border: 1px solid var(--spice-button-disabled);
-  border-radius: 4px;
-}
-
-.matchOption {
-  display: flex;
-  padding: 10px;
-  border-radius: 4px;
-  background-color: var(--spice-card);
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.matchOption:hover {
-  background-color: var(--spice-highlight);
-}
-
-.matchNumber {
-  margin-right: 10px;
-  font-weight: bold;
-  min-width: 20px;
-}
-
-.matchContent {
-  flex: 1;
-}
-
-.matchTitle {
-  font-weight: 500;
-}
-
-.matchAlbum {
-  font-size: 0.9em;
-  color: var(--spice-subtext);
-  margin-top: 2px;
-}
-
-.confidence {
   margin-top: 4px;
-  font-size: 0.8em;
-  color: var(--spice-text);
 }
 
-.loadingMatches {
-  text-align: center;
-  padding: 20px;
-  color: var(--spice-subtext);
-}
-
-.noMatches {
-  text-align: center;
-  padding: 20px;
-  color: var(--spice-subtext);
-  font-style: italic;
-}
-
-.matchingComplete {
-  text-align: center;
-  padding: 20px;
-}
-
-.summaryContainer {
-  padding: 16px;
-}
-
-.selectionsPreview {
-  margin: 16px 0;
-  border: 1px solid var(--spice-button-disabled);
-  border-radius: 4px;
-  padding: 12px;
-  background-color: var(--spice-card);
-}
-
-.selectionsContent {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.selectionItem {
-  padding: 8px;
-  border-bottom: 1px solid var(--spice-button-disabled);
-}
-
-.selectionItem:last-child {
-  border-bottom: none;
-}
-
-.selectionFile {
-  font-weight: 500;
-}
-
-.selectionTrackId {
-  font-size: 0.9em;
-  color: var(--spice-subtext);
-  margin-top: 2px;
-}
-
-.moreSelections {
-  text-align: center;
-  padding: 8px;
-  font-style: italic;
-  color: var(--spice-subtext);
-}
-
-.selectionConfidence {
-  font-size: 0.8em;
-  margin-top: 2px;
-}
-
-.matchText {
-  flex: 1;
-}
-
-.trackItemHeader {
-  font-weight: 500;
-  margin-bottom: 6px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--spice-button-disabled);
-}
-
-.changeIcon {
-  display: inline-block;
-  min-width: 16px;
-  text-align: center;
-  font-weight: bold;
-  margin-right: 6px;
-}
-
-.addTo {
-  color: #2ecc71;
-  font-size: 0.9em;
-  margin-left: 12px;
-  padding: 2px 0;
-}
-
-.removeFrom {
-  color: #e74c3c;
-  font-size: 0.9em;
-  margin-left: 12px;
-  padding: 2px 0;
-}
-
+/* Modal Overlay */
 .modalOverlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(0, 0, 0, 0.7);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
 }
 
+/* Settings Panel */
 .settingsPanel {
-  background-color: #fff;
+  background: var(--spice-card);
   border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-  padding: 20px;
+  padding: 24px;
   width: 500px;
   max-width: 90vw;
-  max-height: 90vh;
+  max-height: 80vh;
   overflow-y: auto;
+  border: 1px solid var(--spice-button-disabled);
 }
 
 .settingsHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   margin-bottom: 20px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #eee;
 }
 
 .settingsHeader h3 {
   margin: 0;
+  color: var(--spice-text);
 }
 
 .settingsForm {
@@ -544,34 +214,16 @@
 .formGroup label {
   font-weight: 500;
   margin-bottom: 4px;
+  color: var(--spice-text);
 }
 
 .formGroup input[type="text"] {
   padding: 8px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--spice-button-disabled);
   border-radius: 4px;
+  background: var(--spice-main);
+  color: var(--spice-text);
   font-size: 14px;
-}
-
-.rangeGroup {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.rangeGroup input[type="range"] {
-  flex: 1;
-}
-
-.rangeValue {
-  min-width: 60px;
-  text-align: right;
-}
-
-.settingDescription {
-  font-size: 12px;
-  color: #666;
-  margin-top: 4px;
 }
 
 .buttonGroup {
@@ -582,266 +234,43 @@
 }
 
 .saveButton {
-  background-color: #1db954;
+  background-color: #1e90ff;
   color: white;
   border: none;
   border-radius: 4px;
   padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
-  font-weight: 500;
+  transition: background-color 0.2s ease;
+}
+
+.saveButton:hover {
+  background-color: #1a7ee0;
 }
 
 .cancelButton {
-  background-color: #eee;
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
   border: none;
   border-radius: 4px;
   padding: 8px 16px;
-  cursor: pointer;
-}
-
-.settingsButton {
-  background: none;
-  border: none;
-  font-size: 18px;
-  cursor: pointer;
-  margin-right: 10px;
-}
-
-.headerButtons {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-}
-
-/* Styles for short tracks */
-.fileDurationShort {
-  color: #ff5252;
-  font-weight: bold;
-}
-
-.fileDuration {
-  color: #666;
-}
-
-.statusIndicator {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 15px;
-}
-
-.statusDot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 5px;
-}
-
-.connected {
-  color: #1ed760; /* Spotify green */
-}
-
-.connected .statusDot {
-  background-color: #1ed760;
-}
-
-.disconnected {
-  color: #ff5555; /* Red */
-}
-
-.disconnected .statusDot {
-  background-color: #ff5555;
-}
-
-.unknown {
-  color: #b3b3b3; /* Gray */
-}
-
-.unknown .statusDot {
-  background-color: #b3b3b3;
-}
-
-.connectButton {
-  padding: 5px 12px;
-  border-radius: 4px;
-  font-weight: bold;
-  cursor: pointer;
-  background-color: #333;
-  border: 1px solid #666;
-  color: white;
-  transition: all 0.2s;
-}
-
-.connectButton:hover {
-  background-color: #444;
-}
-
-.connectButton:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.connectButton.connected {
-  border-color: #1ed760;
-}
-
-.connectButton.disconnected {
-  border-color: #ff5555;
-}
-
-.sequentialHeader {
-  margin-bottom: 20px;
-  padding: 10px;
-  background-color: var(--spice-card);
-  border-radius: 4px;
-}
-
-.sequentialProgress {
-  display: flex;
-  justify-content: space-between;
-  position: relative;
-  padding: 10px 0;
-}
-
-.sequentialProgress::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background-color: var(--spice-button-disabled);
-  z-index: 0;
-}
-
-.sequentialStep {
-  background-color: var(--spice-card);
-  padding: 5px 10px;
-  border-radius: 4px;
-  border: 1px solid var(--spice-button-disabled);
-  position: relative;
-  z-index: 1;
-}
-
-.sequentialStep.active {
-  background-color: var(--spice-button);
-  border-color: var(--spice-button);
-  color: var(--spice-text);
-  font-weight: bold;
-}
-
-.sequentialStep.completed {
-  background-color: var(--spice-notification-success);
-  border-color: var(--spice-notification-success);
-  color: white;
-}
-
-.sequentialStatus {
-  padding: 10px;
-  background-color: var(--spice-card);
-  border-radius: 4px;
-  margin-bottom: 20px;
-}
-
-.progressBar {
-  height: 5px;
-  background-color: var(--spice-button-disabled);
-  border-radius: 2px;
-  overflow: hidden;
-  margin-top: 5px;
-}
-
-.progressFill {
-  height: 100%;
-  background-color: var(--spice-button);
-  transition: width 0.3s ease;
-}
-
-.syncOptionsPanel {
-  background: var(--spice-card);
-  border-radius: 8px;
-  padding: 24px;
-  width: 500px;
-  max-width: 90vw;
-  max-height: 80vh;
-  overflow-y: auto;
-  border: 1px solid var(--spice-border);
-}
-
-.syncOptionsHeader {
-  margin-bottom: 20px;
-}
-
-.syncOptionsHeader h3 {
-  margin: 0 0 8px 0;
-  color: var(--spice-text);
-}
-
-.syncOptionsHeader p {
-  margin: 0;
-  color: var(--spice-subtext);
   font-size: 14px;
-}
-
-.syncOptionsContent {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
-.syncOption {
-  display: flex;
-}
-
-.syncOptionButton {
-  width: 100%;
-  padding: 16px;
-  border: 2px solid var(--spice-border);
-  border-radius: 8px;
-  background: var(--spice-main);
+  font-weight: 600;
   cursor: pointer;
-  text-align: left;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease;
 }
 
-.syncOptionButton:hover {
-  border-color: var(--spice-accent);
-  background: var(--spice-highlight);
+.cancelButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
-.syncOptionButton.normalSync:hover {
-  border-color: var(--spice-button);
-}
-
-.syncOptionButton.forceSync:hover {
-  border-color: #ffa500;
-}
-
-.syncOptionTitle {
-  font-weight: bold;
-  color: var(--spice-text);
-  margin-bottom: 4px;
-  font-size: 16px;
-}
-
-.syncOptionDescription {
-  color: var(--spice-subtext);
-  font-size: 14px;
-  line-height: 1.4;
-}
-
-.syncOptionsFooter {
-  display: flex;
-  justify-content: flex-end;
-}
-
+/* Sequential Sync Progress */
 .sequentialSyncProgress {
   margin-top: 16px;
   padding: 16px;
   background: var(--spice-main);
-  border: 1px solid var(--spice-border);
+  border: 1px solid var(--spice-button-disabled);
   border-radius: 8px;
 }
 
@@ -880,19 +309,19 @@
 .progressStage.pending {
   background: var(--spice-card);
   color: var(--spice-subtext);
-  border: 1px solid var(--spice-border);
+  border: 1px solid var(--spice-button-disabled);
 }
 
 .progressStage.active {
-  background: var(--spice-button);
-  color: var(--spice-button-text);
-  border: 1px solid var(--spice-button);
+  background: #1e90ff;
+  color: white;
+  border: 1px solid #1e90ff;
 }
 
 .progressStage.completed {
-  background: #1db954;
+  background: #2ecc71;
   color: white;
-  border: 1px solid #1db954;
+  border: 1px solid #2ecc71;
 }
 
 .stageNumber {
@@ -921,4 +350,595 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ===== CONFIRMATION PANEL STYLES ===== */
+.confirmationPanel {
+  margin-top: 20px;
+  padding: 20px;
+  background-color: var(--spice-highlight-elevated);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.confirmationPanel h3 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  color: var(--spice-text);
+}
+
+.confirmationPanel h4 {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  color: var(--spice-text);
+}
+
+.confirmationPanel h5 {
+  margin-top: 12px;
+  margin-bottom: 8px;
+  font-size: 0.9em;
+  color: var(--spice-text);
+}
+
+.confirmationButtons {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.confirmButton {
+  background-color: #1e90ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.confirmButton:hover {
+  background-color: #1a7ee0;
+}
+
+/* ===== ANALYSIS DISPLAY STYLES ===== */
+.sampleChanges {
+  margin-bottom: 16px;
+}
+
+.trackList,
+.itemList {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  padding: 8px;
+  background-color: var(--spice-card);
+}
+
+.trackItem,
+.item {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.trackItem:last-child,
+.item:last-child {
+  border-bottom: none;
+}
+
+.trackItemHeader {
+  font-weight: 500;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.changeIcon {
+  display: inline-block;
+  min-width: 16px;
+  text-align: center;
+  font-weight: bold;
+  margin-right: 6px;
+}
+
+.addTo {
+  color: #2ecc71;
+  font-size: 0.9em;
+  margin-left: 12px;
+  padding: 2px 0;
+}
+
+.removeFrom {
+  color: #e74c3c;
+  font-size: 0.9em;
+  margin-left: 12px;
+  padding: 2px 0;
+}
+
+.deleteHeading {
+  color: #e74c3c;
+}
+
+.deleteItem {
+  background-color: rgba(231, 76, 60, 0.1);
+}
+
+/* ===== PAGINATION ===== */
+.loadMoreContainer {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--spice-button-disabled);
+  margin-top: 8px;
+}
+
+.loadMoreButton {
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.loadMoreButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ===== ACCORDION STYLES ===== */
+.accordion {
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.accordionItem {
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.accordionItem:last-child {
+  border-bottom: none;
+}
+
+.accordionHeader {
+  padding: 10px 15px;
+  background-color: var(--spice-card);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 500;
+  color: var(--spice-text);
+}
+
+.accordionHeader:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.accordionContent {
+  padding: 0;
+  background-color: var(--spice-card);
+  overflow: hidden;
+}
+
+.accordionExpanded,
+.accordionCollapsed {
+  font-size: 0.8em;
+  transition: transform 0.3s;
+}
+
+/* ===== FUZZY MATCHING STYLES ===== */
+.fuzzyMatchContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.fileInfo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.fileName {
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: var(--spice-text);
+}
+
+.progress {
+  font-size: 0.9em;
+  color: var(--spice-subtext);
+}
+
+.matchesList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+}
+
+.matchOption {
+  display: flex;
+  padding: 10px;
+  border-radius: 4px;
+  background-color: var(--spice-card);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.matchOption:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.matchNumber {
+  margin-right: 10px;
+  font-weight: bold;
+  min-width: 20px;
+  color: var(--spice-text);
+}
+
+.matchContent {
+  flex: 1;
+}
+
+.matchTitle {
+  font-weight: 500;
+  color: var(--spice-text);
+}
+
+.matchAlbum {
+  font-size: 0.9em;
+  color: var(--spice-subtext);
+  margin-top: 2px;
+}
+
+.confidence {
+  margin-top: 4px;
+  font-size: 0.8em;
+  color: var(--spice-text);
+}
+
+.loadingMatches {
+  text-align: center;
+  padding: 20px;
+  color: var(--spice-subtext);
+}
+
+.skipButton,
+.retryButton {
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  margin-top: 8px;
+}
+
+.skipButton:hover,
+.retryButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.noMatches {
+  text-align: center;
+  padding: 20px;
+  color: var(--spice-subtext);
+  font-style: italic;
+}
+
+.matchingComplete {
+  text-align: center;
+  padding: 20px;
+}
+
+.autoMatchedSection {
+  margin-bottom: 20px;
+  padding: 12px;
+  background-color: rgba(46, 204, 113, 0.1);
+  border-radius: 4px;
+  border-left: 4px solid #2ecc71;
+}
+
+.autoMatchedList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.autoMatchedItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+.moreMatches {
+  font-style: italic;
+  color: var(--spice-subtext);
+  text-align: center;
+  margin-top: 8px;
+}
+
+/* ===== SUMMARY & SELECTIONS ===== */
+.summaryContainer {
+  padding: 16px;
+}
+
+.selectionsContent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.selectionItem {
+  padding: 8px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  background-color: var(--spice-card);
+}
+
+.selectionItem:last-child {
+  border-bottom: none;
+}
+
+.selectionFile {
+  font-weight: 500;
+  color: var(--spice-text);
+}
+
+.selectionTrackId {
+  font-size: 0.9em;
+  color: var(--spice-subtext);
+  margin-top: 2px;
+}
+
+.selectionConfidence {
+  font-size: 0.8em;
+  margin-top: 2px;
+  color: var(--spice-text);
+}
+
+.autoMatchedPreview,
+.skippedFilesPreview {
+  margin-top: 16px;
+  padding: 12px;
+  background-color: var(--spice-card);
+  border-radius: 4px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.skippedItem {
+  padding: 4px 8px;
+  color: var(--spice-text);
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.skippedItem:last-child {
+  margin-bottom: 0;
+}
+
+/* ===== PAGINATION CONTROLS ===== */
+.paginationControls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 10px;
+  border-top: 1px solid var(--spice-button-disabled);
+}
+
+.paginationControls button {
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.paginationControls button:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.paginationControls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.paginationControls span {
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+/* ===== SEQUENTIAL SYNC SPECIFIC ===== */
+.sequentialHeader {
+  margin-bottom: 20px;
+  padding: 10px;
+  background-color: var(--spice-card);
+  border-radius: 4px;
+}
+
+.sequentialProgress {
+  display: flex;
+  justify-content: space-between;
+  position: relative;
+  padding: 10px 0;
+}
+
+.sequentialProgress::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--spice-button-disabled);
+  z-index: 0;
+}
+
+.sequentialStep {
+  background-color: var(--spice-card);
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--spice-button-disabled);
+  position: relative;
+  z-index: 1;
+}
+
+.sequentialStep.active {
+  background-color: #1e90ff;
+  border-color: #1e90ff;
+  color: white;
+  font-weight: bold;
+}
+
+.sequentialStep.completed {
+  background-color: #2ecc71;
+  border-color: #2ecc71;
+  color: white;
+}
+
+/* ===== ANALYSIS SECTIONS ===== */
+.allAnalyses,
+.specificAnalysis,
+.trackChanges,
+.playlistChanges,
+.associationChanges,
+.masterSyncAnalysis {
+  margin-bottom: 16px;
+}
+
+.changesSection {
+  margin-bottom: 12px;
+}
+
+.matchText {
+  flex: 1;
+}
+
+/* ===== SYNC OPTIONS POPUP ===== */
+.syncOptionsPanel {
+  background: var(--spice-card);
+  border-radius: 8px;
+  padding: 24px;
+  width: 500px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.syncOptionsHeader {
+  margin-bottom: 20px;
+}
+
+.syncOptionsHeader h3 {
+  margin: 0 0 8px 0;
+  color: var(--spice-text);
+}
+
+.syncOptionsHeader p {
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+.syncOptionsContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.syncOption {
+  display: flex;
+}
+
+.syncOptionButton {
+  width: 100%;
+  padding: 16px;
+  border: 2px solid var(--spice-button-disabled);
+  border-radius: 8px;
+  background: var(--spice-main);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+}
+
+.syncOptionButton:hover {
+  border-color: #1e90ff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.syncOptionButton.normalSync:hover {
+  border-color: #1e90ff;
+}
+
+.syncOptionButton.forceSync:hover {
+  border-color: #ffa500;
+}
+
+.syncOptionTitle {
+  font-weight: bold;
+  color: var(--spice-text);
+  margin-bottom: 4px;
+  font-size: 16px;
+}
+
+.syncOptionDescription {
+  color: var(--spice-subtext);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.syncOptionsFooter {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ===== RANGE INPUT STYLING ===== */
+.rangeGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rangeGroup input[type="range"] {
+  flex: 1;
+}
+
+.rangeValue {
+  min-width: 60px;
+  text-align: right;
+  color: var(--spice-text);
+}
+
+.settingDescription {
+  font-size: 12px;
+  color: var(--spice-subtext);
+  margin-top: 4px;
 }

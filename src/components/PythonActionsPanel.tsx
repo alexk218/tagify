@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import styles from "./PythonActionsPanel.module.css";
+import "../styles/globals.css";
 import ValidationPanel from "./ValidationPanel";
 import Portal from "../utils/Portal";
 import { useLocalStorage } from "../hooks/useLocalStorage";
