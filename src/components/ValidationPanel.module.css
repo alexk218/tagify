@@ -1019,3 +1019,93 @@
   width: 100%;
   box-sizing: border-box;
 }
+
+/* ALL PLAYLISTS SECTION */
+.viewButtons {
+  display: flex;
+  gap: 8px;
+}
+
+.viewButton {
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.viewButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.viewButton.active {
+  background-color: #1e90ff;
+  color: white;
+}
+
+.allPlaylistsContainer {
+  margin-top: 16px;
+}
+
+.allPlaylistsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.allPlaylistItem {
+  background: var(--spice-card);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.playlistStatusLine {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.playlistInfo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.playlistSummary {
+  font-size: 12px;
+  color: var(--spice-subtext);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trackCounts {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.playlistActions {
+  display: flex;
+  gap: 8px;
+}
+
+.statusGood {
+  color: #4ade80;
+  font-size: 16px;
+}
+
+.statusIssues {
+  color: #f87171;
+  font-size: 16px;
+}
+
+.statusMissing {
+  color: #fbbf24;
+  font-size: 16px;
+}

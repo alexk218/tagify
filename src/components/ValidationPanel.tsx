@@ -146,7 +146,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   const [playlistSearchQuery, setPlaylistSearchQuery] = useState<string>("");
 
-  const [showTrackSummary, setShowTrackSummary] = useState<boolean>(false);
+  const [currentView, setCurrentView] = useState<"playlists" | "tracks" | "all-playlists">(
+    "playlists"
+  );
   const [trackSummaryFilter, setTrackSummaryFilter] = useState<string>("all");
   const [trackSummarySort, setTrackSummarySort] = useState<string>("playlists-desc");
 
@@ -376,6 +378,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         const data = await onRefresh();
         if (data) {
           setPlaylistValidationResult(data);
+          // Store all playlists data for the comprehensive view
+          setAllPlaylistsData(data.playlist_analysis || []);
         }
       } else {
         const queryParams = new URLSearchParams({
@@ -393,6 +397,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         if (response.ok) {
           const data = await response.json();
           setPlaylistValidationResult(data);
+          setAllPlaylistsData(data.playlist_analysis || []);
           setCurrentTab("playlist");
         } else {
           const error = await response.json();
@@ -904,6 +909,92 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       console.error("Error deleting file:", error);
       Spicetify.showNotification("Error deleting file", true);
     }
+  };
+
+  const AllPlaylistsView = () => {
+    const allPlaylists = getFilteredPlaylists();
+
+    const getPlaylistStatusIcon = (playlist: PlaylistIssue) => {
+      if (!playlist.has_m3u) {
+        return (
+          <span className={styles.statusMissing} title="Missing M3U file">
+            ⚠️
+          </span>
+        );
+      }
+      if (playlist.needs_update) {
+        return (
+          <span className={styles.statusIssues} title="Has issues">
+            ❌
+          </span>
+        );
+      }
+      return (
+        <span className={styles.statusGood} title="No issues">
+          ✅
+        </span>
+      );
+    };
+
+    const getPlaylistSummary = (playlist: PlaylistIssue) => {
+      if (!playlist.has_m3u) {
+        return "Missing M3U file";
+      }
+      if (!playlist.needs_update) {
+        return "Up to date";
+      }
+
+      const issues = [];
+      if (playlist.tracks_missing_from_m3u.length > 0) {
+        issues.push(`${playlist.tracks_missing_from_m3u.length} missing`);
+      }
+      if (playlist.unexpected_tracks_in_m3u.length > 0) {
+        issues.push(`${playlist.unexpected_tracks_in_m3u.length} unexpected`);
+      }
+      if (playlist.not_downloaded_tracks?.length > 0) {
+        issues.push(`${playlist.not_downloaded_tracks.length} not downloaded`);
+      }
+
+      return issues.join(", ");
+    };
+
+    return (
+      <div className={styles.allPlaylistsContainer}>
+        <div className={styles.allPlaylistsList}>
+          {allPlaylists.map((playlist, index) => (
+            <div key={index} className={styles.allPlaylistItem}>
+              <div className={styles.playlistStatusLine}>
+                {getPlaylistStatusIcon(playlist)}
+                <div className={styles.playlistInfo}>
+                  <div className={styles.playlistName}>
+                    {playlist.name}
+                    {playlist.location && playlist.location !== "root" && (
+                      <span className={styles.playlistLocation}>({playlist.location})</span>
+                    )}
+                  </div>
+                  <div className={styles.playlistSummary}>
+                    {getPlaylistSummary(playlist)}
+                    <span className={styles.trackCounts}>
+                      • DB: {playlist.total_associations}• Local: {playlist.tracks_with_local_files}
+                      {playlist.has_m3u && ` • M3U: ${playlist.m3u_track_count}`}
+                    </span>
+                  </div>
+                </div>
+                <div className={styles.playlistActions}>
+                  <button
+                    className={styles.regenerateButton}
+                    onClick={() => regeneratePlaylist(playlist.id)}
+                    disabled={!playlist.has_m3u && playlist.total_associations === 0}
+                  >
+                    Regenerate
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   const TrackIssuesSummary = () => {
@@ -1906,13 +1997,33 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
               <div className={styles.playlistsContainer}>
                 <div className={styles.playlistHeader}>
-                  <h3>Playlist Issues</h3>
-                  <button
-                    className={`${styles.summaryButton} ${showTrackSummary ? styles.active : ""}`}
-                    onClick={() => setShowTrackSummary(!showTrackSummary)}
-                  >
-                    {showTrackSummary ? "Show Playlists View" : "Show Problematic Tracks Summary"}
-                  </button>
+                  <h3>Playlist Analysis</h3>
+                  <div className={styles.viewButtons}>
+                    <button
+                      className={`${styles.viewButton} ${
+                        currentView === "playlists" ? styles.active : ""
+                      }`}
+                      onClick={() => setCurrentView("playlists")}
+                    >
+                      Issues Only ({playlistValidationResult.summary.playlists_needing_update})
+                    </button>
+                    <button
+                      className={`${styles.viewButton} ${
+                        currentView === "tracks" ? styles.active : ""
+                      }`}
+                      onClick={() => setCurrentView("tracks")}
+                    >
+                      Track Summary
+                    </button>
+                    <button
+                      className={`${styles.viewButton} ${
+                        currentView === "all-playlists" ? styles.active : ""
+                      }`}
+                      onClick={() => setCurrentView("all-playlists")}
+                    >
+                      All Playlists ({playlistValidationResult.summary.total_playlists})
+                    </button>
+                  </div>
                 </div>
                 <div className={styles.searchBox}>
                   <input
@@ -1933,8 +2044,10 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   )}
                 </div>
                 {playlistValidationResult.playlist_analysis.length > 0 ? (
-                  showTrackSummary ? (
+                  currentView === "tracks" ? (
                     <TrackIssuesSummary />
+                  ) : currentView === "all-playlists" ? (
+                    <AllPlaylistsView />
                   ) : (
                     <div className={styles.playlistList}>
                       {getFilteredPlaylists()
