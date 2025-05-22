@@ -1514,6 +1514,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                       placeholder="Search by artist or title..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && searchTracks()}
                       className={styles.searchInput}
                     />
                     <button
