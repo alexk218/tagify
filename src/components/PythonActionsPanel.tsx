@@ -210,6 +210,20 @@ const PythonActionsPanel: React.FC = () => {
     results: {},
   });
 
+  const [sequentialSyncState, setSequentialSyncState] = useState<{
+    isActive: boolean;
+    currentStage: string;
+    completedStages: string[];
+    totalStages: string[];
+    startTime: number | null;
+  }>({
+    isActive: false,
+    currentStage: "",
+    completedStages: [],
+    totalStages: ["playlists", "tracks", "associations"],
+    startTime: null,
+  });
+
   // TODO: have a summary page at the end of all operations - shows everything that's been modified. saves to a txt or json file?
   // Optional: Add this if you want to persist details between stages
   const [sequentialSyncDetails, setSequentialSyncDetails] = useState<{
@@ -503,6 +517,14 @@ const PythonActionsPanel: React.FC = () => {
 
   const startSequentialSync = async () => {
     // Initialize the sequential process
+    setSequentialSyncState({
+      isActive: true,
+      currentStage: "initializing",
+      completedStages: [],
+      totalStages: ["playlists", "tracks", "associations"],
+      startTime: Date.now(),
+    });
+
     setSequentialProcess({
       active: true,
       stage: "start",
@@ -541,6 +563,13 @@ const PythonActionsPanel: React.FC = () => {
     } catch (err) {
       console.error("Error starting sequential sync:", err);
       Spicetify.showNotification(`Error: ${err || String(err)}`, true);
+      setSequentialSyncState({
+        isActive: false,
+        currentStage: "",
+        completedStages: [],
+        totalStages: ["playlists", "tracks", "associations"],
+        startTime: null,
+      });
       setSequentialProcess({
         active: false,
         stage: "",
@@ -550,6 +579,11 @@ const PythonActionsPanel: React.FC = () => {
   };
 
   const processSequentialStage = async (stage: string) => {
+    setSequentialSyncState((prev) => ({
+      ...prev,
+      currentStage: stage,
+    }));
+
     setSequentialProcess((prev) => ({
       ...prev,
       stage: stage,
@@ -606,6 +640,13 @@ const PythonActionsPanel: React.FC = () => {
       console.error(`Error processing stage ${stage}:`, err);
       Spicetify.showNotification(`Error: ${err || String(err)}`, true);
 
+      setSequentialSyncState({
+        isActive: false,
+        currentStage: "",
+        completedStages: [],
+        totalStages: ["playlists", "tracks", "associations"],
+        startTime: null,
+      });
       setSequentialProcess({
         active: false,
         stage: "",
@@ -745,6 +786,10 @@ const PythonActionsPanel: React.FC = () => {
 
         const result = await response.json();
 
+        setSequentialSyncState((prev) => ({
+          ...prev,
+          completedStages: [...prev.completedStages, data.stage],
+        }));
         // Store the sync result
         setSequentialProcess((prev) => ({
           ...prev,
@@ -755,12 +800,26 @@ const PythonActionsPanel: React.FC = () => {
         if (result.next_stage && result.next_stage !== "complete") {
           await processSequentialStage(result.next_stage);
         } else if (result.next_stage === "complete" || result.stage === "sync_complete") {
+          // Process completed
+          const endTime = Date.now();
+          const duration = sequentialSyncState.startTime
+            ? Math.round((endTime - sequentialSyncState.startTime) / 1000)
+            : 0;
+
+          Spicetify.showNotification(`Database sync completed successfully in ${duration}s`);
+
+          setSequentialSyncState({
+            isActive: false,
+            currentStage: "",
+            completedStages: [],
+            totalStages: ["playlists", "tracks", "associations"],
+            startTime: null,
+          });
           setSequentialProcess({
             active: false,
             stage: "",
             results: {},
           });
-          Spicetify.showNotification("Database sync completed successfully");
         } else {
           // If no next_stage is provided, end the process
           console.warn("No next_stage provided in result:", result);
@@ -2416,12 +2475,20 @@ const PythonActionsPanel: React.FC = () => {
                   master_playlist_id: settings.masterPlaylistId,
                 })
               }
-              disabled={isLoading["sync-database"] || serverStatus !== "connected"}
+              disabled={
+                isLoading["sync-database"] ||
+                serverStatus !== "connected" ||
+                sequentialSyncState.isActive
+              }
             />
             <ActionButton
               label="Clear Database"
               onClick={() => performAction("sync-database", { action: "clear" })}
-              disabled={isLoading["sync-database"] || serverStatus !== "connected"}
+              disabled={
+                isLoading["sync-database"] ||
+                serverStatus !== "connected" ||
+                sequentialSyncState.isActive
+              }
               className={styles.dangerButton}
             />
             <ActionButton
@@ -2431,7 +2498,11 @@ const PythonActionsPanel: React.FC = () => {
                   action: "playlists",
                 })
               }
-              disabled={isLoading["sync-database"] || serverStatus !== "connected"}
+              disabled={
+                isLoading["sync-database"] ||
+                serverStatus !== "connected" ||
+                sequentialSyncState.isActive
+              }
             />
             <ActionButton
               label="Sync Tracks Only"
@@ -2441,7 +2512,11 @@ const PythonActionsPanel: React.FC = () => {
                   master_playlist_id: settings.masterPlaylistId,
                 })
               }
-              disabled={isLoading["sync-database"] || serverStatus !== "connected"}
+              disabled={
+                isLoading["sync-database"] ||
+                serverStatus !== "connected" ||
+                sequentialSyncState.isActive
+              }
             />
             <ActionButton
               label="Sync Associations Only"
@@ -2451,9 +2526,51 @@ const PythonActionsPanel: React.FC = () => {
                   master_playlist_id: settings.masterPlaylistId,
                 })
               }
-              disabled={isLoading["sync-database"] || serverStatus !== "connected"}
+              disabled={
+                isLoading["sync-database"] ||
+                serverStatus !== "connected" ||
+                sequentialSyncState.isActive
+              }
             />
           </div>
+
+          {sequentialSyncState.isActive && (
+            <div className={styles.sequentialSyncProgress}>
+              <div className={styles.progressHeader}>
+                <span className={styles.progressTitle}>Database Sync in Progress</span>
+                {sequentialSyncState.startTime && (
+                  <span className={styles.progressTime}>
+                    {Math.round((Date.now() - sequentialSyncState.startTime) / 1000)}s elapsed
+                  </span>
+                )}
+              </div>
+              <div className={styles.progressStages}>
+                {sequentialSyncState.totalStages.map((stage, index) => (
+                  <div
+                    key={stage}
+                    className={`${styles.progressStage} ${
+                      sequentialSyncState.completedStages.includes(stage)
+                        ? styles.completed
+                        : sequentialSyncState.currentStage === stage
+                        ? styles.active
+                        : styles.pending
+                    }`}
+                  >
+                    <span className={styles.stageNumber}>{index + 1}</span>
+                    <span className={styles.stageName}>
+                      {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                    </span>
+                    {sequentialSyncState.completedStages.includes(stage) && (
+                      <span className={styles.stageCheck}>✓</span>
+                    )}
+                    {sequentialSyncState.currentStage === stage && (
+                      <span className={styles.stageSpinner}>⟳</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className={styles.actionGroup}>

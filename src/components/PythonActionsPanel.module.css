@@ -836,3 +836,89 @@
   display: flex;
   justify-content: flex-end;
 }
+
+.sequentialSyncProgress {
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--spice-main);
+  border: 1px solid var(--spice-border);
+  border-radius: 8px;
+}
+
+.progressHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.progressTitle {
+  font-weight: bold;
+  color: var(--spice-text);
+}
+
+.progressTime {
+  font-size: 12px;
+  color: var(--spice-subtext);
+}
+
+.progressStages {
+  display: flex;
+  gap: 8px;
+}
+
+.progressStage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.progressStage.pending {
+  background: var(--spice-card);
+  color: var(--spice-subtext);
+  border: 1px solid var(--spice-border);
+}
+
+.progressStage.active {
+  background: var(--spice-button);
+  color: var(--spice-button-text);
+  border: 1px solid var(--spice-button);
+}
+
+.progressStage.completed {
+  background: #1db954;
+  color: white;
+  border: 1px solid #1db954;
+}
+
+.stageNumber {
+  font-weight: bold;
+  min-width: 16px;
+  text-align: center;
+}
+
+.stageName {
+  font-weight: 500;
+}
+
+.stageCheck {
+  color: white;
+  font-weight: bold;
+}
+
+.stageSpinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
