@@ -152,17 +152,31 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   // Run validation when component mounts
   useEffect(() => {
-    // Load data on tab change only if we don't have it already
-    if (currentTab === "track") {
-      if (!trackValidationResult) {
-        validateTrackMetadata(true, false); // reset page, don't force refresh
-      }
-    } else if (currentTab === "playlist") {
-      if (!playlistValidationResult) {
-        validatePlaylists(false); // don't force refresh
-      }
+    if (onRefresh) {
+      console.log("ValidationPanel - validationType changed, loading data for:", validationType);
+      onRefresh(false)
+        .then((data) => {
+          if (data) {
+            if (validationType === "track") {
+              setTrackValidationResult(data);
+              setFilesMissingTrackId(data.files_missing_trackid || []);
+              if (data.potential_mismatches) {
+                updateFilteredMismatches(
+                  data.potential_mismatches,
+                  ignoredTrackPaths,
+                  currentSection === "ignored"
+                );
+              }
+            } else {
+              setPlaylistValidationResult(data);
+            }
+          }
+        })
+        .catch((error) => {
+          console.error("Error loading data:", error);
+        });
     }
-  }, [currentTab]);
+  }, [validationType, onRefresh]);
 
   useEffect(() => {
     // Handle initial cached data
@@ -319,7 +333,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         });
 
         const response = await fetch(`${serverUrl}/api/validation/track-metadata?${queryParams}`, {
-          method: "GET", // Changed from POST to GET
+          method: "GET",
           headers: {
             "Content-Type": "application/json",
           },
@@ -1063,6 +1077,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                 </div>
               </div>
 
+              {/* POTENTIAL MISMATCHES BUTTON */}
               <div className={styles.tabs}>
                 <button
                   className={`${styles.tab} ${
@@ -1093,6 +1108,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                 >
                   Potential Mismatches ({trackValidationResult?.summary.potential_mismatches || 0})
                 </button>
+                {/* MISSING TRACKID BUTTON */}
                 <button
                   className={`${styles.tab} ${currentSection === "missing" ? styles.active : ""}`}
                   onClick={() => {
@@ -1106,8 +1122,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     }
                   }}
                 >
-                  Missing TrackId ({trackValidationResult?.summary.files_without_track_id || 0})
+                  Missing TrackId ({filesMissingTrackId.length})
                 </button>
+                {/* CONFIRMED TRACKS BUTTON */}
                 <button
                   className={`${styles.tab} ${currentSection === "ignored" ? styles.active : ""}`}
                   onClick={() => {
@@ -1115,22 +1132,22 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     setSelectedDuplicateTrackId(null);
                     setSelectedMismatch(null);
 
-                    updateFilteredMismatches(
-                      trackValidationResult?.potential_mismatches || [],
-                      ignoredTrackPaths,
-                      true
-                    );
+                    // Show all ignored tracks (no confidence filtering)
+                    const allIgnoredTracks =
+                      trackValidationResult?.potential_mismatches.filter((mismatch) =>
+                        ignoredTrackPaths.has(mismatch.full_path)
+                      ) || [];
 
-                    // Select first item after filteredMismatches has been updated
-                    setTimeout(() => {
-                      if (filteredMismatches.length > 0) {
-                        handleSelectMismatch(filteredMismatches[0]);
-                      }
-                    }, 0);
+                    setFilteredMismatches(allIgnoredTracks);
+
+                    if (allIgnoredTracks.length > 0) {
+                      handleSelectMismatch(allIgnoredTracks[0]);
+                    }
                   }}
                 >
                   Confirmed Tracks ({ignoredTrackPaths.size})
                 </button>
+                {/* DUPLICATE TRACKID BUTTON */}
                 <button
                   className={`${styles.tab} ${
                     currentSection === "duplicates" ? styles.active : ""
@@ -1144,6 +1161,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                 >
                   Duplicate TrackIds ({trackValidationResult?.summary.duplicate_track_ids || 0})
                 </button>
+                {/* SEARCH TRACKS BUTTON */}
                 <button
                   className={`${styles.tab} ${currentSection === "search" ? styles.active : ""}`}
                   onClick={() => {
@@ -1239,67 +1257,39 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
               ) : currentSection === "missing" ? (
                 // Missing TrackId section
                 <div className={styles.mismatchesContainer}>
-                  <div className={styles.filterContainer}>
-                    <label>
-                      Confidence Threshold:
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.05"
-                        value={confidenceThreshold}
-                        onChange={(e) => {
-                          setConfidenceThreshold(parseFloat(e.target.value));
-                          if (trackValidationResult?.potential_mismatches) {
-                            updateFilteredMismatches(
-                              trackValidationResult.potential_mismatches,
-                              ignoredTrackPaths,
-                              false // don't show ignored tracks in this section
-                            );
-                          }
-                        }}
-                      />
-                      <span>{confidenceThreshold.toFixed(2)}</span>
-                    </label>
-                  </div>
-
                   <h3>Files Missing TrackId</h3>
 
                   {filesMissingTrackId.length > 0 ? (
                     <div className={styles.splitView}>
                       <div className={styles.mismatchList}>
-                        {getFilteredMismatchesByConfidence(filesMissingTrackId, confidenceThreshold)
-                          .slice(0, page * pageSize)
-                          .map((file, index) => (
-                            <div
-                              key={index}
-                              className={`${styles.mismatchItem} ${
-                                selectedMismatch && selectedMismatch.file === file.file
-                                  ? styles.selected
-                                  : ""
-                              }`}
-                              onClick={() => handleSelectMismatch(file)}
-                            >
-                              <div className={styles.mismatchFile}>{file.file}</div>
-                              <div className={styles.mismatchDetails}>
-                                <div>
-                                  <strong>Reason:</strong>{" "}
-                                  {file.reason === "missing_track_id"
-                                    ? "No TrackId embedded"
-                                    : file.reason === "error_reading_tags"
-                                    ? "Error reading tags"
-                                    : file.reason}
-                                </div>
-                                <div>
-                                  <strong>Filename:</strong> {file.filename}
-                                </div>
+                        {filesMissingTrackId.slice(0, page * pageSize).map((file, index) => (
+                          <div
+                            key={index}
+                            className={`${styles.mismatchItem} ${
+                              selectedMismatch && selectedMismatch.file === file.file
+                                ? styles.selected
+                                : ""
+                            }`}
+                            onClick={() => handleSelectMismatch(file)}
+                          >
+                            <div className={styles.mismatchFile}>{file.file}</div>
+                            <div className={styles.mismatchDetails}>
+                              <div>
+                                <strong>Reason:</strong>{" "}
+                                {file.reason === "missing_track_id"
+                                  ? "No TrackId embedded"
+                                  : file.reason === "error_reading_tags"
+                                  ? "Error reading tags"
+                                  : file.reason}
+                              </div>
+                              <div>
+                                <strong>Filename:</strong> {file.filename}
                               </div>
                             </div>
-                          ))}
+                          </div>
+                        ))}
 
-                        {getFilteredMismatchesByConfidence(filesMissingTrackId, confidenceThreshold)
-                          .length >
-                          page * pageSize && (
+                        {filesMissingTrackId.length > page * pageSize && (
                           <div className={styles.loadMoreContainer}>
                             <button
                               className={styles.loadMoreButton}
@@ -1402,63 +1392,47 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
               ) : currentSection === "ignored" ? (
                 // Confirmed Tracks section
                 <div className={styles.mismatchesContainer}>
-                  <div className={styles.filterContainer}>
-                    <label>
-                      Confidence Threshold:
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.05"
-                        value={confidenceThreshold}
-                        onChange={(e) => {
-                          setConfidenceThreshold(parseFloat(e.target.value));
-                          if (trackValidationResult?.potential_mismatches) {
-                            updateFilteredMismatches(
-                              trackValidationResult.potential_mismatches,
-                              ignoredTrackPaths,
-                              currentSection === "ignored"
-                            );
-                          }
-                        }}
-                      />
-                      <span>{confidenceThreshold.toFixed(2)}</span>
-                    </label>
-                  </div>
-
-                  {filteredMismatches.length > 0 ? (
+                  {trackValidationResult?.potential_mismatches.filter((mismatch) =>
+                    ignoredTrackPaths.has(mismatch.full_path)
+                  ).length > 0 ? (
                     <div className={styles.splitView}>
                       <div className={styles.mismatchList}>
-                        {filteredMismatches.slice(0, page * pageSize).map((mismatch, index) => (
-                          <div
-                            key={index}
-                            className={`${styles.mismatchItem} ${
-                              selectedMismatch && selectedMismatch.file === mismatch.file
-                                ? styles.selected
-                                : ""
-                            }`}
-                            onClick={() => handleSelectMismatch(mismatch)}
-                          >
-                            <div className={styles.mismatchFile}>{mismatch.file}</div>
-                            <div className={styles.mismatchDetails}>
-                              <div>
-                                <strong>Embedded:</strong> {mismatch.embedded_artist_title}
-                              </div>
-                              <div>
-                                <strong>Filename:</strong> {mismatch.filename}
-                              </div>
-                              <div className={styles.confidenceBar}>
-                                <div
-                                  className={styles.confidenceFill}
-                                  style={{ width: `${mismatch.confidence * 100}%` }}
-                                ></div>
-                                <span>{(mismatch.confidence * 100).toFixed(0)}%</span>
+                        {trackValidationResult.potential_mismatches
+                          .filter((mismatch) => ignoredTrackPaths.has(mismatch.full_path))
+                          .slice(0, page * pageSize)
+                          .map((mismatch, index) => (
+                            <div
+                              key={index}
+                              className={`${styles.mismatchItem} ${
+                                selectedMismatch && selectedMismatch.file === mismatch.file
+                                  ? styles.selected
+                                  : ""
+                              }`}
+                              onClick={() => handleSelectMismatch(mismatch)}
+                            >
+                              <div className={styles.mismatchFile}>{mismatch.file}</div>
+                              <div className={styles.mismatchDetails}>
+                                <div>
+                                  <strong>Embedded:</strong> {mismatch.embedded_artist_title}
+                                </div>
+                                <div>
+                                  <strong>Filename:</strong> {mismatch.filename}
+                                </div>
+                                <div className={styles.confidenceBar}>
+                                  <div
+                                    className={styles.confidenceFill}
+                                    style={{ width: `${mismatch.confidence * 100}%` }}
+                                  ></div>
+                                  <span>{(mismatch.confidence * 100).toFixed(0)}%</span>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          ))}
 
-                        {hasMoreItems && (
+                        {trackValidationResult.potential_mismatches.filter((mismatch) =>
+                          ignoredTrackPaths.has(mismatch.full_path)
+                        ).length >
+                          page * pageSize && (
                           <div className={styles.loadMoreContainer}>
                             <button
                               className={styles.loadMoreButton}
