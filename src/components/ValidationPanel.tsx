@@ -378,8 +378,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         const data = await onRefresh();
         if (data) {
           setPlaylistValidationResult(data);
-          // Store all playlists data for the comprehensive view
-          setAllPlaylistsData(data.playlist_analysis || []);
         }
       } else {
         const queryParams = new URLSearchParams({
@@ -397,7 +395,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         if (response.ok) {
           const data = await response.json();
           setPlaylistValidationResult(data);
-          setAllPlaylistsData(data.playlist_analysis || []);
           setCurrentTab("playlist");
         } else {
           const error = await response.json();
