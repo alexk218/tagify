@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import styles from "./ValidationPanel.module.css";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 
@@ -210,6 +210,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [confirmedShortTracks, setConfirmedShortTracks] = useState<Set<string>>(
     new Set(JSON.parse(localStorage.getItem("tagify:confirmedShortTracks") || "[]") as string[])
   );
+
+  const bulkSearchCancelRef = useRef(false);
 
   const [bulkSearchState, setBulkSearchState] = useState<{
     isRunning: boolean;
@@ -731,6 +733,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       return;
     }
 
+    // Reset cancellation flag
+    bulkSearchCancelRef.current = false;
+
     setBulkSearchState({
       isRunning: true,
       currentIndex: 0,
@@ -742,8 +747,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     Spicetify.showNotification(`Starting bulk search for ${unsearchedTracks.length} tracks`);
 
     for (let i = 0; i < unsearchedTracks.length; i++) {
-      // Check if search was cancelled
-      if (bulkSearchState.cancelled) {
+      // Check if search was cancelled using the ref
+      if (bulkSearchCancelRef.current) {
+        Spicetify.showNotification("Bulk search cancelled");
         break;
       }
 
@@ -760,7 +766,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         await searchSingleTrackForBulk(track);
 
         // Wait between requests to respect rate limits (1.2 seconds)
-        if (i < unsearchedTracks.length - 1) {
+        if (i < unsearchedTracks.length - 1 && !bulkSearchCancelRef.current) {
           await new Promise((resolve) => setTimeout(resolve, 1200));
         }
       } catch (error) {
@@ -777,10 +783,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       cancelled: false,
     });
 
-    if (!bulkSearchState.cancelled) {
+    if (!bulkSearchCancelRef.current) {
       Spicetify.showNotification("Bulk search completed!");
-    } else {
-      Spicetify.showNotification("Bulk search cancelled");
     }
   };
 
@@ -854,6 +858,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   };
 
   const cancelBulkSearch = () => {
+    bulkSearchCancelRef.current = true;
     setBulkSearchState((prev) => ({
       ...prev,
       cancelled: true,
@@ -1838,11 +1843,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                         <strong>Status:</strong> {selectedTrack.status_message}
                       </div>
                     )}
-                    {selectedTrack.total_versions_found && selectedTrack.total_versions_found > 0 && (
-                      <div>
-                        <strong>Total Versions Found:</strong> {selectedTrack.total_versions_found}
-                      </div>
-                    )}
+                    {selectedTrack.total_versions_found &&
+                      selectedTrack.total_versions_found > 0 && (
+                        <div>
+                          <strong>Total Versions Found:</strong>{" "}
+                          {selectedTrack.total_versions_found}
+                        </div>
+                      )}
                   </div>
 
                   <div className={styles.actionButtons}>
