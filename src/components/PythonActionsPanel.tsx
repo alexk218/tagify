@@ -134,7 +134,9 @@ const PythonActionsPanel: React.FC = () => {
     "unknown"
   );
 
-  const [validationType, setValidationType] = useState<"track" | "playlist">("track");
+  const [validationType, setValidationType] = useState<"track" | "playlist" | "short-tracks">(
+    "track"
+  );
 
   const [userMatchSelections, setUserMatchSelections] = useState<
     { fileName: string; trackId: string; confidence: number }[]
@@ -185,20 +187,26 @@ const PythonActionsPanel: React.FC = () => {
     data: any;
   } | null>(null);
 
+  const [activeValidationRequests, setActiveValidationRequests] = useState<Set<string>>(new Set());
+
   const [validationResults, setValidationResults] = useLocalStorage<{
     track: any | null;
     playlist: any | null;
+    "short-tracks": any | null;
   }>("tagify:validationResults", {
     track: null,
     playlist: null,
+    "short-tracks": null,
   });
 
   const [validationTimestamps, setValidationTimestamps] = useLocalStorage<{
     track: number | null;
     playlist: number | null;
+    "short-tracks": any | null;
   }>("tagify:validationTimestamps", {
     track: null,
     playlist: null,
+    "short-tracks": null,
   });
 
   const [sequentialProcess, setSequentialProcess] = useState<{
@@ -985,21 +993,42 @@ const PythonActionsPanel: React.FC = () => {
     setValidationType("playlist");
   };
 
-  const fetchValidationData = async (type: "track" | "playlist", forceRefresh = false) => {
+  const fetchValidationData = async (
+    type: "track" | "playlist" | "short-tracks",
+    forceRefresh = false
+  ) => {
+    // Prevent multiple concurrent requests for the same validation type
+    if (activeValidationRequests.has(type)) {
+      console.log(`Validation request for ${type} already in progress, skipping`);
+      return null;
+    }
+
     // If we have data and aren't forcing a refresh, return the cached data
     if (!forceRefresh && validationResults[type]) {
       return validationResults[type];
     }
 
     try {
+      // Mark this request as active
+      setActiveValidationRequests((prev) => new Set([...prev, type]));
       setIsLoading((prev) => ({ ...prev, [`validate-${type}s`]: true }));
 
-      const endpoint = type === "track" ? "track-metadata" : "playlists";
+      let endpoint: string;
+      let queryParams: URLSearchParams;
 
-      const queryParams = new URLSearchParams({
-        masterTracksDir: settings.masterTracksDir,
-        playlistsDir: settings.playlistsDir,
-      });
+      if (type === "short-tracks") {
+        endpoint = "short-tracks";
+        queryParams = new URLSearchParams({
+          masterTracksDir: settings.masterTracksDir,
+          minLengthMinutes: settings.minTrackLengthMinutes.toString(),
+        });
+      } else {
+        endpoint = type === "track" ? "track-metadata" : "playlists";
+        queryParams = new URLSearchParams({
+          masterTracksDir: settings.masterTracksDir,
+          playlistsDir: settings.playlistsDir,
+        });
+      }
 
       const response = await fetch(
         `${settings.serverUrl}/api/validation/${endpoint}?${queryParams}`,
@@ -1008,6 +1037,8 @@ const PythonActionsPanel: React.FC = () => {
           headers: {
             "Content-Type": "application/json",
           },
+          // Add longer timeout for short tracks validation
+          signal: AbortSignal.timeout(type === "short-tracks" ? 300000 : 60000), // 5 minutes for short tracks, 1 minute for others
         }
       );
 
@@ -1037,6 +1068,12 @@ const PythonActionsPanel: React.FC = () => {
       Spicetify.showNotification(`Error validating ${type}s`, true);
       throw error;
     } finally {
+      // Remove from active requests
+      setActiveValidationRequests((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(type);
+        return newSet;
+      });
       setIsLoading((prev) => ({ ...prev, [`validate-${type}s`]: false }));
     }
   };
@@ -2606,6 +2643,15 @@ const PythonActionsPanel: React.FC = () => {
               label="Validate Playlists"
               onClick={openPlaylistValidation}
               disabled={serverStatus !== "connected"}
+            />
+            <ActionButton
+              label={
+                isLoading["validate-short-tracks"] ? "Scanning Tracks..." : "Validate Short Tracks"
+              }
+              onClick={() => {
+                setValidationType("short-tracks");
+              }}
+              disabled={serverStatus !== "connected" || isLoading["validate-short-tracks"]}
             />
           </div>
         </div>

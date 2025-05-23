@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import styles from "./ValidationPanel.module.css";
+import { useLocalStorage } from "../hooks/useLocalStorage";
 
 interface PotentialMismatch {
   file: string;
@@ -89,12 +90,59 @@ interface SummaryTrackIssue {
   unexpectedInM3u: boolean;
 }
 
+interface ShortTrack {
+  file: string;
+  full_path: string;
+  artist: string;
+  title: string;
+  duration_seconds: number;
+  duration_formatted: string;
+  track_id: string | null;
+  extended_versions_found: ExtendedVersion[];
+  has_longer_versions: boolean;
+  discogs_search_completed: boolean;
+  search_error: string | null;
+  track_found_on_discogs?: boolean;
+  total_versions_found?: number;
+  status_message?: string;
+  status_type?:
+    | "not_searched"
+    | "searching"
+    | "not_found"
+    | "no_extended"
+    | "extended_found"
+    | "error";
+}
+
+interface ExtendedVersion {
+  artist: string;
+  title: string;
+  duration_seconds: number;
+  duration_formatted: string;
+  release_title: string;
+  release_year: number;
+  formats: string[];
+  labels: string[];
+  discogs_url: string;
+  mix_type: string;
+}
+
+interface ShortTracksValidationResult {
+  success: boolean;
+  summary: {
+    total_files: number;
+    short_tracks: number;
+    min_length_minutes: number;
+  };
+  short_tracks: ShortTrack[];
+}
+
 interface ValidationPanelProps {
   serverUrl: string;
   masterTracksDir: string;
   playlistsDir: string;
   minTrackLengthMinutes: number;
-  validationType?: "track" | "playlist";
+  validationType?: "track" | "playlist" | "short-tracks";
   cachedData?: any | null;
   lastUpdated?: number | null;
   onRefresh?: (forceRefresh?: boolean) => Promise<any>;
@@ -110,7 +158,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   lastUpdated = null,
   onRefresh,
 }) => {
-  const [currentTab, setCurrentTab] = useState<"track" | "playlist">(validationType);
+  const [currentTab, setCurrentTab] = useState<"track" | "playlist" | "short-tracks">(
+    validationType
+  );
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [trackValidationResult, setTrackValidationResult] = useState<TrackValidationResult | null>(
     validationType === "track" && cachedData ? cachedData : null
@@ -140,7 +190,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [currentSection, setCurrentSection] = useState<
-    "mismatches" | "ignored" | "missing" | "duplicates" | "search"
+    | "mismatches"
+    | "ignored"
+    | "missing"
+    | "duplicates"
+    | "search"
+    | "short-tracks"
+    | "confirmed-short"
   >("mismatches");
   const [filesMissingTrackId, setFilesMissingTrackId] = useState<PotentialMismatch[]>([]);
 
@@ -152,10 +208,38 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [trackSummaryFilter, setTrackSummaryFilter] = useState<string>("all");
   const [trackSummarySort, setTrackSummarySort] = useState<string>("playlists-desc");
 
+  const [shortTracksValidationResult, setShortTracksValidationResult] =
+    useState<ShortTracksValidationResult | null>(null);
+  const [confirmedShortTracks, setConfirmedShortTracks] = useState<Set<string>>(
+    new Set(JSON.parse(localStorage.getItem("tagify:confirmedShortTracks") || "[]"))
+  );
+
+  const [shortTracksSearchResults, setShortTracksSearchResults] = useLocalStorage<
+    Record<
+      string,
+      {
+        status_type:
+          | "not_searched"
+          | "searching"
+          | "not_found"
+          | "no_extended"
+          | "extended_found"
+          | "error";
+        status_message: string;
+        track_found_on_discogs: boolean;
+        total_versions_found: number;
+        extended_versions_found: ExtendedVersion[];
+        has_longer_versions: boolean;
+        search_date: string;
+      }
+    >
+  >("tagify:shortTracksSearchResults", {});
+
+  const [showShortTracksBackup, setShowShortTracksBackup] = useState(false);
+
   // Run validation when component mounts
   useEffect(() => {
     if (onRefresh) {
-      console.log("ValidationPanel - validationType changed, loading data for:", validationType);
       onRefresh(false)
         .then((data) => {
           if (data) {
@@ -169,8 +253,10 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   currentSection === "ignored"
                 );
               }
-            } else {
+            } else if (validationType === "playlist") {
               setPlaylistValidationResult(data);
+            } else if (validationType === "short-tracks") {
+              setShortTracksValidationResult(data);
             }
           }
         })
@@ -228,6 +314,19 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           .then((data) => {
             if (data) {
               setPlaylistValidationResult(data);
+            }
+          })
+          .catch((error) => {
+            console.error("Error refreshing data:", error);
+          })
+          .finally(() => {
+            setIsLoading(false);
+          });
+      } else if (currentTab === "short-tracks") {
+        onRefresh(true)
+          .then((data) => {
+            if (data) {
+              setShortTracksValidationResult(data);
             }
           })
           .catch((error) => {
@@ -439,6 +538,142 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   const isShortTrack = (duration: number) => {
     return duration < minTrackLengthMinutes * 60;
+  };
+
+  const confirmShortTrack = (filePath: string) => {
+    const newConfirmedTracks = new Set(confirmedShortTracks);
+    newConfirmedTracks.add(filePath);
+    setConfirmedShortTracks(newConfirmedTracks);
+    localStorage.setItem("tagify:confirmedShortTracks", JSON.stringify([...newConfirmedTracks]));
+    Spicetify.showNotification("Track confirmed as correct length");
+  };
+
+  const unconfirmShortTrack = (filePath: string) => {
+    const newConfirmedTracks = new Set(confirmedShortTracks);
+    newConfirmedTracks.delete(filePath);
+    setConfirmedShortTracks(newConfirmedTracks);
+    localStorage.setItem("tagify:confirmedShortTracks", JSON.stringify([...newConfirmedTracks]));
+    Spicetify.showNotification("Track removed from confirmed list");
+  };
+
+  const searchExtendedVersions = async (track: ShortTrack) => {
+    // Set searching status
+    const searchingStatus = {
+      status_type: "searching" as const,
+      status_message: "Searching Discogs...",
+      track_found_on_discogs: false,
+      total_versions_found: 0,
+      extended_versions_found: [],
+      has_longer_versions: false,
+      search_date: new Date().toISOString(),
+    };
+
+    setShortTracksSearchResults((prev) => ({
+      ...prev,
+      [track.full_path]: searchingStatus,
+    }));
+
+    try {
+      const response = await fetch(`${serverUrl}/api/validation/search-extended-versions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          artist: track.artist,
+          title: track.title,
+          currentDuration: track.duration_seconds,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+
+        // Save search results to localStorage
+        const searchResult = {
+          status_type: data.status_type || "error",
+          status_message: data.status_message || "Search completed",
+          track_found_on_discogs: data.track_found_on_discogs || false,
+          total_versions_found: data.total_versions_found || 0,
+          extended_versions_found: data.extended_versions || [],
+          has_longer_versions: data.has_longer_versions || false,
+          search_date: new Date().toISOString(),
+        };
+
+        setShortTracksSearchResults((prev) => ({
+          ...prev,
+          [track.full_path]: searchResult,
+        }));
+
+        // Show notification based on result
+        if (data.success) {
+          Spicetify.showNotification(data.status_message);
+        } else {
+          Spicetify.showNotification(`Search failed: ${data.error}`, true);
+        }
+      } else {
+        // Handle HTTP error
+        const errorResult = {
+          status_type: "error" as const,
+          status_message: "Request failed",
+          track_found_on_discogs: false,
+          total_versions_found: 0,
+          extended_versions_found: [],
+          has_longer_versions: false,
+          search_date: new Date().toISOString(),
+        };
+
+        setShortTracksSearchResults((prev) => ({
+          ...prev,
+          [track.full_path]: errorResult,
+        }));
+
+        Spicetify.showNotification("Failed to search for extended versions", true);
+      }
+    } catch (error) {
+      console.error("Error searching extended versions:", error);
+
+      const errorResult = {
+        status_type: "error" as const,
+        status_message: "Network error",
+        track_found_on_discogs: false,
+        total_versions_found: 0,
+        extended_versions_found: [],
+        has_longer_versions: false,
+        search_date: new Date().toISOString(),
+      };
+
+      setShortTracksSearchResults((prev) => ({
+        ...prev,
+        [track.full_path]: errorResult,
+      }));
+
+      Spicetify.showNotification("Error searching for extended versions", true);
+    }
+  };
+
+  const mergeTrackWithStoredResults = (track: ShortTrack): ShortTrack => {
+    const storedResult = shortTracksSearchResults[track.full_path];
+
+    if (storedResult) {
+      return {
+        ...track,
+        status_type: storedResult.status_type,
+        status_message: storedResult.status_message,
+        track_found_on_discogs: storedResult.track_found_on_discogs,
+        total_versions_found: storedResult.total_versions_found,
+        extended_versions_found: storedResult.extended_versions_found,
+        has_longer_versions: storedResult.has_longer_versions,
+        discogs_search_completed: storedResult.status_type !== "searching",
+      };
+    }
+
+    return {
+      ...track,
+      status_type: "not_searched" as const,
+      status_message: "Not searched yet",
+      discogs_search_completed: false,
+    };
   };
 
   const findPossibleMatches = async (mismatch: PotentialMismatch | SearchResult) => {
@@ -908,6 +1143,98 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     }
   };
 
+  const exportShortTracksData = () => {
+    const exportData = {
+      confirmed_short_tracks: [...confirmedShortTracks],
+      search_results: shortTracksSearchResults,
+      export_date: new Date().toISOString(),
+      min_track_length_minutes: minTrackLengthMinutes,
+      version: "1.0",
+    };
+
+    const dataStr = JSON.stringify(exportData, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(dataBlob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `short-tracks-data-${new Date().toISOString().split("T")[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    Spicetify.showNotification("Short tracks data exported successfully");
+  };
+
+  const importShortTracksData = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const importData = JSON.parse(e.target?.result as string);
+
+        // Validate the import data structure
+        if (
+          !importData.version ||
+          !importData.confirmed_short_tracks ||
+          !importData.search_results
+        ) {
+          Spicetify.showNotification("Invalid backup file format", true);
+          return;
+        }
+
+        // Ask user for confirmation
+        const confirmImport = window.confirm(
+          `This will import ${importData.confirmed_short_tracks.length} confirmed tracks and ${
+            Object.keys(importData.search_results).length
+          } search results. Continue?`
+        );
+
+        if (confirmImport) {
+          // Import confirmed tracks
+          const newConfirmedTracks = new Set(importData.confirmed_short_tracks);
+          setConfirmedShortTracks(newConfirmedTracks);
+          localStorage.setItem(
+            "tagify:confirmedShortTracks",
+            JSON.stringify([...newConfirmedTracks])
+          );
+
+          // Import search results
+          setShortTracksSearchResults(importData.search_results);
+
+          Spicetify.showNotification(
+            `Successfully imported ${
+              importData.confirmed_short_tracks.length
+            } confirmed tracks and ${Object.keys(importData.search_results).length} search results`
+          );
+        }
+      } catch (error) {
+        console.error("Error importing backup:", error);
+        Spicetify.showNotification("Error importing backup file", true);
+      }
+    };
+    reader.readAsText(file);
+
+    // Reset the input
+    event.target.value = "";
+  };
+
+  const clearAllShortTracksData = () => {
+    const confirmClear = window.confirm(
+      "This will clear all confirmed tracks and search results. This cannot be undone. Continue?"
+    );
+
+    if (confirmClear) {
+      setConfirmedShortTracks(new Set());
+      setShortTracksSearchResults({});
+      localStorage.removeItem("tagify:confirmedShortTracks");
+      Spicetify.showNotification("All short tracks data cleared");
+    }
+  };
+
   const AllPlaylistsView = () => {
     const allPlaylists = getFilteredPlaylists();
 
@@ -1092,6 +1419,406 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         ) : (
           <div className={styles.noIssues}>No tracks matching the selected filter</div>
         )}
+      </div>
+    );
+  };
+
+  const ShortTracksView: React.FC<{
+    shortTracks: ShortTrack[];
+    onConfirmTrack: (filePath: string) => void;
+    onSearchExtended: (track: ShortTrack) => void;
+    serverUrl: string;
+  }> = ({ shortTracks, onConfirmTrack, onSearchExtended, serverUrl }) => {
+    const [selectedTrack, setSelectedTrack] = useState<ShortTrack | null>(null);
+
+    return (
+      <div className={styles.splitView}>
+        <div className={styles.shortTracksList}>
+          {shortTracks.map((track, index) => (
+            <div
+              key={index}
+              className={`${styles.shortTrackItem} ${
+                selectedTrack && selectedTrack.full_path === track.full_path ? styles.selected : ""
+              }`}
+              onClick={() => setSelectedTrack(track)}
+            >
+              <div className={styles.trackInfo}>
+                <div className={styles.trackTitle}>
+                  {track.artist} - {track.title}
+                </div>
+                <div className={styles.trackDuration}>{track.duration_formatted}</div>
+                <div className={styles.trackFile}>{track.file}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className={styles.trackDetailPanel}>
+          {selectedTrack ? (
+            <div>
+              <h3>Track Details</h3>
+              <div className={styles.currentInfo}>
+                <div>
+                  <strong>Artist:</strong> {selectedTrack.artist}
+                </div>
+                <div>
+                  <strong>Title:</strong> {selectedTrack.title}
+                </div>
+                <div>
+                  <strong>Duration:</strong> {selectedTrack.duration_formatted}
+                </div>
+                <div>
+                  <strong>File:</strong> {selectedTrack.file}
+                </div>
+              </div>
+
+              <div className={styles.actionButtons}>
+                <button
+                  className={styles.primaryButton}
+                  onClick={() => onSearchExtended(selectedTrack)}
+                >
+                  Search for Extended Versions
+                </button>
+                <button
+                  className={styles.acceptButton}
+                  onClick={() => onConfirmTrack(selectedTrack.full_path)}
+                >
+                  Confirm as Correct Length
+                </button>
+              </div>
+
+              {selectedTrack.extended_versions_found.length > 0 && (
+                <div className={styles.extendedVersions}>
+                  <h4>Extended Versions Found:</h4>
+                  {selectedTrack.extended_versions_found.map((version, idx) => (
+                    <div key={idx} className={styles.extendedVersion}>
+                      <div>
+                        <strong>{version.title}</strong> - {version.duration_formatted}
+                      </div>
+                      <div>
+                        Release: {version.release_title} ({version.release_year})
+                      </div>
+                      <div>Mix Type: {version.mix_type}</div>
+                      <div>Labels: {version.labels.join(", ")}</div>
+                      <a href={version.discogs_url} target="_blank" rel="noopener noreferrer">
+                        View on Discogs
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className={styles.noSelection}>
+              Select a short track to see details and search for extended versions.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const ConfirmedShortTracksView: React.FC<{
+    confirmedTracks: ShortTrack[];
+    onUnconfirmTrack: (filePath: string) => void;
+  }> = ({ confirmedTracks, onUnconfirmTrack }) => {
+    return (
+      <div className={styles.confirmedTracksList}>
+        {confirmedTracks.length > 0 ? (
+          confirmedTracks.map((track, index) => (
+            <div key={index} className={styles.confirmedTrackItem}>
+              <div className={styles.trackInfo}>
+                <div className={styles.trackTitle}>
+                  {track.artist} - {track.title}
+                </div>
+                <div className={styles.trackDuration}>{track.duration_formatted}</div>
+              </div>
+              <button
+                className={styles.removeButton}
+                onClick={() => onUnconfirmTrack(track.full_path)}
+              >
+                Remove
+              </button>
+            </div>
+          ))
+        ) : (
+          <div className={styles.noIssues}>
+            No confirmed short tracks. Mark tracks as correct length to see them here.
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const ThreeColumnShortTracksView: React.FC<{
+    shortTracks: ShortTrack[];
+    onConfirmTrack: (filePath: string) => void;
+    onSearchExtended: (track: ShortTrack) => void;
+    serverUrl: string;
+  }> = ({ shortTracks, onConfirmTrack, onSearchExtended, serverUrl }) => {
+    const [selectedTrack, setSelectedTrack] = useState<ShortTrack | null>(null);
+
+    // Merge tracks with stored search results
+    const mergedTracks = shortTracks.map(mergeTrackWithStoredResults);
+
+    // Separate tracks into categories using merged data
+    const tracksWithExtended = mergedTracks.filter((track) => track.has_longer_versions);
+    const tracksWithoutExtended = mergedTracks.filter(
+      (track) =>
+        !track.has_longer_versions &&
+        (track.status_type === "no_extended" || track.status_type === "not_found")
+    );
+    const unsearchedTracks = mergedTracks.filter(
+      (track) =>
+        !track.discogs_search_completed ||
+        !track.status_type ||
+        track.status_type === "not_searched"
+    );
+    const getStatusIcon = (track: ShortTrack) => {
+      switch (track.status_type) {
+        case "searching":
+          return <span className={styles.searchingIcon}>⏳</span>;
+        case "extended_found":
+          return <span className={styles.foundIcon}>✅</span>;
+        case "no_extended":
+          return <span className={styles.noExtendedIcon}>📋</span>;
+        case "not_found":
+          return <span className={styles.notFoundIcon}>❌</span>;
+        case "error":
+          return <span className={styles.errorIcon}>⚠️</span>;
+        default:
+          return null;
+      }
+    };
+
+    return (
+      <div className={styles.threeColumnLayout}>
+        {/* Column 1: Unsearched Tracks */}
+        <div className={styles.columnContainer}>
+          <h4 className={styles.columnHeader}>Unsearched Tracks ({unsearchedTracks.length})</h4>
+          <div className={styles.trackColumn}>
+            {unsearchedTracks.map((track, index) => (
+              <div
+                key={index}
+                className={`${styles.shortTrackItem} ${
+                  selectedTrack && selectedTrack.full_path === track.full_path
+                    ? styles.selected
+                    : ""
+                }`}
+                onClick={() => setSelectedTrack(track)}
+              >
+                <div className={styles.trackInfo}>
+                  <div className={styles.trackTitle}>
+                    {track.artist} - {track.title}
+                  </div>
+                  <div className={styles.trackDuration}>{track.duration_formatted}</div>
+                  {track.status_message && (
+                    <div className={styles.statusMessage}>
+                      {getStatusIcon(track)} {track.status_message}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Column 2: No Extended Versions */}
+        <div className={styles.columnContainer}>
+          <h4 className={styles.columnHeader}>
+            No Extended Versions ({tracksWithoutExtended.length})
+          </h4>
+          <div className={styles.trackColumn}>
+            {tracksWithoutExtended.map((track, index) => (
+              <div
+                key={index}
+                className={`${styles.shortTrackItem} ${
+                  selectedTrack && selectedTrack.full_path === track.full_path
+                    ? styles.selected
+                    : ""
+                }`}
+                onClick={() => setSelectedTrack(track)}
+              >
+                <div className={styles.trackInfo}>
+                  <div className={styles.trackTitle}>
+                    {track.artist} - {track.title}
+                  </div>
+                  <div className={styles.trackDuration}>{track.duration_formatted}</div>
+                  <div className={styles.statusMessage}>
+                    {getStatusIcon(track)} {track.status_message}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Column 3: Extended Versions Found */}
+        <div className={styles.columnContainer}>
+          <h4 className={styles.columnHeader}>
+            Extended Versions Found ({tracksWithExtended.length})
+          </h4>
+          <div className={styles.trackColumn}>
+            {tracksWithExtended.map((track, index) => (
+              <div
+                key={index}
+                className={`${styles.shortTrackItem} ${styles.hasExtended} ${
+                  selectedTrack && selectedTrack.full_path === track.full_path
+                    ? styles.selected
+                    : ""
+                }`}
+                onClick={() => setSelectedTrack(track)}
+              >
+                <div className={styles.trackInfo}>
+                  <div className={styles.trackTitle}>
+                    {track.artist} - {track.title}
+                  </div>
+                  <div className={styles.trackDuration}>{track.duration_formatted}</div>
+                  <div className={styles.statusMessage}>
+                    {getStatusIcon(track)} {track.status_message}
+                  </div>
+                  <div className={styles.extendedCount}>
+                    {track.extended_versions_found.length} extended version(s)
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Detail Panel */}
+        {selectedTrack && (
+          <div className={styles.detailPanel}>
+            <h3>Track Details</h3>
+            <div className={styles.currentInfo}>
+              <div>
+                <strong>Artist:</strong> {selectedTrack.artist}
+              </div>
+              <div>
+                <strong>Title:</strong> {selectedTrack.title}
+              </div>
+              <div>
+                <strong>Duration:</strong> {selectedTrack.duration_formatted}
+              </div>
+              <div>
+                <strong>File:</strong> {selectedTrack.file}
+              </div>
+              {selectedTrack.status_message && (
+                <div>
+                  <strong>Status:</strong> {selectedTrack.status_message}
+                </div>
+              )}
+            </div>
+
+            <div className={styles.actionButtons}>
+              <button
+                className={styles.primaryButton}
+                onClick={() => onSearchExtended(selectedTrack)}
+                disabled={selectedTrack.status_type === "searching"}
+              >
+                {selectedTrack.status_type === "searching"
+                  ? "Searching..."
+                  : "Search for Extended Versions"}
+              </button>
+              <button
+                className={styles.acceptButton}
+                onClick={() => onConfirmTrack(selectedTrack.full_path)}
+              >
+                Confirm as Correct Length
+              </button>
+            </div>
+
+            {selectedTrack.extended_versions_found.length > 0 && (
+              <div className={styles.extendedVersions}>
+                <h4>Extended Versions Found:</h4>
+                {selectedTrack.extended_versions_found.map((version, idx) => (
+                  <div key={idx} className={styles.extendedVersion}>
+                    <div>
+                      <strong>{version.title}</strong> - {version.duration_formatted}
+                    </div>
+                    <div>
+                      Release: {version.release_title} ({version.release_year})
+                    </div>
+                    <div>Mix Type: {version.mix_type}</div>
+                    <div>Labels: {version.labels.join(", ")}</div>
+                    <a href={version.discogs_url} target="_blank" rel="noopener noreferrer">
+                      View on Discogs
+                    </a>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const ShortTracksBackupPanel: React.FC<{
+    onClose: () => void;
+    onExport: () => void;
+    onImport: (event: React.ChangeEvent<HTMLInputElement>) => void;
+    onClear: () => void;
+    confirmedCount: number;
+    searchResultsCount: number;
+  }> = ({ onClose, onExport, onImport, onClear, confirmedCount, searchResultsCount }) => {
+    return (
+      <div className={styles.modalOverlay}>
+        <div className={styles.modal}>
+          <div className={styles.modalHeader}>
+            <h3 className={styles.modalTitle}>Short Tracks Data Backup</h3>
+            <button className={styles.modalCloseButton} onClick={onClose}>
+              ×
+            </button>
+          </div>
+          <div className={styles.modalBody}>
+            <div className={styles.backupStats}>
+              <div className={styles.statItem}>
+                <span className={styles.statLabel}>Confirmed Short Tracks:</span>
+                <span className={styles.statValue}>{confirmedCount}</span>
+              </div>
+              <div className={styles.statItem}>
+                <span className={styles.statLabel}>Search Results:</span>
+                <span className={styles.statValue}>{searchResultsCount}</span>
+              </div>
+            </div>
+
+            <div className={styles.backupActions}>
+              <div className={styles.actionGroup}>
+                <h4>Export Data</h4>
+                <p>Download all confirmed tracks and search results as a backup file.</p>
+                <button className={styles.primaryButton} onClick={onExport}>
+                  Export Backup File
+                </button>
+              </div>
+
+              <div className={styles.actionGroup}>
+                <h4>Import Data</h4>
+                <p>Import confirmed tracks and search results from a backup file.</p>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={onImport}
+                  className={styles.fileInput}
+                  id="import-short-tracks"
+                />
+                <label htmlFor="import-short-tracks" className={styles.primaryButton}>
+                  Import Backup File
+                </label>
+              </div>
+
+              <div className={styles.actionGroup}>
+                <h4>Clear All Data</h4>
+                <p className={styles.warningText}>
+                  This will permanently delete all confirmed tracks and search results.
+                </p>
+                <button className={styles.dangerButton} onClick={onClear}>
+                  Clear All Data
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -2040,7 +2767,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     </button>
                   )}
                 </div>
-                {playlistValidationResult.playlist_analysis.length > 0 ? (
+                {playlistValidationResult.playlist_analysis?.length > 0 ? (
                   currentView === "tracks" ? (
                     <TrackIssuesSummary />
                   ) : currentView === "all-playlists" ? (
@@ -2196,6 +2923,100 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                 )}
               </div>
             </div>
+          )}
+          {currentTab === "short-tracks" && shortTracksValidationResult && (
+            <div className={styles.shortTracksValidation}>
+              <div className={styles.summary}>
+                <div className={styles.summaryItem}>
+                  <span className={styles.label}>Total Files:</span>
+                  <span className={styles.value}>
+                    {shortTracksValidationResult.summary.total_files}
+                  </span>
+                </div>
+                <div className={styles.summaryItem}>
+                  <span className={styles.label}>Short Tracks:</span>
+                  <span
+                    className={`${styles.value} ${
+                      shortTracksValidationResult.summary.short_tracks > 0 ? styles.warning : ""
+                    }`}
+                  >
+                    {shortTracksValidationResult.summary.short_tracks}
+                  </span>
+                </div>
+                <div className={styles.summaryItem}>
+                  <span className={styles.label}>Minimum Length:</span>
+                  <span className={styles.value}>
+                    {shortTracksValidationResult.summary.min_length_minutes} minutes
+                  </span>
+                </div>
+                <div className={styles.summaryItem}>
+                  <span className={styles.label}>Confirmed Short Tracks:</span>
+                  <span className={styles.value}>{confirmedShortTracks.size}</span>
+                </div>
+                <div className={styles.summaryItem}>
+                  <span className={styles.label}>Search Results:</span>
+                  <span className={styles.value}>
+                    {Object.keys(shortTracksSearchResults).length}
+                  </span>
+                </div>
+              </div>
+
+              <div className={styles.actionButtons}>
+                <button
+                  className={styles.primaryButton}
+                  onClick={() => setShowShortTracksBackup(true)}
+                >
+                  Manage Backup Data
+                </button>
+              </div>
+
+              <div className={styles.tabs}>
+                <button
+                  className={`${styles.tab} ${
+                    currentSection === "short-tracks" ? styles.active : ""
+                  }`}
+                  onClick={() => setCurrentSection("short-tracks")}
+                >
+                  Short Tracks ({shortTracksValidationResult.summary.short_tracks})
+                </button>
+                <button
+                  className={`${styles.tab} ${
+                    currentSection === "confirmed-short" ? styles.active : ""
+                  }`}
+                  onClick={() => setCurrentSection("confirmed-short")}
+                >
+                  Confirmed Short Tracks ({confirmedShortTracks.size})
+                </button>
+              </div>
+
+              {currentSection === "short-tracks" ? (
+                <ThreeColumnShortTracksView
+                  shortTracks={shortTracksValidationResult.short_tracks.filter(
+                    (track) => !confirmedShortTracks.has(track.full_path)
+                  )}
+                  onConfirmTrack={confirmShortTrack}
+                  onSearchExtended={searchExtendedVersions}
+                  serverUrl={serverUrl}
+                />
+              ) : (
+                <ConfirmedShortTracksView
+                  confirmedTracks={shortTracksValidationResult.short_tracks.filter((track) =>
+                    confirmedShortTracks.has(track.full_path)
+                  )}
+                  onUnconfirmTrack={unconfirmShortTrack}
+                />
+              )}
+            </div>
+          )}
+          {showShortTracksBackup && (
+            <ShortTracksBackupPanel
+              onClose={() => setShowShortTracksBackup(false)}
+              onExport={exportShortTracksData}
+              onImport={importShortTracksData}
+              onClear={clearAllShortTracksData}
+              confirmedCount={confirmedShortTracks.size}
+              searchResultsCount={Object.keys(shortTracksSearchResults).length}
+            />
           )}
         </>
       )}

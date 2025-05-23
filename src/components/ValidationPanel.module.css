@@ -1109,3 +1109,448 @@
   color: #fbbf24;
   font-size: 16px;
 }
+
+/* ===== SHORT TRACKS VALIDATION ===== */
+.shortTracksValidation {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.shortTracksList {
+  overflow-y: auto;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  padding: 10px;
+  background: var(--spice-card);
+  max-height: calc(60vh - 200px);
+}
+
+.shortTrackItem {
+  padding: 12px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.shortTrackItem:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.shortTrackItem.selected {
+  background-color: rgba(30, 144, 255, 0.2);
+  border-color: #1e90ff;
+}
+
+.shortTrackItem:last-child {
+  border-bottom: none;
+}
+
+.trackInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trackTitle {
+  font-weight: bold;
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.trackDuration {
+  color: #ffa500;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.trackFile {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.trackDetailPanel {
+  padding: 16px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  background: var(--spice-card);
+  overflow-y: auto;
+}
+
+.trackDetailPanel h3 {
+  margin: 0 0 16px 0;
+  color: var(--spice-text);
+}
+
+/* ===== EXTENDED VERSIONS DISPLAY ===== */
+.extendedVersions {
+  margin-top: 20px;
+  padding: 16px;
+  background: rgba(30, 144, 255, 0.1);
+  border-radius: 4px;
+  border-left: 4px solid #1e90ff;
+}
+
+.extendedVersions h4 {
+  margin: 0 0 12px 0;
+  color: var(--spice-text);
+}
+
+.extendedVersion {
+  padding: 12px;
+  margin-bottom: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.extendedVersion:last-child {
+  margin-bottom: 0;
+}
+
+.extendedVersion div {
+  margin-bottom: 4px;
+  color: var(--spice-text);
+  font-size: 13px;
+}
+
+.extendedVersion div:last-child {
+  margin-bottom: 0;
+}
+
+.extendedVersion strong {
+  color: var(--spice-text);
+}
+
+.extendedVersion a {
+  color: #1e90ff;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.extendedVersion a:hover {
+  text-decoration: underline;
+}
+
+/* ===== CONFIRMED TRACKS LIST ===== */
+.confirmedTracksList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  background: var(--spice-card);
+  max-height: calc(60vh - 200px);
+  overflow-y: auto;
+}
+
+.confirmedTrackItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: rgba(46, 204, 113, 0.1);
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.confirmedTrackItem:hover {
+  background: rgba(46, 204, 113, 0.15);
+}
+
+.confirmedTrackItem .trackInfo {
+  flex: 1;
+  margin-right: 12px;
+}
+
+.confirmedTrackItem .trackTitle {
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.confirmedTrackItem .trackDuration {
+  color: #2ecc71;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.confirmedTrackItem .removeButton {
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.confirmedTrackItem .removeButton:hover {
+  background-color: #c0392b;
+}
+
+/* ===== RESPONSIVE DESIGN ===== */
+@media (max-width: 1200px) {
+  .splitView {
+    grid-template-columns: 1fr;
+    grid-template-rows: 300px 1fr;
+    gap: 16px;
+  }
+
+  .shortTracksList {
+    max-height: 300px;
+  }
+}
+
+/* ===== LOADING STATES FOR SHORT TRACKS ===== */
+.shortTracksValidation .loading {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--spice-subtext);
+  font-style: italic;
+}
+
+/* ===== EMPTY STATES ===== */
+.shortTracksValidation .noIssues {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--spice-subtext);
+  font-style: italic;
+}
+
+/* ===== SEARCH INDICATORS ===== */
+.searchingIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(255, 152, 0, 0.1);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #ffa500;
+  margin-top: 8px;
+}
+
+.searchingIndicator::before {
+  content: "⏳";
+}
+
+.foundExtendedIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(46, 204, 113, 0.1);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #2ecc71;
+  margin-top: 8px;
+}
+
+.foundExtendedIndicator::before {
+  content: "✅";
+}
+
+.noExtendedFoundIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(231, 76, 60, 0.1);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #e74c3c;
+  margin-top: 8px;
+}
+
+.noExtendedFoundIndicator::before {
+  content: "❌";
+}
+
+/* ===== THREE COLUMN LAYOUT ===== */
+.threeColumnLayout {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 400px;
+  gap: 16px;
+  height: calc(70vh - 200px);
+  min-height: 500px;
+}
+
+.columnContainer {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  background: var(--spice-card);
+}
+
+.columnHeader {
+  margin: 0;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--spice-button-disabled);
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.trackColumn {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.detailPanel {
+  padding: 16px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  background: var(--spice-card);
+  overflow-y: auto;
+}
+
+/* ===== STATUS INDICATORS ===== */
+.statusMessage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-top: 4px;
+  color: var(--spice-subtext);
+}
+
+.searchingIcon {
+  color: #ffa500;
+}
+
+.foundIcon {
+  color: #2ecc71;
+}
+
+.noExtendedIcon {
+  color: #3498db;
+}
+
+.notFoundIcon {
+  color: #e74c3c;
+}
+
+.errorIcon {
+  color: #e74c3c;
+}
+
+.extendedCount {
+  font-size: 11px;
+  color: #2ecc71;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.hasExtended {
+  border-left: 4px solid #2ecc71;
+}
+
+/* ===== RESPONSIVE DESIGN ===== */
+@media (max-width: 1400px) {
+  .threeColumnLayout {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr 300px;
+  }
+
+  .detailPanel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .threeColumnLayout {
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(4, 1fr);
+  }
+}
+
+/* ===== BACKUP MODAL ===== */
+.backupStats {
+  display: flex;
+  justify-content: space-around;
+  margin-bottom: 24px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+.statItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.statLabel {
+  font-size: 12px;
+  color: var(--spice-subtext);
+}
+
+.statValue {
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--spice-text);
+}
+
+.backupActions {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.actionGroup {
+  padding: 16px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.actionGroup h4 {
+  margin: 0 0 8px 0;
+  color: var(--spice-text);
+}
+
+.actionGroup p {
+  margin: 0 0 12px 0;
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+.warningText {
+  color: #e74c3c !important;
+  font-weight: 600;
+}
+
+.fileInput {
+  display: none;
+}
+
+.dangerButton {
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.dangerButton:hover {
+  background-color: #c0392b;
+}
