@@ -179,7 +179,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [selectedDuplicateTrackId, setSelectedDuplicateTrackId] = useState<string | null>(null);
 
   const [ignoredTrackPaths, setIgnoredTrackPaths] = useState<Set<string>>(
-    new Set(JSON.parse(localStorage.getItem("tagify:ignoredTrackPaths") || "[]"))
+    new Set(JSON.parse(localStorage.getItem("tagify:ignoredTrackPaths") || "[]") as string[])
   );
   const [showIgnoredTracks, setShowIgnoredTracks] = useState<boolean>(false);
   const [filteredMismatches, setFilteredMismatches] = useState<PotentialMismatch[]>([]);
@@ -190,16 +190,11 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [currentSection, setCurrentSection] = useState<
-    | "mismatches"
-    | "ignored"
-    | "missing"
-    | "duplicates"
-    | "search"
-    | "unsearched"
-    | "no-extended"
-    | "extended-found"
-    | "confirmed-short"
+    "mismatches" | "ignored" | "missing" | "duplicates" | "search"
   >("mismatches");
+  const [shortTracksSection, setShortTracksSection] = useState<
+    "unsearched" | "no-extended" | "extended-found" | "confirmed-short"
+  >("unsearched");
   const [filesMissingTrackId, setFilesMissingTrackId] = useState<PotentialMismatch[]>([]);
 
   const [playlistSearchQuery, setPlaylistSearchQuery] = useState<string>("");
@@ -213,7 +208,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [shortTracksValidationResult, setShortTracksValidationResult] =
     useState<ShortTracksValidationResult | null>(null);
   const [confirmedShortTracks, setConfirmedShortTracks] = useState<Set<string>>(
-    new Set(JSON.parse(localStorage.getItem("tagify:confirmedShortTracks") || "[]"))
+    new Set(JSON.parse(localStorage.getItem("tagify:confirmedShortTracks") || "[]") as string[])
   );
 
   const [bulkSearchState, setBulkSearchState] = useState<{
@@ -1384,7 +1379,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
         if (confirmImport) {
           // Import confirmed tracks
-          const newConfirmedTracks = new Set(importData.confirmed_short_tracks);
+          const newConfirmedTracks = new Set(importData.confirmed_short_tracks as string[]);
           setConfirmedShortTracks(newConfirmedTracks);
           localStorage.setItem(
             "tagify:confirmedShortTracks",
@@ -1843,7 +1838,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                         <strong>Status:</strong> {selectedTrack.status_message}
                       </div>
                     )}
-                    {selectedTrack.total_versions_found > 0 && (
+                    {selectedTrack.total_versions_found && selectedTrack.total_versions_found > 0 && (
                       <div>
                         <strong>Total Versions Found:</strong> {selectedTrack.total_versions_found}
                       </div>
@@ -1973,7 +1968,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   };
 
   const renderShortTracksSection = () => {
-    switch (currentSection) {
+    switch (shortTracksSection) {
       case "unsearched":
         return (
           <ShortTracksSection
@@ -3210,33 +3205,33 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
               <div className={styles.tabs}>
                 <button
                   className={`${styles.tab} ${
-                    currentSection === "unsearched" ? styles.active : ""
+                    shortTracksSection === "unsearched" ? styles.active : ""
                   }`}
-                  onClick={() => setCurrentSection("unsearched")}
+                  onClick={() => setShortTracksSection("unsearched")}
                 >
                   Unsearched ({getUnsearchedTracks().length})
                 </button>
                 <button
                   className={`${styles.tab} ${
-                    currentSection === "no-extended" ? styles.active : ""
+                    shortTracksSection === "no-extended" ? styles.active : ""
                   }`}
-                  onClick={() => setCurrentSection("no-extended")}
+                  onClick={() => setShortTracksSection("no-extended")}
                 >
                   No Extended Versions ({getTracksWithoutExtended().length})
                 </button>
                 <button
                   className={`${styles.tab} ${
-                    currentSection === "extended-found" ? styles.active : ""
+                    shortTracksSection === "extended-found" ? styles.active : ""
                   }`}
-                  onClick={() => setCurrentSection("extended-found")}
+                  onClick={() => setShortTracksSection("extended-found")}
                 >
                   Extended Versions Found ({getTracksWithExtended().length})
                 </button>
                 <button
                   className={`${styles.tab} ${
-                    currentSection === "confirmed-short" ? styles.active : ""
+                    shortTracksSection === "confirmed-short" ? styles.active : ""
                   }`}
-                  onClick={() => setCurrentSection("confirmed-short")}
+                  onClick={() => setShortTracksSection("confirmed-short")}
                 >
                   Confirmed Short Tracks ({confirmedShortTracks.size})
                 </button>
