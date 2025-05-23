@@ -1692,3 +1692,24 @@
 .modalCloseButton:hover {
   color: var(--spice-button);
 }
+
+.secondaryButton {
+  background-color: #ffa500;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.secondaryButton:hover:not(:disabled) {
+  background-color: #e6940a;
+}
+
+.secondaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

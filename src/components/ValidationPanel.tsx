@@ -112,6 +112,7 @@ interface ShortTrack {
     | "no_extended"
     | "extended_found"
     | "error";
+  manually_marked_extended?: boolean;
 }
 
 interface ExtendedVersion {
@@ -246,6 +247,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         extended_versions_found: ExtendedVersion[];
         has_longer_versions: boolean;
         search_date: string;
+        manually_marked_extended?: boolean;
       }
     >
   >(() => {
@@ -257,8 +259,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       return {};
     }
   });
-
-  const [showShortTracksBackup, setShowShortTracksBackup] = useState(false);
 
   // Run validation when component mounts
   useEffect(() => {
@@ -559,42 +559,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     return `Updated ${diffDays} ${diffDays === 1 ? "day" : "days"} ago`;
   };
 
-  // const getUnsearchedTracks = (): ShortTrack[] => {
-  //   if (!shortTracksValidationResult) return [];
-
-  //   return shortTracksValidationResult.short_tracks
-  //     .filter((track) => !confirmedShortTracks.has(track.full_path))
-  //     .map(mergeTrackWithStoredResults)
-  //     .filter(
-  //       (track) =>
-  //         !track.discogs_search_completed ||
-  //         !track.status_type ||
-  //         track.status_type === "not_searched"
-  //     );
-  // };
-
-  // const getTracksWithoutExtended = (): ShortTrack[] => {
-  //   if (!shortTracksValidationResult) return [];
-
-  //   return shortTracksValidationResult.short_tracks
-  //     .filter((track) => !confirmedShortTracks.has(track.full_path))
-  //     .map(mergeTrackWithStoredResults)
-  //     .filter(
-  //       (track) =>
-  //         !track.has_longer_versions &&
-  //         (track.status_type === "no_extended" || track.status_type === "not_found")
-  //     );
-  // };
-
-  // const getTracksWithExtended = (): ShortTrack[] => {
-  //   if (!shortTracksValidationResult) return [];
-
-  //   return shortTracksValidationResult.short_tracks
-  //     .filter((track) => !confirmedShortTracks.has(track.full_path))
-  //     .map(mergeTrackWithStoredResults)
-  //     .filter((track) => track.has_longer_versions);
-  // };
-
   const setShortTracksSearchResults = useCallback(
     (updater: React.SetStateAction<typeof shortTracksSearchResults>) => {
       setShortTracksSearchResultsState((prev) => {
@@ -738,6 +702,26 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     }
   };
 
+  const markAsNeedsExtended = (track: ShortTrack) => {
+    const manualResult = {
+      status_type: "extended_found" as const,
+      status_message: "Manually marked as needs extended version",
+      track_found_on_discogs: false,
+      total_versions_found: 0,
+      extended_versions_found: [],
+      has_longer_versions: true,
+      manually_marked_extended: true,
+      search_date: new Date().toISOString(),
+    };
+
+    setShortTracksSearchResults((prev) => ({
+      ...prev,
+      [track.full_path]: manualResult,
+    }));
+
+    Spicetify.showNotification("Track marked as needs extended version");
+  };
+
   const mergeTrackWithStoredResults = (track: ShortTrack): ShortTrack => {
     const storedResult = shortTracksSearchResults[track.full_path];
 
@@ -751,6 +735,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         extended_versions_found: storedResult.extended_versions_found,
         has_longer_versions: storedResult.has_longer_versions,
         discogs_search_completed: storedResult.status_type !== "searching",
+        manually_marked_extended: storedResult.manually_marked_extended || false,
       };
     }
 
@@ -759,6 +744,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       status_type: "not_searched" as const,
       status_message: "Not searched yet",
       discogs_search_completed: false,
+      manually_marked_extended: false,
     };
   };
 
@@ -1835,8 +1821,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     tracks: ShortTrack[];
     onConfirmTrack: (filePath: string) => void;
     onSearchExtended: (track: ShortTrack) => void;
+    onMarkAsNeedsExtended?: (track: ShortTrack) => void;
     showSearchButton: boolean;
-  }> = ({ title, tracks, onConfirmTrack, onSearchExtended, showSearchButton }) => {
+  }> = ({
+    title,
+    tracks,
+    onConfirmTrack,
+    onSearchExtended,
+    onMarkAsNeedsExtended,
+    showSearchButton,
+  }) => {
     const [selectedTrack, setSelectedTrack] = useState<ShortTrack | null>(null);
 
     useEffect(() => {
@@ -1955,6 +1949,17 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                           : "Search for Extended Versions"}
                       </button>
                     )}
+                    {onMarkAsNeedsExtended && (
+                      <button
+                        className={styles.secondaryButton}
+                        onClick={() => onMarkAsNeedsExtended(selectedTrack)}
+                        disabled={selectedTrack.manually_marked_extended}
+                      >
+                        {selectedTrack.manually_marked_extended
+                          ? "Already Marked"
+                          : "Needs Extended"}
+                      </button>
+                    )}
                     <button
                       className={styles.acceptButton}
                       onClick={() => onConfirmTrack(selectedTrack.full_path)}
@@ -2015,6 +2020,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
             tracks={tracksWithoutExtended}
             onConfirmTrack={confirmShortTrack}
             onSearchExtended={searchExtendedVersions}
+            onMarkAsNeedsExtended={markAsNeedsExtended}
             showSearchButton={true}
           />
         );
