@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import styles from "./ValidationPanel.module.css";
-import { useLocalStorage } from "../hooks/useLocalStorage";
 
 interface PotentialMismatch {
   file: string;
@@ -212,6 +211,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   );
 
   const bulkSearchCancelRef = useRef(false);
+  const isBulkSearchingRef = useRef(false);
 
   const [bulkSearchState, setBulkSearchState] = useState<{
     isRunning: boolean;
@@ -227,7 +227,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     cancelled: false,
   });
 
-  const [shortTracksSearchResults, setShortTracksSearchResults] = useLocalStorage<
+  const [shortTracksSearchResults, setShortTracksSearchResultsState] = useState<
     Record<
       string,
       {
@@ -246,7 +246,15 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         search_date: string;
       }
     >
-  >("tagify:shortTracksSearchResults", {});
+  >(() => {
+    // Initialize from localStorage
+    try {
+      const stored = localStorage.getItem("tagify:shortTracksSearchResults");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
 
   const [showShortTracksBackup, setShowShortTracksBackup] = useState(false);
 
@@ -549,41 +557,68 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     return `Updated ${diffDays} ${diffDays === 1 ? "day" : "days"} ago`;
   };
 
-  const getUnsearchedTracks = (): ShortTrack[] => {
-    if (!shortTracksValidationResult) return [];
+  // const getUnsearchedTracks = (): ShortTrack[] => {
+  //   if (!shortTracksValidationResult) return [];
 
-    return shortTracksValidationResult.short_tracks
-      .filter((track) => !confirmedShortTracks.has(track.full_path))
-      .map(mergeTrackWithStoredResults)
-      .filter(
-        (track) =>
-          !track.discogs_search_completed ||
-          !track.status_type ||
-          track.status_type === "not_searched"
+  //   return shortTracksValidationResult.short_tracks
+  //     .filter((track) => !confirmedShortTracks.has(track.full_path))
+  //     .map(mergeTrackWithStoredResults)
+  //     .filter(
+  //       (track) =>
+  //         !track.discogs_search_completed ||
+  //         !track.status_type ||
+  //         track.status_type === "not_searched"
+  //     );
+  // };
+
+  // const getTracksWithoutExtended = (): ShortTrack[] => {
+  //   if (!shortTracksValidationResult) return [];
+
+  //   return shortTracksValidationResult.short_tracks
+  //     .filter((track) => !confirmedShortTracks.has(track.full_path))
+  //     .map(mergeTrackWithStoredResults)
+  //     .filter(
+  //       (track) =>
+  //         !track.has_longer_versions &&
+  //         (track.status_type === "no_extended" || track.status_type === "not_found")
+  //     );
+  // };
+
+  // const getTracksWithExtended = (): ShortTrack[] => {
+  //   if (!shortTracksValidationResult) return [];
+
+  //   return shortTracksValidationResult.short_tracks
+  //     .filter((track) => !confirmedShortTracks.has(track.full_path))
+  //     .map(mergeTrackWithStoredResults)
+  //     .filter((track) => track.has_longer_versions);
+  // };
+
+  const setShortTracksSearchResults = useCallback(
+    (updater: React.SetStateAction<typeof shortTracksSearchResults>) => {
+      setShortTracksSearchResultsState((prev) => {
+        const newState = typeof updater === "function" ? updater(prev) : updater;
+
+        // If not in bulk search mode, immediately sync to localStorage
+        if (!isBulkSearchingRef.current) {
+          localStorage.setItem("tagify:shortTracksSearchResults", JSON.stringify(newState));
+        }
+
+        return newState;
+      });
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!bulkSearchState.isRunning && isBulkSearchingRef.current) {
+      // Bulk search just completed, sync to localStorage
+      localStorage.setItem(
+        "tagify:shortTracksSearchResults",
+        JSON.stringify(shortTracksSearchResults)
       );
-  };
-
-  const getTracksWithoutExtended = (): ShortTrack[] => {
-    if (!shortTracksValidationResult) return [];
-
-    return shortTracksValidationResult.short_tracks
-      .filter((track) => !confirmedShortTracks.has(track.full_path))
-      .map(mergeTrackWithStoredResults)
-      .filter(
-        (track) =>
-          !track.has_longer_versions &&
-          (track.status_type === "no_extended" || track.status_type === "not_found")
-      );
-  };
-
-  const getTracksWithExtended = (): ShortTrack[] => {
-    if (!shortTracksValidationResult) return [];
-
-    return shortTracksValidationResult.short_tracks
-      .filter((track) => !confirmedShortTracks.has(track.full_path))
-      .map(mergeTrackWithStoredResults)
-      .filter((track) => track.has_longer_versions);
-  };
+      isBulkSearchingRef.current = false;
+    }
+  }, [bulkSearchState.isRunning, shortTracksSearchResults]);
 
   const isShortTrack = (duration: number) => {
     return duration < minTrackLengthMinutes * 60;
@@ -726,12 +761,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   };
 
   const searchAllUnsearchedTracks = async () => {
-    const unsearchedTracks = getUnsearchedTracks();
-
     if (unsearchedTracks.length === 0) {
       Spicetify.showNotification("No unsearched tracks found");
       return;
     }
+
+    // Set bulk search mode
+    isBulkSearchingRef.current = true;
 
     // Reset cancellation flag
     bulkSearchCancelRef.current = false;
@@ -863,7 +899,60 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       ...prev,
       cancelled: true,
     }));
+
+    // Sync current state to localStorage since bulk search is ending
+    if (isBulkSearchingRef.current) {
+      localStorage.setItem(
+        "tagify:shortTracksSearchResults",
+        JSON.stringify(shortTracksSearchResults)
+      );
+      isBulkSearchingRef.current = false;
+    }
   };
+
+  const unsearchedTracks = useMemo(() => {
+    if (!shortTracksValidationResult) return [];
+
+    return shortTracksValidationResult.short_tracks
+      .filter((track) => !confirmedShortTracks.has(track.full_path))
+      .map(mergeTrackWithStoredResults)
+      .filter(
+        (track) =>
+          !track.discogs_search_completed ||
+          !track.status_type ||
+          track.status_type === "not_searched"
+      );
+  }, [shortTracksValidationResult, confirmedShortTracks, shortTracksSearchResults]);
+
+  const tracksWithoutExtended = useMemo(() => {
+    if (!shortTracksValidationResult) return [];
+
+    return shortTracksValidationResult.short_tracks
+      .filter((track) => !confirmedShortTracks.has(track.full_path))
+      .map(mergeTrackWithStoredResults)
+      .filter(
+        (track) =>
+          !track.has_longer_versions &&
+          (track.status_type === "no_extended" || track.status_type === "not_found")
+      );
+  }, [shortTracksValidationResult, confirmedShortTracks, shortTracksSearchResults]);
+
+  const tracksWithExtended = useMemo(() => {
+    if (!shortTracksValidationResult) return [];
+
+    return shortTracksValidationResult.short_tracks
+      .filter((track) => !confirmedShortTracks.has(track.full_path))
+      .map(mergeTrackWithStoredResults)
+      .filter((track) => track.has_longer_versions);
+  }, [shortTracksValidationResult, confirmedShortTracks, shortTracksSearchResults]);
+
+  const confirmedShortTracksList = useMemo(() => {
+    if (!shortTracksValidationResult) return [];
+
+    return shortTracksValidationResult.short_tracks
+      .filter((track) => confirmedShortTracks.has(track.full_path))
+      .map(mergeTrackWithStoredResults);
+  }, [shortTracksValidationResult, confirmedShortTracks, shortTracksSearchResults]);
 
   const findPossibleMatches = async (mismatch: PotentialMismatch | SearchResult) => {
     setIsFetchingMatches(true);
@@ -1980,7 +2069,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         return (
           <ShortTracksSection
             title="Unsearched Tracks"
-            tracks={getUnsearchedTracks()}
+            tracks={unsearchedTracks}
             onConfirmTrack={confirmShortTrack}
             onSearchExtended={searchExtendedVersions}
             showSearchButton={true}
@@ -1990,7 +2079,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         return (
           <ShortTracksSection
             title="No Extended Versions Found"
-            tracks={getTracksWithoutExtended()}
+            tracks={tracksWithoutExtended}
             onConfirmTrack={confirmShortTrack}
             onSearchExtended={searchExtendedVersions}
             showSearchButton={true}
@@ -2000,7 +2089,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         return (
           <ShortTracksSection
             title="Extended Versions Found"
-            tracks={getTracksWithExtended()}
+            tracks={tracksWithExtended}
             onConfirmTrack={confirmShortTrack}
             onSearchExtended={searchExtendedVersions}
             showSearchButton={false}
@@ -2009,11 +2098,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       case "confirmed-short":
         return (
           <ConfirmedShortTracksView
-            confirmedTracks={
-              shortTracksValidationResult?.short_tracks
-                .filter((track) => confirmedShortTracks.has(track.full_path))
-                .map(mergeTrackWithStoredResults) || []
-            }
+            confirmedTracks={confirmedShortTracksList}
             onUnconfirmTrack={unconfirmShortTrack}
           />
         );
@@ -3170,13 +3255,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                 <button
                   className={styles.primaryButton}
                   onClick={searchAllUnsearchedTracks}
-                  disabled={bulkSearchState.isRunning || getUnsearchedTracks().length === 0}
+                  disabled={bulkSearchState.isRunning || unsearchedTracks.length === 0}
                 >
                   {bulkSearchState.isRunning
                     ? `Searching... (${bulkSearchState.currentIndex + 1}/${
                         bulkSearchState.totalTracks
                       })`
-                    : `Search All Unsearched (${getUnsearchedTracks().length})`}
+                    : `Search All Unsearched (${unsearchedTracks.length})`}
                 </button>
                 {bulkSearchState.isRunning && (
                   <button className={styles.dangerButton} onClick={cancelBulkSearch}>
@@ -3216,7 +3301,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   }`}
                   onClick={() => setShortTracksSection("unsearched")}
                 >
-                  Unsearched ({getUnsearchedTracks().length})
+                  Unsearched ({unsearchedTracks.length})
                 </button>
                 <button
                   className={`${styles.tab} ${
@@ -3224,7 +3309,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   }`}
                   onClick={() => setShortTracksSection("no-extended")}
                 >
-                  No Extended Versions ({getTracksWithoutExtended().length})
+                  No Extended Versions ({tracksWithoutExtended.length})
                 </button>
                 <button
                   className={`${styles.tab} ${
@@ -3232,7 +3317,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   }`}
                   onClick={() => setShortTracksSection("extended-found")}
                 >
-                  Extended Versions Found ({getTracksWithExtended().length})
+                  Extended Versions Found ({tracksWithExtended.length})
                 </button>
                 <button
                   className={`${styles.tab} ${
