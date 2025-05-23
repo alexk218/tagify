@@ -212,6 +212,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     new Set(JSON.parse(localStorage.getItem("tagify:confirmedShortTracks") || "[]") as string[])
   );
 
+  const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false);
+
   const [showClearConfirmation, setShowClearConfirmation] = useState(false);
   const bulkSearchCancelRef = useRef(false);
   const isBulkSearchingRef = useRef(false);
@@ -529,6 +531,107 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       Spicetify.showNotification("Error validating playlists", true);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const [playlistCreationResult, setPlaylistCreationResult] = useState<{
+    show: boolean;
+    data: any;
+  } | null>(null);
+
+  const createPlaylistFromExtendedTracks = async () => {
+    if (tracksWithExtended.length === 0) {
+      Spicetify.showNotification("No tracks with extended versions found", true);
+      return;
+    }
+
+    setIsCreatingPlaylist(true);
+
+    try {
+      // Extract track IDs that are already available from the track objects
+      let trackIds = tracksWithExtended
+        .filter((track) => track.track_id && track.track_id.trim())
+        .map((track) => track.track_id);
+
+      // If some tracks don't have track_id in the object, extract from file metadata
+      const tracksWithoutId = tracksWithExtended.filter((track) => !track.track_id);
+
+      if (tracksWithoutId.length > 0) {
+        const extractResponse = await fetch(`${serverUrl}/api/validation/extract-track-ids`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            filePaths: tracksWithoutId.map((track) => track.full_path),
+          }),
+        });
+
+        if (extractResponse.ok) {
+          const extractData = await extractResponse.json();
+          if (extractData.success) {
+            const additionalTrackIds = extractData.track_ids
+              .filter((item: { track_id: any; }) => item.track_id)
+              .map((item: { track_id: any; }) => item.track_id);
+            trackIds = [...trackIds, ...additionalTrackIds];
+          }
+        }
+      }
+
+      if (trackIds.length === 0) {
+        Spicetify.showNotification("No tracks have embedded TrackIDs", true);
+        return;
+      }
+
+      const response = await fetch(
+        `${serverUrl}/api/validation/create-extended-versions-playlist`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            trackIds: trackIds,
+            playlistName: `Extended Versions (${new Date().toLocaleDateString()})`,
+            playlistDescription: `Playlist created from ${
+              trackIds.length
+            } tracks that have extended versions available. Created on ${new Date().toLocaleDateString()}.`,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          // Show detailed results
+          setPlaylistCreationResult({
+            show: true,
+            data: data,
+          });
+
+          if (data.failed_tracks_count > 0) {
+            Spicetify.showNotification(
+              `Playlist created with ${data.tracks_added}/${data.tracks_requested} tracks. ${data.failed_tracks_count} tracks failed.`,
+              false,
+              5000
+            );
+          } else {
+            Spicetify.showNotification(
+              `Successfully created playlist "${data.playlist_name}" with ${data.tracks_added} tracks`
+            );
+          }
+        } else {
+          Spicetify.showNotification(`Error: ${data.message}`, true);
+        }
+      } else {
+        const error = await response.json();
+        Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
+      }
+    } catch (error) {
+      console.error("Error creating playlist:", error);
+      Spicetify.showNotification("Error creating playlist", true);
+    } finally {
+      setIsCreatingPlaylist(false);
     }
   };
 
@@ -1823,6 +1926,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     onSearchExtended: (track: ShortTrack) => void;
     onMarkAsNeedsExtended?: (track: ShortTrack) => void;
     showSearchButton: boolean;
+    onCreatePlaylist?: () => void;
+    isCreatingPlaylist?: boolean;
+    showCreatePlaylistButton?: boolean;
   }> = ({
     title,
     tracks,
@@ -1830,6 +1936,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     onSearchExtended,
     onMarkAsNeedsExtended,
     showSearchButton,
+    onCreatePlaylist,
+    isCreatingPlaylist = false,
+    showCreatePlaylistButton = false,
   }) => {
     const [selectedTrack, setSelectedTrack] = useState<ShortTrack | null>(null);
 
@@ -1869,9 +1978,29 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         {tracks.length > 0 ? (
           <div className={styles.splitView}>
             <div className={styles.tracksList}>
-              <h4 className={styles.sectionTitle}>
-                {title} ({tracks.length})
-              </h4>
+              <div
+                className={
+                  showCreatePlaylistButton
+                    ? styles.sectionHeaderWithButton
+                    : styles.sectionTitleContainer
+                }
+              >
+                <h4 className={styles.sectionTitle}>
+                  {title} ({tracks.length})
+                </h4>
+                {showCreatePlaylistButton && onCreatePlaylist && (
+                  <button
+                    className={styles.createPlaylistButton}
+                    onClick={onCreatePlaylist}
+                    disabled={isCreatingPlaylist || tracks.filter((t) => t.track_id).length === 0}
+                    title={`Create playlist from ${
+                      tracks.filter((t) => t.track_id).length
+                    } tracks with TrackIDs`}
+                  >
+                    {isCreatingPlaylist ? "Creating..." : "Create Playlist"}
+                  </button>
+                )}
+              </div>
               <div className={styles.tracksContainer}>
                 {tracks.map((track, index) => (
                   <div
@@ -2031,7 +2160,10 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
             tracks={tracksWithExtended}
             onConfirmTrack={confirmShortTrack}
             onSearchExtended={searchExtendedVersions}
+            onCreatePlaylist={createPlaylistFromExtendedTracks}
+            isCreatingPlaylist={isCreatingPlaylist}
             showSearchButton={false}
+            showCreatePlaylistButton={true}
           />
         );
       case "confirmed-short":
@@ -2044,6 +2176,71 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       default:
         return null;
     }
+  };
+
+  const PlaylistCreationResultModal: React.FC<{
+    result: any;
+    onClose: () => void;
+  }> = ({ result, onClose }) => {
+    return (
+      <Portal>
+        <div className={styles.modalOverlay}>
+          <div className={styles.modal}>
+            <div className={styles.modalHeader}>
+              <h3 className={styles.modalTitle}>Playlist Creation Results</h3>
+              <button className={styles.modalCloseButton} onClick={onClose}>
+                ×
+              </button>
+            </div>
+            <div className={styles.modalBody}>
+              <div className={styles.playlistInfo}>
+                <h4>Playlist: {result.playlist_name}</h4>
+                <p>
+                  <strong>Successfully added:</strong> {result.tracks_added} /{" "}
+                  {result.tracks_requested} tracks
+                </p>
+                <a
+                  href={result.playlist_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={styles.playlistLink}
+                >
+                  Open in Spotify
+                </a>
+              </div>
+
+              {result.failed_tracks_count > 0 && (
+                <div className={styles.failedTracksSection}>
+                  <h4>Failed Tracks ({result.failed_tracks_count})</h4>
+                  <div className={styles.failedTracksList}>
+                    {result.failed_tracks.map((track: any, index: number) => (
+                      <div key={index} className={styles.failedTrackItem}>
+                        <div className={styles.trackInfo}>
+                          <strong>
+                            {track.artist} - {track.title}
+                          </strong>
+                          <div className={styles.trackAlbum}>{track.album}</div>
+                          <div className={styles.trackId}>Track ID: {track.track_id}</div>
+                        </div>
+                        <div className={styles.errorInfo}>
+                          <strong>Error:</strong> {track.error}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className={styles.modalActions}>
+                <button className={styles.primaryButton} onClick={onClose}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Portal>
+    );
   };
 
   return (
@@ -3319,6 +3516,12 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
             </Portal>
           )}
         </>
+      )}
+      {playlistCreationResult?.show && (
+        <PlaylistCreationResultModal
+          result={playlistCreationResult.data}
+          onClose={() => setPlaylistCreationResult(null)}
+        />
       )}
     </div>
   );
