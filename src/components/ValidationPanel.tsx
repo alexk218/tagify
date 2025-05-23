@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import styles from "./ValidationPanel.module.css";
+import Portal from "../utils/Portal";
 
 interface PotentialMismatch {
   file: string;
@@ -210,6 +211,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     new Set(JSON.parse(localStorage.getItem("tagify:confirmedShortTracks") || "[]") as string[])
   );
 
+  const [showClearConfirmation, setShowClearConfirmation] = useState(false);
   const bulkSearchCancelRef = useRef(false);
   const isBulkSearchingRef = useRef(false);
 
@@ -1501,16 +1503,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   };
 
   const clearAllShortTracksData = () => {
-    const confirmClear = window.confirm(
-      "This will clear all confirmed tracks and search results. This cannot be undone. Continue?"
-    );
+    setShowClearConfirmation(true);
+  };
 
-    if (confirmClear) {
-      setConfirmedShortTracks(new Set());
-      setShortTracksSearchResults({});
-      localStorage.removeItem("tagify:confirmedShortTracks");
-      Spicetify.showNotification("All short tracks data cleared");
-    }
+  const confirmClearAllData = () => {
+    setConfirmedShortTracks(new Set());
+    setShortTracksSearchResults({});
+    localStorage.removeItem("tagify:confirmedShortTracks");
+    localStorage.removeItem("tagify:shortTracksSearchResults");
+    setShowClearConfirmation(false);
+    Spicetify.showNotification("All short tracks data cleared");
   };
 
   const AllPlaylistsView = () => {
@@ -1990,75 +1992,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         ) : (
           <div className={styles.noIssues}>No tracks in this category.</div>
         )}
-      </div>
-    );
-  };
-
-  const ShortTracksBackupPanel: React.FC<{
-    onClose: () => void;
-    onExport: () => void;
-    onImport: (event: React.ChangeEvent<HTMLInputElement>) => void;
-    onClear: () => void;
-    confirmedCount: number;
-    searchResultsCount: number;
-  }> = ({ onClose, onExport, onImport, onClear, confirmedCount, searchResultsCount }) => {
-    return (
-      <div className={styles.modalOverlay}>
-        <div className={styles.modal}>
-          <div className={styles.modalHeader}>
-            <h3 className={styles.modalTitle}>Short Tracks Data Backup</h3>
-            <button className={styles.modalCloseButton} onClick={onClose}>
-              ×
-            </button>
-          </div>
-          <div className={styles.modalBody}>
-            <div className={styles.backupStats}>
-              <div className={styles.statItem}>
-                <span className={styles.statLabel}>Confirmed Short Tracks:</span>
-                <span className={styles.statValue}>{confirmedCount}</span>
-              </div>
-              <div className={styles.statItem}>
-                <span className={styles.statLabel}>Search Results:</span>
-                <span className={styles.statValue}>{searchResultsCount}</span>
-              </div>
-            </div>
-
-            <div className={styles.backupActions}>
-              <div className={styles.actionGroup}>
-                <h4>Export Data</h4>
-                <p>Download all confirmed tracks and search results as a backup file.</p>
-                <button className={styles.primaryButton} onClick={onExport}>
-                  Export Backup File
-                </button>
-              </div>
-
-              <div className={styles.actionGroup}>
-                <h4>Import Data</h4>
-                <p>Import confirmed tracks and search results from a backup file.</p>
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={onImport}
-                  className={styles.fileInput}
-                  id="import-short-tracks"
-                />
-                <label htmlFor="import-short-tracks" className={styles.primaryButton}>
-                  Import Backup File
-                </label>
-              </div>
-
-              <div className={styles.actionGroup}>
-                <h4>Clear All Data</h4>
-                <p className={styles.warningText}>
-                  This will permanently delete all confirmed tracks and search results.
-                </p>
-                <button className={styles.dangerButton} onClick={onClear}>
-                  Clear All Data
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     );
   };
@@ -3246,11 +3179,21 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
               </div>
 
               <div className={styles.actionButtons}>
-                <button
-                  className={styles.primaryButton}
-                  onClick={() => setShowShortTracksBackup(true)}
-                >
-                  Manage Backup Data
+                <button className={styles.primaryButton} onClick={exportShortTracksData}>
+                  Export Backup File
+                </button>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={importShortTracksData}
+                  className={styles.fileInput}
+                  id="import-short-tracks-main"
+                />
+                <label htmlFor="import-short-tracks-main" className={styles.primaryButton}>
+                  Import Backup File
+                </label>
+                <button className={styles.dangerButton} onClick={clearAllShortTracksData}>
+                  Clear All Data
                 </button>
                 <button
                   className={styles.primaryButton}
@@ -3332,15 +3275,42 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
               {renderShortTracksSection()}
             </div>
           )}
-          {showShortTracksBackup && (
-            <ShortTracksBackupPanel
-              onClose={() => setShowShortTracksBackup(false)}
-              onExport={exportShortTracksData}
-              onImport={importShortTracksData}
-              onClear={clearAllShortTracksData}
-              confirmedCount={confirmedShortTracks.size}
-              searchResultsCount={Object.keys(shortTracksSearchResults).length}
-            />
+          {showClearConfirmation && (
+            <Portal>
+              <div className={styles.modalOverlay}>
+                <div className={styles.modal}>
+                  <div className={styles.modalHeader}>
+                    <h3 className={styles.modalTitle}>Confirm Clear All Data</h3>
+                    <button
+                      className={styles.modalCloseButton}
+                      onClick={() => setShowClearConfirmation(false)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className={styles.modalBody}>
+                    <p className={styles.warningText}>
+                      This will permanently delete all confirmed short tracks (
+                      {confirmedShortTracks.size}) and search results (
+                      {Object.keys(shortTracksSearchResults).length}). This action cannot be undone.
+                    </p>
+                    <p>Are you sure you want to continue?</p>
+
+                    <div className={styles.actionButtons}>
+                      <button className={styles.dangerButton} onClick={confirmClearAllData}>
+                        Yes, Clear All Data
+                      </button>
+                      <button
+                        className={styles.primaryButton}
+                        onClick={() => setShowClearConfirmation(false)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Portal>
           )}
         </>
       )}
