@@ -1748,6 +1748,20 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   }> = ({ title, tracks, onConfirmTrack, onSearchExtended, showSearchButton }) => {
     const [selectedTrack, setSelectedTrack] = useState<ShortTrack | null>(null);
 
+    useEffect(() => {
+      // If we have a selected track but it's no longer in the tracks array,
+      // try to find it by full_path and update the reference
+      if (selectedTrack && !tracks.find((t) => t.full_path === selectedTrack.full_path)) {
+        setSelectedTrack(null);
+      } else if (selectedTrack) {
+        // Update the selected track reference if the data has changed
+        const updatedTrack = tracks.find((t) => t.full_path === selectedTrack.full_path);
+        if (updatedTrack && updatedTrack !== selectedTrack) {
+          setSelectedTrack(updatedTrack);
+        }
+      }
+    }, [tracks, selectedTrack]);
+
     const getStatusIcon = (track: ShortTrack) => {
       switch (track.status_type) {
         case "searching":
@@ -1776,7 +1790,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
               <div className={styles.tracksContainer}>
                 {tracks.map((track, index) => (
                   <div
-                    key={index}
+                    key={track.full_path}
                     className={`${styles.shortTrackItem} ${
                       track.has_longer_versions ? styles.hasExtended : ""
                     } ${
