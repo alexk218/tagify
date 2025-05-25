@@ -30,6 +30,7 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     dragIndex: number;
     hoverIndex: number;
   } | null>(null);
+  const [initialOrganizationStructure, setInitialOrganizationStructure] = useState<any>(null);
 
   useEffect(() => {
     fetchPlaylistOrganization();
@@ -37,11 +38,17 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
 
   useEffect(() => {
     if (playlistOrganization?.playlists && !playlistOrganization?.current_organization) {
-      // Only initialize with all playlists in root if no current organization exists
-      setOrganizationStructure({
+      const initialStructure = {
         folders: {},
         root_playlists: playlistOrganization.playlists.map((p: any) => p.name),
-      });
+      };
+      setOrganizationStructure(initialStructure);
+      setInitialOrganizationStructure(JSON.parse(JSON.stringify(initialStructure))); // Deep copy
+    } else if (playlistOrganization?.current_organization) {
+      setOrganizationStructure(playlistOrganization.current_organization);
+      setInitialOrganizationStructure(
+        JSON.parse(JSON.stringify(playlistOrganization.current_organization))
+      ); // Deep copy
     }
   }, [playlistOrganization]);
 
@@ -185,17 +192,48 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     playlistIndex?: number
   ) => {
     setDraggedItem({ ...item, type, source, playlistIndex });
+    setDragWithinFolder(null); // Clear any existing drag state
     e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", ""); // For better browser compatibility
   };
 
   const handleDragOver = (e: React.DragEvent, targetPath: string) => {
     e.preventDefault();
+    e.stopPropagation(); // Prevent event bubbling
     e.dataTransfer.dropEffect = "move";
     setDraggedOver(targetPath);
+
+    // Clear playlist reorder state when dragging over folder areas
+    if (dragWithinFolder && dragWithinFolder.folderPath !== targetPath) {
+      setDragWithinFolder(null);
+    }
   };
 
-  const handleDragLeave = () => {
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    // Only clear if we're actually leaving the target (not moving to a child)
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDraggedOver(null);
+    }
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    // Clean up all drag states when drag operation ends
+    setDraggedItem(null);
     setDraggedOver(null);
+    setDragWithinFolder(null);
+  };
+
+  const handleCancel = () => {
+    if (initialOrganizationStructure && organizationModified) {
+      if (
+        confirm("Are you sure you want to cancel all changes and revert to the original structure?")
+      ) {
+        setOrganizationStructure(JSON.parse(JSON.stringify(initialOrganizationStructure)));
+        setOrganizationModified(false);
+        setPreviewChanges(null);
+      }
+    }
   };
 
   const handleDrop = (
@@ -205,13 +243,15 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     playlistIndex?: number
   ) => {
     e.preventDefault();
+    e.stopPropagation();
+
+    // Clear all drag states
     setDraggedOver(null);
     setDragWithinFolder(null);
 
     if (!draggedItem) return;
 
     if (dropType === "playlist-reorder" && playlistIndex !== undefined) {
-      // Handle playlist reordering within the same folder
       if (draggedItem.type === "playlist" && draggedItem.source === targetPath) {
         handlePlaylistReorder(targetPath, draggedItem.playlistIndex!, playlistIndex);
       }
@@ -219,7 +259,6 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
       return;
     }
 
-    // ... rest of existing drop logic for moving between folders
     const newStructure = { ...organizationStructure };
 
     if (draggedItem.type === "playlist") {
@@ -287,6 +326,7 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     playlistIndex: number
   ) => {
     e.preventDefault();
+    e.stopPropagation();
 
     if (draggedItem && draggedItem.type === "playlist" && draggedItem.source === folderPath) {
       const dragIndex = draggedItem.playlistIndex;
@@ -296,6 +336,7 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
           dragIndex,
           hoverIndex: playlistIndex,
         });
+        setDraggedOver(null); // Clear folder drag state
       }
     }
   };
@@ -432,6 +473,7 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
                   onDragStart={(e) =>
                     handleDragStart(e, { name: playlistName }, "playlist", folder.path, index)
                   }
+                  onDragEnd={handleDragEnd}
                   onDragOver={(e) => handlePlaylistDragOver(e, folder.path, index)}
                   onDrop={(e) => handleDrop(e, folder.path, "playlist-reorder", index)}
                 >
@@ -469,6 +511,13 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
         <div className={styles.structureActions}>
           <button className={styles.secondaryButton} onClick={createNewFolder}>
             Create Folder
+          </button>
+          <button
+            className={styles.secondaryButton}
+            onClick={handleCancel}
+            disabled={!organizationModified}
+          >
+            Cancel Changes
           </button>
           <button
             className={styles.primaryButton}
@@ -519,6 +568,7 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
                   onDragStart={(e) =>
                     handleDragStart(e, { name: playlistName }, "playlist", "root", index)
                   }
+                  onDragEnd={handleDragEnd}
                   onDragOver={(e) => handlePlaylistDragOver(e, "root", index)}
                   onDrop={(e) => handleDrop(e, "root", "playlist-reorder", index)}
                 >
