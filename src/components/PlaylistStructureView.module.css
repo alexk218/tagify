@@ -313,3 +313,13 @@
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.2);
 }
+
+.dragOverPlaylistTop {
+  border-top: 3px solid #1e90ff !important;
+  margin-top: -3px;
+}
+
+.dragOverPlaylistBottom {
+  border-bottom: 3px solid #1e90ff !important;
+  margin-bottom: -3px;
+}
