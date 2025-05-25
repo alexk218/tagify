@@ -31,6 +31,8 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     hoverIndex: number;
   } | null>(null);
   const [initialOrganizationStructure, setInitialOrganizationStructure] = useState<any>(null);
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const [areAllFoldersExpanded, setAreAllFoldersExpanded] = useState(true);
 
   useEffect(() => {
     fetchPlaylistOrganization();
@@ -252,7 +254,6 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
   };
 
   const handleDragEnd = (e: React.DragEvent) => {
-    // Clean up all drag states when drag operation ends
     setDraggedItem(null);
     setDraggedOver(null);
     setDragWithinFolder(null);
@@ -375,7 +376,6 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
         setDraggedOver(null); // Clear folder drag state
       }
     }
-    // For cross-folder operations, let the event bubble up to the folder drop zone
   };
 
   const deleteFolder = (folderPath: string) => {
@@ -454,92 +454,129 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     return Object.values(hierarchy).filter((folder: any) => !folder.parentPath);
   };
 
-  // Add this recursive component for rendering nested folders
-  const renderFolder = (folder: any, level: number = 0) => (
-    <div
-      key={folder.path}
-      className={styles.folderContainer}
-      style={{ marginLeft: `${level * 20}px` }}
-    >
-      <div className={styles.folderHeader}>
-        <span className={styles.folderIcon}>📁</span>
-        <span className={styles.folderName}>{folder.name}</span>
-        <span className={styles.folderCount}>({folder.playlists.length} playlists)</span>
-        <button
-          className={styles.createSubfolderButton}
-          onClick={() => createNestedFolder(folder.path)}
-          title="Create subfolder"
-        >
-          +
-        </button>
-        <button
-          className={styles.deleteButton}
-          onClick={() => deleteFolder(folder.path)}
-          title="Delete folder"
-        >
-          ×
-        </button>
-      </div>
-      <div
-        className={`${styles.folderPlaylistsArea} ${
-          draggedOver === folder.path ? styles.dragOver : ""
-        }`}
-        onDragOver={(e) => handleDragOver(e, folder.path)}
-        onDragLeave={handleDragLeave}
-        onDrop={(e) => handleDrop(e, folder.path, "playlist-area")}
-      >
-        {folder.playlists.length === 0 ? (
-          <div className={styles.emptyFolder}>Drop playlists here</div>
-        ) : (
-          <div className={styles.playlistList}>
-            {folder.playlists.map((playlistName: string, index: number) => {
-              const playlistData = playlistOrganization.playlists.find(
-                (p: any) => p.name === playlistName
-              );
-              const isDraggedOver =
-                dragWithinFolder?.folderPath === folder.path &&
-                dragWithinFolder?.hoverIndex === index;
+  const toggleFolder = (folderPath: string) => {
+    setCollapsedFolders((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(folderPath)) {
+        newSet.delete(folderPath);
+      } else {
+        newSet.add(folderPath);
+      }
+      return newSet;
+    });
+  };
 
-              return (
-                <div
-                  key={`${playlistName}-${index}`}
-                  className={`${styles.playlistCard} ${styles.draggable} ${
-                    dragWithinFolder?.folderPath === folder.path &&
-                    dragWithinFolder?.hoverIndex === index
-                      ? getPlaylistDropIndicator(
-                          folder.path,
-                          index,
-                          dragWithinFolder.dragIndex,
-                          dragWithinFolder.hoverIndex
-                        )
-                      : ""
-                  }`}
-                  draggable
-                  onDragStart={(e) =>
-                    handleDragStart(e, { name: playlistName }, "playlist", folder.path, index)
-                  }
-                  onDragEnd={handleDragEnd}
-                  onDragOver={(e) => handlePlaylistDragOver(e, folder.path, index)}
-                  onDrop={(e) => handlePlaylistDrop(e, folder.path, index)}
-                >
-                  <span className={styles.dragHandle}>⋮⋮</span>
-                  <span className={styles.playlistIcon}>🎵</span>
-                  <span className={styles.playlistName}>{playlistName}</span>
-                  <span className={styles.playlistCount}>
-                    ({playlistData?.track_count || 0} tracks)
-                  </span>
-                </div>
-              );
-            })}
+  const toggleExpandAllFolders = () => {
+    if (areAllFoldersExpanded) {
+      // Collapse all folders
+      const allFolderPaths = Object.keys(organizationStructure.folders || {});
+      setCollapsedFolders(new Set(allFolderPaths));
+      setAreAllFoldersExpanded(false);
+    } else {
+      // Expand all folders
+      setCollapsedFolders(new Set());
+      setAreAllFoldersExpanded(true);
+    }
+  };
+
+  // Recursive component for rendering nested folders
+  const renderFolder = (folder: any, level: number = 0) => {
+    const isCollapsed = collapsedFolders.has(folder.path);
+
+    return (
+      <div
+        key={folder.path}
+        className={styles.folderContainer}
+        style={{ marginLeft: `${level * 20}px` }}
+      >
+        <div className={styles.folderHeader} onClick={() => toggleFolder(folder.path)}>
+          <span className={styles.folderToggle}>{isCollapsed ? "►" : "▼"}</span>
+          <span className={styles.folderIcon}>📁</span>
+          <span className={styles.folderName}>{folder.name}</span>
+          <span className={styles.folderCount}>({folder.playlists.length} playlists)</span>
+          <button
+            className={styles.createSubfolderButton}
+            onClick={(e) => {
+              e.stopPropagation();
+              createNestedFolder(folder.path);
+            }}
+            title="Create subfolder"
+          >
+            +
+          </button>
+          <button
+            className={styles.deleteButton}
+            onClick={(e) => {
+              e.stopPropagation();
+              deleteFolder(folder.path);
+            }}
+            title="Delete folder"
+          >
+            ×
+          </button>
+        </div>
+
+        {!isCollapsed && (
+          <div
+            className={`${styles.folderPlaylistsArea} ${
+              draggedOver === folder.path ? styles.dragOver : ""
+            }`}
+            onDragOver={(e) => handleDragOver(e, folder.path)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, folder.path, "playlist-area")}
+          >
+            {folder.playlists.length === 0 ? (
+              <div className={styles.emptyFolder}>Drop playlists here</div>
+            ) : (
+              <div className={styles.playlistList}>
+                {folder.playlists.map((playlistName: string, index: number) => {
+                  const playlistData = playlistOrganization.playlists.find(
+                    (p: any) => p.name === playlistName
+                  );
+
+                  return (
+                    <div
+                      key={`${playlistName}-${index}`}
+                      className={`${styles.playlistCard} ${styles.draggable} ${
+                        dragWithinFolder?.folderPath === folder.path &&
+                        dragWithinFolder?.hoverIndex === index
+                          ? getPlaylistDropIndicator(
+                              folder.path,
+                              index,
+                              dragWithinFolder.dragIndex,
+                              dragWithinFolder.hoverIndex
+                            )
+                          : ""
+                      }`}
+                      draggable
+                      onDragStart={(e) =>
+                        handleDragStart(e, { name: playlistName }, "playlist", folder.path, index)
+                      }
+                      onDragEnd={handleDragEnd}
+                      onDragOver={(e) => handlePlaylistDragOver(e, folder.path, index)}
+                      onDrop={(e) => handlePlaylistDrop(e, folder.path, index)}
+                    >
+                      <span className={styles.dragHandle}>⋮⋮</span>
+                      <span className={styles.playlistIcon}>🎵</span>
+                      <span className={styles.playlistName}>{playlistName}</span>
+                      <span className={styles.playlistCount}>
+                        ({playlistData?.track_count || 0} tracks)
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
-      </div>
 
-      {/* Render child folders recursively */}
-      {folder.children &&
-        folder.children.map((childFolder: any) => renderFolder(childFolder, level + 1))}
-    </div>
-  );
+        {/* Render child folders recursively */}
+        {!isCollapsed &&
+          folder.children &&
+          folder.children.map((childFolder: any) => renderFolder(childFolder, level + 1))}
+      </div>
+    );
+  };
 
   if (isLoadingOrganization) {
     return <div className={styles.loading}>Loading playlists for organization...</div>;
@@ -554,6 +591,10 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
       <div className={styles.structureHeader}>
         <h3>Playlist Structure</h3>
         <div className={styles.structureActions}>
+          <button className={styles.expandCollapseAllButton} onClick={toggleExpandAllFolders}>
+            <span className={styles.expandCollapseIcon}>{areAllFoldersExpanded ? "▼" : "►"}</span>
+            {areAllFoldersExpanded ? "Collapse All" : "Expand All"}
+          </button>
           <button className={styles.secondaryButton} onClick={createNewFolder}>
             Create Folder
           </button>

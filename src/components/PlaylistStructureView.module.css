@@ -93,9 +93,16 @@
 .folderHeader {
   display: flex;
   align-items: center;
-  padding: 12px;
+  padding: 8px 12px; /* Reduced from default */
   background: rgba(0, 0, 0, 0.2);
   border-bottom: 1px solid var(--spice-button-disabled);
+  cursor: pointer;
+  transition: background 0.2s ease;
+  min-height: 36px; /* Reduced height */
+}
+
+.folderHeader:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .folderIcon {
@@ -106,13 +113,15 @@
 .folderName {
   font-weight: 600;
   color: var(--spice-text);
+  font-size: 14px;
+  margin-left: 8px;
   flex: 1;
 }
 
 .folderCount {
+  font-size: 12px;
   color: var(--spice-subtext);
-  margin-right: 12px;
-  font-size: 14px;
+  margin-left: 8px;
 }
 
 .deleteButton {
@@ -131,8 +140,8 @@
 }
 
 .folderPlaylistsArea {
-  padding: 16px;
-  min-height: 80px;
+  padding: 8px;
+  min-height: 40px;
   border: 2px dashed transparent;
   transition: all 0.2s ease;
 }
@@ -142,11 +151,24 @@
   background-color: rgba(30, 144, 255, 0.1);
 }
 
+.folderToggle {
+  font-size: 10px;
+  margin-right: 8px;
+  width: 12px;
+  display: inline-block;
+  text-align: center;
+  transition: transform 0.2s ease;
+}
+
 .emptyFolder {
+  padding: 16px;
   text-align: center;
   color: var(--spice-subtext);
   font-style: italic;
-  padding: 20px;
+  font-size: 13px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  margin: 8px;
 }
 
 .playlistGrid {
@@ -156,20 +178,19 @@
 }
 
 .playlistCard {
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.2);
+  margin-bottom: 4px;
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
-  cursor: move;
+  gap: 8px;
   transition: all 0.2s ease;
-  user-select: none;
-  border: 1px solid transparent;
+  min-height: 32px;
 }
 
 .playlistCard:hover {
   background: rgba(255, 255, 255, 0.1);
-  border-color: var(--spice-button-disabled);
 }
 
 .playlistCard.draggable:active {
@@ -183,18 +204,14 @@
 }
 
 .playlistName {
-  flex: 1;
+  font-size: 13px;
   color: var(--spice-text);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 1;
 }
 
 .playlistCount {
+  font-size: 11px;
   color: var(--spice-subtext);
-  font-size: 12px;
-  margin-left: 8px;
 }
 
 .modifiedWarning {
@@ -322,4 +339,53 @@
 .dragOverPlaylistBottom {
   border-bottom: 3px solid #1e90ff !important;
   margin-bottom: -3px;
+}
+
+.createSubfolderButton {
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  margin-left: 8px;
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.createSubfolderButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.expandCollapseAllButton {
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.expandCollapseAllButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.expandCollapseIcon {
+  font-size: 10px;
+}
+
+.collapsed {
+  display: none;
 }
