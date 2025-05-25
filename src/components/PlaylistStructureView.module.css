@@ -276,3 +276,40 @@
     justify-content: center;
   }
 }
+
+.playlistList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dragHandle {
+  cursor: grab;
+  color: var(--spice-subtext);
+  margin-right: 8px;
+  font-weight: bold;
+}
+
+.draggable:active .dragHandle {
+  cursor: grabbing;
+}
+
+.dragOverPlaylist {
+  border-top: 2px solid #1e90ff !important;
+  margin-top: 2px;
+}
+
+.playlistCard {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.playlistCard:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}

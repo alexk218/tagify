@@ -25,6 +25,11 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     folders: {},
     root_playlists: [],
   });
+  const [dragWithinFolder, setDragWithinFolder] = useState<{
+    folderPath: string;
+    dragIndex: number;
+    hoverIndex: number;
+  } | null>(null);
 
   useEffect(() => {
     fetchPlaylistOrganization();
@@ -176,9 +181,10 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     e: React.DragEvent,
     item: any,
     type: "folder" | "playlist",
-    source: string = ""
+    source: string = "",
+    playlistIndex?: number
   ) => {
-    setDraggedItem({ ...item, type, source });
+    setDraggedItem({ ...item, type, source, playlistIndex });
     e.dataTransfer.effectAllowed = "move";
   };
 
@@ -195,13 +201,25 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
   const handleDrop = (
     e: React.DragEvent,
     targetPath: string,
-    dropType: "folder" | "playlist-area"
+    dropType: "folder" | "playlist-area" | "playlist-reorder",
+    playlistIndex?: number
   ) => {
     e.preventDefault();
     setDraggedOver(null);
+    setDragWithinFolder(null);
 
     if (!draggedItem) return;
 
+    if (dropType === "playlist-reorder" && playlistIndex !== undefined) {
+      // Handle playlist reordering within the same folder
+      if (draggedItem.type === "playlist" && draggedItem.source === targetPath) {
+        handlePlaylistReorder(targetPath, draggedItem.playlistIndex!, playlistIndex);
+      }
+      setDraggedItem(null);
+      return;
+    }
+
+    // ... rest of existing drop logic for moving between folders
     const newStructure = { ...organizationStructure };
 
     if (draggedItem.type === "playlist") {
@@ -236,6 +254,50 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     setOrganizationStructure(newStructure);
     setOrganizationModified(true);
     setDraggedItem(null);
+  };
+
+  const handlePlaylistReorder = (folderPath: string, dragIndex: number, hoverIndex: number) => {
+    if (dragIndex === hoverIndex) return;
+
+    const newStructure = { ...organizationStructure };
+
+    if (folderPath === "root") {
+      const draggedPlaylist = newStructure.root_playlists[dragIndex];
+      const newRootPlaylists = [...newStructure.root_playlists];
+      newRootPlaylists.splice(dragIndex, 1);
+      newRootPlaylists.splice(hoverIndex, 0, draggedPlaylist);
+      newStructure.root_playlists = newRootPlaylists;
+    } else {
+      if (newStructure.folders[folderPath]) {
+        const draggedPlaylist = newStructure.folders[folderPath].playlists[dragIndex];
+        const newPlaylists = [...newStructure.folders[folderPath].playlists];
+        newPlaylists.splice(dragIndex, 1);
+        newPlaylists.splice(hoverIndex, 0, draggedPlaylist);
+        newStructure.folders[folderPath].playlists = newPlaylists;
+      }
+    }
+
+    setOrganizationStructure(newStructure);
+    setOrganizationModified(true);
+  };
+
+  const handlePlaylistDragOver = (
+    e: React.DragEvent,
+    folderPath: string,
+    playlistIndex: number
+  ) => {
+    e.preventDefault();
+
+    if (draggedItem && draggedItem.type === "playlist" && draggedItem.source === folderPath) {
+      const dragIndex = draggedItem.playlistIndex;
+      if (dragIndex !== undefined && dragIndex !== playlistIndex) {
+        setDragWithinFolder({
+          folderPath,
+          dragIndex,
+          hoverIndex: playlistIndex,
+        });
+      }
+    }
   };
 
   const deleteFolder = (folderPath: string) => {
@@ -351,20 +413,29 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
         {folder.playlists.length === 0 ? (
           <div className={styles.emptyFolder}>Drop playlists here</div>
         ) : (
-          <div className={styles.playlistGrid}>
-            {folder.playlists.map((playlistName: string) => {
+          <div className={styles.playlistList}>
+            {folder.playlists.map((playlistName: string, index: number) => {
               const playlistData = playlistOrganization.playlists.find(
                 (p: any) => p.name === playlistName
               );
+              const isDraggedOver =
+                dragWithinFolder?.folderPath === folder.path &&
+                dragWithinFolder?.hoverIndex === index;
+
               return (
                 <div
-                  key={playlistName}
-                  className={`${styles.playlistCard} ${styles.draggable}`}
+                  key={`${playlistName}-${index}`}
+                  className={`${styles.playlistCard} ${styles.draggable} ${
+                    isDraggedOver ? styles.dragOverPlaylist : ""
+                  }`}
                   draggable
                   onDragStart={(e) =>
-                    handleDragStart(e, { name: playlistName }, "playlist", folder.path)
+                    handleDragStart(e, { name: playlistName }, "playlist", folder.path, index)
                   }
+                  onDragOver={(e) => handlePlaylistDragOver(e, folder.path, index)}
+                  onDrop={(e) => handleDrop(e, folder.path, "playlist-reorder", index)}
                 >
+                  <span className={styles.dragHandle}>⋮⋮</span>
                   <span className={styles.playlistIcon}>🎵</span>
                   <span className={styles.playlistName}>{playlistName}</span>
                   <span className={styles.playlistCount}>
@@ -430,20 +501,28 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
           onDrop={(e) => handleDrop(e, "root", "playlist-area")}
         >
           <h4>Root Playlists ({organizationStructure.root_playlists.length})</h4>
-          <div className={styles.playlistGrid}>
-            {organizationStructure.root_playlists.map((playlistName: string) => {
+          <div className={styles.playlistList}>
+            {organizationStructure.root_playlists.map((playlistName: string, index: number) => {
               const playlistData = playlistOrganization.playlists.find(
                 (p: any) => p.name === playlistName
               );
+              const isDraggedOver =
+                dragWithinFolder?.folderPath === "root" && dragWithinFolder?.hoverIndex === index;
+
               return (
                 <div
-                  key={playlistName}
-                  className={`${styles.playlistCard} ${styles.draggable}`}
+                  key={`${playlistName}-${index}`}
+                  className={`${styles.playlistCard} ${styles.draggable} ${
+                    isDraggedOver ? styles.dragOverPlaylist : ""
+                  }`}
                   draggable
                   onDragStart={(e) =>
-                    handleDragStart(e, { name: playlistName }, "playlist", "root")
+                    handleDragStart(e, { name: playlistName }, "playlist", "root", index)
                   }
+                  onDragOver={(e) => handlePlaylistDragOver(e, "root", index)}
+                  onDrop={(e) => handleDrop(e, "root", "playlist-reorder", index)}
                 >
+                  <span className={styles.dragHandle}>⋮⋮</span>
                   <span className={styles.playlistIcon}>🎵</span>
                   <span className={styles.playlistName}>{playlistName}</span>
                   <span className={styles.playlistCount}>
