@@ -389,3 +389,47 @@
 .collapsed {
   display: none;
 }
+
+.deletePlaylistButton {
+  background: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.deletePlaylistButton:hover {
+  background-color: #c0392b;
+}
+
+.playlistCard {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  transition: background-color 0.2s;
+}
+
+.playlistCard:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.playlistCard:hover .deletePlaylistButton {
+  opacity: 1;
+}
+
+.deletePlaylistButton {
+  opacity: 0.7;
+}

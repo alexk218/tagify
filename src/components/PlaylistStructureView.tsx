@@ -33,6 +33,7 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
   const [initialOrganizationStructure, setInitialOrganizationStructure] = useState<any>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [areAllFoldersExpanded, setAreAllFoldersExpanded] = useState(true);
+  const [cleanupResults, setCleanupResults] = useState<any>(null);
 
   useEffect(() => {
     fetchPlaylistOrganization();
@@ -433,7 +434,20 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
       return aDepth - bDepth;
     });
 
+    // create all intermediate parent folders that don't exist
+    const allFolderPaths = new Set<string>();
+
     sortedFolders.forEach((folderPath) => {
+      const parts = folderPath.split("/");
+      // Create all intermediate paths
+      for (let i = 1; i <= parts.length; i++) {
+        const intermediatePath = parts.slice(0, i).join("/");
+        allFolderPaths.add(intermediatePath);
+      }
+    });
+
+    // Create hierarchy entries for all folder paths (including intermediate ones)
+    Array.from(allFolderPaths).forEach((folderPath) => {
       const parts = folderPath.split("/");
       const folderName = parts[parts.length - 1];
       const parentPath = parts.slice(0, -1).join("/");
@@ -442,8 +456,9 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
         name: folderName,
         path: folderPath,
         parentPath: parentPath || null,
-        playlists: folders[folderPath].playlists || [],
+        playlists: folders[folderPath]?.playlists || [], // Use actual playlists if defined, empty array if intermediate
         children: [],
+        isIntermediate: !folders[folderPath], // Mark as intermediate if not explicitly defined
       };
     });
 
@@ -535,9 +550,94 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     }
   };
 
+  const performCleanup = async (dryRun: boolean = false) => {
+    try {
+      setIsLoadingOrganization(true);
+
+      const response = await fetch(`${serverUrl}/api/validation/cleanup-orphaned-playlists`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          playlistsDir: playlistsDir,
+          dryRun: dryRun,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCleanupResults(data);
+
+        if (!dryRun && data.success) {
+          Spicetify.showNotification(
+            `Cleanup complete: ${data.files_deleted} files deleted${
+              data.structure_cleaned ? ", structure cleaned" : ""
+            }`
+          );
+          // Refresh the structure after cleanup
+          await fetchPlaylistOrganization();
+        } else if (dryRun) {
+          Spicetify.showNotification(
+            `Preview: ${Object.keys(data.orphaned_files || {}).length} orphaned files found`
+          );
+        }
+      } else {
+        const error = await response.json();
+        Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
+      }
+    } catch (error) {
+      console.error("Error during cleanup:", error);
+      Spicetify.showNotification("Error during cleanup", true);
+    } finally {
+      setIsLoadingOrganization(false);
+    }
+  };
+
+  const deleteIndividualPlaylist = async (playlistName: string, folderPath: string) => {
+    const confirmMessage = `Remove "${playlistName}" from the playlist structure?\n\nThis will:\n- Remove it from your organization\n- When you apply changes, it will delete the M3U file\n- The playlist will remain in your Spotify/database`;
+
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      // Remove from structure
+      const newStructure = { ...organizationStructure };
+
+      if (folderPath === "root") {
+        newStructure.root_playlists = newStructure.root_playlists.filter(
+          (name: string) => name !== playlistName
+        );
+      } else {
+        if (newStructure.folders[folderPath]) {
+          newStructure.folders[folderPath].playlists = newStructure.folders[
+            folderPath
+          ].playlists.filter((name: string) => name !== playlistName);
+
+          // Remove folder if it becomes empty
+          if (newStructure.folders[folderPath].playlists.length === 0) {
+            delete newStructure.folders[folderPath];
+          }
+        }
+      }
+
+      setOrganizationStructure(newStructure);
+      setOrganizationModified(true);
+
+      Spicetify.showNotification(
+        `Removed "${playlistName}" from structure. Apply changes to delete the M3U file.`
+      );
+    } catch (error) {
+      console.error("Error removing playlist:", error);
+      Spicetify.showNotification("Error removing playlist", true);
+    }
+  };
+
   // Recursive component for rendering nested folders
   const renderFolder = (folder: any, level: number = 0) => {
     const isCollapsed = collapsedFolders.has(folder.path);
+    const totalPlaylists =
+      folder.playlists.length +
+      (folder.children?.reduce((sum: number, child: any) => sum + child.playlists.length, 0) || 0);
 
     return (
       <div
@@ -549,7 +649,10 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
           <span className={styles.folderToggle}>{isCollapsed ? "►" : "▼"}</span>
           <span className={styles.folderIcon}>📁</span>
           <span className={styles.folderName}>{folder.name}</span>
-          <span className={styles.folderCount}>({folder.playlists.length} playlists)</span>
+          <span className={styles.folderCount}>
+            ({folder.playlists.length} playlists
+            {folder.children?.length > 0 && ` + ${folder.children.length} subfolders`})
+          </span>
           <button
             className={styles.createSubfolderButton}
             onClick={(e) => {
@@ -560,76 +663,104 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
           >
             +
           </button>
-          <button
-            className={styles.deleteButton}
-            onClick={(e) => {
-              e.stopPropagation();
-              deleteFolder(folder.path);
-            }}
-            title="Delete folder"
-          >
-            ×
-          </button>
+          {/* Only show delete button for non-intermediate folders or empty intermediate folders */}
+          {(!folder.isIntermediate ||
+            (folder.children?.length === 0 && folder.playlists.length === 0)) && (
+            <button
+              className={styles.deleteButton}
+              onClick={(e) => {
+                e.stopPropagation();
+                deleteFolder(folder.path);
+              }}
+              title="Delete folder"
+            >
+              ×
+            </button>
+          )}
         </div>
 
         {!isCollapsed && (
-          <div
-            className={`${styles.folderPlaylistsArea} ${
-              draggedOver === folder.path ? styles.dragOver : ""
-            }`}
-            onDragOver={(e) => handleDragOver(e, folder.path)}
-            onDragLeave={handleDragLeave}
-            onDrop={(e) => handleDrop(e, folder.path, "playlist-area")}
-          >
-            {folder.playlists.length === 0 ? (
-              <div className={styles.emptyFolder}>Drop playlists here</div>
-            ) : (
-              <div className={styles.playlistList}>
-                {folder.playlists.map((playlistName: string, index: number) => {
-                  const playlistData = playlistOrganization.playlists.find(
-                    (p: any) => p.name === playlistName
-                  );
+          <>
+            {/* Render playlists if this folder has any */}
+            {folder.playlists.length > 0 && (
+              <div
+                className={`${styles.folderPlaylistsArea} ${
+                  draggedOver === folder.path ? styles.dragOver : ""
+                }`}
+                onDragOver={(e) => handleDragOver(e, folder.path)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, folder.path, "playlist-area")}
+              >
+                <div className={styles.playlistList}>
+                  {folder.playlists.map((playlistName: string, index: number) => {
+                    const playlistData = playlistOrganization.playlists.find(
+                      (p: any) => p.name === playlistName
+                    );
 
-                  return (
-                    <div
-                      key={`${playlistName}-${index}`}
-                      className={`${styles.playlistCard} ${styles.draggable} ${
-                        dragWithinFolder?.folderPath === folder.path &&
-                        dragWithinFolder?.hoverIndex === index
-                          ? getPlaylistDropIndicator(
-                              folder.path,
-                              index,
-                              dragWithinFolder.dragIndex,
-                              dragWithinFolder.hoverIndex
-                            )
-                          : ""
-                      }`}
-                      draggable
-                      onDragStart={(e) =>
-                        handleDragStart(e, { name: playlistName }, "playlist", folder.path, index)
-                      }
-                      onDragEnd={handleDragEnd}
-                      onDragOver={(e) => handlePlaylistDragOver(e, folder.path, index)}
-                      onDrop={(e) => handlePlaylistDrop(e, folder.path, index)}
-                    >
-                      <span className={styles.dragHandle}>⋮⋮</span>
-                      <span className={styles.playlistIcon}>🎵</span>
-                      <span className={styles.playlistName}>{playlistName}</span>
-                      <span className={styles.playlistCount}>
-                        ({playlistData?.track_count || 0} tracks)
-                      </span>
-                    </div>
-                  );
-                })}
+                    return (
+                      <div
+                        key={`${playlistName}-${index}`}
+                        className={`${styles.playlistCard} ${styles.draggable} ${
+                          dragWithinFolder?.folderPath === folder.path &&
+                          dragWithinFolder?.hoverIndex === index
+                            ? getPlaylistDropIndicator(
+                                folder.path,
+                                index,
+                                dragWithinFolder.dragIndex,
+                                dragWithinFolder.hoverIndex
+                              )
+                            : ""
+                        }`}
+                        draggable
+                        onDragStart={(e) =>
+                          handleDragStart(e, { name: playlistName }, "playlist", folder.path, index)
+                        }
+                        onDragEnd={handleDragEnd}
+                        onDragOver={(e) => handlePlaylistDragOver(e, folder.path, index)}
+                        onDrop={(e) => handlePlaylistDrop(e, folder.path, index)}
+                      >
+                        <span className={styles.dragHandle}>⋮⋮</span>
+                        <span className={styles.playlistIcon}>🎵</span>
+                        <span className={styles.playlistName}>{playlistName}</span>
+                        <span className={styles.playlistCount}>
+                          ({playlistData?.track_count || 0} tracks)
+                        </span>
+                        <button
+                          className={styles.deletePlaylistButton}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteIndividualPlaylist(playlistName, folder.path);
+                          }}
+                          title="Remove from structure"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
-          </div>
-        )}
 
-        {/* Render child folders recursively */}
-        {!isCollapsed &&
-          folder.children &&
-          folder.children.map((childFolder: any) => renderFolder(childFolder, level + 1))}
+            {/* Show drop area for intermediate folders with no playlists */}
+            {folder.playlists.length === 0 && (
+              <div
+                className={`${styles.folderPlaylistsArea} ${
+                  draggedOver === folder.path ? styles.dragOver : ""
+                }`}
+                onDragOver={(e) => handleDragOver(e, folder.path)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, folder.path, "playlist-area")}
+              >
+                <div className={styles.emptyFolder}>Drop playlists here</div>
+              </div>
+            )}
+
+            {/* Render child folders recursively */}
+            {folder.children &&
+              folder.children.map((childFolder: any) => renderFolder(childFolder, level + 1))}
+          </>
+        )}
       </div>
     );
   };
@@ -650,6 +781,12 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
           <button className={styles.expandCollapseAllButton} onClick={toggleExpandAllFolders}>
             <span className={styles.expandCollapseIcon}>{areAllFoldersExpanded ? "▼" : "►"}</span>
             {areAllFoldersExpanded ? "Collapse All" : "Expand All"}
+          </button>
+          <button className={styles.secondaryButton} onClick={() => performCleanup(true)}>
+            Preview Cleanup
+          </button>
+          <button className={styles.secondaryButton} onClick={() => performCleanup(false)}>
+            Clean Orphaned Files
           </button>
           <button className={styles.secondaryButton} onClick={reloadFromSavedStructure}>
             Reload Structure
@@ -731,6 +868,16 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
                   <span className={styles.playlistCount}>
                     ({playlistData?.track_count || 0} tracks)
                   </span>
+                  <button
+                    className={styles.deletePlaylistButton}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteIndividualPlaylist(playlistName, "root");
+                    }}
+                    title="Remove from structure"
+                  >
+                    ×
+                  </button>
                 </div>
               );
             })}
