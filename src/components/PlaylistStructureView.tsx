@@ -47,10 +47,14 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
       setOrganizationStructure(initialStructure);
       setInitialOrganizationStructure(JSON.parse(JSON.stringify(initialStructure))); // Deep copy
     } else if (playlistOrganization?.current_organization) {
+      console.log("Loading organization structure:", playlistOrganization.current_organization);
       setOrganizationStructure(playlistOrganization.current_organization);
       setInitialOrganizationStructure(
         JSON.parse(JSON.stringify(playlistOrganization.current_organization))
       ); // Deep copy
+
+      // Reset modification state since we're loading a fresh structure
+      setOrganizationModified(false);
     }
   }, [playlistOrganization]);
 
@@ -479,6 +483,58 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     }
   };
 
+  const reloadFromSavedStructure = async () => {
+    try {
+      setIsLoadingOrganization(true);
+
+      // Get exclusion settings from localStorage
+      const exclusionSettings = JSON.parse(
+        localStorage.getItem("tagify:playlistSettings") ||
+          '{"excludeNonOwnedPlaylists":true,"excludedKeywords":[],"excludedPlaylistIds":[],"excludeByDescription":[]}'
+      );
+
+      const queryParams = new URLSearchParams({
+        exclusionSettings: JSON.stringify(exclusionSettings),
+        playlistsDir: playlistsDir,
+        forceReload: "true", // NEW - force reload from saved structure
+      });
+
+      const response = await fetch(
+        `${serverUrl}/api/validation/playlist-organization?${queryParams}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setPlaylistOrganization(data);
+
+        // Force update the organization structure from the saved file
+        if (data.current_organization) {
+          setOrganizationStructure(data.current_organization);
+          setInitialOrganizationStructure(JSON.parse(JSON.stringify(data.current_organization)));
+          setOrganizationModified(false);
+          setPreviewChanges(null);
+          Spicetify.showNotification("Playlist structure reloaded from saved file");
+        } else {
+          Spicetify.showNotification("No saved structure found to reload", true);
+        }
+      } else {
+        const error = await response.json();
+        Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
+      }
+    } catch (error) {
+      console.error("Error reloading structure:", error);
+      Spicetify.showNotification("Error reloading playlist structure", true);
+    } finally {
+      setIsLoadingOrganization(false);
+    }
+  };
+
   // Recursive component for rendering nested folders
   const renderFolder = (folder: any, level: number = 0) => {
     const isCollapsed = collapsedFolders.has(folder.path);
@@ -594,6 +650,9 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
           <button className={styles.expandCollapseAllButton} onClick={toggleExpandAllFolders}>
             <span className={styles.expandCollapseIcon}>{areAllFoldersExpanded ? "▼" : "►"}</span>
             {areAllFoldersExpanded ? "Collapse All" : "Expand All"}
+          </button>
+          <button className={styles.secondaryButton} onClick={reloadFromSavedStructure}>
+            Reload Structure
           </button>
           <button className={styles.secondaryButton} onClick={createNewFolder}>
             Create Folder

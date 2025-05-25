@@ -1197,6 +1197,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         );
         // Refresh playlist validation
         validatePlaylists();
+        if (currentView === "playlist-structure" && onRefresh) {
+          setTimeout(() => onRefresh(true), 1000);
+        }
       } else {
         const error = await response.json();
         console.error("Error regenerating playlists:", error);
