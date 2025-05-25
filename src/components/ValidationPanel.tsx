@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import styles from "./ValidationPanel.module.css";
 import Portal from "../utils/Portal";
+import PlaylistStructureView from "./PlaylistStructureView";
 
 interface PotentialMismatch {
   file: string;
@@ -200,9 +201,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
   const [playlistSearchQuery, setPlaylistSearchQuery] = useState<string>("");
 
-  const [currentView, setCurrentView] = useState<"playlists" | "tracks" | "all-playlists">(
-    "playlists"
-  );
+  const [currentView, setCurrentView] = useState<
+    "playlists" | "tracks" | "all-playlists" | "playlist-structure"
+  >("playlists");
   const [trackSummaryFilter, setTrackSummaryFilter] = useState<string>("all");
   const [trackSummarySort, setTrackSummarySort] = useState<string>("playlists-desc");
 
@@ -571,8 +572,8 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           const extractData = await extractResponse.json();
           if (extractData.success) {
             const additionalTrackIds = extractData.track_ids
-              .filter((item: { track_id: any; }) => item.track_id)
-              .map((item: { track_id: any; }) => item.track_id);
+              .filter((item: { track_id: any }) => item.track_id)
+              .map((item: { track_id: any }) => item.track_id);
             trackIds = [...trackIds, ...additionalTrackIds];
           }
         }
@@ -3161,6 +3162,14 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     </button>
                     <button
                       className={`${styles.viewButton} ${
+                        currentView === "playlist-structure" ? styles.active : ""
+                      }`}
+                      onClick={() => setCurrentView("playlist-structure")}
+                    >
+                      Playlist Structure
+                    </button>
+                    <button
+                      className={`${styles.viewButton} ${
                         currentView === "all-playlists" ? styles.active : ""
                       }`}
                       onClick={() => setCurrentView("all-playlists")}
@@ -3192,6 +3201,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     <TrackIssuesSummary />
                   ) : currentView === "all-playlists" ? (
                     <AllPlaylistsView />
+                  ) : currentView === "playlist-structure" ? (
+                    <PlaylistStructureView
+                      serverUrl={serverUrl}
+                      playlistsDir={playlistsDir}
+                      masterTracksDir={masterTracksDir}
+                      onRefresh={onRefresh}
+                    />
                   ) : (
                     <div className={styles.playlistList}>
                       {getFilteredPlaylists()
