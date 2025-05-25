@@ -31,8 +31,8 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
   }, []);
 
   useEffect(() => {
-    if (playlistOrganization?.playlists) {
-      // Initialize with all playlists in root by default
+    if (playlistOrganization?.playlists && !playlistOrganization?.current_organization) {
+      // Only initialize with all playlists in root if no current organization exists
       setOrganizationStructure({
         folders: {},
         root_playlists: playlistOrganization.playlists.map((p: any) => p.name),
@@ -51,6 +51,7 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
 
       const queryParams = new URLSearchParams({
         exclusionSettings: JSON.stringify(exclusionSettings),
+        playlistsDir: playlistsDir,
       });
 
       const response = await fetch(
@@ -67,6 +68,23 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
         const data = await response.json();
         setPlaylistOrganization(data);
         setOrganizationModified(false);
+
+        // Set the current organization structure from the server response
+        if (
+          data.current_organization &&
+          Object.keys(data.current_organization.folders || {}).length > 0
+        ) {
+          console.log("Loading existing structure:", data.current_organization);
+          setOrganizationStructure(data.current_organization);
+        } else {
+          console.log("No existing structure found, initializing with all playlists in root");
+          // Only set default structure if no existing structure was found
+          setOrganizationStructure({
+            folders: {},
+            root_playlists: data.playlists.map((p: any) => p.name),
+            structure_version: "1.0",
+          });
+        }
       } else {
         const error = await response.json();
         console.error("Error fetching playlist organization:", error);
@@ -220,16 +238,6 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
     setDraggedItem(null);
   };
 
-  const createNewFolder = () => {
-    const folderName = prompt("Enter folder name:");
-    if (folderName && folderName.trim()) {
-      const newStructure = { ...organizationStructure };
-      newStructure.folders[folderName.trim()] = { playlists: [] };
-      setOrganizationStructure(newStructure);
-      setOrganizationModified(true);
-    }
-  };
-
   const deleteFolder = (folderPath: string) => {
     if (!confirm(`Delete folder "${folderPath}" and move its playlists to root?`)) return;
 
@@ -253,6 +261,127 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
   const handleApply = async () => {
     await applyOrganizationChanges(organizationStructure);
   };
+
+  // Add this helper function at the top of the component
+  const createNestedFolder = (basePath: string = "") => {
+    const folderName = prompt("Enter folder name:");
+    if (folderName && folderName.trim()) {
+      const newStructure = { ...organizationStructure };
+      const fullPath = basePath ? `${basePath}/${folderName.trim()}` : folderName.trim();
+      newStructure.folders[fullPath] = { playlists: [] };
+      setOrganizationStructure(newStructure);
+      setOrganizationModified(true);
+    }
+  };
+
+  // Replace the existing createNewFolder function
+  const createNewFolder = () => createNestedFolder("");
+
+  // Add this function to get folder hierarchy for better display
+  const getFolderHierarchy = () => {
+    const folders = organizationStructure.folders || {};
+    const hierarchy: any = {};
+
+    // Sort folders by depth (fewer slashes first)
+    const sortedFolders = Object.keys(folders).sort((a, b) => {
+      const aDepth = (a.match(/\//g) || []).length;
+      const bDepth = (b.match(/\//g) || []).length;
+      return aDepth - bDepth;
+    });
+
+    sortedFolders.forEach((folderPath) => {
+      const parts = folderPath.split("/");
+      const folderName = parts[parts.length - 1];
+      const parentPath = parts.slice(0, -1).join("/");
+
+      hierarchy[folderPath] = {
+        name: folderName,
+        path: folderPath,
+        parentPath: parentPath || null,
+        playlists: folders[folderPath].playlists || [],
+        children: [],
+      };
+    });
+
+    // Build parent-child relationships
+    Object.values(hierarchy).forEach((folder: any) => {
+      if (folder.parentPath && hierarchy[folder.parentPath]) {
+        hierarchy[folder.parentPath].children.push(folder);
+      }
+    });
+
+    // Return only root level folders (no parent)
+    return Object.values(hierarchy).filter((folder: any) => !folder.parentPath);
+  };
+
+  // Add this recursive component for rendering nested folders
+  const renderFolder = (folder: any, level: number = 0) => (
+    <div
+      key={folder.path}
+      className={styles.folderContainer}
+      style={{ marginLeft: `${level * 20}px` }}
+    >
+      <div className={styles.folderHeader}>
+        <span className={styles.folderIcon}>📁</span>
+        <span className={styles.folderName}>{folder.name}</span>
+        <span className={styles.folderCount}>({folder.playlists.length} playlists)</span>
+        <button
+          className={styles.createSubfolderButton}
+          onClick={() => createNestedFolder(folder.path)}
+          title="Create subfolder"
+        >
+          +
+        </button>
+        <button
+          className={styles.deleteButton}
+          onClick={() => deleteFolder(folder.path)}
+          title="Delete folder"
+        >
+          ×
+        </button>
+      </div>
+      <div
+        className={`${styles.folderPlaylistsArea} ${
+          draggedOver === folder.path ? styles.dragOver : ""
+        }`}
+        onDragOver={(e) => handleDragOver(e, folder.path)}
+        onDragLeave={handleDragLeave}
+        onDrop={(e) => handleDrop(e, folder.path, "playlist-area")}
+      >
+        {folder.playlists.length === 0 ? (
+          <div className={styles.emptyFolder}>Drop playlists here</div>
+        ) : (
+          <div className={styles.playlistGrid}>
+            {folder.playlists.map((playlistName: string) => {
+              const playlistData = playlistOrganization.playlists.find(
+                (p: any) => p.name === playlistName
+              );
+              return (
+                <div
+                  key={playlistName}
+                  className={`${styles.playlistCard} ${styles.draggable}`}
+                  draggable
+                  onDragStart={(e) =>
+                    handleDragStart(e, { name: playlistName }, "playlist", folder.path)
+                  }
+                >
+                  <span className={styles.playlistIcon}>🎵</span>
+                  <span className={styles.playlistName}>{playlistName}</span>
+                  <span className={styles.playlistCount}>
+                    ({playlistData?.track_count || 0} tracks)
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Render child folders recursively */}
+      {folder.children &&
+        folder.children.map((childFolder: any) => renderFolder(childFolder, level + 1))}
+    </div>
+  );
 
   if (isLoadingOrganization) {
     return <div className={styles.loading}>Loading playlists for organization...</div>;
@@ -329,62 +458,7 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
         {/* Folders */}
         <div className={styles.foldersContainer}>
           <h4>Folders ({Object.keys(organizationStructure.folders).length})</h4>
-          {Object.entries(organizationStructure.folders).map(
-            ([folderPath, folderData]: [string, any]) => (
-              <div key={folderPath} className={styles.folderContainer}>
-                <div className={styles.folderHeader}>
-                  <span className={styles.folderIcon}>📁</span>
-                  <span className={styles.folderName}>{folderPath}</span>
-                  <span className={styles.folderCount}>
-                    ({folderData.playlists.length} playlists)
-                  </span>
-                  <button
-                    className={styles.deleteButton}
-                    onClick={() => deleteFolder(folderPath)}
-                    title="Delete folder"
-                  >
-                    ×
-                  </button>
-                </div>
-                <div
-                  className={`${styles.folderPlaylistsArea} ${
-                    draggedOver === folderPath ? styles.dragOver : ""
-                  }`}
-                  onDragOver={(e) => handleDragOver(e, folderPath)}
-                  onDragLeave={handleDragLeave}
-                  onDrop={(e) => handleDrop(e, folderPath, "playlist-area")}
-                >
-                  {folderData.playlists.length === 0 ? (
-                    <div className={styles.emptyFolder}>Drop playlists here</div>
-                  ) : (
-                    <div className={styles.playlistGrid}>
-                      {folderData.playlists.map((playlistName: string) => {
-                        const playlistData = playlistOrganization.playlists.find(
-                          (p: any) => p.name === playlistName
-                        );
-                        return (
-                          <div
-                            key={playlistName}
-                            className={`${styles.playlistCard} ${styles.draggable}`}
-                            draggable
-                            onDragStart={(e) =>
-                              handleDragStart(e, { name: playlistName }, "playlist", folderPath)
-                            }
-                          >
-                            <span className={styles.playlistIcon}>🎵</span>
-                            <span className={styles.playlistName}>{playlistName}</span>
-                            <span className={styles.playlistCount}>
-                              ({playlistData?.track_count || 0} tracks)
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )
-          )}
+          {getFolderHierarchy().map((folder: any) => renderFolder(folder))}
         </div>
       </div>
 
