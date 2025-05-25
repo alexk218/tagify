@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import styles from "./TrackDetails.module.css";
-import { Category, TrackTag } from "../hooks/useTagData";
+import { TagCategory, TrackTag } from "../hooks/useTagData";
 import ReactStars from "react-rating-stars-component";
 import { findPlaylistsContainingTrack } from "../utils/PlaylistManager";
 import { getPlaylistSettings } from "../utils/PlaylistSettings";
@@ -18,7 +18,7 @@ interface TrackDetailsProps {
     bpm: number | null;
     tags: TrackTag[];
   };
-  categories: Category[];
+  categories: TagCategory[];
   onSetRating: (rating: number) => void;
   onSetEnergy: (energy: number) => void;
   onSetBpm: (bpm: number | null) => void;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import styles from "./TrackList.module.css";
 import { parseLocalFileUri } from "../utils/LocalFileParser";
-import { Category } from "../hooks/useTagData";
+import { TagCategory } from "../hooks/useTagData";
 import CreatePlaylistModal from "./CreatePlaylistModal";
 import ReactStars from "react-rating-stars-component";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -28,7 +28,7 @@ interface SpotifyTrackInfo {
 
 interface TrackListProps {
   tracks: { [uri: string]: TrackData };
-  categories: Category[];
+  categories: TagCategory[];
   activeTagFilters: string[];
   excludedTagFilters: string[];
   activeTrackUri: string | null;
@@ -994,6 +994,7 @@ const TrackList: React.FC<TrackListProps> = ({
         </div>
       )}
 
+      {/* TRACK LIST */}
       <div className={styles.trackList}>
         {sortedTracks.length === 0 ? (
           <p className={styles.noTracks}>

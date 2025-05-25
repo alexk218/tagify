@@ -1,6 +1,6 @@
 import React from "react";
 import styles from "./MultiTrackDetails.module.css";
-import { Category, TrackTag } from "../hooks/useTagData";
+import { TagCategory, TrackTag } from "../hooks/useTagData";
 
 interface MultiTrackDetailsProps {
   tracks: Array<{
@@ -10,7 +10,7 @@ interface MultiTrackDetailsProps {
     album: { name: string };
   }>;
   trackTagsMap: Record<string, TrackTag[]>;
-  categories: Category[];
+  categories: TagCategory[];
   onTagAllTracks: (categoryId: string, subcategoryId: string, tagId: string) => void;
   onTagSingleTrack?: (
     trackUri: string,

@@ -151,7 +151,7 @@ class TrackService {
       // Check if categories exist and is an array
       if (!tagData.categories || !Array.isArray(tagData.categories)) {
         console.error("TagData is missing valid categories array", tagData.categories);
-        return {}; // Return empty object to avoid further errors
+        return {};
       }
 
       // Check if tracks exist

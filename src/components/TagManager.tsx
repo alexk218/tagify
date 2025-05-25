@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import styles from "./TagManager.module.css";
-import { Category } from "../hooks/useTagData";
+import { TagCategory } from "../hooks/useTagData";
 
 interface TagManagerProps {
-  categories: Category[];
+  categories: TagCategory[];
   onClose: () => void;
 
   // Category operations

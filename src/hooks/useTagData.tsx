@@ -6,16 +6,16 @@ export interface Tag {
   id: string;
 }
 
-export interface Subcategory {
+export interface TagSubcategory {
   name: string;
   id: string;
   tags: Tag[];
 }
 
-export interface Category {
+export interface TagCategory {
   name: string;
   id: string;
-  subcategories: Subcategory[];
+  subcategories: TagSubcategory[];
 }
 
 export interface TrackTag {
@@ -32,7 +32,7 @@ export interface TrackData {
 }
 
 export interface TagDataStructure {
-  categories: Category[];
+  categories: TagCategory[];
   tracks: {
     [trackUri: string]: TrackData;
   };
@@ -227,7 +227,7 @@ export function useTagData() {
   const [tagData, setTagData] = useState<TagDataStructure>(defaultTagData);
   const [isLoading, setIsLoading] = useState(true);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
-  const pendingTaggedTracks = useRef<Map<string, number>>(new Map());
+  const playlistAdditionTimeouts = useRef<Map<string, number>>(new Map());
 
   const saveToLocalStorage = (data: TagDataStructure) => {
     try {
@@ -329,16 +329,16 @@ export function useTagData() {
   useEffect(() => {
     return () => {
       // Clear all pending timeouts when component unmounts
-      pendingTaggedTracks.current.forEach((timeoutId) => {
+      playlistAdditionTimeouts.current.forEach((timeoutId) => {
         clearTimeout(timeoutId);
       });
-      pendingTaggedTracks.current.clear();
+      playlistAdditionTimeouts.current.clear();
     };
   }, []);
 
   const scheduleAddToTaggedPlaylist = (trackUri: string) => {
     // Clear any existing timeout for this track
-    const existingTimeoutId = pendingTaggedTracks.current.get(trackUri);
+    const existingTimeoutId = playlistAdditionTimeouts.current.get(trackUri);
     if (existingTimeoutId) {
       clearTimeout(existingTimeoutId);
     }
@@ -348,33 +348,33 @@ export function useTagData() {
       // Schedule adding to playlist after 2 seconds
       const timeoutId = setTimeout(async () => {
         await addTrackToTaggedPlaylist(trackUri);
-        pendingTaggedTracks.current.delete(trackUri);
+        playlistAdditionTimeouts.current.delete(trackUri);
       }, 2000);
 
-      pendingTaggedTracks.current.set(trackUri, timeoutId);
+      playlistAdditionTimeouts.current.set(trackUri, timeoutId);
     }
   };
 
   // Function to cancel pending addition to playlist
   const cancelAddToTaggedPlaylist = (trackUri: string) => {
-    const timeoutid = pendingTaggedTracks.current.get(trackUri);
+    const timeoutid = playlistAdditionTimeouts.current.get(trackUri);
 
     if (timeoutid) {
       clearTimeout(timeoutid);
-      pendingTaggedTracks.current.delete(trackUri);
+      playlistAdditionTimeouts.current.delete(trackUri);
     }
   };
 
   // ! CATEGORY MANAGEMENT
 
   // Add a new main category
-  const addCategory = (name: string) => {
+  const createTagCategory = (name: string) => {
     const existingCategoryIds = tagData.categories.map((c) => c.id);
 
     const baseId = generateIdFromName(name);
     const uniqueId = ensureUniqueId(baseId, existingCategoryIds);
 
-    const newCategory: Category = {
+    const newCategory: TagCategory = {
       name,
       id: uniqueId,
       subcategories: [],
@@ -386,7 +386,7 @@ export function useTagData() {
     });
   };
 
-  const removeCategory = (categoryId: string) => {
+  const deleteTagCategory = (categoryId: string) => {
     // Create updated categories without the removed one
     const updatedCategories = tagData.categories.filter((category) => category.id !== categoryId);
 
@@ -405,7 +405,7 @@ export function useTagData() {
     });
   };
 
-  const renameCategory = (categoryId: string, newName: string) => {
+  const renameTagCategory = (categoryId: string, newName: string) => {
     const updatedCategories = tagData.categories?.map((category) =>
       category.id === categoryId ? { ...category, name: newName } : category
     );
@@ -419,7 +419,7 @@ export function useTagData() {
   // ! SUBCATEGORY MANAGEMENT
 
   // Add a new subcategory to a main category
-  const addSubcategory = (categoryId: string, name: string) => {
+  const createTagSubcategory = (categoryId: string, name: string) => {
     // Find the category first
     const category = tagData.categories.find((c) => c.id === categoryId);
     if (!category) return;
@@ -430,7 +430,7 @@ export function useTagData() {
     const baseId = generateIdFromName(name);
     const uniqueId = ensureUniqueId(baseId, existingSubcategoryIds);
 
-    const newSubcategory: Subcategory = {
+    const newSubcategory: TagSubcategory = {
       name,
       id: uniqueId,
       tags: [],
@@ -451,7 +451,7 @@ export function useTagData() {
     });
   };
 
-  const removeSubcategory = (categoryId: string, subcategoryId: string) => {
+  const deleteTagSubcategory = (categoryId: string, subcategoryId: string) => {
     const updatedCategories = tagData.categories?.map((category) => {
       if (category.id !== categoryId) return category;
 
@@ -478,7 +478,7 @@ export function useTagData() {
     });
   };
 
-  const renameSubcategory = (categoryId: string, subcategoryId: string, newName: string) => {
+  const renameTagSubcategory = (categoryId: string, subcategoryId: string, newName: string) => {
     const updatedCategories = tagData.categories?.map((category) => {
       if (category.id !== categoryId) return category;
 
@@ -499,7 +499,7 @@ export function useTagData() {
   // ! TAG MANAGEMENT
 
   // Add a new tag to a subcategory
-  const addTag = (categoryId: string, subcategoryId: string, name: string) => {
+  const createNewTag = (categoryId: string, subcategoryId: string, name: string) => {
     // Find the subcategory first
     const category = tagData.categories.find((c) => c.id === categoryId);
     if (!category) return;
@@ -603,7 +603,7 @@ export function useTagData() {
   // ! TRACK TAG MANAGEMENT
 
   // Ensure track data exists for a given URI
-  const ensureTrackData = (trackUri: string) => {
+  const getOrCreateTrackData = (trackUri: string) => {
     if (!tagData.tracks[trackUri]) {
       const newTagData = {
         ...tagData,
@@ -663,7 +663,7 @@ export function useTagData() {
 
   const setBpm = (trackUri: string, bpm: number | null) => {
     // Ensure track data exists
-    const currentData = ensureTrackData(trackUri);
+    const currentData = getOrCreateTrackData(trackUri);
     const trackData = currentData.tracks[trackUri];
 
     // Check if this would make the track empty
@@ -699,9 +699,15 @@ export function useTagData() {
   };
 
   const backfillBPMData = async () => {
-    // Check if we have tracks that need BPM data
+    // Check if we have tracks that need BPM data - more comprehensive check
     const tracksMissingBPM = Object.entries(tagData.tracks)
-      .filter(([, data]) => data.bpm === undefined || data.bpm === 0)
+      .filter(([uri, data]) => {
+        // Only process Spotify tracks, and check for null, undefined, 0, or missing bpm
+        return (
+          !uri.startsWith("spotify:local:") &&
+          (data.bpm === undefined || data.bpm === null || data.bpm === 0 || !data.bpm)
+        );
+      })
       .map(([uri]) => uri);
 
     if (tracksMissingBPM.length === 0) {
@@ -711,20 +717,37 @@ export function useTagData() {
 
     console.log(`Backfilling BPM data for ${tracksMissingBPM.length} tracks...`);
 
+    // Create a copy of the current track data to work with
+    const updatedTracks = { ...tagData.tracks };
+    let successfulUpdates = 0;
+
     // Process in smaller batches to avoid rate limiting
     const batchSize = 10;
     for (let i = 0; i < tracksMissingBPM.length; i += batchSize) {
       const batch = tracksMissingBPM.slice(i, i + batchSize);
+
+      console.log(
+        `Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(
+          tracksMissingBPM.length / batchSize
+        )}`
+      );
+
       await Promise.all(
         batch.map(async (uri) => {
           try {
+            console.log(`Fetching BPM for track: ${uri}`);
             const bpm = await fetchBPM(uri);
-            if (bpm !== null) {
-              // Update without triggering a full state refresh for each track
-              tagData.tracks[uri] = {
-                ...tagData.tracks[uri],
+
+            if (bpm !== null && bpm > 0) {
+              // Create a new track data object instead of mutating
+              updatedTracks[uri] = {
+                ...updatedTracks[uri],
                 bpm,
               };
+              successfulUpdates++;
+              console.log(`Successfully updated BPM for ${uri}: ${bpm}`);
+            } else {
+              console.log(`No BPM data available for ${uri}`);
             }
           } catch (error) {
             console.error(`Error backfilling BPM for track ${uri}:`, error);
@@ -734,16 +757,19 @@ export function useTagData() {
 
       // Wait a second between batches to be nice to the API
       if (i + batchSize < tracksMissingBPM.length) {
+        console.log("Waiting 1 second before next batch...");
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
-    // After all batches, update the state once
-    setTagData({ ...tagData });
+    // Update the state with the new track data
+    const newTagData = {
+      ...tagData,
+      tracks: updatedTracks,
+    };
 
-    // Save to localStorage
-    saveToLocalStorage(tagData);
-    console.log("BPM backfilling complete!");
+    setTagData(newTagData);
+    console.log(`BPM backfilling complete! Successfully updated ${successfulUpdates} tracks.`);
   };
 
   const findCommonTags = (trackUris: string[]): TrackTag[] => {
@@ -777,15 +803,14 @@ export function useTagData() {
     );
   };
 
-  // Toggle a tag for a track
-  const toggleTrackTag = (
+  const ToggleTagForTrack = (
     trackUri: string,
     categoryId: string,
     subcategoryId: string,
     tagId: string
   ) => {
     // Ensure track data exists
-    const currentData = ensureTrackData(trackUri);
+    const currentData = getOrCreateTrackData(trackUri);
     const trackData = currentData.tracks[trackUri];
 
     // Find if tag already exists
@@ -962,7 +987,7 @@ export function useTagData() {
 
   const setRating = (trackUri: string, rating: number) => {
     // Ensure track data exists
-    const currentData = ensureTrackData(trackUri);
+    const currentData = getOrCreateTrackData(trackUri);
     const trackData = currentData.tracks[trackUri];
 
     // If this is the first rating for an otherwise empty track, schedule adding to TAGGED playlist
@@ -1005,7 +1030,7 @@ export function useTagData() {
   // Set energy level for a track (0 means no energy rating)
   const setEnergy = (trackUri: string, energy: number) => {
     // Ensure track data exists
-    const currentData = ensureTrackData(trackUri);
+    const currentData = getOrCreateTrackData(trackUri);
     const trackData = currentData.tracks[trackUri];
 
     // If this is the first energy setting for an otherwise empty track, schedule adding to TAGGED playlist
@@ -1127,7 +1152,7 @@ export function useTagData() {
     lastSaved,
 
     // Track tag management
-    toggleTrackTag,
+    toggleTrackTag: ToggleTagForTrack,
     setRating,
     setEnergy,
     setBpm,
@@ -1136,17 +1161,17 @@ export function useTagData() {
     findCommonTags,
 
     // Category management
-    addCategory,
-    removeCategory,
-    renameCategory,
+    addCategory: createTagCategory,
+    removeCategory: deleteTagCategory,
+    renameCategory: renameTagCategory,
 
     // Subcategory management
-    addSubcategory,
-    removeSubcategory,
-    renameSubcategory,
+    addSubcategory: createTagSubcategory,
+    removeSubcategory: deleteTagSubcategory,
+    renameSubcategory: renameTagSubcategory,
 
     // Tag management
-    addTag,
+    addTag: createNewTag,
     removeTag,
     renameTag,
 

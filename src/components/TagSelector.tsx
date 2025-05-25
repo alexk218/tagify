@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import styles from "./TagSelector.module.css";
-import { Category, TrackTag } from "../hooks/useTagData";
+import { TagCategory, TrackTag } from "../hooks/useTagData";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 
 interface TagSelectorProps {
@@ -8,7 +8,7 @@ interface TagSelectorProps {
     uri: string;
     name: string;
   };
-  categories: Category[];
+  categories: TagCategory[];
   trackTags: TrackTag[];
   onToggleTag: (categoryId: string, subcategoryId: string, tagId: string) => void;
   onOpenTagManager: () => void;
