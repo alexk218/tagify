@@ -434,7 +434,7 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
       return aDepth - bDepth;
     });
 
-    // create all intermediate parent folders that don't exist
+    // First, create all intermediate parent folders that don't exist
     const allFolderPaths = new Set<string>();
 
     sortedFolders.forEach((folderPath) => {
@@ -456,9 +456,9 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
         name: folderName,
         path: folderPath,
         parentPath: parentPath || null,
-        playlists: folders[folderPath]?.playlists || [], // Use actual playlists if defined, empty array if intermediate
+        playlists: folders[folderPath]?.playlists || [],
         children: [],
-        isIntermediate: !folders[folderPath], // Mark as intermediate if not explicitly defined
+        isIntermediate: !folders[folderPath],
       };
     });
 
@@ -469,8 +469,23 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
       }
     });
 
-    // Return only root level folders (no parent)
-    return Object.values(hierarchy).filter((folder: any) => !folder.parentPath);
+    // Get root level folders and sort them alphabetically
+    const rootFolders = Object.values(hierarchy).filter((folder: any) => !folder.parentPath);
+
+    // Sort root folders alphabetically by name
+    rootFolders.sort((a: any, b: any) => a.name.localeCompare(b.name));
+
+    // Also sort children within each folder recursively
+    const sortChildren = (folder: any) => {
+      if (folder.children && folder.children.length > 0) {
+        folder.children.sort((a: any, b: any) => a.name.localeCompare(b.name));
+        folder.children.forEach(sortChildren);
+      }
+    };
+
+    rootFolders.forEach(sortChildren);
+
+    return rootFolders;
   };
 
   const toggleFolder = (folderPath: string) => {
@@ -487,9 +502,25 @@ const PlaylistStructureView: React.FC<PlaylistStructureViewProps> = ({
 
   const toggleExpandAllFolders = () => {
     if (areAllFoldersExpanded) {
-      // Collapse all folders
-      const allFolderPaths = Object.keys(organizationStructure.folders || {});
-      setCollapsedFolders(new Set(allFolderPaths));
+      // Collapse all folders - include ALL folder paths (both explicit and intermediate)
+      const allFolderPaths = new Set<string>();
+
+      // Add explicit folders
+      Object.keys(organizationStructure.folders || {}).forEach((path) => {
+        allFolderPaths.add(path);
+      });
+
+      // Add all intermediate parent paths
+      Object.keys(organizationStructure.folders || {}).forEach((folderPath) => {
+        const parts = folderPath.split("/");
+        for (let i = 1; i < parts.length; i++) {
+          // < instead of <= to exclude the full path (already added above)
+          const intermediatePath = parts.slice(0, i).join("/");
+          allFolderPaths.add(intermediatePath);
+        }
+      });
+
+      setCollapsedFolders(allFolderPaths);
       setAreAllFoldersExpanded(false);
     } else {
       // Expand all folders
