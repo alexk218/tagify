@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { addTrackToTaggedPlaylist } from "../utils/PlaylistManager";
 
 export interface Tag {
@@ -227,7 +227,7 @@ export function useTagData() {
   const [tagData, setTagData] = useState<TagDataStructure>(defaultTagData);
   const [isLoading, setIsLoading] = useState(true);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
-  const [pendingTaggedTracks] = useState<Map<string, number>>(new Map());
+  const pendingTaggedTracks = useRef<Map<string, number>>(new Map());
 
   const saveToLocalStorage = (data: TagDataStructure) => {
     try {
@@ -325,10 +325,22 @@ export function useTagData() {
     }
   }, [tagData, isLoading]);
 
+  // Cleanup pending timeouts on unmount
+  useEffect(() => {
+    return () => {
+      // Clear all pending timeouts when component unmounts
+      pendingTaggedTracks.current.forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+      pendingTaggedTracks.current.clear();
+    };
+  }, []);
+
   const scheduleAddToTaggedPlaylist = (trackUri: string) => {
     // Clear any existing timeout for this track
-    if (pendingTaggedTracks.has(trackUri)) {
-      clearTimeout(pendingTaggedTracks.get(trackUri));
+    const existingTimeoutId = pendingTaggedTracks.current.get(trackUri);
+    if (existingTimeoutId) {
+      clearTimeout(existingTimeoutId);
     }
 
     // Only schedule for Spotify tracks (not local files)
@@ -336,18 +348,20 @@ export function useTagData() {
       // Schedule adding to playlist after 2 seconds
       const timeoutId = setTimeout(async () => {
         await addTrackToTaggedPlaylist(trackUri);
-        pendingTaggedTracks.delete(trackUri);
+        pendingTaggedTracks.current.delete(trackUri);
       }, 2000);
 
-      pendingTaggedTracks.set(trackUri, timeoutId);
+      pendingTaggedTracks.current.set(trackUri, timeoutId);
     }
   };
 
   // Function to cancel pending addition to playlist
   const cancelAddToTaggedPlaylist = (trackUri: string) => {
-    if (pendingTaggedTracks.has(trackUri)) {
-      clearTimeout(pendingTaggedTracks.get(trackUri));
-      pendingTaggedTracks.delete(trackUri);
+    const timeoutid = pendingTaggedTracks.current.get(trackUri);
+
+    if (timeoutid) {
+      clearTimeout(timeoutid);
+      pendingTaggedTracks.current.delete(trackUri);
     }
   };
 
@@ -786,6 +800,8 @@ export function useTagData() {
         ...trackData.tags.slice(0, existingTagIndex),
         ...trackData.tags.slice(existingTagIndex + 1),
       ];
+      // cancel any pending playlist addition when removing ANY tag
+      cancelAddToTaggedPlaylist(trackUri);
     } else {
       // Add tag if it doesn't exist
       updatedTags = [...trackData.tags, { categoryId, subcategoryId, tagId }];
