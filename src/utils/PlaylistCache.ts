@@ -177,8 +177,7 @@ export async function refreshPlaylistCache(): Promise<number> {
       }
 
       try {
-        // Show progress notification every 5 playlists
-        if (playlistsProcessed % 5 === 0) {
+        if (playlistsProcessed % 50 === 0) {
           Spicetify.showNotification(
             `Refreshing playlist cache: ${playlistsProcessed}/${filteredPlaylists.length} playlists`
           );
