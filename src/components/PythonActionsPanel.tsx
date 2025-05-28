@@ -755,6 +755,7 @@ const PythonActionsPanel: React.FC = () => {
                   title: any;
                   album: any;
                   is_local: any;
+                  changes?: string[];
                 }) => ({
                   id: track.id,
                   old_artists: track.old_artists || "Unknown Artist",
@@ -764,6 +765,7 @@ const PythonActionsPanel: React.FC = () => {
                   title: track.title || "Unknown Title",
                   album: track.album || "Unknown Album",
                   is_local: !!track.is_local,
+                  changes: track.changes || [],
                 })
               ) || [],
 
@@ -896,6 +898,7 @@ const PythonActionsPanel: React.FC = () => {
               title: track.title || "Unknown Title",
               album: track.album || "Unknown Album",
               is_local: !!track.is_local,
+              changes: track.changes || [],
             })) || [],
 
           unchanged_tracks: analysisResults.analyses?.tracks?.unchanged || 0,
@@ -935,6 +938,7 @@ const PythonActionsPanel: React.FC = () => {
             title: track.title || "Unknown Title",
             album: track.album || "Unknown Album",
             is_local: !!track.is_local,
+            changes: track.changes || [],
           })) || [],
 
         unchanged_tracks: analysisResults.stats?.unchanged || 0,
@@ -2028,7 +2032,11 @@ const PythonActionsPanel: React.FC = () => {
                     (item) => (
                       <div className={styles.item}>
                         <div className={styles.itemName}>
-                          {item.old_name || item.old_title || item.old_artists ? (
+                          {item.changes && item.changes.length > 0 ? (
+                            // If we have detailed changes, just show the track name once
+                            `${item.artists} - ${item.title}`
+                          ) : (
+                            // Otherwise show the before → after format
                             <>
                               {item.old_name ||
                                 item.old_title ||
@@ -2038,8 +2046,6 @@ const PythonActionsPanel: React.FC = () => {
                                 item.title ||
                                 (item.artists && `${item.artists} - ${item.title}`)}
                             </>
-                          ) : (
-                            item.name || item.title || item.artists || JSON.stringify(item)
                           )}
                         </div>
                         {/* Show update reasons for playlists */}
@@ -2051,6 +2057,19 @@ const PythonActionsPanel: React.FC = () => {
                             {item.old_snapshot_id !== item.snapshot_id && (
                               <span className={styles.updateReason}>Tracks modified</span>
                             )}
+                          </div>
+                        )}
+                        {/* Show update reasons for tracks */}
+                        {item.changes && item.changes.length > 0 && (
+                          <div className={styles.changeReasons}>
+                            <div className={styles.changesLabel}>Changes:</div>
+                            <ul className={styles.changesList}>
+                              {item.changes.map((change: string, index: number) => (
+                                <li key={index} className={styles.changeItem}>
+                                  {change}
+                                </li>
+                              ))}
+                            </ul>
                           </div>
                         )}
                       </div>
