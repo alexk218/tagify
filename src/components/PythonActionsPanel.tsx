@@ -2003,18 +2003,31 @@ const PythonActionsPanel: React.FC = () => {
                     "items-update",
                     (item) => (
                       <div className={styles.item}>
-                        {item.old_name || item.old_title || item.old_artists ? (
-                          <>
-                            {item.old_name ||
-                              item.old_title ||
-                              (item.old_artists && `${item.old_artists} - ${item.old_title}`)}
-                            {" → "}
-                            {item.name ||
-                              item.title ||
-                              (item.artists && `${item.artists} - ${item.title}`)}
-                          </>
-                        ) : (
-                          item.name || item.title || item.artists || JSON.stringify(item)
+                        <div className={styles.itemName}>
+                          {item.old_name || item.old_title || item.old_artists ? (
+                            <>
+                              {item.old_name ||
+                                item.old_title ||
+                                (item.old_artists && `${item.old_artists} - ${item.old_title}`)}
+                              {" → "}
+                              {item.name ||
+                                item.title ||
+                                (item.artists && `${item.artists} - ${item.title}`)}
+                            </>
+                          ) : (
+                            item.name || item.title || item.artists || JSON.stringify(item)
+                          )}
+                        </div>
+                        {/* Show update reasons for playlists */}
+                        {item.old_name !== undefined && item.old_snapshot_id !== undefined && (
+                          <div className={styles.updateReasons}>
+                            {item.old_name !== item.name && (
+                              <span className={styles.updateReason}>Name changed</span>
+                            )}
+                            {item.old_snapshot_id !== item.snapshot_id && (
+                              <span className={styles.updateReason}>Tracks modified</span>
+                            )}
+                          </div>
                         )}
                       </div>
                     ),

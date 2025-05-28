@@ -942,3 +942,31 @@
   color: var(--spice-subtext);
   margin-top: 4px;
 }
+
+.itemName {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.updateReasons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.updateReason {
+  background: rgba(30, 144, 255, 0.15);
+  color: #1e90ff;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid rgba(30, 144, 255, 0.3);
+}
+
+.updateReason:nth-child(2) {
+  background: rgba(255, 165, 0, 0.15);
+  color: #ffa500;
+  border-color: rgba(255, 165, 0, 0.3);
+}
