@@ -769,6 +769,17 @@ const PythonActionsPanel: React.FC = () => {
                 })
               ) || [],
 
+            tracks_to_delete:
+              stageResult.details?.all_items_to_delete?.map(
+                (track: { id: any; artists: any; title: any; album: any; is_local: any }) => ({
+                  id: track.id,
+                  artists: track.artists || "Unknown Artist",
+                  title: track.title || "Unknown Title",
+                  album: track.album || "Unknown Album",
+                  is_local: !!track.is_local,
+                })
+              ) || [],
+
             unchanged_tracks: stageResult.stats?.unchanged || 0,
           };
         }
@@ -900,6 +911,14 @@ const PythonActionsPanel: React.FC = () => {
               is_local: !!track.is_local,
               changes: track.changes || [],
             })) || [],
+          tracks_to_delete:
+            analysisResults.details?.all_items_to_delete?.map((track) => ({
+              id: track.id,
+              artists: track.artists || "Unknown Artist",
+              title: track.title || "Unknown Title",
+              album: track.album || "Unknown Album",
+              is_local: !!track.is_local,
+            })) || [],
 
           unchanged_tracks: analysisResults.analyses?.tracks?.unchanged || 0,
         },
@@ -940,6 +959,17 @@ const PythonActionsPanel: React.FC = () => {
             is_local: !!track.is_local,
             changes: track.changes || [],
           })) || [],
+
+        tracks_to_delete:
+          analysisResults.details?.all_items_to_delete?.map(
+            (track: { id: any; artists: any; title: any; album: any; is_local: any }) => ({
+              id: track.id,
+              artists: track.artists || "Unknown Artist",
+              title: track.title || "Unknown Title",
+              album: track.album || "Unknown Album",
+              is_local: !!track.is_local,
+            })
+          ) || [],
 
         unchanged_tracks: analysisResults.stats?.unchanged || 0,
       };
