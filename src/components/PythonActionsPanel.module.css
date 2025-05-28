@@ -970,3 +970,8 @@
   color: #ffa500;
   border-color: rgba(255, 165, 0, 0.3);
 }
+
+.playlistName {
+  font-weight: 600;
+  margin-bottom: 4px;
+}

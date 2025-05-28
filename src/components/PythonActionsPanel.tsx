@@ -330,10 +330,18 @@ const PythonActionsPanel: React.FC = () => {
     if (!pendingSyncAction) return;
 
     // Execute the action with the chosen force_refresh option
-    performAction(pendingSyncAction.action, {
-      ...pendingSyncAction.data,
-      force_refresh: forceRefresh,
-    });
+    if (pendingSyncAction.action === "sync-to-master") {
+      performAction("sync-to-master", {
+        ...pendingSyncAction.data,
+        force_refresh: forceRefresh,
+      });
+    } else {
+      // For database sync actions
+      performAction(pendingSyncAction.action, {
+        ...pendingSyncAction.data,
+        force_refresh: forceRefresh,
+      });
+    }
 
     // Clean up state
     setShowSyncOptionsPopup(false);
@@ -1633,7 +1641,23 @@ const PythonActionsPanel: React.FC = () => {
                       "playlists-update",
                       (item) => (
                         <div className={styles.item}>
-                          {item.old_name} → {item.name}
+                          <div className={styles.playlistName}>
+                            {item.old_name !== item.name ? (
+                              <span>
+                                {item.old_name} → {item.name}
+                              </span>
+                            ) : (
+                              <span>{item.name}</span>
+                            )}
+                          </div>
+                          <div className={styles.updateReasons}>
+                            {item.old_name !== item.name && (
+                              <span className={styles.updateReason}>Name changed</span>
+                            )}
+                            {item.old_snapshot_id !== item.snapshot_id && (
+                              <span className={styles.updateReason}>Tracks modified</span>
+                            )}
+                          </div>
                         </div>
                       )
                     )}
@@ -2256,6 +2280,7 @@ const PythonActionsPanel: React.FC = () => {
       if (data.action === "playlists") return "Sync Playlists Only";
       if (data.action === "tracks") return "Sync Tracks Only";
       if (data.action === "associations") return "Sync Associations Only";
+      if (action === "sync-to-master") return "Sync All Playlists to MASTER";
       return "Database Sync";
     };
 
@@ -2629,7 +2654,11 @@ const PythonActionsPanel: React.FC = () => {
           <div className={styles.actionButtons}>
             <ActionButton
               label="Sync All Playlists to MASTER"
-              onClick={() => performAction("sync-to-master")}
+              onClick={() =>
+                handleDatabaseAction("sync-to-master", {
+                  master_playlist_id: settings.masterPlaylistId,
+                })
+              }
               disabled={
                 isLoading["sync-to-master"] ||
                 serverStatus !== "connected" ||
