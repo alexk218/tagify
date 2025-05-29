@@ -273,3 +273,81 @@
 .downloadResult.error {
   color: #e22134;
 }
+
+.downloadAllButton {
+  background-color: rgba(29, 185, 84, 0.8);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-left: 10px;
+}
+
+.downloadAllButton:hover:not(:disabled) {
+  background-color: rgba(29, 185, 84, 1);
+}
+
+.downloadAllButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: rgba(29, 185, 84, 0.4);
+}
+
+.progressContainer {
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 16px;
+}
+
+.progressHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.progressText {
+  font-weight: 600;
+  color: var(--spice-text);
+}
+
+.currentTrack {
+  font-size: 12px;
+  color: var(--spice-subtext);
+  font-style: italic;
+}
+
+.progressBar {
+  width: 100%;
+  height: 8px;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, #1db954, #1ed760);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.progressFill {
+  background: linear-gradient(90deg, #1db954 25%, #1ed760 50%, #1db954 75%);
+  background-size: 200% 100%;
+}

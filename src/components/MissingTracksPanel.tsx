@@ -19,6 +19,13 @@ const MissingTracksPanel: React.FC = () => {
   const [downloadResults, setDownloadResults] = useState<
     Record<string, { success: boolean; message: string }>
   >({});
+  const [batchDownloading, setBatchDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<{
+    current: number;
+    total: number;
+    currentTrackId?: string;
+    currentTrackName?: string;
+  }>({ current: 0, total: 0 });
 
   // Use custom event hook to listen for toggle events
   useCustomEvents({
@@ -78,6 +85,9 @@ const MissingTracksPanel: React.FC = () => {
     try {
       setDownloadingTracks((prev) => new Set([...prev, trackId]));
 
+      // Set individual progress
+      setDownloadProgress({ current: 1, total: 1, currentTrackId: trackId });
+
       const response = await fetch(
         `${
           localStorage.getItem("tagify:localServerUrl") || "http://localhost:8765"
@@ -106,7 +116,6 @@ const MissingTracksPanel: React.FC = () => {
 
       if (result.success) {
         Spicetify.showNotification(`Successfully downloaded: ${result.track_info}`);
-        // Optionally refresh the missing tracks list
         loadData();
       } else {
         Spicetify.showNotification(`Download failed: ${result.message}`, true);
@@ -127,6 +136,70 @@ const MissingTracksPanel: React.FC = () => {
         newSet.delete(trackId);
         return newSet;
       });
+      setDownloadProgress({ current: 0, total: 0 });
+    }
+  };
+
+  const downloadAllTracks = async () => {
+    if (missingTracks.length === 0) return;
+
+    try {
+      setBatchDownloading(true);
+      setDownloadProgress({ current: 0, total: missingTracks.length });
+
+      const trackIds = missingTracks.map((track) => track.id);
+
+      const response = await fetch(
+        `${
+          localStorage.getItem("tagify:localServerUrl") || "http://localhost:8765"
+        }/api/tracks/download-batch`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            track_ids: trackIds,
+            download_dir: localStorage.getItem("tagify:masterTracksDir") || "",
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (result.success) {
+        Spicetify.showNotification(
+          `Batch download completed: ${result.success_count} successful, ${result.failure_count} failed`
+        );
+
+        // Update individual results
+        const newResults: Record<string, { success: boolean; message: string }> = {};
+
+        result.successful_downloads.forEach((download: any) => {
+          newResults[download.track_id] = {
+            success: true,
+            message: "Download completed",
+          };
+        });
+
+        result.failed_downloads.forEach((download: any) => {
+          newResults[download.track_id] = {
+            success: false,
+            message: download.error,
+          };
+        });
+
+        setDownloadResults((prev) => ({ ...prev, ...newResults }));
+        loadData(); // Refresh the list
+      } else {
+        Spicetify.showNotification(`Batch download failed: ${result.message}`, true);
+      }
+    } catch (error) {
+      console.error("Error in batch download:", error);
+      Spicetify.showNotification("Batch download failed", true);
+    } finally {
+      setBatchDownloading(false);
+      setDownloadProgress({ current: 0, total: 0 });
     }
   };
 
@@ -134,7 +207,7 @@ const MissingTracksPanel: React.FC = () => {
     <div className={styles.container}>
       <div className={styles.header}>
         <h2>Missing Tracks</h2>
-        <div className={styles.headerButtons}>
+        <div>
           <button className={styles.refreshButton} onClick={() => loadData()} disabled={isLoading}>
             {isLoading ? "Refreshing..." : "Refresh"}
           </button>
@@ -146,8 +219,45 @@ const MissingTracksPanel: React.FC = () => {
           >
             Create Playlist
           </button>
+
+          <button
+            className={styles.downloadAllButton}
+            onClick={downloadAllTracks}
+            disabled={missingTracks.length === 0 || batchDownloading}
+          >
+            {batchDownloading ? "Downloading All..." : "Download All"}
+          </button>
         </div>
       </div>
+
+      {(batchDownloading || downloadProgress.total > 0) && (
+        <div className={styles.progressContainer}>
+          <div className={styles.progressHeader}>
+            <span className={styles.progressText}>
+              {batchDownloading
+                ? `Downloading tracks: ${downloadProgress.current} of ${downloadProgress.total}`
+                : `Download progress: ${downloadProgress.current} of ${downloadProgress.total}`}
+            </span>
+            {downloadProgress.currentTrackName && (
+              <span className={styles.currentTrack}>
+                Current: {downloadProgress.currentTrackName}
+              </span>
+            )}
+          </div>
+          <div className={styles.progressBar}>
+            <div
+              className={styles.progressFill}
+              style={{
+                width: `${
+                  downloadProgress.total > 0
+                    ? (downloadProgress.current / downloadProgress.total) * 100
+                    : 0
+                }%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {cachedData && (
         <div className={styles.cacheInfo}>
