@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import styles from "./MissingTracksPanel.module.css";
 import { useCustomEvents } from "../hooks/useCustomEvents";
 import { useMissingTracks } from "../hooks/useMissingTracks";
@@ -14,6 +14,11 @@ const MissingTracksPanel: React.FC = () => {
     createPlaylist,
     cachedData,
   } = useMissingTracks();
+
+  const [downloadingTracks, setDownloadingTracks] = useState<Set<string>>(new Set());
+  const [downloadResults, setDownloadResults] = useState<
+    Record<string, { success: boolean; message: string }>
+  >({});
 
   // Use custom event hook to listen for toggle events
   useCustomEvents({
@@ -67,6 +72,62 @@ const MissingTracksPanel: React.FC = () => {
 
     // Otherwise show full date
     return date.toLocaleString();
+  };
+
+  const downloadTrack = async (trackId: string) => {
+    try {
+      setDownloadingTracks((prev) => new Set([...prev, trackId]));
+
+      const response = await fetch(
+        `${
+          localStorage.getItem("tagify:localServerUrl") || "http://localhost:8765"
+        }/api/tracks/download`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            track_id: trackId,
+            download_dir: localStorage.getItem("tagify:masterTracksDir") || "",
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      setDownloadResults((prev) => ({
+        ...prev,
+        [trackId]: {
+          success: result.success,
+          message: result.message || (result.success ? "Download completed" : "Download failed"),
+        },
+      }));
+
+      if (result.success) {
+        Spicetify.showNotification(`Successfully downloaded: ${result.track_info}`);
+        // Optionally refresh the missing tracks list
+        loadData();
+      } else {
+        Spicetify.showNotification(`Download failed: ${result.message}`, true);
+      }
+    } catch (error) {
+      console.error("Error downloading track:", error);
+      setDownloadResults((prev) => ({
+        ...prev,
+        [trackId]: {
+          success: false,
+          message: `Error: ${error}`,
+        },
+      }));
+      Spicetify.showNotification("Download failed", true);
+    } finally {
+      setDownloadingTracks((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(trackId);
+        return newSet;
+      });
+    }
   };
 
   return (
@@ -137,8 +198,25 @@ const MissingTracksPanel: React.FC = () => {
                       onClick={() => playTrack(track.id)}
                       title="Play track"
                     >
-                      {"Play"}
+                      Play
                     </button>
+                    <button
+                      className={styles.downloadButton}
+                      onClick={() => downloadTrack(track.id)}
+                      disabled={downloadingTracks.has(track.id)}
+                      title="Download track using spotDL"
+                    >
+                      {downloadingTracks.has(track.id) ? "Downloading..." : "Download"}
+                    </button>
+                    {downloadResults[track.id] && (
+                      <span
+                        className={`${styles.downloadResult} ${
+                          downloadResults[track.id].success ? styles.success : styles.error
+                        }`}
+                      >
+                        {downloadResults[track.id].success ? "✓" : "✗"}
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}
