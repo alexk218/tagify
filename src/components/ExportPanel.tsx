@@ -183,7 +183,7 @@ const ExportPanel: React.FC<ExportPanelProps> = ({ data, onClose }) => {
       });
 
       // Call the rekordbox XML generation endpoint
-      const response = await fetch(`${serverUrl}/api/generate-rekordbox-xml`, {
+      const response = await fetch(`${serverUrl}/api/rekordbox/generate-xml`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
