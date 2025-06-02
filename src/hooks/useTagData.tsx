@@ -1096,8 +1096,6 @@ export function useTagData() {
         return;
       }
 
-      const trackId = uri.split(":").pop() || uri;
-
       const tagNames = data.tags
         .map((tag) => findTagName(tag.categoryId, tag.subcategoryId, tag.tagId))
         .filter((name) => name !== "");
@@ -1106,7 +1104,7 @@ export function useTagData() {
       const bpmComment = data.bpm !== null ? `BPM ${data.bpm} - ` : "";
 
       // Format for rekordbox
-      exportResult.tracks[trackId] = {
+      exportResult.tracks[uri] = {
         rating: data.rating,
         energy: data.energy,
         bpm: data.bpm,
