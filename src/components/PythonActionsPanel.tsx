@@ -185,19 +185,6 @@ interface MatchSelection {
   confidence: number;
 }
 
-// interface TrackItem {
-//   id: string;
-//   artists: string;
-//   name: string;
-//   title?: string;
-// }
-
-// interface PlaylistItem {
-//   name: string;
-//   track_count: number;
-//   tracks: TrackItem[];
-// }
-
 interface MasterSyncAnalysis {
   total_tracks_to_add: number;
   playlists_with_new_tracks: number;
