@@ -5,6 +5,99 @@ import ValidationPanel from "./ValidationPanel";
 import Portal from "../utils/Portal";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 
+interface SyncStats {
+  added: number;
+  updated: number;
+  deleted: number;
+  unchanged: number;
+}
+
+interface BaseSyncDetails {
+  operation_type: "playlists" | "tracks" | "associations" | "all" | "clear";
+  items_to_add: any[];
+  items_to_update: any[];
+  items_to_delete: any[];
+  preview_limit: number;
+  total_items_to_add: number;
+  total_items_to_update: number;
+  total_items_to_delete: number;
+}
+
+interface PlaylistSyncDetails extends BaseSyncDetails {
+  operation_type: "playlists";
+}
+
+interface TrackSyncDetails extends BaseSyncDetails {
+  operation_type: "tracks";
+}
+
+interface AssociationSyncDetails extends BaseSyncDetails {
+  operation_type: "associations";
+  tracks_with_changes: any[];
+  changed_playlists: any[];
+  associations_to_add: number;
+  associations_to_remove: number;
+}
+
+type SyncDetails =
+  | PlaylistSyncDetails
+  | TrackSyncDetails
+  | AssociationSyncDetails
+  | BaseSyncDetails;
+
+interface SyncResponse {
+  success: boolean;
+  action: "playlists" | "tracks" | "associations" | "all" | "clear";
+  stage:
+    | "analysis"
+    | "sync_complete"
+    | "start"
+    | "playlists"
+    | "tracks"
+    | "associations"
+    | "complete";
+  message: string;
+  stats: SyncStats;
+  details: SyncDetails;
+  needs_confirmation: boolean;
+  next_stage?: "playlists" | "tracks" | "associations" | "complete" | null;
+}
+
+function isPlaylistSyncDetails(details: SyncDetails): details is PlaylistSyncDetails {
+  return details.operation_type === "playlists";
+}
+
+function isTrackSyncDetails(details: SyncDetails): details is TrackSyncDetails {
+  return details.operation_type === "tracks";
+}
+
+function isAssociationSyncDetails(details: SyncDetails): details is AssociationSyncDetails {
+  return details.operation_type === "associations";
+}
+
+interface TrackItem {
+  id: string;
+  artists: string;
+  title: string;
+  album: string;
+  is_local?: boolean;
+  old_artists?: string;
+  old_title?: string;
+  old_album?: string;
+  changes?: string[];
+  added_at?: string;
+}
+
+// Interface for playlist items
+interface PlaylistItem {
+  id: string;
+  name: string;
+  old_name?: string;
+  snapshot_id?: string;
+  old_snapshot_id?: string;
+}
+
+
 interface AnalysisResults {
   stage: string;
   success: boolean;
@@ -55,6 +148,7 @@ interface AnalysisResults {
     associations_to_remove?: number;
     all_changes?: any[];
     samples?: any[];
+    changed_playlists?: any[];
   };
   needs_confirmation?: boolean;
 }
@@ -71,6 +165,9 @@ type ActionInfo = {
   data: any;
 } & (
   | { name: "sequential-sync"; data: { stage: string; details?: any } }
+  | { name: "embed-metadata"; data: any }
+  | { name: "sync-database"; data: any }
+  | { name: "sync-to-master"; data: any }
   | { name: string; data: any }
 );
 
@@ -88,18 +185,18 @@ interface MatchSelection {
   confidence: number;
 }
 
-interface TrackItem {
-  id: string;
-  artists: string;
-  name: string;
-  title?: string;
-}
+// interface TrackItem {
+//   id: string;
+//   artists: string;
+//   name: string;
+//   title?: string;
+// }
 
-interface PlaylistItem {
-  name: string;
-  track_count: number;
-  tracks: TrackItem[];
-}
+// interface PlaylistItem {
+//   name: string;
+//   track_count: number;
+//   tracks: TrackItem[];
+// }
 
 interface MasterSyncAnalysis {
   total_tracks_to_add: number;
@@ -175,6 +272,7 @@ const PythonActionsPanel: React.FC = () => {
   };
 
   const [analysisResults, setAnalysisResults] = useState<AnalysisResults | null>(null);
+  const [syncResponse, setSyncResponse] = useState<SyncResponse | null>(null);
   const [isAwaitingConfirmation, setIsAwaitingConfirmation] = useState(false);
   const [currentAction, setCurrentAction] = useState<ActionInfo | null>(null);
   const [paginationState, setPaginationState] = useState<
@@ -236,9 +334,9 @@ const PythonActionsPanel: React.FC = () => {
   // TODO: have a summary page at the end of all operations - shows everything that's been modified. saves to a txt or json file?
   // Optional: Add this if you want to persist details between stages
   const [sequentialSyncDetails, setSequentialSyncDetails] = useState<{
-    playlists?: any;
-    tracks?: any;
-    associations?: any;
+    playlists?: SyncResponse;
+    tracks?: SyncResponse;
+    associations?: SyncResponse;
   }>({});
 
   // Check server connection on load and when serverUrl changes
@@ -465,58 +563,126 @@ const PythonActionsPanel: React.FC = () => {
 
       const result = await response.json();
 
-      // Check if this is an embed-metadata operation that requires fuzzy matching
-      if (
-        action === "embed-metadata" &&
-        result.needs_confirmation &&
-        result.requires_fuzzy_matching &&
-        !data.confirmed
-      ) {
-        // Set up for fuzzy matching process
-        setAnalysisResults(result);
-        setIsAwaitingConfirmation(true);
-        setCurrentAction({
-          name: action,
-          data: requestData,
-        });
-        setUserMatchSelections([]);
-        setSkippedFiles([]);
-        setFuzzyMatchingState({
-          isActive: true,
-          currentFileIndex: 0,
-          matches: [],
-          isLoading: false,
-        });
+      // Handle embed-metadata operations (special case with fuzzy matching)
+      if (action === "embed-metadata") {
+        // Check if this is an embed-metadata operation that requires fuzzy matching
+        if (result.needs_confirmation && result.requires_fuzzy_matching && !data.confirmed) {
+          // Set up for fuzzy matching process - use old structure for embed-metadata
+          setAnalysisResults(result); // Keep using analysisResults for embed-metadata
+          setIsAwaitingConfirmation(true);
+          setCurrentAction({
+            name: action,
+            data: requestData,
+          });
+          setUserMatchSelections([]);
+          setSkippedFiles([]);
+          setFuzzyMatchingState({
+            isActive: true,
+            currentFileIndex: 0,
+            matches: [],
+            isLoading: false,
+          });
 
-        // Show notification about analysis completion
-        Spicetify.showNotification(
-          `Found ${result.details.files_to_process.length} files to process.`
-        );
-      }
-      // For other analysis operations that need confirmation
-      else if (result.needs_confirmation && !data.confirmed) {
-        setAnalysisResults(result);
-        setIsAwaitingConfirmation(true);
-        setCurrentAction({
-          name: action,
-          data: requestData,
-        });
+          // Show notification about analysis completion
+          Spicetify.showNotification(
+            `Found ${result.details.files_to_process.length} files to process.`
+          );
+        }
+        // For embed-metadata operations that need confirmation but no fuzzy matching
+        else if (result.needs_confirmation && !data.confirmed) {
+          setAnalysisResults(result); // Keep using analysisResults for embed-metadata
+          setIsAwaitingConfirmation(true);
+          setCurrentAction({
+            name: action,
+            data: requestData,
+          });
 
-        // Show notification about analysis completion
-        Spicetify.showNotification(`Analysis complete. Please review and confirm.`);
+          // Show notification about analysis completion
+          Spicetify.showNotification(`Analysis complete. Please review and confirm.`);
+        }
+        // Regular embed-metadata result - process normally
+        else {
+          setResults((prev) => ({
+            ...prev,
+            [action]: {
+              success: result.success,
+              message: result.message || JSON.stringify(result),
+            },
+          }));
+
+          // Show notification
+          if (result.success) {
+            Spicetify.showNotification(`Success: ${result.message || action + " completed"}`);
+          } else {
+            Spicetify.showNotification(`Error: ${result.message || "Unknown error"}`, true);
+          }
+        }
       }
-      // Regular result - process normally
+      // Handle sync database operations (use new SyncResponse structure)
+      else if (action === "sync-database" || action === "sync-to-master") {
+        const syncResponse: SyncResponse = result;
+
+        // Check if this needs confirmation (analysis stage)
+        if (syncResponse.needs_confirmation && !data.confirmed) {
+          setSyncResponse(syncResponse);
+          setIsAwaitingConfirmation(true);
+          setCurrentAction({
+            name: action,
+            data: requestData,
+          });
+
+          // Show notification about analysis completion
+          Spicetify.showNotification(`Analysis complete. Please review and confirm.`);
+        }
+        // Regular result - process normally
+        else {
+          setResults((prev) => ({
+            ...prev,
+            [action]: {
+              success: syncResponse.success,
+              message: syncResponse.message || JSON.stringify(syncResponse),
+            },
+          }));
+
+          // Show notification
+          if (syncResponse.success) {
+            Spicetify.showNotification(`Success: ${syncResponse.message || action + " completed"}`);
+          } else {
+            Spicetify.showNotification(`Error: ${syncResponse.message || "Unknown error"}`, true);
+          }
+        }
+      }
+      // Handle all other operations (validation, m3u generation, etc.)
       else {
-        setResults((prev) => ({
-          ...prev,
-          [action]: { success: result.success, message: result.message || JSON.stringify(result) },
-        }));
+        // For other operations that might need confirmation
+        if (result.needs_confirmation && !data.confirmed) {
+          // Use the old analysisResults structure for backwards compatibility
+          setAnalysisResults(result);
+          setIsAwaitingConfirmation(true);
+          setCurrentAction({
+            name: action,
+            data: requestData,
+          });
 
-        // Show notification
-        if (result.success) {
-          Spicetify.showNotification(`Success: ${result.message || action + " completed"}`);
-        } else {
-          Spicetify.showNotification(`Error: ${result.message || "Unknown error"}`, true);
+          // Show notification about analysis completion
+          Spicetify.showNotification(`Analysis complete. Please review and confirm.`);
+        }
+        // Regular result - process normally
+        else {
+          setResults((prev) => ({
+            ...prev,
+            [action]: {
+              success: result.success,
+              message: result.message || JSON.stringify(result),
+            },
+          }));
+
+          // Show notification
+          if (result.success) {
+            Spicetify.showNotification(`Success: ${result.message || action + " completed"}`);
+          } else {
+            Spicetify.showNotification(`Error: ${result.message || "Unknown error"}`, true);
+          }
         }
       }
     } catch (err: unknown) {
@@ -698,102 +864,22 @@ const PythonActionsPanel: React.FC = () => {
 
     const { name, data } = currentAction;
 
-    // Map old action names to new API endpoints
-    const endpointMap: Record<string, { url: string; method: string }> = {
-      "embed-metadata": { url: "/api/tracks/metadata/embed", method: "POST" },
-      "sync-database": { url: "/api/sync/database", method: "POST" },
-      "sequential-sync": { url: "/api/sync/database", method: "POST" },
-    };
-
-    // Handle sequential sync confirmations
-    if (name === "sequential-sync" && data.stage) {
+    // Handle sequential sync confirmations (uses syncResponse)
+    if (name === "sequential-sync" && data.stage && syncResponse) {
       const stage = data.stage;
 
       // Clear the confirmation UI
-      setAnalysisResults(null);
+      setSyncResponse(null);
       setIsAwaitingConfirmation(false);
       setCurrentAction(null);
 
       try {
-        // Get the analysis result for this stage to use as precomputed changes
-        const stageResult = sequentialProcess.results[stage];
         const playlistSettings = getPlaylistSettings();
-
-        // Prepare precomputed changes based on the stage
-        let formattedPrecomputedChanges = stageResult.details;
-
-        // Special handling for tracks stage to ensure all required fields are included
-        if (stage === "tracks") {
-          formattedPrecomputedChanges = {
-            tracks_to_add:
-              stageResult.details?.all_items_to_add?.map(
-                (track: {
-                  id: any;
-                  artists: any;
-                  title: any;
-                  album: any;
-                  is_local: any;
-                  added_at: any;
-                }) => ({
-                  id: track.id,
-                  artists: track.artists || "Unknown Artist",
-                  title: track.title || "Unknown Title",
-                  album: track.album || "Unknown Album",
-                  is_local: !!track.is_local,
-                  added_at: track.added_at || null,
-                })
-              ) || [],
-
-            tracks_to_update:
-              stageResult.details?.all_items_to_update?.map(
-                (track: {
-                  id: any;
-                  old_artists: any;
-                  old_title: any;
-                  old_album: any;
-                  artists: any;
-                  title: any;
-                  album: any;
-                  is_local: any;
-                  changes?: string[];
-                }) => ({
-                  id: track.id,
-                  old_artists: track.old_artists || "Unknown Artist",
-                  old_title: track.old_title || "Unknown Title",
-                  old_album: track.old_album || "Unknown Album",
-                  artists: track.artists || "Unknown Artist",
-                  title: track.title || "Unknown Title",
-                  album: track.album || "Unknown Album",
-                  is_local: !!track.is_local,
-                  changes: track.changes || [],
-                })
-              ) || [],
-
-            tracks_to_delete:
-              stageResult.details?.all_items_to_delete?.map(
-                (track: { id: any; artists: any; title: any; album: any; is_local: any }) => ({
-                  id: track.id,
-                  artists: track.artists || "Unknown Artist",
-                  title: track.title || "Unknown Title",
-                  album: track.album || "Unknown Album",
-                  is_local: !!track.is_local,
-                })
-              ) || [],
-
-            unchanged_tracks: stageResult.stats?.unchanged || 0,
-          };
-        }
-
-        // Get the endpoint for this action
-        const endpoint = endpointMap["sync-database"] || {
-          url: "/api/sync-database",
-          method: "POST",
-        };
         const url = `${settings.serverUrl}/api/sync/database`;
 
         // Apply the changes with confirmation
         const response = await fetch(url, {
-          method: endpoint.method,
+          method: "POST",
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
@@ -803,8 +889,7 @@ const PythonActionsPanel: React.FC = () => {
             stage: stage,
             force_refresh: false,
             confirmed: true,
-            precomputed_changes_from_analysis:
-              stage === "tracks" ? formattedPrecomputedChanges : stageResult.details,
+            precomputed_changes_from_analysis: syncResponse,
             master_playlist_id: settings.masterPlaylistId,
             playlistSettings: playlistSettings,
           }),
@@ -814,16 +899,17 @@ const PythonActionsPanel: React.FC = () => {
           throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
         }
 
-        const result = await response.json();
+        const result: SyncResponse = await response.json();
 
         setSequentialSyncState((prev) => ({
           ...prev,
           completedStages: [...prev.completedStages, data.stage],
         }));
+
         // Store the sync result
-        setSequentialProcess((prev) => ({
+        setSequentialSyncDetails((prev) => ({
           ...prev,
-          results: { ...prev.results, [`${stage}_sync`]: result },
+          [stage]: result,
         }));
 
         // Move to the next stage
@@ -845,174 +931,98 @@ const PythonActionsPanel: React.FC = () => {
             totalStages: ["playlists", "tracks", "associations"],
             startTime: null,
           });
-          setSequentialProcess({
-            active: false,
-            stage: "",
-            results: {},
-          });
-        } else {
-          // If no next_stage is provided, end the process
-          console.warn("No next_stage provided in result:", result);
-          setSequentialProcess({
-            active: false,
-            stage: "",
-            results: {},
-          });
-          Spicetify.showNotification("Database sync completed");
+          setSequentialSyncDetails({});
         }
       } catch (err) {
         console.error(`Error applying changes for stage ${stage}:`, err);
         Spicetify.showNotification(`Error: ${err || String(err)}`, true);
 
-        setSequentialProcess({
-          active: false,
-          stage: "",
-          results: {},
+        setSequentialSyncState({
+          isActive: false,
+          currentStage: "",
+          completedStages: [],
+          totalStages: ["playlists", "tracks", "associations"],
+          startTime: null,
         });
+        setSequentialSyncDetails({});
       }
 
       return;
     }
 
-    // Add confirmation flag and user selections to the data
-    const confirmData = {
-      ...data,
-      confirmed: true,
-    };
+    // Handle embed-metadata confirmations (uses analysisResults)
+    if (name === "embed-metadata" && analysisResults) {
+      // Add confirmation flag and user selections to the data
+      const confirmData = {
+        ...data,
+        confirmed: true,
+        userSelections: userMatchSelections,
+        skippedFiles: skippedFiles,
+      };
 
-    if (name === "sync-database") {
-      console.log(`Confirming ${data.action} sync with:`, confirmData);
+      // Reset states
+      setAnalysisResults(null);
+      setIsAwaitingConfirmation(false);
+      setCurrentAction(null);
+      setUserMatchSelections([]);
+      setSkippedFiles([]);
+      setFuzzyMatchingState({
+        isActive: false,
+        currentFileIndex: 0,
+        matches: [],
+        isLoading: false,
+      });
+
+      // Perform the action with confirmation
+      await performAction(name, confirmData);
+      return;
     }
 
-    if (name === "sync-database" && data.action === "all" && analysisResults) {
-      // Include all precomputed data
-      confirmData.precomputed_changes_from_analysis = {
-        playlists: analysisResults.analyses?.playlists?.details,
-        tracks: {
-          tracks_to_add:
-            analysisResults.analyses?.tracks?.all_tracks_to_add?.map((track) => ({
-              id: track.id,
-              artists: track.artists || "Unknown Artist",
-              title: track.title || "Unknown Title",
-              album: track.album || "Unknown Album",
-              is_local: !!track.is_local,
-              added_at: track.added_at || null,
-            })) || [],
-
-          tracks_to_update:
-            analysisResults.analyses?.tracks?.all_tracks_to_update?.map((track) => ({
-              id: track.id,
-              old_artists: track.old_artists || "Unknown Artist",
-              old_title: track.old_title || "Unknown Title",
-              old_album: track.old_album || "Unknown Album",
-              artists: track.artists || "Unknown Artist",
-              title: track.title || "Unknown Title",
-              album: track.album || "Unknown Album",
-              is_local: !!track.is_local,
-              changes: track.changes || [],
-            })) || [],
-          tracks_to_delete:
-            analysisResults.details?.all_items_to_delete?.map((track) => ({
-              id: track.id,
-              artists: track.artists || "Unknown Artist",
-              title: track.title || "Unknown Title",
-              album: track.album || "Unknown Album",
-              is_local: !!track.is_local,
-            })) || [],
-
-          unchanged_tracks: analysisResults.analyses?.tracks?.unchanged || 0,
-        },
-        associations: {
-          tracks_with_changes:
-            analysisResults.details?.tracks_with_changes ||
-            analysisResults.details?.all_changes ||
-            analysisResults.details?.samples ||
-            [],
-          tracks_with_playlists: analysisResults.stats?.tracks_with_playlists,
-          tracks_without_playlists: analysisResults.stats?.tracks_without_playlists,
-          total_associations: analysisResults.stats?.total_associations,
-        },
+    // Handle sync operations (uses syncResponse)
+    if ((name === "sync-database" || name === "sync-to-master") && syncResponse) {
+      const confirmData = {
+        ...data,
+        confirmed: true,
+        precomputed_changes_from_analysis: syncResponse,
       };
-    } else if (name === "sync-database" && data.action === "playlists" && analysisResults) {
-      confirmData.precomputed_changes_from_analysis = analysisResults.details;
-    } else if (name === "sync-database" && data.action === "tracks" && analysisResults) {
-      confirmData.precomputed_changes_from_analysis = {
-        tracks_to_add:
-          analysisResults.details?.all_items_to_add?.map((track) => ({
-            id: track.id,
-            artists: track.artists || "Unknown Artist",
-            title: track.title || "Unknown Title",
-            album: track.album || "Unknown Album",
-            is_local: !!track.is_local,
-            added_at: track.added_at || null,
-          })) || [],
 
-        tracks_to_update:
-          analysisResults.details?.all_items_to_update?.map((track) => ({
-            id: track.id,
-            old_artists: track.old_artists || "Unknown Artist",
-            old_title: track.old_title || "Unknown Title",
-            old_album: track.old_album || "Unknown Album",
-            artists: track.artists || "Unknown Artist",
-            title: track.title || "Unknown Title",
-            album: track.album || "Unknown Album",
-            is_local: !!track.is_local,
-            changes: track.changes || [],
-          })) || [],
+      // Reset states
+      setSyncResponse(null);
+      setIsAwaitingConfirmation(false);
+      setCurrentAction(null);
 
-        tracks_to_delete:
-          analysisResults.details?.all_items_to_delete?.map(
-            (track: { id: any; artists: any; title: any; album: any; is_local: any }) => ({
-              id: track.id,
-              artists: track.artists || "Unknown Artist",
-              title: track.title || "Unknown Title",
-              album: track.album || "Unknown Album",
-              is_local: !!track.is_local,
-            })
-          ) || [],
-
-        unchanged_tracks: analysisResults.stats?.unchanged || 0,
-      };
-    } else if (name === "sync-database" && data.action === "associations" && analysisResults) {
-      confirmData.precomputed_changes_from_analysis = {
-        tracks_with_changes:
-          analysisResults.details?.tracks_with_changes ||
-          analysisResults.details?.all_changes ||
-          analysisResults.details?.samples ||
-          [],
-        tracks_with_playlists: analysisResults.stats?.tracks_with_playlists,
-        tracks_without_playlists: analysisResults.stats?.tracks_without_playlists,
-        total_associations: analysisResults.stats?.total_associations,
-      };
+      // Perform the action with confirmation
+      await performAction(name, confirmData);
+      return;
     }
 
-    if (name === "embed-metadata") {
-      // Include the user-selected matches for embed-metadata
-      confirmData.userSelections = userMatchSelections;
-      confirmData.skippedFiles = skippedFiles;
+    // Handle other operations that might use analysisResults for backwards compatibility
+    if (analysisResults) {
+      const confirmData = {
+        ...data,
+        confirmed: true,
+        // Include any precomputed data from analysisResults if needed
+        precomputed_changes_from_analysis: analysisResults,
+      };
+
+      // Reset states
+      setAnalysisResults(null);
+      setIsAwaitingConfirmation(false);
+      setCurrentAction(null);
+
+      // Perform the action with confirmation
+      await performAction(name, confirmData);
+      return;
     }
 
-    // Reset states
-    setAnalysisResults(null);
-    setIsAwaitingConfirmation(false);
-    setCurrentAction(null);
-    setUserMatchSelections([]);
-    setSkippedFiles([]);
-    setFuzzyMatchingState({
-      isActive: false,
-      currentFileIndex: 0,
-      matches: [],
-      isLoading: false,
-    });
-
-    // Perform the action with confirmation
-    await performAction(name, confirmData);
+    console.warn("confirmAction called but no valid confirmation data found");
   };
 
   // Cancel confirmation
   const cancelAction = () => {
     // Reset all states
-    setAnalysisResults(null);
+    setSyncResponse(null);
+    // setAnalysisResults(null);
     setIsAwaitingConfirmation(false);
     setCurrentAction(null);
     setUserMatchSelections([]);
@@ -1433,11 +1443,12 @@ const PythonActionsPanel: React.FC = () => {
 
   // Render the confirmation UI when needed
   const renderConfirmation = () => {
-    if (!isAwaitingConfirmation || !analysisResults) return null;
+    if (!isAwaitingConfirmation) return null;
 
     // For embed-metadata action with fuzzy matching
     if (
       currentAction?.name === "embed-metadata" &&
+      analysisResults &&
       analysisResults.requires_fuzzy_matching &&
       fuzzyMatchingState.isActive
     ) {
@@ -1451,6 +1462,7 @@ const PythonActionsPanel: React.FC = () => {
     // For embed-metadata action when fuzzy matching is complete or for final confirmation
     if (
       currentAction?.name === "embed-metadata" &&
+      analysisResults &&
       analysisResults.requires_fuzzy_matching &&
       !fuzzyMatchingState.isActive &&
       (userMatchSelections.length > 0 || skippedFiles.length > 0)
@@ -1607,39 +1619,35 @@ const PythonActionsPanel: React.FC = () => {
         </div>
       );
     }
-    if (
-      isAwaitingConfirmation &&
-      analysisResults &&
-      analysisResults.stage &&
-      currentAction?.name === "sequential-sync"
-    ) {
+
+    if (currentAction?.name === "sequential-sync" && syncResponse && syncResponse.stage) {
       return (
         <div className={styles.confirmationPanel}>
           <h3>
             Database Sync -{" "}
-            {analysisResults.stage.charAt(0).toUpperCase() + analysisResults.stage.slice(1)} Stage
+            {syncResponse.stage.charAt(0).toUpperCase() + syncResponse.stage.slice(1)} Stage
           </h3>
 
-          {/* Show a header indicating this is part of the sequential process */}
+          {/* Show sequential progress indicator */}
           <div className={styles.sequentialHeader}>
             <div className={styles.sequentialProgress}>
               <span
                 className={`${styles.sequentialStep} ${
-                  analysisResults.stage === "playlists" ? styles.active : ""
+                  syncResponse.stage === "playlists" ? styles.active : ""
                 }`}
               >
                 1. Playlists
               </span>
               <span
                 className={`${styles.sequentialStep} ${
-                  analysisResults.stage === "tracks" ? styles.active : ""
+                  syncResponse.stage === "tracks" ? styles.active : ""
                 }`}
               >
                 2. Tracks
               </span>
               <span
                 className={`${styles.sequentialStep} ${
-                  analysisResults.stage === "associations" ? styles.active : ""
+                  syncResponse.stage === "associations" ? styles.active : ""
                 }`}
               >
                 3. Associations
@@ -1647,16 +1655,25 @@ const PythonActionsPanel: React.FC = () => {
             </div>
           </div>
 
-          {/* Render the analysis results based on the stage */}
-          {analysisResults.stage === "playlists" && analysisResults.details && (
+          {/* NEW: Render based on syncResponse structure */}
+          <div>
+            <p>
+              {syncResponse.stats.added} to add, {syncResponse.stats.updated} to update,{" "}
+              {syncResponse.stats.deleted} to delete, {syncResponse.stats.unchanged} unchanged
+            </p>
+          </div>
+
+          {/* Render based on stage and new structure */}
+          {syncResponse.stage === "playlists" && (
             <div className={styles.playlistChanges}>
               <h4>Playlist Changes</h4>
-              {analysisResults.stats.added > 0 && analysisResults.details.to_add && (
+
+              {syncResponse.stats.added > 0 && (
                 <div className={styles.changesSection}>
-                  <h5>Playlists to Add ({analysisResults.stats.added})</h5>
+                  <h5>Playlists to Add ({syncResponse.stats.added})</h5>
                   <div className={styles.itemList}>
                     {renderPaginatedList(
-                      analysisResults.details.to_add || [],
+                      syncResponse.details.items_to_add || [],
                       "playlists-add",
                       (item) => (
                         <div className={styles.item}>{item.name}</div>
@@ -1666,12 +1683,12 @@ const PythonActionsPanel: React.FC = () => {
                 </div>
               )}
 
-              {analysisResults.stats.updated > 0 && analysisResults.details.to_update && (
+              {syncResponse.stats.updated > 0 && (
                 <div className={styles.changesSection}>
-                  <h5>Playlists to Update ({analysisResults.stats.updated})</h5>
+                  <h5>Playlists to Update ({syncResponse.stats.updated})</h5>
                   <div className={styles.itemList}>
                     {renderPaginatedList(
-                      analysisResults.details.to_update || [],
+                      syncResponse.details.items_to_update || [],
                       "playlists-update",
                       (item) => (
                         <div className={styles.item}>
@@ -1699,12 +1716,12 @@ const PythonActionsPanel: React.FC = () => {
                 </div>
               )}
 
-              {analysisResults.stats.deleted > 0 && analysisResults.details.to_delete && (
+              {syncResponse.stats.deleted > 0 && (
                 <div className={styles.changesSection}>
-                  <h5>Playlists to Delete ({analysisResults.stats.deleted})</h5>
+                  <h5>Playlists to Delete ({syncResponse.stats.deleted})</h5>
                   <div className={styles.itemList}>
                     {renderPaginatedList(
-                      analysisResults.details.to_delete || [],
+                      syncResponse.details.items_to_delete || [],
                       "playlists-delete",
                       (item) => (
                         <div className={styles.item}>{item.name}</div>
@@ -1716,15 +1733,16 @@ const PythonActionsPanel: React.FC = () => {
             </div>
           )}
 
-          {analysisResults.stage === "tracks" && analysisResults.details && (
+          {syncResponse.stage === "tracks" && (
             <div className={styles.trackChanges}>
               <h4>Track Changes</h4>
-              {analysisResults.stats.added > 0 && analysisResults.details.all_items_to_add && (
+
+              {syncResponse.stats.added > 0 && (
                 <div className={styles.changesSection}>
-                  <h5>Tracks to Add ({analysisResults.stats.added})</h5>
+                  <h5>Tracks to Add ({syncResponse.stats.added})</h5>
                   <div className={styles.itemList}>
                     {renderPaginatedList(
-                      analysisResults.details.all_items_to_add || [],
+                      syncResponse.details.items_to_add || [],
                       "tracks-add",
                       (track) => (
                         <div className={styles.trackItem}>
@@ -1736,17 +1754,46 @@ const PythonActionsPanel: React.FC = () => {
                 </div>
               )}
 
-              {analysisResults.stats.updated > 0 && analysisResults.details.all_items_to_update && (
+              {syncResponse.stats.updated > 0 && (
                 <div className={styles.changesSection}>
-                  <h5>Tracks to Update ({analysisResults.stats.updated})</h5>
+                  <h5>Tracks to Update ({syncResponse.stats.updated})</h5>
                   <div className={styles.trackList}>
                     {renderPaginatedList(
-                      analysisResults.details.all_items_to_update || [],
+                      syncResponse.details.items_to_update || [],
                       "tracks-update",
                       (track) => (
                         <div className={styles.trackItem}>
                           {track.old_artists} - {track.old_title} → {track.artists} - {track.title}
                           {track.is_local ? " (LOCAL)" : ""}
+                          {track.changes && track.changes.length > 0 && (
+                            <div className={styles.changeReasons}>
+                              <div className={styles.changesLabel}>Changes:</div>
+                              <ul className={styles.changesList}>
+                                {track.changes.map((change: string, index: number) => (
+                                  <li key={index} className={styles.changeItem}>
+                                    {change}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {syncResponse.stats.deleted > 0 && (
+                <div className={styles.changesSection}>
+                  <h5>Tracks to Delete ({syncResponse.stats.deleted})</h5>
+                  <div className={styles.trackList}>
+                    {renderPaginatedList(
+                      syncResponse.details.items_to_delete || [],
+                      "tracks-delete",
+                      (track) => (
+                        <div className={`${styles.trackItem} ${styles.deleteItem}`}>
+                          {track.artists} - {track.title} {track.is_local ? "(LOCAL)" : ""}
                         </div>
                       )
                     )}
@@ -1756,55 +1803,44 @@ const PythonActionsPanel: React.FC = () => {
             </div>
           )}
 
-          {analysisResults.stage === "associations" && analysisResults.details && (
+          {syncResponse.stage === "associations" && (
             <div className={styles.associationChanges}>
               <h4>Association Changes</h4>
-              {(analysisResults.details.all_changes ||
-                analysisResults.details.samples ||
-                analysisResults.details.tracks_with_changes) && (
-                <div className={styles.changesSection}>
-                  <h5>
-                    Track Association Changes (
-                    {analysisResults.stats ? (
-                      <>
-                        {analysisResults.stats.associations_to_add || 0} to add,{" "}
-                        {analysisResults.stats.associations_to_remove || 0} to remove
-                      </>
-                    ) : (
-                      "Updating associations"
-                    )}
-                    )
-                  </h5>
-                  <div className={styles.trackList}>
-                    {renderPaginatedList(
-                      analysisResults.details.all_changes ||
-                        analysisResults.details.tracks_with_changes ||
-                        analysisResults.details.samples ||
-                        [],
-                      "associations",
-                      (item) => (
-                        <div className={styles.trackItem}>
-                          <div className={styles.trackItemHeader}>
-                            <strong>{item.track_info || item.track}</strong>
+              {/* Cast details to AssociationSyncDetails to access tracks_with_changes */}
+              {isAssociationSyncDetails(syncResponse.details) &&
+                syncResponse.details.tracks_with_changes && (
+                  <div className={styles.changesSection}>
+                    <h5>
+                      Track Association Changes ({syncResponse.details.associations_to_add} to add,{" "}
+                      {syncResponse.details.associations_to_remove} to remove )
+                    </h5>
+                    <div className={styles.trackList}>
+                      {renderPaginatedList(
+                        syncResponse.details.tracks_with_changes,
+                        "associations",
+                        (item) => (
+                          <div className={styles.trackItem}>
+                            <div className={styles.trackItemHeader}>
+                              <strong>{item.track_info || item.track}</strong>
+                            </div>
+                            {item.add_to && item.add_to.length > 0 && (
+                              <div className={styles.addTo}>
+                                <span className={styles.changeIcon}>+</span> Adding to playlists:{" "}
+                                {item.add_to.join(", ")}
+                              </div>
+                            )}
+                            {item.remove_from && item.remove_from.length > 0 && (
+                              <div className={styles.removeFrom}>
+                                <span className={styles.changeIcon}>-</span> Removing from
+                                playlists: {item.remove_from.join(", ")}
+                              </div>
+                            )}
                           </div>
-                          {item.add_to && item.add_to.length > 0 && (
-                            <div className={styles.addTo}>
-                              <span className={styles.changeIcon}>+</span> Adding to playlists:{" "}
-                              {item.add_to.join(", ")}
-                            </div>
-                          )}
-                          {item.remove_from && item.remove_from.length > 0 && (
-                            <div className={styles.removeFrom}>
-                              <span className={styles.changeIcon}>-</span> Removing from playlists:{" "}
-                              {item.remove_from.join(", ")}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    )}
+                        )
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
             </div>
           )}
 
@@ -1820,266 +1856,62 @@ const PythonActionsPanel: React.FC = () => {
       );
     }
 
-    return (
-      <div className={styles.confirmationPanel}>
-        <h3>Confirm Changes</h3>
+    // For regular sync operations (sync-database, sync-to-master) - use syncResponse
+    if (
+      syncResponse &&
+      (currentAction?.name === "sync-database" || currentAction?.name === "sync-to-master")
+    ) {
+      return (
+        <div className={styles.confirmationPanel}>
+          <h3>
+            Confirm Changes -{" "}
+            {syncResponse.action.charAt(0).toUpperCase() + syncResponse.action.slice(1)}
+          </h3>
 
-        {analysisResults.analyses && analysisResults.analyses.playlists && (
-          // This is for the 'all' action
-          <div className={styles.allAnalyses}>
-            <h4>Playlist Changes</h4>
+          <div className={styles.summaryStats}>
             <p>
-              {analysisResults.analyses.playlists.added} playlists to add,{" "}
-              {analysisResults.analyses.playlists.updated} to update,{" "}
-              {analysisResults.analyses.playlists.unchanged} unchanged,{" "}
-              {analysisResults.analyses.playlists.details?.to_delete?.length || 0} to delete
+              {syncResponse.stats.added} to add, {syncResponse.stats.updated} to update,
+              {syncResponse.stats.deleted} to delete, {syncResponse.stats.unchanged} unchanged
             </p>
-
-            {/* Paginated Playlists to Add */}
-            {analysisResults.analyses.playlists.details.to_add.length > 0 && (
-              <div className={styles.sampleChanges}>
-                <h5>
-                  Playlists to Add ({analysisResults.analyses.playlists.details.to_add.length})
-                </h5>
-                <div className={styles.itemList}>
-                  {renderPaginatedList(
-                    analysisResults.analyses.playlists.details.to_add,
-                    "playlists-add",
-                    (item) => (
-                      <div className={styles.item}>{item.name}</div>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Paginated Playlists to Update */}
-            {analysisResults.analyses.playlists.details.to_update.length > 0 && (
-              <div className={styles.sampleChanges}>
-                <h5>
-                  Playlists to Update ({analysisResults.analyses.playlists.details.to_update.length}
-                  )
-                </h5>
-                <div className={styles.itemList}>
-                  {renderPaginatedList(
-                    analysisResults.analyses.playlists.details.to_update,
-                    "playlists-update",
-                    (item) => (
-                      <div className={styles.item}>
-                        {item.old_name} → {item.name}
-                      </div>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-
-            {analysisResults.analyses.playlists.details.to_delete.length > 0 && (
-              <div className={styles.sampleChanges}>
-                <h5>
-                  Playlists to Delete ({analysisResults.analyses.playlists.details.to_delete.length}
-                  )
-                </h5>
-                <div className={styles.itemList}>
-                  {renderPaginatedList(
-                    analysisResults.analyses.playlists.details.to_delete,
-                    "playlists-delete",
-                    (item) => (
-                      <div className={styles.item}>{item.name}</div>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-
-            <h4>Track Changes</h4>
-            <p>
-              {analysisResults.analyses.tracks?.added} tracks to add,{" "}
-              {analysisResults.analyses.tracks?.updated} to update,{" "}
-              {analysisResults.analyses.tracks?.unchanged} unchanged,{" "}
-              {analysisResults.analyses.tracks?.deleted || 0} to delete
-            </p>
-
-            {/* Paginated Tracks to Add */}
-            {analysisResults.analyses.tracks &&
-              analysisResults.analyses.tracks.to_add_total > 0 && (
-                <div className={styles.sampleChanges}>
-                  <h5>Tracks to Add ({analysisResults.analyses.tracks.to_add_total})</h5>
-                  <div className={styles.trackList}>
-                    {renderPaginatedList(
-                      analysisResults.analyses.tracks.all_tracks_to_add ||
-                        analysisResults.analyses.tracks.to_add_sample,
-                      "tracks-add",
-                      (track) => (
-                        <div className={styles.trackItem}>
-                          {track.artists} - {track.title} {track.is_local ? "(LOCAL)" : ""}
-                        </div>
-                      ),
-                      analysisResults.analyses.tracks.to_add_total
-                    )}
-                  </div>
-                </div>
-              )}
-
-            {/* Paginated Tracks to Update */}
-            {analysisResults.analyses.tracks &&
-              analysisResults.analyses.tracks.to_update_total > 0 && (
-                <div className={styles.sampleChanges}>
-                  <h5>Tracks to Update ({analysisResults.analyses.tracks.to_update_total})</h5>
-                  <div className={styles.trackList}>
-                    {renderPaginatedList(
-                      analysisResults.analyses.tracks.all_tracks_to_update || [],
-                      "tracks-update",
-                      (track) => (
-                        <div className={styles.trackItem}>
-                          {track.old_artists} - {track.old_title} → {track.artists} - {track.title}
-                        </div>
-                      ),
-                      analysisResults.analyses.tracks.to_update_total
-                    )}
-                  </div>
-                </div>
-              )}
-
-            {analysisResults.analyses.tracks &&
-              analysisResults.analyses.tracks.to_delete_total > 0 && (
-                <div className={styles.sampleChanges}>
-                  <h5 className={styles.deleteHeading}>
-                    Tracks to Delete ({analysisResults.analyses.tracks.to_delete_total})
-                  </h5>
-                  <div className={styles.trackList}>
-                    {renderPaginatedList(
-                      analysisResults.analyses.tracks.all_tracks_to_delete ||
-                        analysisResults.analyses.tracks.to_delete_sample ||
-                        [],
-                      "tracks-delete",
-                      (track) => (
-                        <div className={`${styles.trackItem} ${styles.deleteItem}`}>
-                          {track.artists} - {track.title} {track.is_local ? "(LOCAL)" : ""}
-                        </div>
-                      ),
-                      analysisResults.analyses.tracks.to_delete_total
-                    )}
-                  </div>
-                </div>
-              )}
-
-            <h4>Association Changes</h4>
-            <p>
-              {analysisResults.analyses.associations.associations_to_add} associations to add,
-              {analysisResults.analyses.associations.associations_to_remove} to remove, affecting{" "}
-              {analysisResults.analyses.associations.tracks_with_changes.length} tracks
-            </p>
-
-            {/* Paginated association changes */}
-            {(analysisResults.analyses.associations.all_changes ||
-              analysisResults.analyses.associations.samples) && (
-              <div className={styles.sampleChanges}>
-                <h5>
-                  Track Association Changes (
-                  {analysisResults.analyses.associations.tracks_with_changes
-                    ? analysisResults.analyses.associations.tracks_with_changes.length
-                    : "Unknown"}
-                  )
-                </h5>
-                <div className={styles.trackList}>
-                  {renderPaginatedList(
-                    analysisResults.analyses.associations.all_changes ||
-                      analysisResults.analyses.associations.samples ||
-                      [],
-                    "associations",
-                    (item) => (
-                      <div className={styles.trackItem}>
-                        {/* Clearly display the track info as a header */}
-                        <div className={styles.trackItemHeader}>
-                          <strong>{item.track_info || item.track}</strong>
-                        </div>
-                        {item.add_to && item.add_to.length > 0 && (
-                          <div className={styles.addTo}>
-                            <span className={styles.changeIcon}>+</span> Adding to playlists:{" "}
-                            {item.add_to.join(", ")}
-                          </div>
-                        )}
-                        {item.remove_from && item.remove_from.length > 0 && (
-                          <div className={styles.removeFrom}>
-                            <span className={styles.changeIcon}>-</span> Removing from playlists:{" "}
-                            {item.remove_from.join(", ")}
-                          </div>
-                        )}
-                      </div>
-                    ),
-                    analysisResults.analyses.associations.tracks_with_changes
-                      ? analysisResults.analyses.associations.tracks_with_changes.length
-                      : undefined
-                  )}
-                </div>
-              </div>
-            )}
           </div>
-        )}
 
-        {/* Display specific analysis results for other actions */}
-        {analysisResults.details && !analysisResults.analyses && (
-          <div className={styles.specificAnalysis}>
-            {/* Render details based on what's available */}
-            {analysisResults.details.to_add && analysisResults.details.to_add.length > 0 && (
-              <div className={styles.sampleChanges}>
-                <h5>
-                  Items to Add (
-                  {analysisResults.details.to_add_total || analysisResults.details.to_add.length})
-                </h5>
-                <div className={styles.itemList}>
-                  {renderPaginatedList(
-                    analysisResults.details.all_items_to_add || analysisResults.details.to_add,
-                    "items-add",
-                    (item) => (
-                      <div className={styles.item}>
-                        {item.name ||
-                          item.title ||
-                          item.artists ||
-                          (item.id ? `${item.artists} - ${item.title}` : JSON.stringify(item))}
-                      </div>
-                    ),
-                    analysisResults.details.to_add_total
-                  )}
+          {/* Render details based on operation type */}
+          {isPlaylistSyncDetails(syncResponse.details) && (
+            <div className={styles.playlistChanges}>
+              <h4>Playlist Changes</h4>
+              {syncResponse.stats.added > 0 && (
+                <div className={styles.changesSection}>
+                  <h5>Playlists to Add ({syncResponse.stats.added})</h5>
+                  <div className={styles.itemList}>
+                    {renderPaginatedList(
+                      syncResponse.details.items_to_add || [],
+                      "playlists-add",
+                      (item) => (
+                        <div className={styles.item}>{item.name}</div>
+                      )
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {analysisResults.details.to_update && analysisResults.details.to_update.length > 0 && (
-              <div className={styles.sampleChanges}>
-                <h5>
-                  Items to Update (
-                  {analysisResults.details.to_update_total ||
-                    analysisResults.details.to_update.length}
-                  )
-                </h5>
-                <div className={styles.itemList}>
-                  {renderPaginatedList(
-                    analysisResults.details.all_items_to_update ||
-                      analysisResults.details.to_update,
-                    "items-update",
-                    (item) => (
-                      <div className={styles.item}>
-                        <div className={styles.itemName}>
-                          {item.changes && item.changes.length > 0 ? (
-                            // If we have detailed changes, just show the track name once
-                            `${item.artists} - ${item.title}`
-                          ) : (
-                            // Otherwise show the before → after format
-                            <>
-                              {item.old_name ||
-                                item.old_title ||
-                                (item.old_artists && `${item.old_artists} - ${item.old_title}`)}
-                              {" → "}
-                              {item.name ||
-                                item.title ||
-                                (item.artists && `${item.artists} - ${item.title}`)}
-                            </>
-                          )}
-                        </div>
-                        {/* Show update reasons for playlists */}
-                        {item.old_name !== undefined && item.old_snapshot_id !== undefined && (
+              {syncResponse.stats.updated > 0 && (
+                <div className={styles.changesSection}>
+                  <h5>Playlists to Update ({syncResponse.stats.updated})</h5>
+                  <div className={styles.itemList}>
+                    {renderPaginatedList(
+                      syncResponse.details.items_to_update || [],
+                      "playlists-update",
+                      (item) => (
+                        <div className={styles.item}>
+                          <div className={styles.playlistName}>
+                            {item.old_name !== item.name ? (
+                              <span>
+                                {item.old_name} → {item.name}
+                              </span>
+                            ) : (
+                              <span>{item.name}</span>
+                            )}
+                          </div>
                           <div className={styles.updateReasons}>
                             {item.old_name !== item.name && (
                               <span className={styles.updateReason}>Name changed</span>
@@ -2088,197 +1920,136 @@ const PythonActionsPanel: React.FC = () => {
                               <span className={styles.updateReason}>Tracks modified</span>
                             )}
                           </div>
-                        )}
-                        {/* Show update reasons for tracks */}
-                        {item.changes && item.changes.length > 0 && (
-                          <div className={styles.changeReasons}>
-                            <div className={styles.changesLabel}>Changes:</div>
-                            <ul className={styles.changesList}>
-                              {item.changes.map((change: string, index: number) => (
-                                <li key={index} className={styles.changeItem}>
-                                  {change}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    ),
-                    analysisResults.details.to_update_total
-                  )}
-                </div>
-              </div>
-            )}
-
-            {analysisResults.details?.to_delete && analysisResults.details.to_delete.length > 0 && (
-              <div className={styles.sampleChanges}>
-                <h5 className={styles.deleteHeading}>
-                  Items to Delete (
-                  {analysisResults.details.to_delete_total ||
-                    analysisResults.details.to_delete.length}
-                  )
-                </h5>
-                <div className={styles.itemList}>
-                  {renderPaginatedList(
-                    analysisResults.details.all_items_to_delete ||
-                      analysisResults.details.to_delete,
-                    "items-delete",
-                    (item) => (
-                      <div className={`${styles.item} ${styles.deleteItem}`}>
-                        {item.name ||
-                          item.title ||
-                          item.artists ||
-                          (item.id ? `${item.artists} - ${item.title}` : JSON.stringify(item))}
-                      </div>
-                    ),
-                    analysisResults.details.to_delete_total
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* For embeddingTrackMetadata - show files */}
-            {analysisResults.details.files_to_process && (
-              <div className={styles.sampleChanges}>
-                <h5>Files to Process ({analysisResults.details.files_to_process.length})</h5>
-                <div className={styles.itemList}>
-                  {renderPaginatedList(
-                    analysisResults.details.files_to_process,
-                    "files-process",
-                    (file) => (
-                      <div className={styles.item}>{file.name || file}</div>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* For generating M3U playlists */}
-            {analysisResults.details.playlists && (
-              <div className={styles.sampleChanges}>
-                <h5>Playlists to Generate ({analysisResults.details.playlists.length})</h5>
-                <div className={styles.itemList}>
-                  {renderPaginatedList(
-                    analysisResults.details.playlists,
-                    "m3u-playlists",
-                    (playlist) => (
-                      <div className={styles.item}>
-                        {playlist.name} ({playlist.track_count} tracks)
-                      </div>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* For association changes */}
-            {analysisResults.details.all_changes ||
-            analysisResults.details.samples ||
-            (analysisResults.details.tracks_with_changes &&
-              analysisResults.details.tracks_with_changes.length > 0) ? (
-              <div className={styles.sampleChanges}>
-                <h5>
-                  Track Association Changes ({analysisResults.details.associations_to_add || 0} to
-                  add, {analysisResults.details.associations_to_remove || 0} to remove)
-                </h5>
-                <div className={styles.trackList}>
-                  {renderPaginatedList(
-                    analysisResults.details.all_changes ||
-                      analysisResults.details.samples ||
-                      analysisResults.details.tracks_with_changes ||
-                      [],
-                    "associations-specific",
-                    (item) => (
-                      <div className={styles.trackItem}>
-                        <div className={styles.trackItemHeader}>
-                          <strong>{item.track_info || item.track}</strong>
                         </div>
-                        {item.add_to && item.add_to.length > 0 && (
-                          <div className={styles.addTo}>
-                            <span className={styles.changeIcon}>+</span> Adding to playlists:{" "}
-                            {item.add_to.join(", ")}
-                          </div>
-                        )}
-                        {item.remove_from && item.remove_from.length > 0 && (
-                          <div className={styles.removeFrom}>
-                            <span className={styles.changeIcon}>-</span> Removing from playlists:{" "}
-                            {item.remove_from.join(", ")}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  )}
+                      )
+                    )}
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </div>
-        )}
+              )}
+            </div>
+          )}
 
-        {/* For sync-to-master */}
-        {analysisResults.master_sync && (
-          <div className={styles.masterSyncAnalysis}>
-            <h4>Sync to MASTER Playlist</h4>
-            <p>
-              {analysisResults.master_sync.total_tracks_to_add} tracks to add from{" "}
-              {analysisResults.master_sync.playlists_with_new_tracks} playlists
-            </p>
-
-            {analysisResults.master_sync.playlists && (
-              <div className={styles.sampleChanges}>
-                <h5>Tracks by Playlist</h5>
-                <div className={styles.accordion}>
-                  {analysisResults.master_sync.playlists.map(
-                    (playlist: PlaylistItem, i: React.Key | null | undefined) => (
-                      <div key={i} className={styles.accordionItem}>
-                        <div
-                          className={styles.accordionHeader}
-                          onClick={() => toggleAccordion(`playlist-${i}`)}
-                        >
-                          {playlist.name} ({playlist.track_count} tracks)
-                          <span
-                            className={
-                              expandedSections[`playlist-${i}`]
-                                ? styles.accordionExpanded
-                                : styles.accordionCollapsed
-                            }
-                          >
-                            {expandedSections[`playlist-${i}`] ? "▼" : "►"}
-                          </span>
+          {isTrackSyncDetails(syncResponse.details) && (
+            <div className={styles.trackChanges}>
+              <h4>Track Changes</h4>
+              {/* MIGHT BE FUCKED */}
+              {syncResponse.stats.added > 0 && (
+                <div className={styles.changesSection}>
+                  <h5>Tracks to Add ({syncResponse.stats.added})</h5>
+                  <div className={styles.itemList}>
+                    {renderPaginatedList(
+                      syncResponse.details.items_to_add || [],
+                      "tracks-add",
+                      (track) => (
+                        <div className={styles.trackItem}>
+                          {track.artists} - {track.title} {track.is_local ? "(LOCAL)" : ""}
                         </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
 
-                        {expandedSections[`playlist-${i}`] && (
-                          <div className={styles.accordionContent}>
-                            {renderPaginatedList(
-                              playlist.tracks,
-                              `playlist-tracks-${i}`,
-                              (track) => (
-                                <div className={styles.trackItem}>
-                                  {track.artists} - {track.name}
-                                </div>
-                              ),
-                              Number(playlist.track_count)
+              {syncResponse.stats.updated > 0 && (
+                <div className={styles.changesSection}>
+                  <h5>Tracks to Update ({syncResponse.stats.updated})</h5>
+                  <div className={styles.trackList}>
+                    {renderPaginatedList(
+                      syncResponse.details.items_to_update || [],
+                      "tracks-update",
+                      (track) => (
+                        <div className={styles.trackItem}>
+                          {track.old_artists} - {track.old_title} → {track.artists} - {track.title}
+                          {track.is_local ? " (LOCAL)" : ""}
+                          {track.changes && track.changes.length > 0 && (
+                            <div className={styles.changeReasons}>
+                              <div className={styles.changesLabel}>Changes:</div>
+                              <ul className={styles.changesList}>
+                                {track.changes.map((change: string, index: number) => (
+                                  <li key={index} className={styles.changeItem}>
+                                    {change}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {syncResponse.stats.deleted > 0 && (
+                <div className={styles.changesSection}>
+                  <h5>Tracks to Delete ({syncResponse.stats.deleted})</h5>
+                  <div className={styles.trackList}>
+                    {renderPaginatedList(
+                      syncResponse.details.items_to_delete || [],
+                      "tracks-delete",
+                      (track) => (
+                        <div className={`${styles.trackItem} ${styles.deleteItem}`}>
+                          {track.artists} - {track.title} {track.is_local ? "(LOCAL)" : ""}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isAssociationSyncDetails(syncResponse.details) && (
+            <div className={styles.associationChanges}>
+              <h4>Association Changes</h4>
+              {isAssociationSyncDetails(syncResponse.details) &&
+                syncResponse.details.tracks_with_changes && (
+                  <div className={styles.changesSection}>
+                    <h5>
+                      Track Association Changes ({syncResponse.details.associations_to_add} to add,{" "}
+                      {syncResponse.details.associations_to_remove} to remove )
+                    </h5>
+                    <div className={styles.trackList}>
+                      {renderPaginatedList(
+                        syncResponse.details.tracks_with_changes,
+                        "associations",
+                        (item) => (
+                          <div className={styles.trackItem}>
+                            <div className={styles.trackItemHeader}>
+                              <strong>{item.track_info || item.track}</strong>
+                            </div>
+                            {item.add_to && item.add_to.length > 0 && (
+                              <div className={styles.addTo}>
+                                <span className={styles.changeIcon}>+</span> Adding to playlists:{" "}
+                                {item.add_to.join(", ")}
+                              </div>
+                            )}
+                            {item.remove_from && item.remove_from.length > 0 && (
+                              <div className={styles.removeFrom}>
+                                <span className={styles.changeIcon}>-</span> Removing from
+                                playlists: {item.remove_from.join(", ")}
+                              </div>
                             )}
                           </div>
-                        )}
-                      </div>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+            </div>
+          )}
 
-        <div className={styles.confirmationButtons}>
-          <button className={styles.confirmButton} onClick={confirmAction}>
-            Confirm
-          </button>
-          <button className={styles.cancelButton} onClick={cancelAction}>
-            Cancel
-          </button>
+          <div className={styles.confirmationButtons}>
+            <button className={styles.confirmButton} onClick={confirmAction}>
+              Confirm Changes
+            </button>
+            <button className={styles.cancelButton} onClick={cancelAction}>
+              Cancel
+            </button>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
   };
 
   // Helper function to render paginated lists with "Load More" button
