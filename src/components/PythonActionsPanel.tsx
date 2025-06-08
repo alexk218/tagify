@@ -97,7 +97,6 @@ interface PlaylistItem {
   old_snapshot_id?: string;
 }
 
-
 interface AnalysisResults {
   stage: string;
   success: boolean;
@@ -294,16 +293,6 @@ const PythonActionsPanel: React.FC = () => {
     "short-tracks": null,
   });
 
-  const [sequentialProcess, setSequentialProcess] = useState<{
-    active: boolean;
-    stage: string;
-    results: Record<string, any>;
-  }>({
-    active: false,
-    stage: "",
-    results: {},
-  });
-
   const [sequentialSyncState, setSequentialSyncState] = useState<{
     isActive: boolean;
     currentStage: string;
@@ -414,23 +403,22 @@ const PythonActionsPanel: React.FC = () => {
   const executeSyncAction = (forceRefresh: boolean) => {
     if (!pendingSyncAction) return;
 
-    // Execute the action with the chosen force_refresh option
-    if (pendingSyncAction.action === "sync-to-master") {
-      performAction("sync-to-master", {
-        ...pendingSyncAction.data,
-        force_refresh: forceRefresh,
-      });
-    } else {
-      // For database sync actions
-      performAction(pendingSyncAction.action, {
-        ...pendingSyncAction.data,
-        force_refresh: forceRefresh,
-      });
-    }
+    performAction(pendingSyncAction.action, {
+      ...pendingSyncAction.data,
+      force_refresh: forceRefresh,
+    });
 
     // Clean up state
     setShowSyncOptionsPopup(false);
     setPendingSyncAction(null);
+  };
+
+  const executeNormalSync = () => {
+    executeSyncAction(false); // Use cached data when possible
+  };
+
+  const executeForceRefreshSync = () => {
+    executeSyncAction(true); // Ignore cached data and fetch fresh
   };
 
   const cancelSyncAction = () => {
@@ -695,12 +683,6 @@ const PythonActionsPanel: React.FC = () => {
       startTime: Date.now(),
     });
 
-    setSequentialProcess({
-      active: true,
-      stage: "start",
-      results: {},
-    });
-
     const playlistSettings = getPlaylistSettings();
 
     // Start the process - first API call just returns instructions
@@ -740,11 +722,6 @@ const PythonActionsPanel: React.FC = () => {
         totalStages: ["playlists", "tracks", "associations"],
         startTime: null,
       });
-      setSequentialProcess({
-        active: false,
-        stage: "",
-        results: {},
-      });
     }
   };
 
@@ -752,11 +729,6 @@ const PythonActionsPanel: React.FC = () => {
     setSequentialSyncState((prev) => ({
       ...prev,
       currentStage: stage,
-    }));
-
-    setSequentialProcess((prev) => ({
-      ...prev,
-      stage: stage,
     }));
 
     setIsLoading((prev) => ({ ...prev, [`sync-${stage}`]: true }));
@@ -787,15 +759,11 @@ const PythonActionsPanel: React.FC = () => {
 
       const analysisResult = await analyzeResponse.json();
 
-      // Store the result for this stage
-      setSequentialProcess((prev) => ({
-        ...prev,
-        results: { ...prev.results, [stage]: analysisResult },
-      }));
-
       // If changes need confirmation, show confirmation UI
       if (analysisResult.needs_confirmation) {
+        // TODO: set analysis results?
         setAnalysisResults(analysisResult);
+        setSyncResponse(analysisResult);
         setIsAwaitingConfirmation(true);
         setCurrentAction({
           name: "sequential-sync",
@@ -817,11 +785,6 @@ const PythonActionsPanel: React.FC = () => {
         totalStages: ["playlists", "tracks", "associations"],
         startTime: null,
       });
-      setSequentialProcess({
-        active: false,
-        stage: "",
-        results: {},
-      });
     } finally {
       setIsLoading((prev) => ({ ...prev, [`sync-${stage}`]: false }));
     }
@@ -836,11 +799,6 @@ const PythonActionsPanel: React.FC = () => {
     }
     // If we're done with all stages
     else if (nextStage === "complete") {
-      setSequentialProcess({
-        active: false,
-        stage: "",
-        results: {},
-      });
       Spicetify.showNotification("Database sync completed successfully");
     }
   };
@@ -2070,6 +2028,7 @@ const PythonActionsPanel: React.FC = () => {
   };
 
   // State for accordion sections
+  // TODO: delete these?
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
 
   const toggleAccordion = (sectionKey: string) => {
@@ -2104,7 +2063,7 @@ const PythonActionsPanel: React.FC = () => {
               <div className={styles.syncOption}>
                 <button
                   className={`${styles.syncOptionButton} ${styles.normalSync}`}
-                  onClick={() => executeSyncAction(false)}
+                  onClick={() => executeNormalSync()}
                 >
                   <div className={styles.syncOptionTitle}>Normal Sync</div>
                   <div className={styles.syncOptionDescription}>
@@ -2116,7 +2075,7 @@ const PythonActionsPanel: React.FC = () => {
               <div className={styles.syncOption}>
                 <button
                   className={`${styles.syncOptionButton} ${styles.forceSync}`}
-                  onClick={() => executeSyncAction(true)}
+                  onClick={() => executeForceRefreshSync()}
                 >
                   <div className={styles.syncOptionTitle}>Force Full Refresh</div>
                   <div className={styles.syncOptionDescription}>
@@ -2417,6 +2376,7 @@ const PythonActionsPanel: React.FC = () => {
             />
           </div>
 
+          {/* Sequential sync progress indicator (Playlists | Tracks | Associations) */}
           {sequentialSyncState.isActive && (
             <div className={styles.sequentialSyncProgress}>
               <div className={styles.progressHeader}>
