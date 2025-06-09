@@ -130,6 +130,26 @@ interface FileMappingSelection {
   file_name: string;
 }
 
+interface FileMappingResult {
+  filename: string;
+  uri: string;
+  success: boolean;
+  confidence?: number;
+  source?: string;
+  reason?: string;
+  track_info?: string;
+}
+
+interface FileMappingResponse {
+  success: boolean;
+  stage: string;
+  message: string;
+  successful_mappings: number;
+  failed_mappings: number;
+  results: FileMappingResult[];
+  total_processed: number;
+}
+
 interface MatchSelection {
   fileName?: string;
   trackId?: string;
@@ -167,6 +187,7 @@ interface AnalysisResultsEmbedMetadata {
   requires_fuzzy_matching?: boolean;
   requires_user_selection: boolean;
   details: {
+    files_requiring_user_input: FileToProcess[];
     files_to_process: string[];
     auto_matched_files: any[];
     total_files: number;
@@ -231,6 +252,8 @@ const PythonActionsPanel: React.FC = () => {
     matches: [],
     isLoading: false,
   });
+  const [mappingResults, setMappingResults] = useState<FileMappingResponse | null>(null);
+  const [showMappingResults, setShowMappingResults] = useState(false);
 
   const [settingsVisible, setSettingsVisible] = useState<boolean>(false);
   const [settings, setSettings] = useState({
@@ -1159,6 +1182,216 @@ const PythonActionsPanel: React.FC = () => {
     }
   }, [analysisResults]);
 
+  const MappingResultsPanel = () => {
+    if (!mappingResults || !showMappingResults) return null;
+
+    const [successPage, setSuccessPage] = useState(1);
+    const [failedPage, setFailedPage] = useState(1);
+    const resultsPerPage = 20;
+
+    const successfulMappings = mappingResults.results.filter((r) => r.success);
+    const failedMappings = mappingResults.results.filter((r) => !r.success);
+
+    const getPagedResults = (results: FileMappingResult[], page: number) => {
+      const startIndex = (page - 1) * resultsPerPage;
+      return results.slice(startIndex, startIndex + resultsPerPage);
+    };
+
+    const handleContinue = () => {
+      setShowMappingResults(false);
+      setMappingResults(null);
+
+      // If there are still files requiring user input, resume fuzzy matching
+      if (
+        analysisResults?.details?.files_requiring_user_input?.length &&
+        analysisResults?.details?.files_requiring_user_input?.length > 0
+      ) {
+        setFuzzyMatchingState({
+          isActive: true,
+          currentFileIndex: 0, // Reset to first remaining file
+          matches: [],
+          isLoading: false,
+        });
+      } else {
+        // All done, reset everything
+        setAnalysisResults(null);
+        setIsAwaitingConfirmation(false);
+        setCurrentAction(null);
+        setUserMatchSelections([]);
+        setSkippedFiles([]);
+      }
+    };
+
+    const handleFinish = () => {
+      setShowMappingResults(false);
+      setMappingResults(null);
+      setAnalysisResults(null);
+      setIsAwaitingConfirmation(false);
+      setCurrentAction(null);
+      setUserMatchSelections([]);
+      setSkippedFiles([]);
+      setFuzzyMatchingState({
+        isActive: false,
+        currentFileIndex: 0,
+        matches: [],
+        isLoading: false,
+      });
+    };
+
+    return (
+      <Portal>
+        <div className={styles.modalOverlay}>
+          <div className={styles.mappingResultsPanel}>
+            <div className={styles.mappingResultsHeader}>
+              <h3>File Mapping Results</h3>
+              <div className={styles.resultsSummary}>
+                <div className={styles.summaryStats}>
+                  <span className={styles.successStat}>
+                    ✓ {mappingResults.successful_mappings} Successful
+                  </span>
+                  <span className={styles.failedStat}>
+                    ✗ {mappingResults.failed_mappings} Failed
+                  </span>
+                  <span className={styles.totalStat}>Total: {mappingResults.total_processed}</span>
+                </div>
+                <p className={styles.summaryMessage}>{mappingResults.message}</p>
+              </div>
+            </div>
+
+            <div className={styles.mappingResultsContent}>
+              {/* Successful Mappings Section */}
+              {successfulMappings.length > 0 && (
+                <div className={styles.resultSection}>
+                  <h4 className={styles.sectionTitle}>
+                    ✓ Successful Mappings ({successfulMappings.length})
+                  </h4>
+                  <div className={styles.resultsList}>
+                    {getPagedResults(successfulMappings, successPage).map((result, index) => (
+                      <div key={index} className={`${styles.resultItem} ${styles.successItem}`}>
+                        <div className={styles.resultFileName}>{result.filename}</div>
+                        <div className={styles.resultUri}>{result.uri}</div>
+                        {/* Add track info display */}
+                        {result.track_info && (
+                          <div className={styles.resultTrackInfo}>
+                            <span className={styles.trackName}>→ {result.track_info}</span>
+                          </div>
+                        )}
+                        <div className={styles.resultMeta}>
+                          {result.confidence && (
+                            <span className={styles.confidence}>
+                              {(result.confidence * 100).toFixed(1)}% confidence
+                            </span>
+                          )}
+                          {result.source && (
+                            <span className={styles.source}>
+                              {result.source === "auto_match" ? "Auto-matched" : "User selected"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Pagination for successful mappings */}
+                  {successfulMappings.length > resultsPerPage && (
+                    <div className={styles.paginationControls}>
+                      <button
+                        disabled={successPage === 1}
+                        onClick={() => setSuccessPage((prev) => Math.max(1, prev - 1))}
+                      >
+                        Previous
+                      </button>
+                      <span>
+                        Page {successPage} of{" "}
+                        {Math.ceil(successfulMappings.length / resultsPerPage)}
+                      </span>
+                      <button
+                        disabled={
+                          successPage >= Math.ceil(successfulMappings.length / resultsPerPage)
+                        }
+                        onClick={() => setSuccessPage((prev) => prev + 1)}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Failed Mappings Section */}
+              {failedMappings.length > 0 && (
+                <div className={styles.resultSection}>
+                  <h4 className={styles.sectionTitle}>
+                    ✗ Failed Mappings ({failedMappings.length})
+                  </h4>
+                  <div className={styles.resultsList}>
+                    {getPagedResults(failedMappings, failedPage).map((result, index) => (
+                      <div key={index} className={`${styles.resultItem} ${styles.failedItem}`}>
+                        <div className={styles.resultFileName}>{result.filename}</div>
+                        <div className={styles.resultUri}>{result.uri}</div>
+                        {/* Add track info display for failed mappings too */}
+                        {result.track_info && (
+                          <div className={styles.resultTrackInfo}>
+                            <span className={styles.trackName}>→ {result.track_info}</span>
+                          </div>
+                        )}
+                        <div className={styles.resultReason}>
+                          <span className={styles.errorReason}>
+                            {result.reason || "Unknown error"}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Pagination for failed mappings */}
+                  {failedMappings.length > resultsPerPage && (
+                    <div className={styles.paginationControls}>
+                      <button
+                        disabled={failedPage === 1}
+                        onClick={() => setFailedPage((prev) => Math.max(1, prev - 1))}
+                      >
+                        Previous
+                      </button>
+                      <span>
+                        Page {failedPage} of {Math.ceil(failedMappings.length / resultsPerPage)}
+                      </span>
+                      <button
+                        disabled={failedPage >= Math.ceil(failedMappings.length / resultsPerPage)}
+                        onClick={() => setFailedPage((prev) => prev + 1)}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className={styles.mappingResultsFooter}>
+              {analysisResults?.details?.files_requiring_user_input?.length &&
+              analysisResults?.details?.files_requiring_user_input?.length > 0 ? (
+                <>
+                  <button className={styles.continueButton} onClick={handleContinue}>
+                    Continue with Remaining Files (
+                    {analysisResults.details.files_requiring_user_input.length})
+                  </button>
+                  <button className={styles.finishButton} onClick={handleFinish}>
+                    Finish
+                  </button>
+                </>
+              ) : (
+                <button className={styles.finishButton} onClick={handleFinish}>
+                  Done
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </Portal>
+    );
+  };
+
   const FuzzyMatchConfirmation = () => {
     const isFileMapping = currentAction?.name === "create-file-mappings";
 
@@ -1254,40 +1487,48 @@ const PythonActionsPanel: React.FC = () => {
           throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
         }
 
-        const result = await response.json();
+        const result: FileMappingResponse = await response.json();
 
         if (result.success) {
-          Spicetify.showNotification(
-            `Successfully applied mappings for ${selections.length} ${description}`
-          );
+          setMappingResults(result);
+          setShowMappingResults(true);
 
-          // Instead of trying to modify the analysis results, let's just reset the fuzzy matching state
-          // and let the user know they can refresh if they want to see remaining files
-
+          // Handle different scenarios based on the description
           if (description.includes("auto-matched")) {
-            // For auto-matched files, we can show a success message and suggest refreshing
-            Spicetify.showNotification(
-              "Auto-matched files applied successfully. Refresh to see remaining files.",
-              false,
-              5000
-            );
-          } else {
-            // For manual selections, clear the current selections and continue
+            // For auto-matched files, clear the fuzzy matching state
+            setFuzzyMatchingState({
+              isActive: false,
+              currentFileIndex: 0,
+              matches: [],
+              isLoading: false,
+            });
+          } else if (description.includes("manually selected")) {
+            // For manual selections, clear the current selections
             setUserMatchSelections([]);
-            Spicetify.showNotification(
-              `${selections.length} manual selections applied. Continue matching remaining files.`,
-              false,
-              3000
-            );
-          }
 
-          // Optionally, you could also reset the entire fuzzy matching state:
-          // setFuzzyMatchingState({
-          //   isActive: false,
-          //   currentFileIndex: 0,
-          //   matches: [],
-          //   isLoading: false,
-          // });
+            // Update the analysis results to remove the files that were just processed
+            if (analysisResults && analysisResults.details.files_requiring_user_input) {
+              const processedFiles = new Set(selections.map((s) => s.file_path || s.file_name));
+              const remainingFiles = analysisResults.details.files_requiring_user_input.filter(
+                (file) => !processedFiles.has(file.file_path) && !processedFiles.has(file.file_name)
+              );
+
+              // Directly mutate the array (React will still re-render because of other state changes)
+              analysisResults.details.files_requiring_user_input = remainingFiles;
+            }
+
+            // If there are no more files requiring input, stop fuzzy matching
+            if (
+              analysisResults?.details?.files_requiring_user_input?.length === selections.length
+            ) {
+              setFuzzyMatchingState({
+                isActive: false,
+                currentFileIndex: 0,
+                matches: [],
+                isLoading: false,
+              });
+            }
+          }
         } else {
           throw new Error(result.message || "Unknown error occurred");
         }
@@ -2574,6 +2815,7 @@ const PythonActionsPanel: React.FC = () => {
       </div>
 
       <SyncOptionsPopup />
+      <MappingResultsPanel />
 
       {settingsVisible && (
         <Portal>
