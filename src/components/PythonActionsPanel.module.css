@@ -1361,3 +1361,136 @@
   font-size: 0.9em;
   font-weight: 500;
 }
+
+/* Search Section */
+.searchSection {
+  background: var(--spice-card);
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.searchSection h4 {
+  margin: 0 0 12px 0;
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.searchInputContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  background: var(--spice-player);
+  color: var(--spice-text);
+  font-size: 14px;
+  outline: none;
+}
+
+.searchInput:focus {
+  border-color: var(--spice-accent);
+  box-shadow: 0 0 0 2px rgba(var(--spice-rgb-accent), 0.2);
+}
+
+.searchSpinner {
+  position: absolute;
+  right: 12px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Search Results */
+.searchResults {
+  margin-top: 12px;
+}
+
+.searchResults h5 {
+  margin: 0 0 8px 0;
+  color: var(--spice-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.searchResultsList {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  background: var(--spice-player);
+}
+
+.searchResultItem {
+  padding: 12px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.searchResultItem:last-child {
+  border-bottom: none;
+}
+
+.searchResultItem:hover {
+  background: var(--spice-button-disabled);
+}
+
+.searchResultContent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.searchResultTitle {
+  color: var(--spice-text);
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.searchResultAlbum {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.searchResultConfidence {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.localIndicator {
+  background: var(--spice-accent);
+  color: var(--spice-main);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.noSearchResults {
+  padding: 16px;
+  text-align: center;
+  color: var(--spice-subtext);
+  font-style: italic;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  background: var(--spice-player);
+}

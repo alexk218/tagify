@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import styles from "./PythonActionsPanel.module.css";
 import "../styles/globals.css";
 import ValidationPanel from "./ValidationPanel";
@@ -121,6 +121,8 @@ type Match = {
   title: string;
   album: string;
   ratio: number;
+  confidence: number;
+  is_local: boolean;
 };
 
 interface FileMappingSelection {
@@ -254,6 +256,11 @@ const PythonActionsPanel: React.FC = () => {
   });
   const [mappingResults, setMappingResults] = useState<FileMappingResponse | null>(null);
   const [showMappingResults, setShowMappingResults] = useState(false);
+
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchResults, setSearchResults] = useState<Match[]>([]);
+  const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [showSearchResults, setShowSearchResults] = useState<boolean>(false);
 
   const [settingsVisible, setSettingsVisible] = useState<boolean>(false);
   const [settings, setSettings] = useState({
@@ -1392,6 +1399,48 @@ const PythonActionsPanel: React.FC = () => {
     );
   };
 
+  const handleSearch = async (query: string) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      setShowSearchResults(false);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const response = await fetch(
+        `${settings.serverUrl}/api/tracks/search?query=${encodeURIComponent(
+          query
+        )}&type=matching&limit=20`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setSearchResults(data.results || []);
+        setShowSearchResults(true);
+      } else {
+        console.error("Search failed:", response.statusText);
+        setSearchResults([]);
+      }
+    } catch (error) {
+      console.error("Search error:", error);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleSearch(searchQuery);
+  };
+
   const FuzzyMatchConfirmation = () => {
     const isFileMapping = currentAction?.name === "create-file-mappings";
 
@@ -1538,7 +1587,6 @@ const PythonActionsPanel: React.FC = () => {
       }
     };
 
-    // Local state to track matches independently from React's state updates
     const [localMatches, setLocalMatches] = useState<any[]>([]);
     const [isLocalLoading, setIsLocalLoading] = useState(false);
     const [hasCalledAPI, setHasCalledAPI] = useState(false);
@@ -1546,17 +1594,14 @@ const PythonActionsPanel: React.FC = () => {
     // Runs once per file - fetches matches
     useEffect(() => {
       const fetchMatches = async () => {
-        // Exit early if no file or already called API for this file
         if (!currentFileName || hasCalledAPI) return;
 
-        console.log(`Fetching matches for ${currentFileName} (independent fetch)`);
+        console.log(`Fetching matches for ${currentFileName}`);
         setIsLocalLoading(true);
         setHasCalledAPI(true);
 
         try {
           const sanitizedUrl = settings.serverUrl.replace(/^["'](.*)["']$/, "$1").trim();
-
-          // Use a simpler fetch approach
           const response = await fetch(`${sanitizedUrl}/api/tracks/match`, {
             method: "POST",
             headers: {
@@ -1567,21 +1612,14 @@ const PythonActionsPanel: React.FC = () => {
             }),
           });
 
-          console.log(`Received response with status ${response.status}`);
-
           if (response.ok) {
             const data = await response.json();
-            console.log("Fetch received data:", data);
-
             if (data && data.success && data.matches) {
-              console.log(`Found ${data.matches.length} matches via fetch`);
               setLocalMatches(data.matches);
             } else {
-              console.error("Invalid response format:", data);
               setLocalMatches([]);
             }
           } else {
-            console.error(`Fetch request failed with status: ${response.status}`);
             setLocalMatches([]);
           }
         } catch (error) {
@@ -1593,7 +1631,7 @@ const PythonActionsPanel: React.FC = () => {
       };
 
       fetchMatches();
-    }, [currentFileName, hasCalledAPI, settings.serverUrl]);
+    }, [currentFileName, fuzzyMatchingState.currentFileIndex]);
 
     // Reset the hasCalledAPI flag when moving to a new file
     useEffect(() => {
@@ -1795,7 +1833,7 @@ const PythonActionsPanel: React.FC = () => {
           Match Files with Tracks ({processedFilesCount} of {files.length} complete)
         </h3>
 
-        {currentFileName ? (
+        {currentFileName && (
           <>
             <div className={styles.fileInfo}>
               <div className={styles.fileName}>
@@ -1806,6 +1844,65 @@ const PythonActionsPanel: React.FC = () => {
               </div>
             </div>
 
+            {/* Search Section */}
+            <div className={styles.searchSection}>
+              <h4>Search for Track</h4>
+              <form onSubmit={handleSearchSubmit} className={styles.searchInputContainer}>
+                <input
+                  type="text"
+                  className={styles.searchInput}
+                  placeholder="Search by artist, title, or album... (Press Enter to search)"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)} // Direct state update
+                />
+                <button type="submit" className={styles.actionButton} disabled={isSearching}>
+                  {isSearching ? "🔍" : "Search"}
+                </button>
+              </form>
+
+              {/* Search Results */}
+              {showSearchResults && searchResults.length > 0 && (
+                <div className={styles.searchResults}>
+                  <h5>Search Results ({searchResults.length})</h5>
+                  <div className={styles.searchResultsList}>
+                    {searchResults.map((match, index) => (
+                      <div
+                        key={match.track_id || index}
+                        className={styles.searchResultItem}
+                        onClick={() => {
+                          handleSelectMatch(match);
+                          setSearchQuery("");
+                          setSearchResults([]);
+                          setShowSearchResults(false);
+                        }}
+                      >
+                        <div className={styles.searchResultContent}>
+                          <div className={styles.searchResultTitle}>
+                            {match.artist} - {match.title}
+                          </div>
+                          <div className={styles.searchResultAlbum}>{match.album}</div>
+                          <div className={styles.searchResultConfidence}>
+                            Match: {(match.confidence * 100).toFixed(1)}%
+                            {match.is_local && (
+                              <span className={styles.localIndicator}> (LOCAL)</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {showSearchResults &&
+                searchResults.length === 0 &&
+                searchQuery.trim() &&
+                !isSearching && (
+                  <div className={styles.noSearchResults}>No tracks found for "{searchQuery}"</div>
+                )}
+            </div>
+
+            {/* Existing fuzzy match results */}
             {isLocalLoading ? (
               <div className={styles.loadingMatches}>
                 <div>Loading potential matches...</div>
@@ -1821,6 +1918,7 @@ const PythonActionsPanel: React.FC = () => {
               </div>
             ) : (
               <div className={styles.matchesList}>
+                <h4>Suggested Matches</h4>
                 <div className={styles.matchOption} onClick={handleSkip}>
                   <div className={styles.matchNumber}>0.</div>
                   <div className={styles.matchText}>Skip this file (no match)</div>
@@ -1861,18 +1959,6 @@ const PythonActionsPanel: React.FC = () => {
               </div>
             )}
           </>
-        ) : (
-          <div className={styles.matchingComplete}>
-            <p>All files have been processed!</p>
-            <p>Selected matches for {userMatchSelections.length} files.</p>
-            <p>Skipped {skippedFiles.length} files.</p>
-            <button className={styles.confirmButton} onClick={confirmAction}>
-              {isFileMapping ? "Create File-Track Mappings" : "Confirm and Embed Metadata"}
-            </button>
-            <button className={styles.cancelButton} onClick={cancelAction}>
-              Cancel
-            </button>
-          </div>
         )}
       </div>
     );
