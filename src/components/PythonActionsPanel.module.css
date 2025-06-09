@@ -1018,3 +1018,96 @@
   font-size: 0.8em;
   color: var(--spice-text);
 }
+
+.autoMatchedHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.applyAutoMatchesButton,
+.applyPartialButton {
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  align-self: flex-start;
+}
+
+.applyAutoMatchesButton:hover,
+.applyPartialButton:hover {
+  background-color: #218838;
+}
+
+.autoMatchedItem {
+  display: grid;
+  grid-template-columns: 2fr 3fr 1fr;
+  gap: 12px;
+  padding: 8px 12px;
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  align-items: center;
+}
+
+.trackInfo {
+  color: var(--spice-subtext);
+  font-size: 0.9em;
+}
+
+.seeMoreContainer,
+.collapseContainer {
+  display: flex;
+  justify-content: center;
+  margin: 12px 0;
+}
+
+.seeMoreButton,
+.collapseButton {
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.seeMoreButton:hover,
+.collapseButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.manualMatchingSection {
+  margin-top: 20px;
+  padding: 16px;
+  background-color: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.manualMatchingHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.manualMatchingHeader h4 {
+  margin: 0;
+  color: var(--spice-text);
+}
+
+.manualMatchingHeader p {
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 0.9em;
+}

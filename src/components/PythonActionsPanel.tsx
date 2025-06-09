@@ -97,61 +97,6 @@ interface PlaylistItem {
   old_snapshot_id?: string;
 }
 
-interface AnalysisResults {
-  stage: string;
-  success: boolean;
-  message: string;
-  stats?: any;
-  requires_fuzzy_matching?: boolean;
-  analyses?: {
-    playlists?: {
-      added: number;
-      updated: number;
-      unchanged: number;
-      deleted: number;
-      details: any;
-    };
-    tracks?: {
-      added: number;
-      updated: number;
-      unchanged: number;
-      deleted: number;
-      to_add_sample: any[];
-      all_tracks_to_add: any[];
-      to_add_total: number;
-      to_update_sample: any[];
-      to_delete_sample: any[];
-      all_tracks_to_update: any[];
-      to_update_total: number;
-      all_tracks_to_delete: any[];
-      to_delete_total: number;
-    };
-    associations?: any;
-  };
-  master_sync?: MasterSyncAnalysis;
-  details?: {
-    files_to_process?: string[];
-    playlists?: any[];
-    to_add?: any[];
-    to_add_total?: number;
-    all_items_to_add?: any[];
-    to_update?: any[];
-    to_update_total?: number;
-    all_items_to_update?: any[];
-    to_delete?: any[];
-    to_delete_total?: number;
-    all_items_to_delete?: any[];
-    auto_matched_files?: any[];
-    tracks_with_changes?: any[];
-    associations_to_add?: number;
-    associations_to_remove?: number;
-    all_changes?: any[];
-    samples?: any[];
-    changed_playlists?: any[];
-  };
-  needs_confirmation?: boolean;
-}
-
 interface ActionButtonProps {
   label: string;
   onClick: () => void;
@@ -178,11 +123,58 @@ type Match = {
   ratio: number;
 };
 
+interface FileMappingSelection {
+  file_path: string;
+  uri: string;
+  confidence: number;
+  file_name: string;
+}
+
 interface MatchSelection {
-  fileName: string;
-  trackId: string;
+  fileName?: string;
+  trackId?: string;
+  file_name?: string;
+  file_path?: string;
+  uri?: string;
   confidence: number;
 }
+
+interface FileToProcess {
+  file_path: string;
+  file_name: string;
+}
+
+interface AnalysisResultsFileMapping {
+  stage: string;
+  success: boolean;
+  message: string;
+  needs_confirmation: boolean;
+  requires_fuzzy_matching?: boolean;
+  requires_user_selection: boolean;
+  details: {
+    files_requiring_user_input: FileToProcess[];
+    auto_matched_files: any[];
+    total_files: number;
+    files_without_mappings: number;
+  };
+}
+
+interface AnalysisResultsEmbedMetadata {
+  stage: string;
+  success: boolean;
+  message: string;
+  needs_confirmation?: boolean;
+  requires_fuzzy_matching?: boolean;
+  requires_user_selection: boolean;
+  details: {
+    files_to_process: string[];
+    auto_matched_files: any[];
+    total_files: number;
+  };
+}
+
+// Union type for analysis results
+type AnalysisResultsUnion = AnalysisResultsFileMapping | AnalysisResultsEmbedMetadata;
 
 interface MasterSyncAnalysis {
   total_tracks_to_add: number;
@@ -208,6 +200,7 @@ const PythonActionsPanel: React.FC = () => {
     "sequential-playlists": false,
     "sequential-tracks": false,
     "sequential-associations": false,
+    "create-file-mappings": false,
   });
   const [results, setResults] = useState<
     Record<string, { success: boolean; message: string } | null>
@@ -220,10 +213,12 @@ const PythonActionsPanel: React.FC = () => {
   const [validationType, setValidationType] = useState<"track" | "playlist" | "short-tracks">(
     "track"
   );
-
   const [userMatchSelections, setUserMatchSelections] = useState<
-    { fileName: string; trackId: string; confidence: number }[]
+    (MatchSelection | FileMappingSelection)[]
   >([]);
+  const [showAllAutoMatched, setShowAllAutoMatched] = useState(false);
+  const [autoMatchedPage, setAutoMatchedPage] = useState(1);
+  const autoMatchedPerPage = 20;
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
   const [fuzzyMatchingState, setFuzzyMatchingState] = useState<{
     isActive: boolean;
@@ -257,7 +252,7 @@ const PythonActionsPanel: React.FC = () => {
     return items.slice(startIndex, startIndex + perPage);
   };
 
-  const [analysisResults, setAnalysisResults] = useState<AnalysisResults | null>(null);
+  const [analysisResults, setAnalysisResults] = useState<AnalysisResultsUnion | null>(null);
   const [syncResponse, setSyncResponse] = useState<SyncResponse | null>(null);
   const [isAwaitingConfirmation, setIsAwaitingConfirmation] = useState(false);
   const [currentAction, setCurrentAction] = useState<ActionInfo | null>(null);
@@ -478,6 +473,7 @@ const PythonActionsPanel: React.FC = () => {
       // Map old action names to new API endpoints
       const endpointMap: Record<string, { url: string; method: string }> = {
         "embed-metadata": { url: "/api/tracks/metadata/embed", method: "POST" },
+        "create-file-mappings": { url: "/api/tracks/mapping", method: "POST" },
         "sync-database": { url: "/api/sync/database", method: "POST" },
         "sync-to-master": { url: "/api/sync/master", method: "POST" },
         "generate-m3u": { url: "/api/playlists/generate", method: "POST" },
@@ -626,12 +622,32 @@ const PythonActionsPanel: React.FC = () => {
             Spicetify.showNotification(`Error: ${syncResponse.message || "Unknown error"}`, true);
           }
         }
-      }
-      // Handle all other operations (validation, m3u generation, etc.)
-      else {
-        // For other operations that might need confirmation
-        if (result.needs_confirmation && !data.confirmed) {
-          // Use the old analysisResults structure for backwards compatibility
+      } else if (action === "create-file-mappings") {
+        // Check if this requires user selection (analysis stage)
+        if (result.needs_confirmation && result.requires_user_selection && !data.confirmed) {
+          // Set up for fuzzy matching process
+          setAnalysisResults(result);
+          setIsAwaitingConfirmation(true);
+          setCurrentAction({
+            name: action,
+            data: requestData,
+          });
+          setUserMatchSelections([]);
+          setSkippedFiles([]);
+          setFuzzyMatchingState({
+            isActive: true,
+            currentFileIndex: 0,
+            matches: [],
+            isLoading: false,
+          });
+
+          // Show notification about analysis completion
+          Spicetify.showNotification(
+            `Found ${result.details.files_requiring_user_input.length} files requiring user input.`
+          );
+        }
+        // For operations that need confirmation but no user selection
+        else if (result.needs_confirmation && !data.confirmed) {
           setAnalysisResults(result);
           setIsAwaitingConfirmation(true);
           setCurrentAction({
@@ -642,7 +658,7 @@ const PythonActionsPanel: React.FC = () => {
           // Show notification about analysis completion
           Spicetify.showNotification(`Analysis complete. Please review and confirm.`);
         }
-        // Regular result - process normally
+        // Regular result - process normally (execution phase complete)
         else {
           setResults((prev) => ({
             ...prev,
@@ -941,6 +957,38 @@ const PythonActionsPanel: React.FC = () => {
       return;
     }
 
+    if (name === "create-file-mappings" && analysisResults) {
+      // Add confirmation flag and user selections to the data
+      const confirmData = {
+        ...data,
+        confirmed: true,
+        user_selections: userMatchSelections.map((selection: any) => ({
+          file_path: selection.file_path,
+          uri: selection.uri,
+          confidence: selection.confidence,
+          file_name: selection.file_name,
+        })), // Ensure correct format for API
+        precomputed_changes_from_analysis: analysisResults,
+      };
+
+      // Reset states
+      setAnalysisResults(null);
+      setIsAwaitingConfirmation(false);
+      setCurrentAction(null);
+      setUserMatchSelections([]);
+      setSkippedFiles([]);
+      setFuzzyMatchingState({
+        isActive: false,
+        currentFileIndex: 0,
+        matches: [],
+        isLoading: false,
+      });
+
+      // Perform the action with confirmation
+      await performAction(name, confirmData);
+      return;
+    }
+
     // Handle other operations that might use analysisResults for backwards compatibility
     if (analysisResults) {
       const confirmData = {
@@ -1112,21 +1160,155 @@ const PythonActionsPanel: React.FC = () => {
   }, [analysisResults]);
 
   const FuzzyMatchConfirmation = () => {
-    const files = analysisResults?.details?.files_to_process || [];
+    const isFileMapping = currentAction?.name === "create-file-mappings";
+
+    // Type guards
+    const isFileMappingResult = (
+      result: AnalysisResultsUnion
+    ): result is AnalysisResultsFileMapping => {
+      return (
+        "requires_user_selection" in result.details ||
+        "files_requiring_user_input" in result.details
+      );
+    };
+
+    const isEmbedMetadataResult = (
+      result: AnalysisResultsUnion
+    ): result is AnalysisResultsEmbedMetadata => {
+      return "requires_fuzzy_matching" in result || "files_to_process" in result.details;
+    };
+
+    // Get files with proper typing
+    let files: (FileToProcess | string)[] = [];
+    if (analysisResults) {
+      if (isFileMapping && isFileMappingResult(analysisResults)) {
+        files = analysisResults.details.files_requiring_user_input;
+      } else if (!isFileMapping && isEmbedMetadataResult(analysisResults)) {
+        files = analysisResults.details.files_to_process;
+      }
+    }
+
     const currentFile = files[fuzzyMatchingState.currentFileIndex];
+
+    // Get the current file name with proper type checking
+    const currentFileName = (() => {
+      if (isFileMapping && typeof currentFile === "object" && "file_name" in currentFile) {
+        return currentFile.file_name;
+      } else if (typeof currentFile === "string") {
+        return currentFile;
+      }
+      return "";
+    })();
+
+    // Get the current file path for file mappings
+    const currentFilePath = (() => {
+      if (isFileMapping && typeof currentFile === "object" && "file_path" in currentFile) {
+        return currentFile.file_path;
+      } else if (typeof currentFile === "string") {
+        return currentFile; // For embed-metadata, the string is the file name
+      }
+      return "";
+    })();
+
+    const handleApplyAutoMatches = async () => {
+      if (!analysisResults?.details?.auto_matched_files) return;
+
+      const autoMatchSelections = analysisResults.details.auto_matched_files.map((match: any) => ({
+        file_path: match.file_path,
+        uri: match.uri,
+        confidence: match.confidence,
+        file_name: match.fileName || match.file_name,
+      }));
+
+      // Apply just the auto-matches
+      await applyFileMapping(autoMatchSelections, "auto-matched files");
+    };
+
+    const handleApplyPartialChanges = async () => {
+      if (userMatchSelections.length === 0) return;
+
+      // Apply the current user selections
+      await applyFileMapping(userMatchSelections, "manually selected files");
+    };
+
+    const applyFileMapping = async (selections: any[], description: string) => {
+      try {
+        const confirmData = {
+          masterTracksDir: settings.masterTracksDir,
+          confirmed: true,
+          user_selections: selections,
+          precomputed_changes_from_analysis: analysisResults,
+        };
+
+        // Make the API call to apply the mappings
+        const response = await fetch(`${settings.serverUrl}/api/tracks/mapping`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(confirmData),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        if (result.success) {
+          Spicetify.showNotification(
+            `Successfully applied mappings for ${selections.length} ${description}`
+          );
+
+          // Instead of trying to modify the analysis results, let's just reset the fuzzy matching state
+          // and let the user know they can refresh if they want to see remaining files
+
+          if (description.includes("auto-matched")) {
+            // For auto-matched files, we can show a success message and suggest refreshing
+            Spicetify.showNotification(
+              "Auto-matched files applied successfully. Refresh to see remaining files.",
+              false,
+              5000
+            );
+          } else {
+            // For manual selections, clear the current selections and continue
+            setUserMatchSelections([]);
+            Spicetify.showNotification(
+              `${selections.length} manual selections applied. Continue matching remaining files.`,
+              false,
+              3000
+            );
+          }
+
+          // Optionally, you could also reset the entire fuzzy matching state:
+          // setFuzzyMatchingState({
+          //   isActive: false,
+          //   currentFileIndex: 0,
+          //   matches: [],
+          //   isLoading: false,
+          // });
+        } else {
+          throw new Error(result.message || "Unknown error occurred");
+        }
+      } catch (error) {
+        console.error("Error applying file mappings:", error);
+        Spicetify.showNotification(`Error applying mappings: ${error}`, true);
+      }
+    };
 
     // Local state to track matches independently from React's state updates
     const [localMatches, setLocalMatches] = useState<any[]>([]);
     const [isLocalLoading, setIsLocalLoading] = useState(false);
     const [hasCalledAPI, setHasCalledAPI] = useState(false);
 
-    // This effect will run once per file
+    // Runs once per file - fetches matches
     useEffect(() => {
       const fetchMatches = async () => {
         // Exit early if no file or already called API for this file
-        if (!currentFile || hasCalledAPI) return;
+        if (!currentFileName || hasCalledAPI) return;
 
-        console.log(`Fetching matches for ${currentFile} (independent fetch)`);
+        console.log(`Fetching matches for ${currentFileName} (independent fetch)`);
         setIsLocalLoading(true);
         setHasCalledAPI(true);
 
@@ -1140,7 +1322,7 @@ const PythonActionsPanel: React.FC = () => {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              fileName: currentFile,
+              fileName: currentFileName,
             }),
           });
 
@@ -1170,7 +1352,7 @@ const PythonActionsPanel: React.FC = () => {
       };
 
       fetchMatches();
-    }, [currentFile]);
+    }, [currentFileName, hasCalledAPI, settings.serverUrl]);
 
     // Reset the hasCalledAPI flag when moving to a new file
     useEffect(() => {
@@ -1179,15 +1361,28 @@ const PythonActionsPanel: React.FC = () => {
     }, [fuzzyMatchingState.currentFileIndex]);
 
     const handleSelectMatch = (match: any) => {
-      // Add selection to tracked selections
-      setUserMatchSelections((prev) => [
-        ...prev,
-        {
-          fileName: currentFile,
-          trackId: match.track_id,
-          confidence: match.ratio,
-        },
-      ]);
+      if (isFileMapping) {
+        // For file mappings - use the new format
+        setUserMatchSelections((prev) => [
+          ...prev,
+          {
+            file_path: currentFilePath,
+            uri: match.uri || `spotify:track:${match.track_id}`, // Convert track_id to URI if needed
+            confidence: match.ratio || match.confidence,
+            file_name: currentFileName,
+          },
+        ]);
+      } else {
+        // For embed-metadata - use the existing format
+        setUserMatchSelections((prev) => [
+          ...prev,
+          {
+            fileName: currentFileName,
+            trackId: match.track_id,
+            confidence: match.ratio,
+          },
+        ]);
+      }
 
       // Move to next file
       if (fuzzyMatchingState.currentFileIndex < files.length - 1) {
@@ -1206,8 +1401,8 @@ const PythonActionsPanel: React.FC = () => {
     };
 
     const handleSkip = () => {
-      // Add file to skipped files
-      setSkippedFiles((prev) => [...prev, currentFile]);
+      // Add file to skipped files - always use the filename string
+      setSkippedFiles((prev) => [...prev, currentFileName]);
 
       // Move to next file
       if (fuzzyMatchingState.currentFileIndex < files.length - 1) {
@@ -1233,67 +1428,137 @@ const PythonActionsPanel: React.FC = () => {
           Match Files with Tracks ({processedFilesCount} of {files.length} complete)
         </h3>
 
+        {/* Enhanced auto-matched files section */}
         {analysisResults &&
           analysisResults.details &&
+          "auto_matched_files" in analysisResults.details &&
           analysisResults.details.auto_matched_files &&
           analysisResults.details.auto_matched_files.length > 0 && (
             <div className={styles.autoMatchedSection}>
-              {" "}
-              <h4>Auto-matched Files ({analysisResults.details.auto_matched_files.length})</h4>
-              <p>These files were automatically matched with high confidence (75%+):</p>
+              <div className={styles.autoMatchedHeader}>
+                <h4>Auto-matched Files ({analysisResults.details.auto_matched_files.length})</h4>
+                <p>These files were automatically matched with high confidence (75%+):</p>
+
+                {/* Apply Auto-Matches Button */}
+                <button className={styles.applyAutoMatchesButton} onClick={handleApplyAutoMatches}>
+                  Apply Auto-Matches ({analysisResults.details.auto_matched_files.length} files)
+                </button>
+              </div>
+
               <div className={styles.autoMatchedList}>
-                {" "}
-                {/* TODO: fix this */}
-                {analysisResults.details.auto_matched_files.slice(0, 5).map(
-                  (
-                    match: {
-                      fileName:
-                        | string
-                        | number
-                        | bigint
-                        | boolean
-                        | React.ReactElement<unknown, string | React.JSXElementConstructor<any>>
-                        | Iterable<React.ReactNode>
-                        | React.ReactPortal
-                        | Promise<
-                            | string
-                            | number
-                            | bigint
-                            | boolean
-                            | React.ReactPortal
-                            | React.ReactElement<unknown, string | React.JSXElementConstructor<any>>
-                            | Iterable<React.ReactNode>
-                            | null
-                            | undefined
-                          >
-                        | null
-                        | undefined;
-                      confidence: number;
-                    },
-                    index: React.Key | null | undefined
-                  ) => (
-                    <div key={index} className={styles.autoMatchedItem}>
-                      <span className={styles.fileName}>{match.fileName}</span>
-                      <span className={styles.confidence}>
-                        {(match.confidence * 100).toFixed(0)}% confidence
-                      </span>
+                {/* Show either preview or full list based on showAllAutoMatched */}
+                {!showAllAutoMatched ? (
+                  <>
+                    {analysisResults.details.auto_matched_files
+                      .slice(0, 5)
+                      .map((match: any, index: number) => (
+                        <div key={index} className={styles.autoMatchedItem}>
+                          <span className={styles.fileName}>
+                            {match.fileName || match.file_name}
+                          </span>
+                          <span className={styles.trackInfo}>{match.track_info}</span>
+                          <span className={styles.confidence}>
+                            {(match.confidence * 100).toFixed(0)}% confidence
+                          </span>
+                        </div>
+                      ))}
+
+                    {analysisResults.details.auto_matched_files.length > 5 && (
+                      <div className={styles.seeMoreContainer}>
+                        <button
+                          className={styles.seeMoreButton}
+                          onClick={() => setShowAllAutoMatched(true)}
+                        >
+                          See All {analysisResults.details.auto_matched_files.length} Auto-Matched
+                          Files
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* Paginated full list */}
+                    {getPagedItems(
+                      analysisResults.details.auto_matched_files,
+                      autoMatchedPage,
+                      autoMatchedPerPage
+                    ).map((match: any, index: number) => (
+                      <div key={index} className={styles.autoMatchedItem}>
+                        <span className={styles.fileName}>{match.fileName || match.file_name}</span>
+                        <span className={styles.trackInfo}>{match.track_info}</span>
+                        <span className={styles.confidence}>
+                          {(match.confidence * 100).toFixed(0)}% confidence
+                        </span>
+                      </div>
+                    ))}
+
+                    {/* Pagination controls for auto-matched files */}
+                    {analysisResults.details.auto_matched_files.length > autoMatchedPerPage && (
+                      <div className={styles.paginationControls}>
+                        <button
+                          disabled={autoMatchedPage === 1}
+                          onClick={() => setAutoMatchedPage((prev) => Math.max(1, prev - 1))}
+                        >
+                          Previous
+                        </button>
+                        <span>
+                          Page {autoMatchedPage} of{" "}
+                          {Math.ceil(
+                            analysisResults.details.auto_matched_files.length / autoMatchedPerPage
+                          )}
+                        </span>
+                        <button
+                          disabled={
+                            autoMatchedPage >=
+                            Math.ceil(
+                              analysisResults.details.auto_matched_files.length / autoMatchedPerPage
+                            )
+                          }
+                          onClick={() => setAutoMatchedPage((prev) => prev + 1)}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
+
+                    <div className={styles.collapseContainer}>
+                      <button
+                        className={styles.collapseButton}
+                        onClick={() => setShowAllAutoMatched(false)}
+                      >
+                        Collapse
+                      </button>
                     </div>
-                  )
-                )}
-                {analysisResults.details.auto_matched_files.length > 5 && (
-                  <div className={styles.moreMatches}>
-                    ...and {analysisResults.details.auto_matched_files.length - 5} more
-                  </div>
+                  </>
                 )}
               </div>
             </div>
           )}
 
-        {currentFile ? (
+        {/* Manual matching section with Apply Partial Changes button */}
+        <div className={styles.manualMatchingSection}>
+          <div className={styles.manualMatchingHeader}>
+            <h4>Manual Matching Required</h4>
+            <p>Files that need your input ({files.length} remaining)</p>
+
+            {/* Apply Partial Changes Button - show if user has made some selections */}
+            {userMatchSelections.length > 0 && (
+              <button className={styles.applyPartialButton} onClick={handleApplyPartialChanges}>
+                Apply Changes for {userMatchSelections.length} Selected Files
+              </button>
+            )}
+          </div>
+        </div>
+
+        <h3>
+          Match Files with Tracks ({processedFilesCount} of {files.length} complete)
+        </h3>
+
+        {currentFileName ? (
           <>
             <div className={styles.fileInfo}>
               <div className={styles.fileName}>
-                <strong>Current file:</strong> {currentFile}
+                <strong>Current file:</strong> {currentFileName}
               </div>
               <div className={styles.progress}>
                 File {fuzzyMatchingState.currentFileIndex + 1} of {files.length}
@@ -1352,20 +1617,6 @@ const PythonActionsPanel: React.FC = () => {
                     </button>
                   </div>
                 )}
-
-                {/* Show debug info for easier troubleshooting */}
-                <div
-                  className={styles.debugInfo} // TODO: add this styling. or just remove this div
-                  style={{ marginTop: "20px", fontSize: "12px", color: "#999" }}
-                >
-                  <p>
-                    Debug: API called: {hasCalledAPI ? "Yes" : "No"}, Loading:{" "}
-                    {isLocalLoading ? "Yes" : "No"}, Matches: {localMatches.length}
-                  </p>
-                  <p>
-                    File index: {fuzzyMatchingState.currentFileIndex}, Total files: {files.length}
-                  </p>
-                </div>
               </div>
             )}
           </>
@@ -1375,7 +1626,7 @@ const PythonActionsPanel: React.FC = () => {
             <p>Selected matches for {userMatchSelections.length} files.</p>
             <p>Skipped {skippedFiles.length} files.</p>
             <button className={styles.confirmButton} onClick={confirmAction}>
-              Confirm and Embed Metadata
+              {isFileMapping ? "Create File-Track Mappings" : "Confirm and Embed Metadata"}
             </button>
             <button className={styles.cancelButton} onClick={cancelAction}>
               Cancel
@@ -1389,6 +1640,180 @@ const PythonActionsPanel: React.FC = () => {
   // Render the confirmation UI when needed
   const renderConfirmation = () => {
     if (!isAwaitingConfirmation) return null;
+
+    if (
+      currentAction?.name === "create-file-mappings" &&
+      analysisResults &&
+      analysisResults.requires_user_selection &&
+      fuzzyMatchingState.isActive
+    ) {
+      return (
+        <div className={styles.confirmationPanel}>
+          <FuzzyMatchConfirmation />
+        </div>
+      );
+    }
+
+    if (
+      currentAction?.name === "create-file-mappings" &&
+      analysisResults &&
+      analysisResults.requires_user_selection &&
+      !fuzzyMatchingState.isActive &&
+      (userMatchSelections.length > 0 || skippedFiles.length > 0)
+    ) {
+      return (
+        <div className={styles.confirmationPanel}>
+          <h3>Confirm File-Track Mappings</h3>
+          <div className={styles.summaryContainer}>
+            <p>Ready to create file-track mappings for {userMatchSelections.length} files.</p>
+            <p>{skippedFiles.length} files were skipped.</p>
+
+            <div className={styles.selectionsContent}>
+              {userMatchSelections &&
+                userMatchSelections.length > 0 &&
+                getPagedItems(userMatchSelections, matchPage, itemsPerPage).map(
+                  (selection: any, index: number) => {
+                    // Handle both formats
+                    const fileName = selection.fileName || selection.file_name;
+                    const trackIdentifier = selection.trackId || selection.uri;
+
+                    return (
+                      <div key={index} className={styles.selectionItem}>
+                        <div className={styles.selectionFile}>{fileName}</div>
+                        <div className={styles.selectionTrackId}>{trackIdentifier}</div>
+                        <div className={styles.selectionConfidence}>
+                          Confidence: {(selection.confidence * 100).toFixed(2)}%
+                        </div>
+                      </div>
+                    );
+                  }
+                )}
+              {/* Pagination controls */}
+              {userMatchSelections && userMatchSelections.length > itemsPerPage && (
+                <div className={styles.paginationControls}>
+                  <button
+                    disabled={matchPage === 1}
+                    onClick={() => setMatchPage((prev) => Math.max(1, prev - 1))}
+                  >
+                    Previous
+                  </button>
+                  <span>
+                    Page {matchPage} of {Math.ceil(userMatchSelections.length / itemsPerPage)}
+                  </span>
+                  <button
+                    disabled={matchPage >= Math.ceil(userMatchSelections.length / itemsPerPage)}
+                    onClick={() => setMatchPage((prev) => prev + 1)}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Show auto-matched files if any */}
+            {analysisResults.details?.auto_matched_files &&
+              analysisResults.details.auto_matched_files.length > 0 && (
+                <div className={styles.autoMatchedPreview}>
+                  <h4>Auto-Matched Files ({analysisResults.details.auto_matched_files.length}):</h4>
+                  <div className={styles.selectionsContent}>
+                    {getPagedItems<any>(
+                      Array.isArray(analysisResults.details.auto_matched_files)
+                        ? analysisResults.details.auto_matched_files
+                        : [],
+                      autoMatchPage,
+                      itemsPerPage
+                    ).map((match, index: number) => (
+                      <div key={index} className={styles.selectionItem}>
+                        <div className={styles.selectionFile}>{match.file_name}</div>
+                        <div className={styles.selectionTrackId}>{match.uri}</div>
+                        <div className={styles.selectionConfidence}>
+                          Confidence: {(match.confidence * 100).toFixed(2)}%
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Pagination for auto-matched files */}
+                    {Array.isArray(analysisResults.details.auto_matched_files) &&
+                      analysisResults.details.auto_matched_files.length > itemsPerPage && (
+                        <div className={styles.paginationControls}>
+                          <button
+                            disabled={autoMatchPage === 1}
+                            onClick={() => setAutoMatchPage((prev) => Math.max(1, prev - 1))}
+                          >
+                            Previous
+                          </button>
+                          <span>
+                            Page {autoMatchPage} of{" "}
+                            {Math.ceil(
+                              analysisResults.details.auto_matched_files.length / itemsPerPage
+                            )}
+                          </span>
+                          <button
+                            disabled={
+                              autoMatchPage >=
+                              Math.ceil(
+                                analysisResults.details.auto_matched_files.length / itemsPerPage
+                              )
+                            }
+                            onClick={() => setAutoMatchPage((prev) => prev + 1)}
+                          >
+                            Next
+                          </button>
+                        </div>
+                      )}
+                  </div>
+                </div>
+              )}
+
+            {/* Show skipped files if any */}
+            {skippedFiles && skippedFiles.length > 0 && (
+              <div className={styles.skippedFilesPreview}>
+                <h4>Skipped Files:</h4>
+                <div className={styles.selectionsContent}>
+                  {getPagedItems(skippedFiles, skippedPage, itemsPerPage).map(
+                    (fileName: string, index: number) => (
+                      <div key={index} className={styles.skippedItem}>
+                        {fileName}
+                      </div>
+                    )
+                  )}
+
+                  {/* Pagination for skipped files */}
+                  {skippedFiles.length > itemsPerPage && (
+                    <div className={styles.paginationControls}>
+                      <button
+                        disabled={skippedPage === 1}
+                        onClick={() => setSkippedPage((prev) => Math.max(1, prev - 1))}
+                      >
+                        Previous
+                      </button>
+                      <span>
+                        Page {skippedPage} of {Math.ceil(skippedFiles.length / itemsPerPage)}
+                      </span>
+                      <button
+                        disabled={skippedPage >= Math.ceil(skippedFiles.length / itemsPerPage)}
+                        onClick={() => setSkippedPage((prev) => prev + 1)}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className={styles.confirmationButtons}>
+              <button className={styles.confirmButton} onClick={confirmAction}>
+                Create File-Track Mappings
+              </button>
+              <button className={styles.cancelButton} onClick={cancelAction}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     // For embed-metadata action with fuzzy matching
     if (
@@ -2258,6 +2683,11 @@ const PythonActionsPanel: React.FC = () => {
               label="Embed Track Metadata"
               onClick={() => performAction("embed-metadata")}
               disabled={isLoading["embed-metadata"] || serverStatus !== "connected"}
+            />
+            <ActionButton
+              label="Map Files to Tracks"
+              onClick={() => performAction("create-file-mappings")}
+              disabled={isLoading["create-file-mappings"] || serverStatus !== "connected"}
             />
             <ActionButton
               label="Generate M3U Playlists"
