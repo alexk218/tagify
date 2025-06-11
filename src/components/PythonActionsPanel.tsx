@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import styles from "./PythonActionsPanel.module.css";
 import "../styles/globals.css";
 import ValidationPanel from "./ValidationPanel";
@@ -75,28 +75,6 @@ function isAssociationSyncDetails(details: SyncDetails): details is AssociationS
   return details.operation_type === "associations";
 }
 
-interface TrackItem {
-  id: string;
-  artists: string;
-  title: string;
-  album: string;
-  is_local?: boolean;
-  old_artists?: string;
-  old_title?: string;
-  old_album?: string;
-  changes?: string[];
-  added_at?: string;
-}
-
-// Interface for playlist items
-interface PlaylistItem {
-  id: string;
-  name: string;
-  old_name?: string;
-  snapshot_id?: string;
-  old_snapshot_id?: string;
-}
-
 interface ActionButtonProps {
   label: string;
   onClick: () => void;
@@ -109,7 +87,6 @@ type ActionInfo = {
   data: any;
 } & (
   | { name: "sequential-sync"; data: { stage: string; details?: any } }
-  | { name: "embed-metadata"; data: any }
   | { name: "sync-database"; data: any }
   | { name: "sync-to-master"; data: any }
   | { name: string; data: any }
@@ -181,29 +158,33 @@ interface AnalysisResultsFileMapping {
   };
 }
 
-interface AnalysisResultsEmbedMetadata {
-  stage: string;
-  success: boolean;
-  message: string;
-  needs_confirmation?: boolean;
-  requires_fuzzy_matching?: boolean;
-  requires_user_selection: boolean;
-  details: {
-    files_requiring_user_input: FileToProcess[];
-    files_to_process: string[];
-    auto_matched_files: any[];
-    total_files: number;
-  };
-}
-
-// Union type for analysis results
-type AnalysisResultsUnion = AnalysisResultsFileMapping | AnalysisResultsEmbedMetadata;
-
+// TODO: implement confirmation panel for master sync analysis
 interface MasterSyncAnalysis {
   total_tracks_to_add: number;
   playlists_with_new_tracks: number;
   playlists: PlaylistItem[];
   needs_confirmation: boolean;
+}
+
+interface TrackItem {
+  id: string;
+  artists: string;
+  title: string;
+  album: string;
+  is_local?: boolean;
+  old_artists?: string;
+  old_title?: string;
+  old_album?: string;
+  changes?: string[];
+  added_at?: string;
+}
+
+interface PlaylistItem {
+  id: string;
+  name: string;
+  old_name?: string;
+  snapshot_id?: string;
+  old_snapshot_id?: string;
 }
 
 const ActionButton: React.FC<ActionButtonProps> = ({ label, onClick, disabled, className }) => (
@@ -282,7 +263,7 @@ const PythonActionsPanel: React.FC = () => {
     return items.slice(startIndex, startIndex + perPage);
   };
 
-  const [analysisResults, setAnalysisResults] = useState<AnalysisResultsUnion | null>(null);
+  const [analysisResults, setAnalysisResults] = useState<AnalysisResultsFileMapping | null>(null);
   const [syncResponse, setSyncResponse] = useState<SyncResponse | null>(null);
   const [isAwaitingConfirmation, setIsAwaitingConfirmation] = useState(false);
   const [currentAction, setCurrentAction] = useState<ActionInfo | null>(null);
@@ -502,7 +483,6 @@ const PythonActionsPanel: React.FC = () => {
 
       // Map old action names to new API endpoints
       const endpointMap: Record<string, { url: string; method: string }> = {
-        "embed-metadata": { url: "/api/tracks/metadata/embed", method: "POST" },
         "create-file-mappings": { url: "/api/tracks/mapping", method: "POST" },
         "sync-database": { url: "/api/sync/database", method: "POST" },
         "sync-to-master": { url: "/api/sync/master", method: "POST" },
@@ -564,63 +544,8 @@ const PythonActionsPanel: React.FC = () => {
 
       const result = await response.json();
 
-      // Handle embed-metadata operations (special case with fuzzy matching)
-      if (action === "embed-metadata") {
-        // Check if this is an embed-metadata operation that requires fuzzy matching
-        if (result.needs_confirmation && result.requires_fuzzy_matching && !data.confirmed) {
-          // Set up for fuzzy matching process - use old structure for embed-metadata
-          setAnalysisResults(result); // Keep using analysisResults for embed-metadata
-          setIsAwaitingConfirmation(true);
-          setCurrentAction({
-            name: action,
-            data: requestData,
-          });
-          setUserMatchSelections([]);
-          setSkippedFiles([]);
-          setFuzzyMatchingState({
-            isActive: true,
-            currentFileIndex: 0,
-            matches: [],
-            isLoading: false,
-          });
-
-          // Show notification about analysis completion
-          Spicetify.showNotification(
-            `Found ${result.details.files_to_process.length} files to process.`
-          );
-        }
-        // For embed-metadata operations that need confirmation but no fuzzy matching
-        else if (result.needs_confirmation && !data.confirmed) {
-          setAnalysisResults(result); // Keep using analysisResults for embed-metadata
-          setIsAwaitingConfirmation(true);
-          setCurrentAction({
-            name: action,
-            data: requestData,
-          });
-
-          // Show notification about analysis completion
-          Spicetify.showNotification(`Analysis complete. Please review and confirm.`);
-        }
-        // Regular embed-metadata result - process normally
-        else {
-          setResults((prev) => ({
-            ...prev,
-            [action]: {
-              success: result.success,
-              message: result.message || JSON.stringify(result),
-            },
-          }));
-
-          // Show notification
-          if (result.success) {
-            Spicetify.showNotification(`Success: ${result.message || action + " completed"}`);
-          } else {
-            Spicetify.showNotification(`Error: ${result.message || "Unknown error"}`, true);
-          }
-        }
-      }
       // Handle sync database operations (use new SyncResponse structure)
-      else if (action === "sync-database" || action === "sync-to-master") {
+      if (action === "sync-database" || action === "sync-to-master") {
         const syncResponse: SyncResponse = result;
 
         // Check if this needs confirmation (analysis stage)
@@ -938,34 +863,6 @@ const PythonActionsPanel: React.FC = () => {
         setSequentialSyncDetails({});
       }
 
-      return;
-    }
-
-    // Handle embed-metadata confirmations (uses analysisResults)
-    if (name === "embed-metadata" && analysisResults) {
-      // Add confirmation flag and user selections to the data
-      const confirmData = {
-        ...data,
-        confirmed: true,
-        userSelections: userMatchSelections,
-        skippedFiles: skippedFiles,
-      };
-
-      // Reset states
-      setAnalysisResults(null);
-      setIsAwaitingConfirmation(false);
-      setCurrentAction(null);
-      setUserMatchSelections([]);
-      setSkippedFiles([]);
-      setFuzzyMatchingState({
-        isActive: false,
-        currentFileIndex: 0,
-        matches: [],
-        isLoading: false,
-      });
-
-      // Perform the action with confirmation
-      await performAction(name, confirmData);
       return;
     }
 
@@ -1446,7 +1343,7 @@ const PythonActionsPanel: React.FC = () => {
 
     // Type guards
     const isFileMappingResult = (
-      result: AnalysisResultsUnion
+      result: AnalysisResultsFileMapping
     ): result is AnalysisResultsFileMapping => {
       return (
         "requires_user_selection" in result.details ||
@@ -1454,19 +1351,11 @@ const PythonActionsPanel: React.FC = () => {
       );
     };
 
-    const isEmbedMetadataResult = (
-      result: AnalysisResultsUnion
-    ): result is AnalysisResultsEmbedMetadata => {
-      return "requires_fuzzy_matching" in result || "files_to_process" in result.details;
-    };
-
     // Get files with proper typing
     let files: (FileToProcess | string)[] = [];
     if (analysisResults) {
       if (isFileMapping && isFileMappingResult(analysisResults)) {
         files = analysisResults.details.files_requiring_user_input;
-      } else if (!isFileMapping && isEmbedMetadataResult(analysisResults)) {
-        files = analysisResults.details.files_to_process;
       }
     }
 
@@ -1476,8 +1365,8 @@ const PythonActionsPanel: React.FC = () => {
     const currentFileName = (() => {
       if (isFileMapping && typeof currentFile === "object" && "file_name" in currentFile) {
         return currentFile.file_name;
-      } else if (typeof currentFile === "string") {
-        return currentFile;
+      // } else if (typeof currentFile === "string") {
+        // return currentFile;
       }
       return "";
     })();
@@ -1486,8 +1375,8 @@ const PythonActionsPanel: React.FC = () => {
     const currentFilePath = (() => {
       if (isFileMapping && typeof currentFile === "object" && "file_path" in currentFile) {
         return currentFile.file_path;
-      } else if (typeof currentFile === "string") {
-        return currentFile; // For embed-metadata, the string is the file name
+      // } else if (typeof currentFile === "string") {
+        // return currentFile; // For embed-metadata, the string is the file name
       }
       return "";
     })();
@@ -1651,18 +1540,7 @@ const PythonActionsPanel: React.FC = () => {
             file_name: currentFileName,
           },
         ]);
-      } else {
-        // For embed-metadata - use the existing format
-        setUserMatchSelections((prev) => [
-          ...prev,
-          {
-            fileName: currentFileName,
-            trackId: match.track_id,
-            confidence: match.ratio,
-          },
-        ]);
       }
-
       // Move to next file
       if (fuzzyMatchingState.currentFileIndex < files.length - 1) {
         setFuzzyMatchingState((prev) => ({
@@ -2132,181 +2010,6 @@ const PythonActionsPanel: React.FC = () => {
             <div className={styles.confirmationButtons}>
               <button className={styles.confirmButton} onClick={confirmAction}>
                 Create File-Track Mappings
-              </button>
-              <button className={styles.cancelButton} onClick={cancelAction}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // For embed-metadata action with fuzzy matching
-    if (
-      currentAction?.name === "embed-metadata" &&
-      analysisResults &&
-      analysisResults.requires_fuzzy_matching &&
-      fuzzyMatchingState.isActive
-    ) {
-      return (
-        <div className={styles.confirmationPanel}>
-          <FuzzyMatchConfirmation />
-        </div>
-      );
-    }
-
-    // For embed-metadata action when fuzzy matching is complete or for final confirmation
-    if (
-      currentAction?.name === "embed-metadata" &&
-      analysisResults &&
-      analysisResults.requires_fuzzy_matching &&
-      !fuzzyMatchingState.isActive &&
-      (userMatchSelections.length > 0 || skippedFiles.length > 0)
-    ) {
-      return (
-        <div className={styles.confirmationPanel}>
-          <h3>Confirm Metadata Embedding</h3>
-          <div className={styles.summaryContainer}>
-            <p>Ready to embed metadata for {userMatchSelections.length} files.</p>
-            <p>{skippedFiles.length} files were skipped.</p>
-
-            <div className={styles.selectionsContent}>
-              {userMatchSelections &&
-                userMatchSelections.length > 0 &&
-                getPagedItems(userMatchSelections, matchPage, itemsPerPage).map(
-                  (selection: MatchSelection, index: number) => (
-                    <div key={index} className={styles.selectionItem}>
-                      <div className={styles.selectionFile}>{selection.fileName}</div>
-                      <div className={styles.selectionTrackId}>{selection.trackId}</div>
-                      <div className={styles.selectionConfidence}>
-                        Confidence: {(selection.confidence * 100).toFixed(2)}%
-                      </div>
-                    </div>
-                  )
-                )}
-
-              {/* Pagination controls */}
-              {userMatchSelections && userMatchSelections.length > itemsPerPage && (
-                <div className={styles.paginationControls}>
-                  <button
-                    disabled={matchPage === 1}
-                    onClick={() => setMatchPage((prev) => Math.max(1, prev - 1))}
-                  >
-                    Previous
-                  </button>
-                  <span>
-                    Page {matchPage} of {Math.ceil(userMatchSelections.length / itemsPerPage)}
-                  </span>
-                  <button
-                    disabled={matchPage >= Math.ceil(userMatchSelections.length / itemsPerPage)}
-                    onClick={() => setMatchPage((prev) => prev + 1)}
-                  >
-                    Next
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Auto-matched files section */}
-            {analysisResults.details?.auto_matched_files &&
-              analysisResults.details.auto_matched_files.length > 0 && (
-                <div className={styles.autoMatchedPreview}>
-                  <h4>Auto-Matched Files:</h4>
-                  <div className={styles.selectionsContent}>
-                    {getPagedItems<any>(
-                      Array.isArray(analysisResults.details.auto_matched_files)
-                        ? analysisResults.details.auto_matched_files
-                        : [],
-                      autoMatchPage,
-                      itemsPerPage
-                    ).map((match, index: number) => {
-                      // Cast the match to MatchSelection type
-                      const typedMatch = match as MatchSelection;
-                      return (
-                        <div key={index} className={styles.selectionItem}>
-                          <div className={styles.selectionFile}>{typedMatch.fileName}</div>
-                          <div className={styles.selectionTrackId}>{typedMatch.trackId}</div>
-                          <div className={styles.selectionConfidence}>
-                            Confidence: {(typedMatch.confidence * 100).toFixed(2)}%
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {/* Pagination for auto-matched files */}
-                    {Array.isArray(analysisResults.details.auto_matched_files) &&
-                      analysisResults.details.auto_matched_files.length > itemsPerPage && (
-                        <div className={styles.paginationControls}>
-                          <button
-                            disabled={autoMatchPage === 1}
-                            onClick={() => setAutoMatchPage((prev) => Math.max(1, prev - 1))}
-                          >
-                            Previous
-                          </button>
-                          <span>
-                            Page {autoMatchPage} of{" "}
-                            {Math.ceil(
-                              analysisResults.details.auto_matched_files.length / itemsPerPage
-                            )}
-                          </span>
-                          <button
-                            disabled={
-                              autoMatchPage >=
-                              Math.ceil(
-                                analysisResults.details.auto_matched_files.length / itemsPerPage
-                              )
-                            }
-                            onClick={() => setAutoMatchPage((prev) => prev + 1)}
-                          >
-                            Next
-                          </button>
-                        </div>
-                      )}
-                  </div>
-                </div>
-              )}
-
-            {/* Skipped files section */}
-            {skippedFiles && skippedFiles.length > 0 && (
-              <div className={styles.skippedFilesPreview}>
-                <h4>Skipped Files:</h4>
-                <div className={styles.selectionsContent}>
-                  {getPagedItems(skippedFiles, skippedPage, itemsPerPage).map(
-                    (fileName: string, index: number) => (
-                      <div key={index} className={styles.skippedItem}>
-                        {fileName}
-                      </div>
-                    )
-                  )}
-
-                  {/* Pagination for skipped files */}
-                  {skippedFiles.length > itemsPerPage && (
-                    <div className={styles.paginationControls}>
-                      <button
-                        disabled={skippedPage === 1}
-                        onClick={() => setSkippedPage((prev) => Math.max(1, prev - 1))}
-                      >
-                        Previous
-                      </button>
-                      <span>
-                        Page {skippedPage} of {Math.ceil(skippedFiles.length / itemsPerPage)}
-                      </span>
-                      <button
-                        disabled={skippedPage >= Math.ceil(skippedFiles.length / itemsPerPage)}
-                        onClick={() => setSkippedPage((prev) => prev + 1)}
-                      >
-                        Next
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className={styles.confirmationButtons}>
-              <button className={styles.confirmButton} onClick={confirmAction}>
-                Confirm and Embed Metadata
               </button>
               <button className={styles.cancelButton} onClick={cancelAction}>
                 Cancel
@@ -3007,11 +2710,6 @@ const PythonActionsPanel: React.FC = () => {
         <div className={styles.actionGroup}>
           <h4>File Management</h4>
           <div className={styles.actionButtons}>
-            <ActionButton
-              label="Embed Track Metadata"
-              onClick={() => performAction("embed-metadata")}
-              disabled={isLoading["embed-metadata"] || serverStatus !== "connected"}
-            />
             <ActionButton
               label="Map Files to Tracks"
               onClick={() => performAction("create-file-mappings")}
