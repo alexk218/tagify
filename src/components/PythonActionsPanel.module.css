@@ -1494,3 +1494,457 @@
   border-radius: 4px;
   background: var(--spice-player);
 }
+
+.fileMappingAnalysisPanel {
+  background: var(--spice-card);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 600px;
+  width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.analysisHeader {
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.analysisHeader h3 {
+  color: var(--spice-text);
+  margin-bottom: 8px;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.analysisHeader p {
+  color: var(--spice-subtext);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.analysisContent {
+  margin-bottom: 24px;
+}
+
+.settingGroup {
+  margin-bottom: 20px;
+}
+
+.settingLabel {
+  display: block;
+  color: var(--spice-text);
+  font-weight: 500;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.sliderGroup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.confidenceSlider {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--spice-button-disabled);
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.confidenceSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--spice-button);
+  cursor: pointer;
+  border: 2px solid var(--spice-main);
+  transition: all 0.2s ease;
+}
+
+.confidenceSlider::-webkit-slider-thumb:hover {
+  background: var(--spice-button-active);
+  transform: scale(1.1);
+}
+
+.confidenceSlider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--spice-button);
+  cursor: pointer;
+  border: 2px solid var(--spice-main);
+  transition: all 0.2s ease;
+}
+
+.sliderValue {
+  color: var(--spice-text);
+  font-weight: 600;
+  font-size: 0.95rem;
+  min-width: 45px;
+  text-align: center;
+  background: var(--spice-button-disabled);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.settingDescription {
+  color: var(--spice-subtext);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  padding: 8px 12px;
+  background: var(--spice-button-disabled);
+  border-radius: 6px;
+  border-left: 3px solid var(--spice-main);
+}
+
+.analysisStats {
+  background: var(--spice-button-disabled);
+  padding: 16px;
+  border-radius: 8px;
+  margin-top: 16px;
+}
+
+.statItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.statItem:last-child {
+  margin-bottom: 0;
+}
+
+.statLabel {
+  color: var(--spice-subtext);
+  font-size: 0.85rem;
+}
+
+.statValue {
+  color: var(--spice-text);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.analysisFooter {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.analyzeButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.95rem;
+}
+
+.analyzeButton:hover:not(:disabled) {
+  background: var(--spice-button-active);
+  transform: translateY(-1px);
+}
+
+.analyzeButton:disabled {
+  background: var(--spice-button-disabled);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.cancelButton {
+  background: transparent;
+  color: var(--spice-subtext);
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.95rem;
+}
+
+.cancelButton:hover {
+  color: var(--spice-text);
+  border-color: var(--spice-button);
+  background: var(--spice-button-disabled);
+}
+
+/* Add these styles to your PythonActionsPanel.module.css */
+
+.fileMappingPanel {
+  background: var(--spice-card);
+  border-radius: 12px;
+  padding: 0;
+  max-width: 900px;
+  width: 95vw;
+  max-height: 90vh;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--spice-button-disabled);
+  display: flex;
+  flex-direction: column;
+}
+
+.mappingHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  background: var(--spice-button-disabled);
+}
+
+.mappingHeader h3 {
+  color: var(--spice-text);
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.closeButton {
+  background: none;
+  border: none;
+  color: var(--spice-subtext);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.closeButton:hover {
+  background: var(--spice-button);
+  color: var(--spice-text);
+}
+
+.autoMatchSection {
+  padding: 24px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  background: var(--spice-card);
+}
+
+.autoMatchSection h4 {
+  color: var(--spice-text);
+  margin: 0 0 8px 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.autoMatchSection p {
+  color: var(--spice-subtext);
+  margin: 0 0 16px 0;
+  font-size: 0.9rem;
+}
+
+.autoMatchControls {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sliderGroup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sliderLabel {
+  color: var(--spice-text);
+  font-weight: 500;
+  font-size: 0.9rem;
+  min-width: 140px;
+}
+
+.confidenceSlider {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--spice-button-disabled);
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.confidenceSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--spice-button);
+  cursor: pointer;
+  border: 2px solid var(--spice-main);
+  transition: all 0.2s ease;
+}
+
+.confidenceSlider::-webkit-slider-thumb:hover {
+  background: var(--spice-button-active);
+  transform: scale(1.1);
+}
+
+.sliderValue {
+  color: var(--spice-text);
+  font-weight: 600;
+  font-size: 0.9rem;
+  min-width: 45px;
+  text-align: center;
+  background: var(--spice-button-disabled);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.autoMatchButtons {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.autoMatchButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+}
+
+.autoMatchButton:hover:not(:disabled) {
+  background: var(--spice-button-active);
+  transform: translateY(-1px);
+}
+
+.autoMatchButton:disabled {
+  background: var(--spice-button-disabled);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.applyAutoButton {
+  background: var(--spice-main);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+}
+
+.applyAutoButton:hover {
+  background: var(--spice-main);
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.autoMatchResults {
+  margin-top: 16px;
+  background: var(--spice-button-disabled);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.resultsStats {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.stat {
+  color: var(--spice-text);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.autoMatchPreview h5 {
+  color: var(--spice-text);
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.autoMatchItem {
+  display: grid;
+  grid-template-columns: 1fr 2fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--spice-button);
+  font-size: 0.85rem;
+}
+
+.autoMatchItem:last-child {
+  border-bottom: none;
+}
+
+.fileName {
+  color: var(--spice-text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trackInfo {
+  color: var(--spice-subtext);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.confidence {
+  color: var(--spice-main);
+  font-weight: 600;
+  text-align: right;
+}
+
+.moreMatches {
+  color: var(--spice-subtext);
+  font-style: italic;
+  font-size: 0.8rem;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.sectionDivider {
+  height: 1px;
+  background: var(--spice-button-disabled);
+}
+
+.manualMatchSection {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  background: var(--spice-card);
+}
+
+.manualMatchSection h4 {
+  color: var(--spice-text);
+  margin: 0 0 8px 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.manualMatchSection p {
+  color: var(--spice-subtext);
+  margin: 0 0 16px 0;
+  font-size: 0.9rem;
+}

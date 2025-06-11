@@ -242,6 +242,8 @@ const PythonActionsPanel: React.FC = () => {
   const [searchResults, setSearchResults] = useState<Match[]>([]);
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [showSearchResults, setShowSearchResults] = useState<boolean>(false);
+  const [showFileMappingAnalysis, setShowFileMappingAnalysis] = useState(false);
+  const [fileMappingConfidenceThreshold, setFileMappingConfidenceThreshold] = useState(0.75);
 
   const [settingsVisible, setSettingsVisible] = useState<boolean>(false);
   const [settings, setSettings] = useState({
@@ -456,6 +458,89 @@ const PythonActionsPanel: React.FC = () => {
     return defaultSettings;
   };
 
+  const handleMapFilesToTracksClick = () => {
+    setShowFileMappingAnalysis(true);
+  };
+
+  const handleStartFileMappingAnalysis = async () => {
+    setShowFileMappingAnalysis(false);
+
+    await performAction("create-file-mappings", {
+      confidence_threshold: fileMappingConfidenceThreshold,
+    });
+  };
+
+  const FileMappingAnalysisPanel = () => {
+    if (!showFileMappingAnalysis) return null;
+
+    return (
+      <Portal>
+        <div className={styles.modalOverlay}>
+          <div className={styles.fileMappingAnalysisPanel}>
+            <div className={styles.analysisHeader}>
+              <h3>File-to-Track Mapping Analysis</h3>
+              <p>Configure the analysis settings for mapping your local files to Spotify tracks.</p>
+            </div>
+
+            <div className={styles.analysisContent}>
+              <div className={styles.settingGroup}>
+                <label className={styles.settingLabel}>Auto-Match Confidence Threshold</label>
+                <div className={styles.sliderGroup}>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="0.95"
+                    step="0.05"
+                    value={fileMappingConfidenceThreshold}
+                    onChange={(e) => setFileMappingConfidenceThreshold(Number(e.target.value))}
+                    className={styles.confidenceSlider}
+                  />
+                  <span className={styles.sliderValue}>
+                    {(fileMappingConfidenceThreshold * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className={styles.settingDescription}>
+                  Files with matches above this confidence level will be automatically mapped. Lower
+                  values will auto-match more files but may include incorrect matches. Higher values
+                  will require more manual review but ensure accuracy.
+                </div>
+              </div>
+
+              <div className={styles.analysisStats}>
+                <div className={styles.statItem}>
+                  <span className={styles.statLabel}>Directory:</span>
+                  <span className={styles.statValue}>
+                    {settings.masterTracksDir || "Not configured"}
+                  </span>
+                </div>
+                <div className={styles.statItem}>
+                  <span className={styles.statLabel}>Supported formats:</span>
+                  <span className={styles.statValue}>MP3, FLAC, WAV, M4A, AAC, OGG, WMA</span>
+                </div>
+              </div>
+            </div>
+
+            <div className={styles.analysisFooter}>
+              <button
+                className={styles.analyzeButton}
+                onClick={handleStartFileMappingAnalysis}
+                disabled={isLoading["create-file-mappings"] || !settings.masterTracksDir}
+              >
+                {isLoading["create-file-mappings"] ? "Analyzing..." : "Start Analysis"}
+              </button>
+              <button
+                className={styles.cancelButton}
+                onClick={() => setShowFileMappingAnalysis(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </Portal>
+    );
+  };
+
   const performAction = async (action: string, data: any = {}) => {
     if (action === "sync-database" && data.action === "all") {
       await startSequentialSync();
@@ -578,8 +663,14 @@ const PythonActionsPanel: React.FC = () => {
           }
         }
       } else if (action === "create-file-mappings") {
+        const analysisResponse: AnalysisResultsFileMapping = result;
+
         // Check if this requires user selection (analysis stage)
-        if (result.needs_confirmation && result.requires_user_selection && !data.confirmed) {
+        if (
+          analysisResponse.needs_confirmation &&
+          analysisResponse.requires_user_selection &&
+          !data.confirmed
+        ) {
           // Set up for fuzzy matching process
           setAnalysisResults(result);
           setIsAwaitingConfirmation(true);
@@ -1365,7 +1456,7 @@ const PythonActionsPanel: React.FC = () => {
     const currentFileName = (() => {
       if (isFileMapping && typeof currentFile === "object" && "file_name" in currentFile) {
         return currentFile.file_name;
-      // } else if (typeof currentFile === "string") {
+        // } else if (typeof currentFile === "string") {
         // return currentFile;
       }
       return "";
@@ -1375,7 +1466,7 @@ const PythonActionsPanel: React.FC = () => {
     const currentFilePath = (() => {
       if (isFileMapping && typeof currentFile === "object" && "file_path" in currentFile) {
         return currentFile.file_path;
-      // } else if (typeof currentFile === "string") {
+        // } else if (typeof currentFile === "string") {
         // return currentFile; // For embed-metadata, the string is the file name
       }
       return "";
@@ -2605,6 +2696,7 @@ const PythonActionsPanel: React.FC = () => {
 
       <SyncOptionsPopup />
       <MappingResultsPanel />
+      <FileMappingAnalysisPanel />
 
       {settingsVisible && (
         <Portal>
@@ -2712,7 +2804,7 @@ const PythonActionsPanel: React.FC = () => {
           <div className={styles.actionButtons}>
             <ActionButton
               label="Map Files to Tracks"
-              onClick={() => performAction("create-file-mappings")}
+              onClick={handleMapFilesToTracksClick}
               disabled={isLoading["create-file-mappings"] || serverStatus !== "connected"}
             />
             <ActionButton
