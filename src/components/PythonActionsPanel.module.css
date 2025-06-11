@@ -603,12 +603,6 @@
   margin-top: 2px;
 }
 
-.confidence {
-  margin-top: 4px;
-  font-size: 0.8em;
-  color: var(--spice-text);
-}
-
 .loadingMatches {
   text-align: center;
   padding: 20px;
@@ -1909,9 +1903,11 @@
 }
 
 .confidence {
-  color: var(--spice-main);
-  font-weight: 600;
-  text-align: right;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .moreMatches {
