@@ -1683,8 +1683,6 @@
   background: var(--spice-button-disabled);
 }
 
-/* Add these styles to your PythonActionsPanel.module.css */
-
 .fileMappingPanel {
   background: var(--spice-card);
   border-radius: 12px;
@@ -1947,4 +1945,512 @@
   color: var(--spice-subtext);
   margin: 0 0 16px 0;
   font-size: 0.9rem;
+}
+
+/* Auto-matching section improvements */
+.autoMatchedItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--spice-button);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  background: var(--spice-card);
+}
+
+.autoMatchContent {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 4px;
+}
+
+.rejectAutoMatchButton {
+  background: var(--spice-button);
+  border: 1px solid var(--spice-text);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+  margin-left: 8px;
+  transition: all 0.2s ease;
+}
+
+.rejectAutoMatchButton:hover {
+  background: var(--spice-button-active);
+  color: var(--spice-main);
+  transform: scale(1.1);
+}
+
+.rejectAutoMatchButton:active {
+  transform: scale(0.95);
+}
+
+/* Pagination controls */
+.paginationControls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin: 16px 0;
+  padding: 12px;
+  background: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+}
+
+.paginationControls button {
+  background: var(--spice-button);
+  border: 1px solid var(--spice-text);
+  border-radius: 4px;
+  padding: 6px 12px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.paginationControls button:hover:not(:disabled) {
+  background: var(--spice-button-active);
+  transform: translateY(-1px);
+}
+
+.paginationControls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.paginationControls span {
+  color: var(--spice-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* File count info */
+.fileCountInfo {
+  background: var(--spice-card);
+  border: 1px solid var(--spice-button);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 12px 0;
+}
+
+.fileCountInfo p {
+  margin: 0;
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Analysis stats improvements */
+.analysisStats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+  padding: 16px;
+  background: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+}
+
+.statItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--spice-main);
+  border-radius: 4px;
+  border: 1px solid var(--spice-button);
+}
+
+.statLabel {
+  color: var(--spice-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.statValue {
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--spice-button);
+  padding: 2px 8px;
+  border-radius: 12px;
+  min-width: 24px;
+  text-align: center;
+}
+
+/* Loading states */
+.loadingFiles {
+  text-align: center;
+  padding: 24px;
+  background: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+  margin: 16px 0;
+}
+
+.loadingFiles p {
+  color: var(--spice-text);
+  font-size: 14px;
+  margin: 0;
+}
+
+/* Manual matching start section */
+.manualMatchingStart {
+  padding: 16px;
+  text-align: center;
+  background: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+  margin: 12px 0;
+}
+
+.startManualMatchingButton {
+  background: var(--spice-button);
+  border: 1px solid var(--spice-text);
+  border-radius: 6px;
+  padding: 12px 20px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.startManualMatchingButton:hover {
+  background: var(--spice-button-active);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.startManualMatchingButton:active {
+  transform: translateY(0);
+}
+
+/* Auto-match button styling */
+.autoMatchButton {
+  background: var(--spice-button);
+  border: 1px solid var(--spice-text);
+  border-radius: 6px;
+  padding: 10px 16px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  margin-top: 12px;
+  transition: all 0.2s ease;
+}
+
+.autoMatchButton:hover:not(:disabled) {
+  background: var(--spice-button-active);
+  transform: translateY(-1px);
+}
+
+.autoMatchButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Apply buttons styling */
+.applyAutoMatchesButton {
+  background: var(--spice-notification);
+  border: 1px solid var(--spice-notification);
+  border-radius: 6px;
+  padding: 10px 16px;
+  color: var(--spice-main);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 16px;
+  width: 100%;
+  transition: all 0.2s ease;
+}
+
+.applyAutoMatchesButton:hover {
+  background: var(--spice-notification-error);
+  border-color: var(--spice-notification-error);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.applyPartialButton {
+  background: var(--spice-notification);
+  border: 1px solid var(--spice-notification);
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: var(--spice-main);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 8px 0;
+  transition: all 0.2s ease;
+}
+
+.applyPartialButton:hover {
+  background: var(--spice-notification-error);
+  border-color: var(--spice-notification-error);
+  transform: translateY(-1px);
+}
+
+/* Section headers and organization */
+.autoMatchingSection,
+.manualMatchingSection {
+  margin: 24px 0;
+  padding: 20px;
+  background: var(--spice-main);
+  border-radius: 12px;
+  border: 2px solid var(--spice-button);
+}
+
+.autoMatchingHeader,
+.manualMatchingHeader {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--spice-button);
+}
+
+.autoMatchingHeader h4,
+.manualMatchingHeader h4 {
+  color: var(--spice-text);
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+}
+
+.autoMatchingHeader p,
+.manualMatchingHeader p {
+  color: var(--spice-subtext);
+  font-size: 14px;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Auto match results container */
+.autoMatchResults {
+  background: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.autoMatchResults h5 {
+  color: var(--spice-text);
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+}
+
+.autoMatchResults p {
+  color: var(--spice-subtext);
+  font-size: 13px;
+  margin: 0 0 16px 0;
+}
+
+.autoMatchedList {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+
+/* Panel footer */
+.panelFooter {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 2px solid var(--spice-button);
+  text-align: center;
+}
+
+.closePanelButton {
+  background: var(--spice-button);
+  border: 1px solid var(--spice-text);
+  border-radius: 6px;
+  padding: 10px 24px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.closePanelButton:hover {
+  background: var(--spice-button-active);
+  transform: translateY(-1px);
+}
+
+/* Confidence slider styling */
+.settingGroup {
+  margin: 12px 0;
+}
+
+.settingLabel {
+  display: block;
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.sliderGroup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.confidenceSlider {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--spice-button);
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.confidenceSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--spice-notification);
+  cursor: pointer;
+  border: 2px solid var(--spice-main);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.confidenceSlider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--spice-notification);
+  cursor: pointer;
+  border: 2px solid var(--spice-main);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.sliderValue {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 48px;
+  text-align: center;
+  border: 1px solid var(--spice-text);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .analysisStats {
+    grid-template-columns: 1fr;
+  }
+
+  .autoMatchedItem {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .rejectAutoMatchButton {
+    align-self: flex-end;
+    margin-left: 0;
+  }
+
+  .paginationControls {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+/* Navigation controls for manual matching */
+.manualMatchingControls {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+  padding: 16px;
+  background: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+}
+
+.prevFileButton,
+.nextFileButton {
+  background: var(--spice-button);
+  border: 1px solid var(--spice-text);
+  border-radius: 6px;
+  padding: 10px 16px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  min-width: 120px;
+}
+
+.prevFileButton:hover:not(:disabled),
+.nextFileButton:hover:not(:disabled) {
+  background: var(--spice-button-active);
+  transform: translateY(-1px);
+}
+
+.prevFileButton:disabled,
+.nextFileButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.prevFileButton:active:not(:disabled),
+.nextFileButton:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Ensure smooth transitions between files */
+.fileInfo {
+  background: var(--spice-card);
+  border: 1px solid var(--spice-button);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+  transition: all 0.3s ease;
+}
+
+.fileName {
+  color: var(--spice-text);
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+.progress {
+  color: var(--spice-subtext);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Improve overall layout flow */
+.fuzzyMatchContainer {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.fuzzyMatchContainer h3 {
+  color: var(--spice-text);
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0 0 24px 0;
+  text-align: center;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--spice-button);
 }
