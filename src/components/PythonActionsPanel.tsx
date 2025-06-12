@@ -1607,15 +1607,65 @@ const PythonActionsPanel: React.FC = () => {
     const handleApplyAutoMatches = async () => {
       if (!autoMatchResults?.details?.auto_matched_files) return;
 
-      const autoMatchSelections = autoMatchResults.details.auto_matched_files.map((match: any) => ({
+      const nonRejectedMatches = getNonRejectedAutoMatches();
+
+      if (nonRejectedMatches.length === 0) {
+        Spicetify.showNotification("No auto-matches to apply (all were rejected)", true);
+        return;
+      }
+
+      const autoMatchSelections = nonRejectedMatches.map((match: any) => ({
         file_path: match.file_path,
         uri: match.uri,
         confidence: match.confidence,
         file_name: match.fileName || match.file_name,
       }));
 
-      // Apply just the auto-matches
+      // Apply only the non-rejected auto-matches
       await applyFileMapping(autoMatchSelections, "auto-matched files");
+    };
+
+    const handleRejectAutoMatch = (fileToReject: any) => {
+      const filePath = fileToReject.file_path;
+
+      // Add to rejected list (prevent duplicates)
+      setRejectedAutoMatches((prev) => {
+        if (prev.includes(filePath)) {
+          return prev; // Already rejected
+        }
+        return [...prev, filePath];
+      });
+
+      // Add to manual matching files if not already there
+      const fileForManual = {
+        file_path: fileToReject.file_path,
+        file_name: fileToReject.fileName || fileToReject.file_name,
+      };
+
+      setAllUnmappedFiles((prev) => {
+        // Check if file is already in the list
+        const exists = prev.some((f) => f.file_path === fileForManual.file_path);
+        if (!exists) {
+          return [...prev, fileForManual];
+        }
+        return prev;
+      });
+
+      Spicetify.showNotification(`Moved "${fileForManual.file_name}" to manual matching`);
+    };
+
+    const handleClearRejections = () => {
+      setRejectedAutoMatches([]);
+      // Remove the rejected files from manual matching list
+      setAllUnmappedFiles((prev) =>
+        prev.filter(
+          (file) =>
+            !autoMatchResults?.details?.auto_matched_files?.some(
+              (autoMatch: any) => autoMatch.file_path === file.file_path
+            )
+        )
+      );
+      Spicetify.showNotification("Cleared all rejections - files moved back to auto-match");
     };
 
     const handleApplyPartialChanges = async () => {
@@ -1858,71 +1908,93 @@ const PythonActionsPanel: React.FC = () => {
                 <h5>
                   Auto-Matched Files ({getNonRejectedAutoMatches().length} of{" "}
                   {autoMatchResults.details.auto_matched_files.length})
+                  {rejectedAutoMatches.length > 0 && (
+                    <span className={styles.rejectedCount}>
+                      {" "}
+                      - {rejectedAutoMatches.length} rejected
+                    </span>
+                  )}
                 </h5>
                 <p>
                   These files were automatically matched with{" "}
                   {(analysisConfidenceThreshold * 100).toFixed(0)}%+ confidence:
                 </p>
 
-                <div className={styles.autoMatchedList}>
-                  {/* Show paginated results with individual confidence */}
-                  {getPagedItems(
-                    getNonRejectedAutoMatches(),
-                    autoMatchedPage,
-                    autoMatchedPerPage
-                  ).map((match: any, index: number) => (
-                    <div key={index} className={styles.autoMatchedItem}>
-                      <div className={styles.autoMatchContent}>
-                        <span className={styles.fileName}>{match.file_name}</span>
-                        <span className={styles.trackInfo}>{match.track_info}</span>
-                        <span className={styles.confidence}>
-                          {(match.confidence * 100).toFixed(1)}% confidence
-                        </span>
-                      </div>
-                      <button
-                        className={styles.rejectAutoMatchButton}
-                        onClick={() => handleRejectAutoMatch(match)}
-                        title="Reject this auto-match and move to manual matching"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Pagination controls for auto-matched files */}
-                {getNonRejectedAutoMatches().length > autoMatchedPerPage && (
-                  <div className={styles.paginationControls}>
+                {/* Show warning if all files are rejected */}
+                {getNonRejectedAutoMatches().length === 0 && rejectedAutoMatches.length > 0 && (
+                  <div className={styles.allRejectedWarning}>
+                    <p>⚠️ All auto-matched files have been rejected for manual matching.</p>
                     <button
-                      disabled={autoMatchedPage === 1}
-                      onClick={() => setAutoMatchedPage((prev) => Math.max(1, prev - 1))}
+                      className={styles.clearRejectionsButton}
+                      onClick={handleClearRejections}
                     >
-                      Previous
-                    </button>
-                    <span>
-                      Page {autoMatchedPage} of{" "}
-                      {Math.ceil(getNonRejectedAutoMatches().length / autoMatchedPerPage)}
-                    </span>
-                    <button
-                      disabled={
-                        autoMatchedPage >=
-                        Math.ceil(getNonRejectedAutoMatches().length / autoMatchedPerPage)
-                      }
-                      onClick={() => setAutoMatchedPage((prev) => prev + 1)}
-                    >
-                      Next
+                      Clear All Rejections
                     </button>
                   </div>
                 )}
 
-                {/* Apply auto-matches button */}
+                {/* Only show the list if there are non-rejected matches */}
                 {getNonRejectedAutoMatches().length > 0 && (
-                  <button
-                    className={styles.applyAutoMatchesButton}
-                    onClick={handleApplyAutoMatches}
-                  >
-                    Apply Auto-Matches ({getNonRejectedAutoMatches().length} files)
-                  </button>
+                  <>
+                    <div className={styles.autoMatchedList}>
+                      {/* Show paginated results with individual confidence */}
+                      {getPagedItems(
+                        getNonRejectedAutoMatches(),
+                        autoMatchedPage,
+                        autoMatchedPerPage
+                      ).map((match: any, index: number) => (
+                        <div key={index} className={styles.autoMatchedItem}>
+                          <div className={styles.autoMatchContent}>
+                            <span className={styles.fileName}>{match.file_name}</span>
+                            <span className={styles.trackInfo}>{match.track_info}</span>
+                            <span className={styles.confidence}>
+                              {((match.confidence || 0) * 100).toFixed(1)}% confidence
+                            </span>
+                          </div>
+                          <button
+                            className={styles.rejectAutoMatchButton}
+                            onClick={() => handleRejectAutoMatch(match)}
+                            title="Reject this auto-match and move to manual matching"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Pagination controls for auto-matched files */}
+                    {getNonRejectedAutoMatches().length > autoMatchedPerPage && (
+                      <div className={styles.paginationControls}>
+                        <button
+                          disabled={autoMatchedPage === 1}
+                          onClick={() => setAutoMatchedPage((prev) => Math.max(1, prev - 1))}
+                        >
+                          Previous
+                        </button>
+                        <span>
+                          Page {autoMatchedPage} of{" "}
+                          {Math.ceil(getNonRejectedAutoMatches().length / autoMatchedPerPage)}
+                        </span>
+                        <button
+                          disabled={
+                            autoMatchedPage >=
+                            Math.ceil(getNonRejectedAutoMatches().length / autoMatchedPerPage)
+                          }
+                          onClick={() => setAutoMatchedPage((prev) => prev + 1)}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Apply auto-matches button - only show if there are non-rejected matches */}
+                    <button
+                      className={styles.applyAutoMatchesButton}
+                      onClick={handleApplyAutoMatches}
+                    >
+                      Apply Auto-Matches ({getNonRejectedAutoMatches().length} files)
+                    </button>
+                  </>
                 )}
               </div>
             )}
