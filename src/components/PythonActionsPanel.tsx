@@ -220,7 +220,6 @@ const PythonActionsPanel: React.FC = () => {
   const [userMatchSelections, setUserMatchSelections] = useState<
     (MatchSelection | FileMappingSelection)[]
   >([]);
-  const [showAllAutoMatched, setShowAllAutoMatched] = useState(false);
   const [autoMatchedPage, setAutoMatchedPage] = useState(1);
   const autoMatchedPerPage = 20;
   const [rejectedAutoMatches, setRejectedAutoMatches] = useState<string[]>([]);
@@ -244,7 +243,6 @@ const PythonActionsPanel: React.FC = () => {
   const [searchResults, setSearchResults] = useState<Match[]>([]);
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [showSearchResults, setShowSearchResults] = useState<boolean>(false);
-  const [showFileMappingAnalysis, setShowFileMappingAnalysis] = useState<boolean>(false);
   const [fileMappingConfidenceThreshold, setFileMappingConfidenceThreshold] =
     useState<number>(0.75);
   const [analysisConfidenceThreshold, setAnalysisConfidenceThreshold] = useState<number>(0.75);
@@ -322,14 +320,6 @@ const PythonActionsPanel: React.FC = () => {
     totalStages: ["playlists", "tracks", "associations"],
     startTime: null,
   });
-
-  // TODO: have a summary page at the end of all operations - shows everything that's been modified. saves to a txt or json file?
-  // Optional: Add this if you want to persist details between stages
-  const [sequentialSyncDetails, setSequentialSyncDetails] = useState<{
-    playlists?: SyncResponse;
-    tracks?: SyncResponse;
-    associations?: SyncResponse;
-  }>({});
 
   // Check server connection on load and when serverUrl changes
   useEffect(() => {
@@ -466,30 +456,6 @@ const PythonActionsPanel: React.FC = () => {
     return defaultSettings;
   };
 
-  const handleRejectAutoMatch = (fileToReject: any) => {
-    const filePath = fileToReject.file_path;
-
-    // Add to rejected list
-    setRejectedAutoMatches((prev) => [...prev, filePath]);
-
-    // Add to manual matching files if not already there
-    const fileForManual = {
-      file_path: fileToReject.file_path,
-      file_name: fileToReject.fileName || fileToReject.file_name,
-    };
-
-    setAllUnmappedFiles((prev) => {
-      // Check if file is already in the list
-      const exists = prev.some((f) => f.file_path === fileForManual.file_path);
-      if (!exists) {
-        return [...prev, fileForManual];
-      }
-      return prev;
-    });
-
-    Spicetify.showNotification(`Moved "${fileForManual.file_name}" to manual matching`);
-  };
-
   const getNonRejectedAutoMatches = () => {
     if (!autoMatchResults?.details?.auto_matched_files) return [];
 
@@ -609,85 +575,6 @@ const PythonActionsPanel: React.FC = () => {
     } finally {
       setIsLoading((prev) => ({ ...prev, "auto-match-analysis": false }));
     }
-  };
-
-  const handleStartFileMappingAnalysis = async () => {
-    setShowFileMappingAnalysis(false);
-
-    await performAction("create-file-mappings", {
-      confidence_threshold: fileMappingConfidenceThreshold,
-    });
-  };
-
-  const FileMappingAnalysisPanel = () => {
-    if (!showFileMappingAnalysis) return null;
-
-    return (
-      <Portal>
-        <div className={styles.modalOverlay}>
-          <div className={styles.fileMappingAnalysisPanel}>
-            <div className={styles.analysisHeader}>
-              <h3>File-to-Track Mapping Analysis</h3>
-              <p>Configure the analysis settings for mapping your local files to Spotify tracks.</p>
-            </div>
-
-            <div className={styles.analysisContent}>
-              <div className={styles.settingGroup}>
-                <label className={styles.settingLabel}>Auto-Match Confidence Threshold</label>
-                <div className={styles.sliderGroup}>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="0.95"
-                    step="0.05"
-                    value={fileMappingConfidenceThreshold}
-                    onChange={(e) => setFileMappingConfidenceThreshold(Number(e.target.value))}
-                    className={styles.confidenceSlider}
-                  />
-                  <span className={styles.sliderValue}>
-                    {(fileMappingConfidenceThreshold * 100).toFixed(0)}%
-                  </span>
-                </div>
-                <div className={styles.settingDescription}>
-                  Files with matches above this confidence level will be automatically mapped. Lower
-                  values will auto-match more files but may include incorrect matches. Higher values
-                  will require more manual review but ensure accuracy.
-                </div>
-              </div>
-
-              <div className={styles.analysisStats}>
-                <div className={styles.statItem}>
-                  <span className={styles.statLabel}>Directory:</span>
-                  <span className={styles.statValue}>
-                    {settings.masterTracksDir || "Not configured"}
-                  </span>
-                </div>
-                <div className={styles.statItem}>
-                  <span className={styles.statLabel}>Supported formats:</span>
-                  <span className={styles.statValue}>MP3, FLAC, WAV, M4A, AAC, OGG, WMA</span>
-                </div>
-              </div>
-            </div>
-
-            <div className={styles.analysisFooter}>
-              <button
-                className={styles.analyzeButton}
-                onClick={handleStartFileMappingAnalysis}
-                disabled={isLoading["create-file-mappings"] || !settings.masterTracksDir}
-              >
-                {isLoading["create-file-mappings"] ? "Analyzing..." : "Start Analysis"}
-              </button>
-              <button
-                className={styles.cancelButton}
-                onClick={() => setShowFileMappingAnalysis(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      </Portal>
-    );
   };
 
   const performAction = async (action: string, data: any = {}) => {
@@ -1062,12 +949,6 @@ const PythonActionsPanel: React.FC = () => {
           completedStages: [...prev.completedStages, data.stage],
         }));
 
-        // Store the sync result
-        setSequentialSyncDetails((prev) => ({
-          ...prev,
-          [stage]: result,
-        }));
-
         // Move to the next stage
         if (result.next_stage && result.next_stage !== "complete") {
           await processSequentialStage(result.next_stage);
@@ -1087,7 +968,6 @@ const PythonActionsPanel: React.FC = () => {
             totalStages: ["playlists", "tracks", "associations"],
             startTime: null,
           });
-          setSequentialSyncDetails({});
         }
       } catch (err) {
         console.error(`Error applying changes for stage ${stage}:`, err);
@@ -1100,7 +980,6 @@ const PythonActionsPanel: React.FC = () => {
           totalStages: ["playlists", "tracks", "associations"],
           startTime: null,
         });
-        setSequentialSyncDetails({});
       }
 
       return;
@@ -3013,17 +2892,6 @@ const PythonActionsPanel: React.FC = () => {
     );
   };
 
-  // State for accordion sections
-  // TODO: delete these?
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
-
-  const toggleAccordion = (sectionKey: string) => {
-    setExpandedSections((prev) => ({
-      ...prev,
-      [sectionKey]: !prev[sectionKey],
-    }));
-  };
-
   const SyncOptionsPopup = () => {
     if (!showSyncOptionsPopup || !pendingSyncAction) return null;
 
@@ -3136,7 +3004,6 @@ const PythonActionsPanel: React.FC = () => {
 
       <SyncOptionsPopup />
       <MappingResultsPanel />
-      <FileMappingAnalysisPanel />
 
       {settingsVisible && (
         <Portal>
