@@ -1472,7 +1472,7 @@
 
 .localIndicator {
   background: var(--spice-accent);
-  color: var(--spice-main);
+  color: rgba(255, 230, 2, 0.815);
   padding: 2px 6px;
   border-radius: 3px;
   font-size: 10px;
@@ -2449,4 +2449,128 @@
   text-align: center;
   padding-bottom: 16px;
   border-bottom: 2px solid var(--spice-button);
+}
+
+/* Already mapped indicator */
+.mappedIndicator {
+  color: var(--spice-notification);
+  background: rgba(29, 185, 84, 0.15);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: 8px;
+  border: 1px solid rgba(29, 185, 84, 0.3);
+}
+
+/* Already mapped section */
+.alreadyMappedSection {
+  background: rgba(29, 185, 84, 0.1);
+  border: 1px solid rgba(29, 185, 84, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+  border-left: 4px solid #1db954;
+}
+
+.alreadyMappedSection h4 {
+  color: var(--spice-text);
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.mappedDetails {
+  background: var(--spice-card);
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.mappedDetails div {
+  color: var(--spice-text);
+  font-size: 14px;
+  margin-bottom: 8px;
+  font-family: monospace;
+}
+
+.mappedDetails div:last-of-type {
+  margin-bottom: 12px;
+}
+
+.removeMappingButton {
+  background: var(--spice-button);
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 6px;
+  padding: 8px 16px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.removeMappingButton:hover {
+  background: var(--spice-button-active);
+  border-color: var(--spice-text);
+  transform: translateY(-1px);
+}
+
+.removeMappingButton:active {
+  transform: translateY(0);
+}
+
+/* Search results header with close button */
+.searchResultsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.searchResultsHeader h5 {
+  margin: 0;
+  color: var(--spice-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.closeSearchButton {
+  background: var(--spice-button);
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.closeSearchButton:hover {
+  background: var(--spice-button-active);
+  color: var(--spice-notification-error);
+  transform: scale(1.05);
+}
+
+.closeSearchButton:active {
+  transform: scale(0.95);
+}
+
+/* No search results with close button */
+.noSearchResultsContent {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+}
+
+.noSearchResultsContent span {
+  color: var(--spice-subtext);
+  font-style: italic;
 }

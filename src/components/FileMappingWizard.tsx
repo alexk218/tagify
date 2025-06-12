@@ -141,6 +141,10 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
   onShowMappingResultsChange,
   onClosePanel,
 }) => {
+  const [localMatches, setLocalMatches] = useState<any[]>([]);
+  const [isLocalLoading, setIsLocalLoading] = useState(false);
+  const [hasCalledAPI, setHasCalledAPI] = useState(false);
+
   const autoMatchedPerPage = 20;
 
   const isFileMapping = currentAction?.name === "create-file-mappings";
@@ -413,9 +417,17 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
     }
   };
 
-  const [localMatches, setLocalMatches] = useState<any[]>([]);
-  const [isLocalLoading, setIsLocalLoading] = useState(false);
-  const [hasCalledAPI, setHasCalledAPI] = useState(false);
+  const isCurrentFileAlreadyMapped = () => {
+    if (!currentFilePath || !isFileMapping) return false;
+
+    return userMatchSelections.some((selection) => {
+      // Handle both possible formats of selections
+      if ("file_path" in selection) {
+        return selection.file_path === currentFilePath;
+      }
+      return false;
+    });
+  };
 
   // Runs once per file - fetches matches
   useEffect(() => {
@@ -768,7 +780,7 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
           )}
         </div>
 
-        {/* Manual matching interface - show based on dynamic file count */}
+        {/* MANUAL MATCHING INTERFACE */}
         {(() => {
           const manualFiles =
             allUnmappedFiles.length > 0
@@ -783,6 +795,9 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
                   <div className={styles.fileInfo}>
                     <div className={styles.fileName}>
                       <strong>Current file:</strong> {currentFileName}
+                      {isCurrentFileAlreadyMapped() && (
+                        <span className={styles.mappedIndicator}> ✓ Already Mapped</span>
+                      )}
                     </div>
                     <div className={styles.progress}>
                       File {fuzzyMatchingState.currentFileIndex + 1} of {manualFiles.length}(
@@ -790,123 +805,207 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
                     </div>
                   </div>
 
-                  {/* Search Section */}
-                  <div className={styles.searchSection}>
-                    <h4>Search for Track</h4>
-                    <form onSubmit={handleSearchSubmit} className={styles.searchInputContainer}>
-                      <input
-                        type="text"
-                        className={styles.searchInput}
-                        placeholder="Search by artist, title, or album... (Press Enter to search)"
-                        value={searchQuery}
-                        onChange={(e) => onSearchQueryChange(e.target.value)}
-                      />
-                      <button type="submit" className={styles.actionButton} disabled={isSearching}>
-                        {isSearching ? "🔍" : "Search"}
-                      </button>
-                    </form>
+                  {/* Show mapped file details if already mapped */}
+                  {isCurrentFileAlreadyMapped() && (
+                    <div className={styles.alreadyMappedSection}>
+                      <h4>This file has already been mapped:</h4>
+                      {(() => {
+                        const mappedSelection = userMatchSelections.find((selection) => {
+                          if ("file_path" in selection) {
+                            return selection.file_path === currentFilePath;
+                          }
+                          return false;
+                        });
 
-                    {/* Search Results */}
-                    {showSearchResults && searchResults.length > 0 && (
-                      <div className={styles.searchResults}>
-                        <h5>Search Results ({searchResults.length})</h5>
-                        <div className={styles.searchResultsList}>
-                          {searchResults.map((match, index) => (
+                        if (mappedSelection && "uri" in mappedSelection) {
+                          return (
+                            <div className={styles.mappedDetails}>
+                              <div>
+                                <strong>URI:</strong> {mappedSelection.uri}
+                              </div>
+                              <div>
+                                <strong>Confidence:</strong>{" "}
+                                {(mappedSelection.confidence * 100).toFixed(1)}%
+                              </div>
+                              <button
+                                className={styles.removeMappingButton}
+                                onClick={() => {
+                                  // Remove this mapping from userMatchSelections
+                                  const updatedSelections = userMatchSelections.filter(
+                                    (selection) => {
+                                      if ("file_path" in selection) {
+                                        return selection.file_path !== currentFilePath;
+                                      }
+                                      return true;
+                                    }
+                                  );
+                                  onUserMatchSelectionsChange(updatedSelections);
+                                  Spicetify.showNotification(
+                                    `Removed mapping for ${currentFileName}`
+                                  );
+                                }}
+                              >
+                                Remove This Mapping
+                              </button>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  )}
+
+                  {/* Only show search and matching interface if not already mapped */}
+                  {!isCurrentFileAlreadyMapped() && (
+                    <>
+                      {/* Search Section */}
+                      <div className={styles.searchSection}>
+                        <h4>Search for Track</h4>
+                        <form onSubmit={handleSearchSubmit} className={styles.searchInputContainer}>
+                          <input
+                            type="text"
+                            className={styles.searchInput}
+                            placeholder="Search by artist, title, or album... (Press Enter to search)"
+                            value={searchQuery}
+                            onChange={(e) => onSearchQueryChange(e.target.value)}
+                          />
+                          <button
+                            type="submit"
+                            className={styles.actionButton}
+                            disabled={isSearching}
+                          >
+                            {isSearching ? "🔍" : "Search"}
+                          </button>
+                        </form>
+
+                        {/* Search Results */}
+                        {showSearchResults && searchResults.length > 0 && (
+                          <div className={styles.searchResults}>
+                            <div className={styles.searchResultsHeader}>
+                              <h5>Search Results ({searchResults.length})</h5>
+                              <button
+                                className={styles.closeSearchButton}
+                                onClick={() => {
+                                  onShowSearchResultsChange(false);
+                                  onSearchResultsChange([]);
+                                  onSearchQueryChange("");
+                                }}
+                                title="Close search results"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            <div className={styles.searchResultsList}>
+                              {searchResults.map((match, index) => (
+                                <div
+                                  key={match.track_id || index}
+                                  className={styles.searchResultItem}
+                                  onClick={() => {
+                                    handleSelectMatch(match);
+                                    onSearchQueryChange("");
+                                    onSearchResultsChange([]);
+                                    onShowSearchResultsChange(false);
+                                  }}
+                                >
+                                  <div className={styles.searchResultContent}>
+                                    <div className={styles.searchResultTitle}>
+                                      {match.artist} - {match.title}
+                                    </div>
+                                    <div className={styles.searchResultAlbum}>{match.album}</div>
+                                    <div className={styles.searchResultConfidence}>
+                                      Match:{" "}
+                                      {((match.confidence || match.ratio || 0) * 100).toFixed(1)}%
+                                      {match.is_local && (
+                                        <span className={styles.localIndicator}> (LOCAL)</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {showSearchResults &&
+                          searchResults.length === 0 &&
+                          searchQuery.trim() &&
+                          !isSearching && (
+                            <div className={styles.noSearchResults}>
+                              <div className={styles.noSearchResultsContent}>
+                                <span>No tracks found for "{searchQuery}"</span>
+                                <button
+                                  className={styles.closeSearchButton}
+                                  onClick={() => {
+                                    onShowSearchResultsChange(false);
+                                    onSearchQueryChange("");
+                                  }}
+                                  title="Close search results"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                      </div>
+
+                      {/* Existing fuzzy match results */}
+                      {isLocalLoading ? (
+                        <div className={styles.loadingMatches}>
+                          <div>Loading potential matches...</div>
+                          <button
+                            className={styles.skipButton}
+                            onClick={() => {
+                              setIsLocalLoading(false);
+                              handleSkip();
+                            }}
+                          >
+                            Skip this file
+                          </button>
+                        </div>
+                      ) : (
+                        <div className={styles.matchesList}>
+                          <h4>Suggested Matches</h4>
+                          <div className={styles.matchOption} onClick={handleSkip}>
+                            <div className={styles.matchNumber}>0.</div>
+                            <div className={styles.matchText}>Skip this file (no match)</div>
+                          </div>
+
+                          {localMatches.map((match, index) => (
                             <div
                               key={match.track_id || index}
-                              className={styles.searchResultItem}
-                              onClick={() => {
-                                handleSelectMatch(match);
-                                onSearchQueryChange("");
-                                onSearchResultsChange([]);
-                                onShowSearchResultsChange(false);
-                              }}
+                              className={styles.matchOption}
+                              onClick={() => handleSelectMatch(match)}
                             >
-                              <div className={styles.searchResultContent}>
-                                <div className={styles.searchResultTitle}>
+                              <div className={styles.matchNumber}>{index + 1}.</div>
+                              <div className={styles.matchContent}>
+                                <div className={styles.matchTitle}>
                                   {match.artist} - {match.title}
                                 </div>
-                                <div className={styles.searchResultAlbum}>{match.album}</div>
-                                <div className={styles.searchResultConfidence}>
-                                  Match: {((match.confidence || match.ratio || 0) * 100).toFixed(1)}
-                                  %
-                                  {match.is_local && (
-                                    <span className={styles.localIndicator}> (LOCAL)</span>
-                                  )}
+                                <div className={styles.matchAlbum}>{match.album}</div>
+                                <div className={styles.confidence}>
+                                  {((match.ratio || match.confidence || 0) * 100).toFixed(1)}%
+                                  confidence
                                 </div>
                               </div>
                             </div>
                           ))}
-                        </div>
-                      </div>
-                    )}
 
-                    {showSearchResults &&
-                      searchResults.length === 0 &&
-                      searchQuery.trim() &&
-                      !isSearching && (
-                        <div className={styles.noSearchResults}>
-                          No tracks found for "{searchQuery}"
+                          {localMatches.length === 0 && !isLocalLoading && hasCalledAPI && (
+                            <div className={styles.noMatches}>
+                              <p>No potential matches found.</p>
+                              <button
+                                className={styles.retryButton}
+                                onClick={() => {
+                                  setHasCalledAPI(false);
+                                }}
+                              >
+                                Retry
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
-                  </div>
-
-                  {/* Existing fuzzy match results */}
-                  {isLocalLoading ? (
-                    <div className={styles.loadingMatches}>
-                      <div>Loading potential matches...</div>
-                      <button
-                        className={styles.skipButton}
-                        onClick={() => {
-                          setIsLocalLoading(false);
-                          handleSkip();
-                        }}
-                      >
-                        Skip this file
-                      </button>
-                    </div>
-                  ) : (
-                    <div className={styles.matchesList}>
-                      <h4>Suggested Matches</h4>
-                      <div className={styles.matchOption} onClick={handleSkip}>
-                        <div className={styles.matchNumber}>0.</div>
-                        <div className={styles.matchText}>Skip this file (no match)</div>
-                      </div>
-
-                      {localMatches.map((match, index) => (
-                        <div
-                          key={match.track_id || index}
-                          className={styles.matchOption}
-                          onClick={() => handleSelectMatch(match)}
-                        >
-                          <div className={styles.matchNumber}>{index + 1}.</div>
-                          <div className={styles.matchContent}>
-                            <div className={styles.matchTitle}>
-                              {match.artist} - {match.title}
-                            </div>
-                            <div className={styles.matchAlbum}>{match.album}</div>
-                            <div className={styles.confidence}>
-                              {((match.ratio || match.confidence || 0) * 100).toFixed(1)}%
-                              confidence
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-
-                      {localMatches.length === 0 && !isLocalLoading && hasCalledAPI && (
-                        <div className={styles.noMatches}>
-                          <p>No potential matches found.</p>
-                          <button
-                            className={styles.retryButton}
-                            onClick={() => {
-                              setHasCalledAPI(false);
-                            }}
-                          >
-                            Retry
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    </>
                   )}
 
                   {/* Navigation controls */}
