@@ -458,14 +458,6 @@ const PythonActionsPanel: React.FC = () => {
     return defaultSettings;
   };
 
-  const getNonRejectedAutoMatches = () => {
-    if (!autoMatchResults?.details?.auto_matched_files) return [];
-
-    return autoMatchResults.details.auto_matched_files.filter(
-      (match: any) => !rejectedAutoMatches.includes(match.file_path)
-    );
-  };
-
   const fetchAllUnmappedFiles = async () => {
     setIsLoading((prev) => ({ ...prev, "fetch-unmapped-files": true }));
 
@@ -532,51 +524,6 @@ const PythonActionsPanel: React.FC = () => {
 
     // Immediately fetch all unmapped files
     fetchAllUnmappedFiles();
-  };
-
-  const handleAutoMatchAnalysis = async () => {
-    setIsLoading((prev) => ({ ...prev, "auto-match-analysis": true }));
-
-    try {
-      const cleanMasterTracksDir = settings.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
-
-      const requestData = {
-        masterTracksDir: cleanMasterTracksDir,
-        confidence_threshold: fileMappingConfidenceThreshold,
-        confirmed: false, // Analysis only
-      };
-
-      const response = await fetch(`${settings.serverUrl}/api/tracks/mapping`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(requestData),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
-      }
-
-      const result: AnalysisResultsFileMapping = await response.json();
-      setAutoMatchResults(result);
-
-      // Store the confidence threshold used for this analysis
-      setAnalysisConfidenceThreshold(fileMappingConfidenceThreshold);
-
-      // Show notification about analysis completion
-      Spicetify.showNotification(
-        `Auto-match analysis complete: ${
-          result.details.auto_matched_files?.length || 0
-        } files can be auto-matched`
-      );
-    } catch (error) {
-      console.error("Error in auto-match analysis:", error);
-      Spicetify.showNotification(`Auto-match analysis failed: ${error}`, true);
-    } finally {
-      setIsLoading((prev) => ({ ...prev, "auto-match-analysis": false }));
-    }
   };
 
   const performAction = async (action: string, data: any = {}) => {
@@ -1334,167 +1281,6 @@ const PythonActionsPanel: React.FC = () => {
       );
     }
 
-    if (
-      currentAction?.name === "create-file-mappings" &&
-      analysisResults &&
-      analysisResults.requires_user_selection &&
-      !fuzzyMatchingState.isActive &&
-      (userMatchSelections.length > 0 || skippedFiles.length > 0)
-    ) {
-      return (
-        <div className={styles.confirmationPanel}>
-          <h3>Confirm File-Track Mappings</h3>
-          <div className={styles.summaryContainer}>
-            <p>Ready to create file-track mappings for {userMatchSelections.length} files.</p>
-            <p>{skippedFiles.length} files were skipped.</p>
-
-            <div className={styles.selectionsContent}>
-              {userMatchSelections &&
-                userMatchSelections.length > 0 &&
-                getPagedItems(userMatchSelections, matchPage, itemsPerPage).map(
-                  (selection: any, index: number) => {
-                    // Handle both formats
-                    const fileName = selection.fileName || selection.file_name;
-                    const trackIdentifier = selection.trackId || selection.uri;
-
-                    return (
-                      <div key={index} className={styles.selectionItem}>
-                        <div className={styles.selectionFile}>{fileName}</div>
-                        <div className={styles.selectionTrackId}>{trackIdentifier}</div>
-                        <div className={styles.selectionConfidence}>
-                          Confidence: {(selection.confidence * 100).toFixed(2)}%
-                        </div>
-                      </div>
-                    );
-                  }
-                )}
-              {/* Pagination controls */}
-              {userMatchSelections && userMatchSelections.length > itemsPerPage && (
-                <div className={styles.paginationControls}>
-                  <button
-                    disabled={matchPage === 1}
-                    onClick={() => setMatchPage((prev) => Math.max(1, prev - 1))}
-                  >
-                    Previous
-                  </button>
-                  <span>
-                    Page {matchPage} of {Math.ceil(userMatchSelections.length / itemsPerPage)}
-                  </span>
-                  <button
-                    disabled={matchPage >= Math.ceil(userMatchSelections.length / itemsPerPage)}
-                    onClick={() => setMatchPage((prev) => prev + 1)}
-                  >
-                    Next
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Show auto-matched files if any */}
-            {analysisResults.details?.auto_matched_files &&
-              analysisResults.details.auto_matched_files.length > 0 && (
-                <div className={styles.autoMatchedPreview}>
-                  <h4>Auto-Matched Files ({analysisResults.details.auto_matched_files.length}):</h4>
-                  <div className={styles.selectionsContent}>
-                    {getPagedItems<any>(
-                      Array.isArray(analysisResults.details.auto_matched_files)
-                        ? analysisResults.details.auto_matched_files
-                        : [],
-                      autoMatchPage,
-                      itemsPerPage
-                    ).map((match, index: number) => (
-                      <div key={index} className={styles.selectionItem}>
-                        <div className={styles.selectionFile}>{match.file_name}</div>
-                        <div className={styles.selectionTrackId}>{match.uri}</div>
-                        <div className={styles.selectionConfidence}>
-                          Confidence: {(match.confidence * 100).toFixed(2)}%
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Pagination for auto-matched files */}
-                    {Array.isArray(analysisResults.details.auto_matched_files) &&
-                      analysisResults.details.auto_matched_files.length > itemsPerPage && (
-                        <div className={styles.paginationControls}>
-                          <button
-                            disabled={autoMatchPage === 1}
-                            onClick={() => setAutoMatchPage((prev) => Math.max(1, prev - 1))}
-                          >
-                            Previous
-                          </button>
-                          <span>
-                            Page {autoMatchPage} of{" "}
-                            {Math.ceil(
-                              analysisResults.details.auto_matched_files.length / itemsPerPage
-                            )}
-                          </span>
-                          <button
-                            disabled={
-                              autoMatchPage >=
-                              Math.ceil(
-                                analysisResults.details.auto_matched_files.length / itemsPerPage
-                              )
-                            }
-                            onClick={() => setAutoMatchPage((prev) => prev + 1)}
-                          >
-                            Next
-                          </button>
-                        </div>
-                      )}
-                  </div>
-                </div>
-              )}
-
-            {/* Show skipped files if any */}
-            {skippedFiles && skippedFiles.length > 0 && (
-              <div className={styles.skippedFilesPreview}>
-                <h4>Skipped Files:</h4>
-                <div className={styles.selectionsContent}>
-                  {getPagedItems(skippedFiles, skippedPage, itemsPerPage).map(
-                    (fileName: string, index: number) => (
-                      <div key={index} className={styles.skippedItem}>
-                        {fileName}
-                      </div>
-                    )
-                  )}
-
-                  {/* Pagination for skipped files */}
-                  {skippedFiles.length > itemsPerPage && (
-                    <div className={styles.paginationControls}>
-                      <button
-                        disabled={skippedPage === 1}
-                        onClick={() => setSkippedPage((prev) => Math.max(1, prev - 1))}
-                      >
-                        Previous
-                      </button>
-                      <span>
-                        Page {skippedPage} of {Math.ceil(skippedFiles.length / itemsPerPage)}
-                      </span>
-                      <button
-                        disabled={skippedPage >= Math.ceil(skippedFiles.length / itemsPerPage)}
-                        onClick={() => setSkippedPage((prev) => prev + 1)}
-                      >
-                        Next
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className={styles.confirmationButtons}>
-              <button className={styles.confirmButton} onClick={confirmAction}>
-                Create File-Track Mappings
-              </button>
-              <button className={styles.cancelButton} onClick={cancelAction}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
     if (currentAction?.name === "sequential-sync" && syncResponse && syncResponse.stage) {
       return (
         <div className={styles.confirmationPanel}>
@@ -1530,7 +1316,7 @@ const PythonActionsPanel: React.FC = () => {
             </div>
           </div>
 
-          {/* NEW: Render based on syncResponse structure */}
+          {/* Render based on syncResponse structure */}
           <div>
             <p>
               {syncResponse.stats.added} to add, {syncResponse.stats.updated} to update,{" "}
