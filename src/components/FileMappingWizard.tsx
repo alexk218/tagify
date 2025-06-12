@@ -142,7 +142,6 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
   onClosePanel,
 }) => {
   const autoMatchedPerPage = 20;
-  const itemsPerPage = 20;
 
   const isFileMapping = currentAction?.name === "create-file-mappings";
 

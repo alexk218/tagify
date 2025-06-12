@@ -223,7 +223,6 @@ const PythonActionsPanel: React.FC = () => {
     (MatchSelection | FileMappingSelection)[]
   >([]);
   const [autoMatchedPage, setAutoMatchedPage] = useState(1);
-  const autoMatchedPerPage = 20;
   const [rejectedAutoMatches, setRejectedAutoMatches] = useState<string[]>([]);
 
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
@@ -262,16 +261,6 @@ const PythonActionsPanel: React.FC = () => {
     minTrackLengthMinutes: Number(localStorage.getItem("tagify:minTrackLengthMinutes") || "5"),
     rekordboxXmlPath: localStorage.getItem("tagify:rekordboxXmlPath") || "",
   });
-
-  const [matchPage, setMatchPage] = useState(1);
-  const [autoMatchPage, setAutoMatchPage] = useState(1);
-  const [skippedPage, setSkippedPage] = useState(1);
-  const itemsPerPage = 20;
-
-  const getPagedItems = <T,>(items: T[], page: number, perPage: number): T[] => {
-    const startIndex = (page - 1) * perPage;
-    return items.slice(startIndex, startIndex + perPage);
-  };
 
   const [analysisResults, setAnalysisResults] = useState<AnalysisResultsFileMapping | null>(null);
   const [syncResponse, setSyncResponse] = useState<SyncResponse | null>(null);
@@ -1138,57 +1127,6 @@ const PythonActionsPanel: React.FC = () => {
         page: prev[section]?.page + 1 || 2,
       },
     }));
-  };
-
-  useEffect(() => {
-    // When the analysis results come in, show how many files were auto-matched
-    if (analysisResults && analysisResults.details && analysisResults.details.auto_matched_files) {
-      const autoMatchedCount = analysisResults.details.auto_matched_files.length;
-      if (autoMatchedCount > 0) {
-        Spicetify.showNotification(
-          `Auto-matched ${autoMatchedCount} files with high confidence!`,
-          false,
-          3000
-        );
-      }
-    }
-  }, [analysisResults]);
-
-  const handleSearch = async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults([]);
-      setShowSearchResults(false);
-      return;
-    }
-
-    setIsSearching(true);
-    try {
-      const response = await fetch(
-        `${settings.serverUrl}/api/tracks/search?query=${encodeURIComponent(
-          query
-        )}&type=matching&limit=20`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setSearchResults(data.results || []);
-        setShowSearchResults(true);
-      } else {
-        console.error("Search failed:", response.statusText);
-        setSearchResults([]);
-      }
-    } catch (error) {
-      console.error("Search error:", error);
-      setSearchResults([]);
-    } finally {
-      setIsSearching(false);
-    }
   };
 
   // Render the confirmation UI when needed
