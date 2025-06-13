@@ -90,16 +90,19 @@ const MissingTracksPanel: React.FC = () => {
     name?: string;
     artists?: string;
   }) => {
-    const trackId = track.id || getTrackIdFromUri(track.uri);
+    const uri = track.uri;
 
-    if (!trackId) {
-      Spicetify.showNotification("Cannot download: Invalid track ID", true);
+    if (!uri) {
+      Spicetify.showNotification("Cannot download: Invalid track URI", true);
       return;
     }
 
+    // Use URI as the key for tracking download state
+    const trackKey = uri;
+
     try {
-      setDownloadingTracks((prev) => new Set([...prev, trackId]));
-      setDownloadProgress({ current: 1, total: 1, currentTrackId: trackId });
+      setDownloadingTracks((prev) => new Set([...prev, trackKey]));
+      setDownloadProgress({ current: 1, total: 1, currentTrackId: trackKey });
 
       const response = await fetch(
         `${
@@ -111,7 +114,7 @@ const MissingTracksPanel: React.FC = () => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            track_id: trackId,
+            uri: uri,
             download_dir: localStorage.getItem("tagify:masterTracksDir") || "",
           }),
         }
@@ -121,15 +124,18 @@ const MissingTracksPanel: React.FC = () => {
 
       setDownloadResults((prev) => ({
         ...prev,
-        [trackId]: {
+        [trackKey]: {
           success: result.success,
           message: result.message || (result.success ? "Download completed" : "Download failed"),
         },
       }));
 
       if (result.success) {
-        Spicetify.showNotification(`Successfully downloaded: ${result.track_info}`);
-        loadData();
+        const statusMessage = result.mapping_created
+          ? `Successfully downloaded and mapped: ${result.track_info}`
+          : `Downloaded but mapping failed: ${result.track_info}`;
+        Spicetify.showNotification(statusMessage);
+        loadData(); // Refresh to show the new mapping
       } else {
         Spicetify.showNotification(`Download failed: ${result.message}`, true);
       }
@@ -137,7 +143,7 @@ const MissingTracksPanel: React.FC = () => {
       console.error("Error downloading track:", error);
       setDownloadResults((prev) => ({
         ...prev,
-        [trackId]: {
+        [trackKey]: {
           success: false,
           message: `Error: ${error}`,
         },
@@ -146,7 +152,7 @@ const MissingTracksPanel: React.FC = () => {
     } finally {
       setDownloadingTracks((prev) => {
         const newSet = new Set(prev);
-        newSet.delete(trackId);
+        newSet.delete(trackKey);
         return newSet;
       });
       setDownloadProgress({ current: 0, total: 0 });
@@ -160,10 +166,7 @@ const MissingTracksPanel: React.FC = () => {
       setBatchDownloading(true);
       setDownloadProgress({ current: 0, total: missingTracks.length });
 
-      // Extract track IDs from URIs
-      const trackIds = missingTracks
-        .map((track) => track.id || getTrackIdFromUri(track.uri))
-        .filter((id) => id !== null) as string[];
+      const uris = missingTracks.map((track) => track.uri).filter((uri) => uri) as string[];
 
       const response = await fetch(
         `${
@@ -175,7 +178,7 @@ const MissingTracksPanel: React.FC = () => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            track_ids: trackIds,
+            uris: uris,
             download_dir: localStorage.getItem("tagify:masterTracksDir") || "",
           }),
         }
@@ -192,21 +195,21 @@ const MissingTracksPanel: React.FC = () => {
         const newResults: Record<string, { success: boolean; message: string }> = {};
 
         result.successful_downloads.forEach((download: any) => {
-          newResults[download.track_id] = {
+          newResults[download.uri] = {
             success: true,
             message: "Download completed",
           };
         });
 
         result.failed_downloads.forEach((download: any) => {
-          newResults[download.track_id] = {
+          newResults[download.uri] = {
             success: false,
             message: download.error,
           };
         });
 
         setDownloadResults((prev) => ({ ...prev, ...newResults }));
-        loadData(); // Refresh the list
+        loadData(); // Refresh the list to show new mappings
       } else {
         Spicetify.showNotification(`Batch download failed: ${result.message}`, true);
       }
@@ -308,7 +311,7 @@ const MissingTracksPanel: React.FC = () => {
           {missingTracks.length > 0 ? (
             <div className={styles.tracksList}>
               {missingTracks.map((track) => {
-                const trackId = track.id || getTrackIdFromUri(track.uri);
+                const trackKey = track.uri;
                 return (
                   <div key={track.uri} className={styles.trackItem}>
                     <div className={styles.trackInfo}>
@@ -328,23 +331,24 @@ const MissingTracksPanel: React.FC = () => {
                       >
                         Play
                       </button>
-                      {trackId && (
+                      {/* Only show download button for regular Spotify tracks, not local files */}
+                      {track.uri.startsWith("spotify:track:") && (
                         <button
                           className={styles.downloadButton}
                           onClick={() => downloadTrack(track)}
-                          disabled={downloadingTracks.has(trackId)}
+                          disabled={downloadingTracks.has(trackKey)}
                           title="Download track using spotDL"
                         >
-                          {downloadingTracks.has(trackId) ? "Downloading..." : "Download"}
+                          {downloadingTracks.has(trackKey) ? "Downloading..." : "Download"}
                         </button>
                       )}
-                      {trackId && downloadResults[trackId] && (
+                      {downloadResults[trackKey] && (
                         <span
                           className={`${styles.downloadResult} ${
-                            downloadResults[trackId].success ? styles.success : styles.error
+                            downloadResults[trackKey].success ? styles.success : styles.error
                           }`}
                         >
-                          {downloadResults[trackId].success ? "✓" : "✗"}
+                          {downloadResults[trackKey].success ? "✓" : "✗"}
                         </span>
                       )}
                     </div>
