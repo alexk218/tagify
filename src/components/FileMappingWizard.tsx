@@ -211,6 +211,14 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
       }
 
       const result: AnalysisResultsFileMapping = await response.json();
+
+      // Sort auto-matched files by confidence (highest first)
+      if (result.details?.auto_matched_files) {
+        result.details.auto_matched_files.sort(
+          (a: any, b: any) => (b.confidence || 0) - (a.confidence || 0)
+        );
+      }
+
       onAutoMatchResultsChange(result);
 
       // Show notification about analysis completion

@@ -542,6 +542,7 @@ const PythonActionsPanel: React.FC = () => {
 
       // Map old action names to new API endpoints
       const endpointMap: Record<string, { url: string; method: string }> = {
+        "cleanup-stale-mappings": { url: "/api/tracks/cleanup-mappings", method: "POST" },
         "create-file-mappings": { url: "/api/tracks/mapping", method: "POST" },
         "sync-database": { url: "/api/sync/database", method: "POST" },
         "sync-to-master": { url: "/api/sync/master", method: "POST" },
@@ -2054,32 +2055,9 @@ const PythonActionsPanel: React.FC = () => {
               disabled={isLoading["validate-tracks"] || serverStatus !== "connected"}
             />
             <ActionButton
-              label="Generate rekordbox XML"
-              onClick={() => {
-                const tagData = JSON.parse(localStorage.getItem("tagify:tagData") || "{}");
-                const tracks = tagData.tracks || {};
-
-                const ratingData: Record<string, { rating: number; energy: number }> = {};
-                Object.entries(tracks).forEach(([key, value]) => {
-                  // Only include tracks that have ratings or energy values
-                  const trackData = value as any;
-                  if (trackData.rating || trackData.energy) {
-                    ratingData[key] = {
-                      rating: trackData.rating || 0,
-                      energy: trackData.energy || 0,
-                    };
-                  }
-                });
-
-                console.log("Prepared ratingData to send:", ratingData);
-                console.log("Number of tracks with ratings:", Object.keys(ratingData).length);
-
-                performAction("generate-rekordbox-xml", {
-                  rekordboxXmlPath: settings.rekordboxXmlPath,
-                  ratingData: ratingData,
-                });
-              }}
-              disabled={isLoading["generate-rekordbox-xml"] || serverStatus !== "connected"}
+              label="Clean Up Stale Mappings"
+              onClick={() => performAction("cleanup-stale-mappings")}
+              disabled={isLoading["cleanup-stale-mappings"] || serverStatus !== "connected"}
             />
           </div>
         </div>
