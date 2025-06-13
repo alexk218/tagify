@@ -3,11 +3,25 @@ import { useLocalStorage } from "../hooks/useLocalStorage";
 
 interface SpotifyTrack {
   id: string;
-  uri?: string;
+  uri: string;
   name: string;
   artists: string;
   album: string;
   added_at?: string;
+  is_local_file: boolean;
+  file_hash: string;
+  modified: string;
+}
+
+interface LocalTrackInfo {
+  path: string;
+  filename: string;
+  uri: string;
+  track_id: string | null;
+  size: number;
+  modified: number;
+  file_hash: string | null;
+  is_local_file: boolean;
 }
 
 // Interface for our database results
@@ -18,14 +32,13 @@ interface DirectCompareResult {
   missing_tracks: SpotifyTrack[];
   local_tracks: {
     count: number;
-    tracks: any[];
+    tracks: LocalTrackInfo[];
   };
-  music_directory: string;
-  master_playlist_id: string;
+  master_tracks_directory: string;
+  mapping_method: string;
   message?: string;
 }
 
-// Custom hook for missing tracks functionality
 export function useMissingTracks() {
   const [cachedResults, setCachedResults] = useLocalStorage<{
     masterTracks: SpotifyTrack[];
@@ -38,11 +51,13 @@ export function useMissingTracks() {
     localTracksCount: 0,
     lastUpdated: null,
   });
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [masterTracks, setMasterTracks] = useState<SpotifyTrack[]>(cachedResults.masterTracks);
   const [missingTracks, setMissingTracks] = useState<SpotifyTrack[]>(cachedResults.missingTracks);
   const [localTracksCount, setLocalTracksCount] = useState(cachedResults.localTracksCount);
+
   const [serverUrl, setServerUrl] = useLocalStorage<string>(
     "tagify:localServerUrl",
     "http://localhost:8765"
@@ -57,16 +72,11 @@ export function useMissingTracks() {
     }
 
     try {
-      // Get the master playlist ID from localStorage
-      const playlistId = localStorage.getItem("tagify:masterPlaylistId");
       const masterTracksDir = localStorage.getItem("tagify:masterTracksDir");
-
-      // Sanitize the server URL
       const sanitizedUrl = serverUrl.replace(/^["'](.*)["']$/, "$1");
 
       // Build the query URL with parameters
       const queryUrl = new URL(`${sanitizedUrl}/api/tracks/compare`);
-      if (playlistId) queryUrl.searchParams.append("master_playlist_id", playlistId);
       if (masterTracksDir) queryUrl.searchParams.append("master_tracks_dir", masterTracksDir);
 
       // Make the API request
@@ -92,14 +102,9 @@ export function useMissingTracks() {
           lastUpdated: data.database_time,
         });
 
-        // Store the master playlist ID if it was provided
-        if (data.master_playlist_id && !playlistId) {
-          localStorage.setItem("tagify:masterPlaylistId", data.master_playlist_id);
-        }
-
         // Store the music directory if it was provided
-        if (data.music_directory && !masterTracksDir) {
-          localStorage.setItem("tagify:masterTracksDir", data.music_directory);
+        if (data.master_tracks_directory && !masterTracksDir) {
+          localStorage.setItem("tagify:masterTracksDir", data.master_tracks_directory);
         }
       } else {
         throw new Error(data.message || "Unknown error from server");
@@ -144,7 +149,7 @@ export function useMissingTracks() {
       const playlistId = playlistResponse.id;
 
       // Add tracks in batches
-      const trackUris = missingTracks.map((track) => `spotify:track:${track.id}`);
+      const trackUris = missingTracks.map((track) => track.uri).filter((uri) => uri); // Filter out any undefined URIs
 
       for (let i = 0; i < trackUris.length; i += 100) {
         const batch = trackUris.slice(i, i + 100);

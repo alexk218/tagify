@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import styles from "./PythonActionsPanel.module.css";
+import "../styles/globals.css";
 
 interface Match {
   track_id: string;
@@ -632,7 +633,7 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
                 Auto-Matched Files ({getNonRejectedAutoMatches().length} of{" "}
                 {autoMatchResults.details.auto_matched_files.length})
                 {rejectedAutoMatches.length > 0 && (
-                  <span className={styles.rejectedCount}>
+                  <span>
                     {" "}
                     - {rejectedAutoMatches.length} rejected
                   </span>
@@ -647,7 +648,7 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
               {getNonRejectedAutoMatches().length === 0 && rejectedAutoMatches.length > 0 && (
                 <div className={styles.allRejectedWarning}>
                   <p>⚠️ All auto-matched files have been rejected for manual matching.</p>
-                  <button className={styles.clearRejectionsButton} onClick={handleClearRejections}>
+                  <button className="btn" onClick={handleClearRejections}>
                     Clear All Rejections
                   </button>
                 </div>

@@ -31,7 +31,6 @@ const MissingTracksPanel: React.FC = () => {
   useCustomEvents({
     eventName: "tagify:toggleMissingTracks",
     handler: () => {
-      // Just using this to ensure the component gets mounted/unmounted correctly
       console.log("Toggle event received in MissingTracksPanel");
     },
     dependencies: [],
@@ -39,25 +38,29 @@ const MissingTracksPanel: React.FC = () => {
 
   // Update localStorage flag when component mounts
   useEffect(() => {
-    // Save that MissingTracksPanel is active
     localStorage.setItem("tagify:activePanel", "missingTracks");
-
-    // Clean up function
     return () => {
-      // We don't clear this when unmounting, allowing it to persist
+      // Clean up function - we don't clear this when unmounting
     };
   }, []);
 
-  // Play a track
-  const playTrack = async (trackId: string) => {
+  const playTrack = async (track: { uri: string; id?: string; name?: string }) => {
     try {
-      const uri = `spotify:track:${trackId}`;
+      const uri = track.uri;
       await Spicetify.Player.playUri(uri);
       Spicetify.showNotification(`Playing track`);
     } catch (error) {
       console.error("Error playing track:", error);
       Spicetify.showNotification("Failed to play track", true);
     }
+  };
+
+  // Extract track ID from URI for download functionality
+  const getTrackIdFromUri = (uri: string): string | null => {
+    if (uri.startsWith("spotify:track:")) {
+      return uri.split(":")[2];
+    }
+    return null;
   };
 
   // Format a date for display
@@ -81,11 +84,21 @@ const MissingTracksPanel: React.FC = () => {
     return date.toLocaleString();
   };
 
-  const downloadTrack = async (trackId: string) => {
+  const downloadTrack = async (track: {
+    uri: string;
+    id?: string;
+    name?: string;
+    artists?: string;
+  }) => {
+    const trackId = track.id || getTrackIdFromUri(track.uri);
+
+    if (!trackId) {
+      Spicetify.showNotification("Cannot download: Invalid track ID", true);
+      return;
+    }
+
     try {
       setDownloadingTracks((prev) => new Set([...prev, trackId]));
-
-      // Set individual progress
       setDownloadProgress({ current: 1, total: 1, currentTrackId: trackId });
 
       const response = await fetch(
@@ -147,7 +160,10 @@ const MissingTracksPanel: React.FC = () => {
       setBatchDownloading(true);
       setDownloadProgress({ current: 0, total: missingTracks.length });
 
-      const trackIds = missingTracks.map((track) => track.id);
+      // Extract track IDs from URIs
+      const trackIds = missingTracks
+        .map((track) => track.id || getTrackIdFromUri(track.uri))
+        .filter((id) => id !== null) as string[];
 
       const response = await fetch(
         `${
@@ -291,45 +307,50 @@ const MissingTracksPanel: React.FC = () => {
 
           {missingTracks.length > 0 ? (
             <div className={styles.tracksList}>
-              {missingTracks.map((track) => (
-                <div key={track.id} className={styles.trackItem}>
-                  <div className={styles.trackInfo}>
-                    <div className={styles.trackName}>{track.name}</div>
-                    <div className={styles.trackArtist}>{track.artists}</div>
-                    {track.added_at && (
-                      <div className={styles.trackDate}>
-                        Added: {new Date(track.added_at).toLocaleDateString()}
-                      </div>
-                    )}
-                  </div>
-                  <div className={styles.trackActions}>
-                    <button
-                      className={styles.playButton}
-                      onClick={() => playTrack(track.id)}
-                      title="Play track"
-                    >
-                      Play
-                    </button>
-                    <button
-                      className={styles.downloadButton}
-                      onClick={() => downloadTrack(track.id)}
-                      disabled={downloadingTracks.has(track.id)}
-                      title="Download track using spotDL"
-                    >
-                      {downloadingTracks.has(track.id) ? "Downloading..." : "Download"}
-                    </button>
-                    {downloadResults[track.id] && (
-                      <span
-                        className={`${styles.downloadResult} ${
-                          downloadResults[track.id].success ? styles.success : styles.error
-                        }`}
+              {missingTracks.map((track) => {
+                const trackId = track.id || getTrackIdFromUri(track.uri);
+                return (
+                  <div key={track.uri} className={styles.trackItem}>
+                    <div className={styles.trackInfo}>
+                      <div className={styles.trackName}>{track.name}</div>
+                      <div className={styles.trackArtist}>{track.artists}</div>
+                      {track.added_at && (
+                        <div className={styles.trackDate}>
+                          Added: {new Date(track.added_at).toLocaleDateString()}
+                        </div>
+                      )}
+                    </div>
+                    <div className={styles.trackActions}>
+                      <button
+                        className={styles.playButton}
+                        onClick={() => playTrack(track)}
+                        title="Play track"
                       >
-                        {downloadResults[track.id].success ? "✓" : "✗"}
-                      </span>
-                    )}
+                        Play
+                      </button>
+                      {trackId && (
+                        <button
+                          className={styles.downloadButton}
+                          onClick={() => downloadTrack(track)}
+                          disabled={downloadingTracks.has(trackId)}
+                          title="Download track using spotDL"
+                        >
+                          {downloadingTracks.has(trackId) ? "Downloading..." : "Download"}
+                        </button>
+                      )}
+                      {trackId && downloadResults[trackId] && (
+                        <span
+                          className={`${styles.downloadResult} ${
+                            downloadResults[trackId].success ? styles.success : styles.error
+                          }`}
+                        >
+                          {downloadResults[trackId].success ? "✓" : "✗"}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className={styles.noMissingTracks}>
