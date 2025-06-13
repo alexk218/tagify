@@ -37,4 +37,11 @@ export default defineConfig([
       "@typescript-eslint/no-unused-vars": "warn",
     },
   },
+
+  {
+    files: ["**/*.{ts,tsx}"],
+    rules: {
+      "react/prop-types": "off",
+    },
+  },
 ]);
