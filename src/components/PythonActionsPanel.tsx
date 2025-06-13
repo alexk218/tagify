@@ -1053,6 +1053,7 @@ const PythonActionsPanel: React.FC = () => {
         queryParams = new URLSearchParams({
           masterTracksDir: settings.masterTracksDir,
           playlistsDir: settings.playlistsDir,
+          masterPlaylistId: settings.masterPlaylistId,
         });
       }
 
@@ -2265,6 +2266,7 @@ const PythonActionsPanel: React.FC = () => {
         serverUrl={settings.serverUrl}
         masterTracksDir={settings.masterTracksDir}
         playlistsDir={settings.playlistsDir}
+        masterPlaylistId={settings.masterPlaylistId}
         minTrackLengthMinutes={settings.minTrackLengthMinutes}
         validationType={validationType}
         cachedData={validationResults[validationType]}

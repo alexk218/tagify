@@ -55,6 +55,15 @@ interface TrackValidationResult {
   duplicate_track_ids: Record<string, DuplicateTrackData>;
 }
 
+interface TrackIssue {
+  uri: string;
+  title?: string;
+  artists?: string;
+  album?: string;
+  reason?: string;
+  expected_path?: string;
+}
+
 interface PlaylistAnalysisItem {
   name: string;
   id: string;
@@ -63,12 +72,12 @@ interface PlaylistAnalysisItem {
   total_associations: number;
   tracks_with_local_files: number;
   m3u_track_count: number;
-  tracks_missing_from_m3u: any[];
-  unexpected_tracks_in_m3u: any[];
+  tracks_missing_from_m3u: TrackIssue[];
+  unexpected_tracks_in_m3u: TrackIssue[];
   total_discrepancy: number;
   identified_discrepancy: number;
   unidentified_discrepancy: number;
-  not_downloaded_tracks: any[];
+  not_downloaded_tracks: TrackIssue[];
   location: string;
 }
 
@@ -157,6 +166,7 @@ interface ValidationPanelProps {
   serverUrl: string;
   masterTracksDir: string;
   playlistsDir: string;
+  masterPlaylistId: string;
   minTrackLengthMinutes: number;
   validationType?: "track" | "playlist" | "short-tracks";
   cachedData?: any | null;
@@ -168,6 +178,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   serverUrl,
   masterTracksDir,
   playlistsDir,
+  masterPlaylistId,
   minTrackLengthMinutes,
   validationType = "track",
   cachedData = null,
@@ -520,7 +531,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         }
       } else {
         const queryParams = new URLSearchParams({
-          masterTracksDir: masterTracksDir,
+          masterPlaylistId: masterPlaylistId,
           playlistsDir: playlistsDir,
         });
 
@@ -1202,9 +1213,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
       if (response.ok) {
         const data = await response.json();
-        Spicetify.showNotification(
-          `${data.playlists_updated} playlists regenerated successfully`
-        );
+        Spicetify.showNotification(`${data.playlists_updated} playlists regenerated successfully`);
         // Refresh playlist validation
         validatePlaylists();
         if (currentView === "playlist-structure" && onRefresh) {
@@ -1234,16 +1243,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       .forEach((playlist) => {
         // Process missing tracks
         playlist.tracks_missing_from_m3u.forEach((track) => {
-          const trackKey = `${track}`;
+          const trackKey = track.uri;
           if (!trackIssuesMap.has(trackKey)) {
             trackIssuesMap.set(trackKey, {
-              id: track.id,
-              title: track.title,
-              artists: track.artists,
+              id: track.uri,
+              title: track.title || "Unknown Title",
+              artists: track.artists || "Unknown Artist",
               album: track.album,
               playlistsCount: 0,
               playlistNames: [],
-              isLocal: track.is_local || false,
+              isLocal: track.uri?.startsWith("spotify:local:") || false,
               notDownloaded: false,
               missingFromM3u: true,
               unexpectedInM3u: false,
@@ -1260,16 +1269,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
         // Process unexpected tracks
         playlist.unexpected_tracks_in_m3u.forEach((track) => {
-          const trackKey = `${track.id}`;
+          const trackKey = track.uri;
           if (!trackIssuesMap.has(trackKey)) {
             trackIssuesMap.set(trackKey, {
-              id: track.id,
-              title: track.title,
-              artists: track.artists,
+              id: track.uri,
+              title: track.title || "Unknown Title",
+              artists: track.artists || "Unknown Artist",
               album: track.album,
               playlistsCount: 0,
               playlistNames: [],
-              isLocal: track.is_local || false,
+              isLocal: track.uri?.startsWith("spotify:local:") || false,
               notDownloaded: false,
               missingFromM3u: false,
               unexpectedInM3u: true,
@@ -1286,16 +1295,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
         // Process not downloaded tracks
         playlist.not_downloaded_tracks?.forEach((track) => {
-          const trackKey = `${track.id}`;
+          const trackKey = track.uri;
           if (!trackIssuesMap.has(trackKey)) {
             trackIssuesMap.set(trackKey, {
-              id: track.id,
-              title: track.title,
-              artists: track.artists,
+              id: track.uri,
+              title: track.title || "Unknown Title",
+              artists: track.artists || "Unknown Artist",
               album: track.album,
               playlistsCount: 0,
               playlistNames: [],
-              isLocal: track.is_local || false,
+              isLocal: track.uri?.startsWith("spotify:local:") || false,
               notDownloaded: true,
               missingFromM3u: false,
               unexpectedInM3u: false,
@@ -1706,43 +1715,43 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
 
       if (playlist.tracks_missing_from_m3u?.length > 0) {
         details.push(`Missing from M3U (${playlist.tracks_missing_from_m3u.length}):`);
-        playlist.tracks_missing_from_m3u.slice(0, 5).forEach((track) => {
-          details.push(`  - ${track.uri}`);
+        playlist.tracks_missing_from_m3u.forEach((track) => {
+          // Display title and artists instead of just URI
+          const trackDisplay =
+            track.title && track.artists ? `${track.artists} - ${track.title}` : track.uri;
+          details.push(`  - ${trackDisplay}`);
         });
-        if (playlist.tracks_missing_from_m3u.length > 5) {
-          details.push(`  ... and ${playlist.tracks_missing_from_m3u.length - 5} more`);
-        }
         details.push("");
       }
 
       if (playlist.unexpected_tracks_in_m3u?.length > 0) {
         details.push(`Unexpected in M3U (${playlist.unexpected_tracks_in_m3u.length}):`);
-        playlist.unexpected_tracks_in_m3u.slice(0, 5).forEach((track) => {
-          details.push(`  - ${track.uri}`);
+        playlist.unexpected_tracks_in_m3u.forEach((track) => {
+          // Display title and artists
+          const trackDisplay =
+            track.title && track.artists ? `${track.artists} - ${track.title}` : track.uri;
+          details.push(`  - ${trackDisplay}`);
         });
-        if (playlist.unexpected_tracks_in_m3u.length > 5) {
-          details.push(`  ... and ${playlist.unexpected_tracks_in_m3u.length - 5} more`);
-        }
         details.push("");
       }
 
       if (playlist.not_downloaded_tracks?.length > 0) {
         details.push(`Not downloaded (${playlist.not_downloaded_tracks.length}):`);
-        playlist.not_downloaded_tracks.slice(0, 5).forEach((track) => {
-          details.push(
-            `  - ${track.uri} (${
-              track.reason === "no_mapping" ? "No file mapping" : "File missing"
-            })`
-          );
+        playlist.not_downloaded_tracks.forEach((track) => {
+          // Display title and artists instead of just URI
+          const trackDisplay =
+            track.title && track.artists ? `${track.artists} - ${track.title}` : track.uri;
+          const reasonText = track.reason === "no_mapping" ? "No file mapping" : "File missing";
+          details.push(`  - ${trackDisplay} (${reasonText})`);
         });
-        if (playlist.not_downloaded_tracks.length > 5) {
-          details.push(`  ... and ${playlist.not_downloaded_tracks.length - 5} more`);
-        }
+        details.push("");
       }
 
-      // Show details in a proper modal/dialog instead of alert
-      console.log(details.join("\n"));
-      alert(details.join("\n")); // Replace with a proper modal component later
+      Spicetify.PopupModal.display({
+        title: "Playlist Details",
+        content: details.join("\n"),
+        isLarge: true,
+      });
     };
 
     return (
@@ -3378,7 +3387,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                               </div>
                             </div>
 
-                            {/* Show URI-based discrepancy details */}
+                            {/* Show track-based discrepancy details with titles and artists */}
                             {(playlist.tracks_missing_from_m3u?.length > 0 ||
                               playlist.unexpected_tracks_in_m3u?.length > 0 ||
                               playlist.not_downloaded_tracks?.length > 0) && (
@@ -3390,22 +3399,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                       {playlist.tracks_missing_from_m3u.length} tracks
                                     </span>
                                     <div className={styles.issueDetails}>
-                                      {playlist.tracks_missing_from_m3u
-                                        .slice(0, 3)
-                                        .map((track, i) => (
-                                          <div
-                                            key={i}
-                                            className={styles.trackUri}
-                                            title={track.uri}
-                                          >
-                                            {track.uri}
-                                          </div>
-                                        ))}
-                                      {playlist.tracks_missing_from_m3u.length > 3 && (
-                                        <div className={styles.moreItems}>
-                                          +{playlist.tracks_missing_from_m3u.length - 3} more
+                                      {playlist.tracks_missing_from_m3u.map((track, i) => (
+                                        <div key={i} className={styles.trackInfo} title={track.uri}>
+                                          {track.title && track.artists
+                                            ? `${track.artists} - ${track.title}`
+                                            : track.uri}
                                         </div>
-                                      )}
+                                      ))}
                                     </div>
                                   </div>
                                 )}
@@ -3417,22 +3417,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                       {playlist.unexpected_tracks_in_m3u.length} tracks
                                     </span>
                                     <div className={styles.issueDetails}>
-                                      {playlist.unexpected_tracks_in_m3u
-                                        .slice(0, 3)
-                                        .map((track, i) => (
-                                          <div
-                                            key={i}
-                                            className={styles.trackUri}
-                                            title={track.uri}
-                                          >
-                                            {track.uri}
-                                          </div>
-                                        ))}
-                                      {playlist.unexpected_tracks_in_m3u.length > 3 && (
-                                        <div className={styles.moreItems}>
-                                          +{playlist.unexpected_tracks_in_m3u.length - 3} more
+                                      {playlist.unexpected_tracks_in_m3u.map((track, i) => (
+                                        <div key={i} className={styles.trackInfo} title={track.uri}>
+                                          {track.title && track.artists
+                                            ? `${track.artists} - ${track.title}`
+                                            : track.uri}
                                         </div>
-                                      )}
+                                      ))}
                                     </div>
                                   </div>
                                 )}
@@ -3444,25 +3435,20 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                       {playlist.not_downloaded_tracks.length} tracks
                                     </span>
                                     <div className={styles.issueDetails}>
-                                      {playlist.not_downloaded_tracks
-                                        .slice(0, 3)
-                                        .map((track, i) => (
-                                          <div key={i} className={styles.trackIssue}>
-                                            <div className={styles.trackUri} title={track.uri}>
-                                              {track.uri}
-                                            </div>
-                                            <div className={styles.trackReason}>
-                                              {track.reason === "file_missing"
-                                                ? "File Missing"
-                                                : "No File Mapping"}
-                                            </div>
+                                      {playlist.not_downloaded_tracks.map((track, i) => (
+                                        <div key={i} className={styles.trackIssue}>
+                                          <div className={styles.trackInfo} title={track.uri}>
+                                            {track.title && track.artists
+                                              ? `${track.artists} - ${track.title}`
+                                              : track.uri}
                                           </div>
-                                        ))}
-                                      {playlist.not_downloaded_tracks.length > 3 && (
-                                        <div className={styles.moreItems}>
-                                          +{playlist.not_downloaded_tracks.length - 3} more
+                                          <div className={styles.trackReason}>
+                                            {track.reason === "file_missing"
+                                              ? "File Missing"
+                                              : "No File Mapping"}
+                                          </div>
                                         </div>
-                                      )}
+                                      ))}
                                     </div>
                                   </div>
                                 )}
