@@ -55,23 +55,21 @@ interface TrackValidationResult {
   duplicate_track_ids: Record<string, DuplicateTrackData>;
 }
 
-interface PlaylistIssue {
-  unidentified_discrepancy: number;
-  tracks_with_local_files: number;
-  total_discrepancy: number;
-  total_associations: number;
+interface PlaylistAnalysisItem {
   name: string;
   id: string;
   has_m3u: boolean;
   needs_update: boolean;
-  expected_track_count: number;
+  total_associations: number;
+  tracks_with_local_files: number;
   m3u_track_count: number;
   tracks_missing_from_m3u: any[];
   unexpected_tracks_in_m3u: any[];
-  expected_with_local_files: number;
-  count_discrepancy: number;
+  total_discrepancy: number;
+  identified_discrepancy: number;
+  unidentified_discrepancy: number;
   not_downloaded_tracks: any[];
-  location?: string;
+  location: string;
 }
 
 interface PlaylistValidationResult {
@@ -81,7 +79,7 @@ interface PlaylistValidationResult {
     playlists_needing_update: number;
     missing_m3u_files: number;
   };
-  playlist_analysis: PlaylistIssue[];
+  playlist_analysis: PlaylistAnalysisItem[];
 }
 
 interface SearchResult {
@@ -1205,7 +1203,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       if (response.ok) {
         const data = await response.json();
         Spicetify.showNotification(
-          `${data.stats.playlists_updated} playlists regenerated successfully`
+          `${data.playlists_updated} playlists regenerated successfully`
         );
         // Refresh playlist validation
         validatePlaylists();
@@ -1236,7 +1234,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       .forEach((playlist) => {
         // Process missing tracks
         playlist.tracks_missing_from_m3u.forEach((track) => {
-          const trackKey = `${track.id}`;
+          const trackKey = `${track}`;
           if (!trackIssuesMap.has(trackKey)) {
             trackIssuesMap.set(trackKey, {
               id: track.id,
@@ -1429,41 +1427,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     }
   };
 
-  // TODO: remove this and all references -> replace with removeFileMapping
-  const removeTrackId = async (filePath: string) => {
-    try {
-      const response = await fetch(`${serverUrl}/api/tracks/metadata`, {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          file_path: filePath,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          Spicetify.showNotification("TrackId removed successfully");
-          // Refresh validation after removal
-          setSelectedMismatch(null);
-          setPossibleMatches([]);
-          validateTrackMetadata();
-        } else {
-          Spicetify.showNotification(`Error: ${data.message}`, true);
-        }
-      } else {
-        const error = await response.json();
-        console.error("Error removing track ID:", error);
-        Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
-      }
-    } catch (error) {
-      console.error("Error removing track ID:", error);
-      Spicetify.showNotification("Error removing track ID", true);
-    }
-  };
-
   const getFilteredMismatchesByConfidence = (
     mismatches: PotentialMismatch[],
     threshold: number
@@ -1548,6 +1511,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     });
   };
 
+  // TODO: use this function
   const deleteFile = async (filePath: string, fileName: string) => {
     const confirmed = await confirmDialog(`Are you sure you want to delete ${fileName}?`);
 
@@ -1677,7 +1641,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const AllPlaylistsView = () => {
     const allPlaylists = getFilteredPlaylists();
 
-    const getPlaylistStatusIcon = (playlist: PlaylistIssue) => {
+    const getPlaylistStatusIcon = (playlist: PlaylistAnalysisItem) => {
       if (!playlist.has_m3u) {
         return (
           <span className={styles.statusMissing} title="Missing M3U file">
@@ -1699,7 +1663,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       );
     };
 
-    const getPlaylistSummary = (playlist: PlaylistIssue) => {
+    const getPlaylistSummary = (playlist: PlaylistAnalysisItem) => {
       if (!playlist.has_m3u) {
         return "Missing M3U file";
       }
@@ -1708,17 +1672,77 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       }
 
       const issues = [];
-      if (playlist.tracks_missing_from_m3u.length > 0) {
-        issues.push(`${playlist.tracks_missing_from_m3u.length} missing`);
+      if (playlist.tracks_missing_from_m3u?.length > 0) {
+        issues.push(`${playlist.tracks_missing_from_m3u.length} missing from M3U`);
       }
-      if (playlist.unexpected_tracks_in_m3u.length > 0) {
-        issues.push(`${playlist.unexpected_tracks_in_m3u.length} unexpected`);
+      if (playlist.unexpected_tracks_in_m3u?.length > 0) {
+        issues.push(`${playlist.unexpected_tracks_in_m3u.length} unexpected in M3U`);
       }
       if (playlist.not_downloaded_tracks?.length > 0) {
-        issues.push(`${playlist.not_downloaded_tracks.length} not downloaded`);
+        const noMapping = playlist.not_downloaded_tracks.filter(
+          (t) => t.reason === "no_mapping"
+        ).length;
+        const fileMissing = playlist.not_downloaded_tracks.filter(
+          (t) => t.reason === "file_missing"
+        ).length;
+
+        if (noMapping > 0) issues.push(`${noMapping} no file mapping`);
+        if (fileMissing > 0) issues.push(`${fileMissing} files missing`);
       }
 
-      return issues.join(", ");
+      return issues.join(", ") || "Issues detected";
+    };
+
+    const showPlaylistDetails = (playlist: PlaylistAnalysisItem) => {
+      const details = [
+        `Playlist: ${playlist.name}`,
+        `Location: ${playlist.location}`,
+        `Database tracks: ${playlist.total_associations}`,
+        `Tracks with local files: ${playlist.tracks_with_local_files}`,
+        `Tracks in M3U: ${playlist.m3u_track_count}`,
+        ``,
+        `Issues:`,
+      ];
+
+      if (playlist.tracks_missing_from_m3u?.length > 0) {
+        details.push(`Missing from M3U (${playlist.tracks_missing_from_m3u.length}):`);
+        playlist.tracks_missing_from_m3u.slice(0, 5).forEach((track) => {
+          details.push(`  - ${track.uri}`);
+        });
+        if (playlist.tracks_missing_from_m3u.length > 5) {
+          details.push(`  ... and ${playlist.tracks_missing_from_m3u.length - 5} more`);
+        }
+        details.push("");
+      }
+
+      if (playlist.unexpected_tracks_in_m3u?.length > 0) {
+        details.push(`Unexpected in M3U (${playlist.unexpected_tracks_in_m3u.length}):`);
+        playlist.unexpected_tracks_in_m3u.slice(0, 5).forEach((track) => {
+          details.push(`  - ${track.uri}`);
+        });
+        if (playlist.unexpected_tracks_in_m3u.length > 5) {
+          details.push(`  ... and ${playlist.unexpected_tracks_in_m3u.length - 5} more`);
+        }
+        details.push("");
+      }
+
+      if (playlist.not_downloaded_tracks?.length > 0) {
+        details.push(`Not downloaded (${playlist.not_downloaded_tracks.length}):`);
+        playlist.not_downloaded_tracks.slice(0, 5).forEach((track) => {
+          details.push(
+            `  - ${track.uri} (${
+              track.reason === "no_mapping" ? "No file mapping" : "File missing"
+            })`
+          );
+        });
+        if (playlist.not_downloaded_tracks.length > 5) {
+          details.push(`  ... and ${playlist.not_downloaded_tracks.length - 5} more`);
+        }
+      }
+
+      // Show details in a proper modal/dialog instead of alert
+      console.log(details.join("\n"));
+      alert(details.join("\n")); // Replace with a proper modal component later
     };
 
     return (
@@ -1735,19 +1759,26 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                       <span className={styles.playlistLocation}>({playlist.location})</span>
                     )}
                   </div>
-                  <div className={styles.playlistSummary}>
-                    {getPlaylistSummary(playlist)}
-                    <span className={styles.trackCounts}>
-                      • DB: {playlist.total_associations}• Local: {playlist.tracks_with_local_files}
-                      {playlist.has_m3u && ` • M3U: ${playlist.m3u_track_count}`}
-                    </span>
+                  <div className={styles.playlistSummary}>{getPlaylistSummary(playlist)}</div>
+                  <div className={styles.playlistStats}>
+                    <span>DB: {playlist.total_associations}</span>
+                    <span>Local: {playlist.tracks_with_local_files}</span>
+                    <span>M3U: {playlist.m3u_track_count}</span>
                   </div>
                 </div>
                 <div className={styles.playlistActions}>
                   <button
+                    className={styles.detailsButton}
+                    onClick={() => showPlaylistDetails(playlist)}
+                    title="Show detailed information"
+                  >
+                    Details
+                  </button>
+                  <button
                     className={styles.regenerateButton}
                     onClick={() => regeneratePlaylist(playlist.id)}
-                    disabled={!playlist.has_m3u && playlist.total_associations === 0}
+                    disabled={isLoading}
+                    title="Regenerate this playlist"
                   >
                     Regenerate
                   </button>
@@ -3314,110 +3345,127 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                   <span className={styles.missing}>Missing M3U File</span>
                                 ) : (
                                   <span className={styles.mismatch}>
-                                    {playlist.tracks_missing_from_m3u.length} missing,{" "}
-                                    {playlist.unexpected_tracks_in_m3u.length} unexpected
+                                    {playlist.tracks_missing_from_m3u?.length || 0} missing,{" "}
+                                    {playlist.unexpected_tracks_in_m3u?.length || 0} unexpected
                                   </span>
                                 )}
                                 <button
                                   className={styles.regenerateButton}
                                   onClick={() => regeneratePlaylist(playlist.id)}
+                                  disabled={isLoading}
                                 >
                                   Regenerate
                                 </button>
                               </div>
                             </div>
 
-                            {playlist.has_m3u && (
-                              <div className={styles.playlistDetails}>
-                                <div className={styles.trackCounts}>
-                                  <div>Total tracks in database: {playlist.total_associations}</div>
-                                  <div>
-                                    Tracks with local files: {playlist.tracks_with_local_files}
-                                  </div>
-                                  <div>Current tracks in M3U: {playlist.m3u_track_count}</div>
+                            <div className={styles.playlistStats}>
+                              <div className={styles.statItem}>
+                                <span className={styles.statLabel}>Database Tracks:</span>
+                                <span className={styles.statValue}>
+                                  {playlist.total_associations}
+                                </span>
+                              </div>
+                              <div className={styles.statItem}>
+                                <span className={styles.statLabel}>With Local Files:</span>
+                                <span className={styles.statValue}>
+                                  {playlist.tracks_with_local_files}
+                                </span>
+                              </div>
+                              <div className={styles.statItem}>
+                                <span className={styles.statLabel}>In M3U:</span>
+                                <span className={styles.statValue}>{playlist.m3u_track_count}</span>
+                              </div>
+                            </div>
 
-                                  {playlist.total_discrepancy !== 0 && (
-                                    <div
-                                      className={`${styles.discrepancy} ${
-                                        Math.abs(playlist.total_discrepancy) > 0
-                                          ? styles.warning
-                                          : ""
-                                      }`}
-                                    >
-                                      <strong>Track Count Discrepancy:</strong>{" "}
-                                      {playlist.total_discrepancy > 0
-                                        ? `${playlist.total_discrepancy} more tracks in database than in M3U file`
-                                        : `${Math.abs(
-                                            playlist.total_discrepancy
-                                          )} more tracks in M3U file than in database`}
-                                    </div>
-                                  )}
-                                </div>
-
-                                {playlist.tracks_missing_from_m3u.length > 0 && (
-                                  <div className={styles.missingTracks}>
-                                    <h4>
-                                      Tracks missing from M3U (
-                                      {playlist.tracks_missing_from_m3u.length}):
-                                    </h4>
-                                    <ul>
+                            {/* Show URI-based discrepancy details */}
+                            {(playlist.tracks_missing_from_m3u?.length > 0 ||
+                              playlist.unexpected_tracks_in_m3u?.length > 0 ||
+                              playlist.not_downloaded_tracks?.length > 0) && (
+                              <div className={styles.playlistIssues}>
+                                {playlist.tracks_missing_from_m3u?.length > 0 && (
+                                  <div className={styles.issueItem}>
+                                    <span className={styles.issueLabel}>Missing from M3U:</span>
+                                    <span className={styles.issueValue}>
+                                      {playlist.tracks_missing_from_m3u.length} tracks
+                                    </span>
+                                    <div className={styles.issueDetails}>
                                       {playlist.tracks_missing_from_m3u
-                                        .slice(0, 5)
-                                        .map((track, idx) => (
-                                          <li key={idx}>
-                                            {track.artists} - {track.title}{" "}
-                                            {track.is_local ? "(Local File)" : ""}
-                                          </li>
+                                        .slice(0, 3)
+                                        .map((track, i) => (
+                                          <div
+                                            key={i}
+                                            className={styles.trackUri}
+                                            title={track.uri}
+                                          >
+                                            {track.uri}
+                                          </div>
                                         ))}
-                                      {playlist.tracks_missing_from_m3u.length > 5 && (
-                                        <li className={styles.moreItems}>
-                                          ...and {playlist.tracks_missing_from_m3u.length - 5} more
-                                        </li>
+                                      {playlist.tracks_missing_from_m3u.length > 3 && (
+                                        <div className={styles.moreItems}>
+                                          +{playlist.tracks_missing_from_m3u.length - 3} more
+                                        </div>
                                       )}
-                                    </ul>
+                                    </div>
                                   </div>
                                 )}
 
-                                {playlist.unexpected_tracks_in_m3u.length > 0 && (
-                                  <div className={styles.unexpectedTracks}>
-                                    <h4>
-                                      Unexpected tracks in M3U (
-                                      {playlist.unexpected_tracks_in_m3u.length}):
-                                    </h4>
-                                    <ul>
+                                {playlist.unexpected_tracks_in_m3u?.length > 0 && (
+                                  <div className={styles.issueItem}>
+                                    <span className={styles.issueLabel}>Unexpected in M3U:</span>
+                                    <span className={styles.issueValue}>
+                                      {playlist.unexpected_tracks_in_m3u.length} tracks
+                                    </span>
+                                    <div className={styles.issueDetails}>
                                       {playlist.unexpected_tracks_in_m3u
-                                        .slice(0, 5)
-                                        .map((track, idx) => (
-                                          <li key={idx}>
-                                            {track.artists} - {track.title}{" "}
-                                            {track.is_local ? "(Local File)" : ""}
-                                          </li>
+                                        .slice(0, 3)
+                                        .map((track, i) => (
+                                          <div
+                                            key={i}
+                                            className={styles.trackUri}
+                                            title={track.uri}
+                                          >
+                                            {track.uri}
+                                          </div>
                                         ))}
-                                      {playlist.unexpected_tracks_in_m3u.length > 5 && (
-                                        <li className={styles.moreItems}>
-                                          ...and {playlist.unexpected_tracks_in_m3u.length - 5} more
-                                        </li>
+                                      {playlist.unexpected_tracks_in_m3u.length > 3 && (
+                                        <div className={styles.moreItems}>
+                                          +{playlist.unexpected_tracks_in_m3u.length - 3} more
+                                        </div>
                                       )}
-                                    </ul>
+                                    </div>
                                   </div>
                                 )}
-                                {playlist.not_downloaded_tracks &&
-                                  playlist.not_downloaded_tracks.length > 0 && (
-                                    <div className={styles.notDownloadedTracks}>
-                                      <h4>
-                                        Tracks in database but not downloaded (
-                                        {playlist.not_downloaded_tracks.length}):
-                                      </h4>
-                                      <ul>
-                                        {playlist.not_downloaded_tracks.map((track, idx) => (
-                                          <li key={idx}>
-                                            {track.artists} - {track.title}{" "}
-                                            {track.is_local ? "(Local File)" : ""}
-                                          </li>
+
+                                {playlist.not_downloaded_tracks?.length > 0 && (
+                                  <div className={styles.issueItem}>
+                                    <span className={styles.issueLabel}>Not Downloaded:</span>
+                                    <span className={styles.issueValue}>
+                                      {playlist.not_downloaded_tracks.length} tracks
+                                    </span>
+                                    <div className={styles.issueDetails}>
+                                      {playlist.not_downloaded_tracks
+                                        .slice(0, 3)
+                                        .map((track, i) => (
+                                          <div key={i} className={styles.trackIssue}>
+                                            <div className={styles.trackUri} title={track.uri}>
+                                              {track.uri}
+                                            </div>
+                                            <div className={styles.trackReason}>
+                                              {track.reason === "file_missing"
+                                                ? "File Missing"
+                                                : "No File Mapping"}
+                                            </div>
+                                          </div>
                                         ))}
-                                      </ul>
+                                      {playlist.not_downloaded_tracks.length > 3 && (
+                                        <div className={styles.moreItems}>
+                                          +{playlist.not_downloaded_tracks.length - 3} more
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
