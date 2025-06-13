@@ -55,14 +55,6 @@ const MissingTracksPanel: React.FC = () => {
     }
   };
 
-  // Extract track ID from URI for download functionality
-  const getTrackIdFromUri = (uri: string): string | null => {
-    if (uri.startsWith("spotify:track:")) {
-      return uri.split(":")[2];
-    }
-    return null;
-  };
-
   // Format a date for display
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);

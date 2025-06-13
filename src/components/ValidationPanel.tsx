@@ -20,6 +20,8 @@ interface FileDetail {
   path: string;
   duration: number;
   duration_formatted: string;
+  file_size: number;
+  last_modified: string;
 }
 
 interface DuplicateTrackData {
@@ -540,6 +542,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     data: any;
   } | null>(null);
 
+  // TODO: figure this out...
   const createPlaylistFromExtendedTracks = async () => {
     if (tracksWithExtended.length === 0) {
       Spicetify.showNotification("No tracks with extended versions found", true);
@@ -558,7 +561,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       const tracksWithoutId = tracksWithExtended.filter((track) => !track.track_id);
 
       if (tracksWithoutId.length > 0) {
-        const extractResponse = await fetch(`${serverUrl}/api/validation/extract-track-ids`, {
+        const extractResponse = await fetch(`${serverUrl}/api/validation/extract-file-mappings`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1081,6 +1084,37 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     }
   };
 
+  const createFileMapping = async (filePath: string, uri: string, matchInfo: any) => {
+    try {
+      const response = await fetch(`${serverUrl}/api/validation/create-file-mapping`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ filePath, uri }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Refresh the validation data
+        Spicetify.showNotification(
+          `File mapping created: ${matchInfo.artist} - ${matchInfo.title}`
+        );
+        // Clear selection to show the updated list
+        setSelectedMismatch(null);
+        setPossibleMatches([]);
+        validateTrackMetadata();
+      } else {
+        Spicetify.showNotification(`Error: ${result.message}`, true);
+      }
+    } catch (error) {
+      console.error("Error creating file mapping:", error);
+      Spicetify.showNotification("Error creating file mapping", true);
+    }
+  };
+
+  // TODO: remove this and all references to it
   const correctTrackId = async (filePath: string, newTrackId: string) => {
     try {
       const response = await fetch(`${serverUrl}/api/tracks/metadata`, {
@@ -1364,6 +1398,65 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     Spicetify.showNotification("Track marked as correctly embedded");
   };
 
+  const removeFileMapping = async (filePath: string) => {
+    try {
+      const response = await fetch(`${serverUrl}/api/validation/remove-file-mapping`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ filePath }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Refresh the validation data
+        // onRefresh(true);
+        Spicetify.showNotification("File mapping removed successfully");
+        // Refresh validation after removal
+        // todo: make sure this is good. rename validateTrackMetadata + route
+        setSelectedMismatch(null);
+        setPossibleMatches([]);
+        validateTrackMetadata();
+      } else {
+        Spicetify.showNotification(`Error: ${result.message}`, true);
+      }
+    } catch (error) {
+      console.error("Error removing file mapping:", error);
+      Spicetify.showNotification("Error removing file mapping", true);
+    }
+  };
+
+  // TODO: just use removeFileMapping? and delete route for this?
+  const removeDuplicateMapping = async (filePath: string, uri: string) => {
+    try {
+      const response = await fetch(`${serverUrl}/api/validation/remove-duplicate-mapping`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ filePath, uri }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Refresh the validation data
+        Spicetify.showNotification("Duplicate mapping removed successfully");
+        setSelectedMismatch(null);
+        setPossibleMatches([]);
+        validateTrackMetadata();
+      } else {
+        Spicetify.showNotification(`Error: ${result.message}`, true);
+      }
+    } catch (error) {
+      console.error("Error removing duplicate mapping:", error);
+      Spicetify.showNotification("Error removing duplicate mapping", true);
+    }
+  };
+
+  // TODO: remove this and all references -> replace with removeFileMapping
   const removeTrackId = async (filePath: string) => {
     try {
       const response = await fetch(`${serverUrl}/api/tracks/metadata`, {
@@ -2352,12 +2445,12 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                 >
                   Potential Mismatches ({trackValidationResult?.summary.potential_mismatches || 0})
                 </button>
-                {/* MISSING TRACKID BUTTON */}
+                {/* MISSING MAPPING BUTTON */}
                 <button
                   className={`${styles.tab} ${currentSection === "missing" ? styles.active : ""}`}
                   onClick={() => {
                     setCurrentSection("missing");
-                    setSelectedDuplicateTrackId(null);
+                    setSelectedDuplicateTrackId(null); // TOOD: REMOVE or replace this
                     setSelectedMismatch(null);
 
                     // Select first item if available
@@ -2366,7 +2459,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     }
                   }}
                 >
-                  Missing TrackId ({filesMissingTrackId.length})
+                  Missing Mapping ({filesMissingTrackId.length})
                 </button>
                 {/* CONFIRMED TRACKS BUTTON */}
                 <button
@@ -2391,7 +2484,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                 >
                   Confirmed Tracks ({ignoredTrackPaths.size})
                 </button>
-                {/* DUPLICATE TRACKID BUTTON */}
+                {/* DUPLICATE MAPPINGS BUTTON */}
                 <button
                   className={`${styles.tab} ${
                     currentSection === "duplicates" ? styles.active : ""
@@ -2399,11 +2492,18 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   onClick={() => {
                     setCurrentSection("duplicates");
                     setSelectedMismatch(null);
-                    setSelectedDuplicateTrackId(Object.keys(getDuplicateTrackIds())[0] || null);
+                    setSelectedDuplicateTrackId(null);
+
+                    // Select first duplicate URI if available
+                    const duplicateUris = Object.keys(
+                      trackValidationResult?.duplicate_track_ids || {}
+                    );
+                    if (duplicateUris.length > 0) {
+                      setSelectedDuplicateTrackId(duplicateUris[0]);
+                    }
                   }}
-                  disabled={trackValidationResult?.summary.duplicate_track_ids === 0}
                 >
-                  Duplicate TrackIds ({trackValidationResult?.summary.duplicate_track_ids || 0})
+                  Duplicate Mappings ({trackValidationResult?.summary.duplicate_track_ids || 0})
                 </button>
                 {/* SEARCH TRACKS BUTTON */}
                 <button
@@ -2418,90 +2518,110 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                 </button>
               </div>
 
-              {selectedDuplicateTrackId || currentSection === "duplicates" ? (
-                // Show duplicate track IDs
+              {currentSection === "duplicates" ? (
+                // Show duplicate URI mappings
                 <div className={styles.duplicatesContainer}>
-                  <h3>Duplicate TrackIds</h3>
-                  {Object.keys(getDuplicateTrackIds()).length > 0 ? (
+                  <h3>Duplicate Mappings</h3>
+                  {Object.keys(trackValidationResult?.duplicate_track_ids || {}).length > 0 ? (
                     <div className={styles.splitView}>
                       <div className={styles.duplicatesList}>
-                        {Object.entries(getDuplicateTrackIds()).map(
-                          ([trackId, trackData], index) => (
+                        <h4>Tracks with Multiple File Mappings:</h4>
+                        {Object.entries(trackValidationResult?.duplicate_track_ids || {}).map(
+                          ([uri, duplicateInfo]) => (
                             <div
-                              key={index}
+                              key={uri}
                               className={`${styles.duplicateItem} ${
-                                selectedDuplicateTrackId === trackId ? styles.selected : ""
+                                selectedDuplicateTrackId === uri ? styles.selected : ""
                               }`}
-                              onClick={() => setSelectedDuplicateTrackId(trackId)}
+                              onClick={() => setSelectedDuplicateTrackId(uri)}
                             >
-                              <div className={styles.duplicateTrackId}>{trackId}</div>
-                              <div className={styles.duplicateTrackTitle}>
-                                {trackData.track_title}
+                              <div className={styles.duplicateHeader}>
+                                <strong>{duplicateInfo.track_title}</strong>
+                                <span className={styles.fileCount}>
+                                  ({duplicateInfo.files.length} files)
+                                </span>
                               </div>
-                              <div className={styles.duplicateCount}>
-                                {trackData.files.length} files
-                              </div>
+                              <div className={styles.duplicateUri}>URI: {uri}</div>
                             </div>
                           )
                         )}
                       </div>
 
                       <div className={styles.duplicateDetail}>
-                        {selectedDuplicateTrackId && (
-                          <>
-                            <h3>Files with TrackId: {selectedDuplicateTrackId}</h3>
-                            <h4>
-                              {getDuplicateTrackIds()[selectedDuplicateTrackId]?.track_title ||
-                                "Unknown Track"}
-                            </h4>
-                            <div className={styles.filesList}>
-                              {getDuplicateTrackIds()[selectedDuplicateTrackId]?.files.map(
-                                (file, index) => (
+                        {selectedDuplicateTrackId &&
+                          trackValidationResult?.duplicate_track_ids[selectedDuplicateTrackId] && (
+                            <>
+                              <h3>Files mapped to this track:</h3>
+                              <h4>
+                                {trackValidationResult.duplicate_track_ids[selectedDuplicateTrackId]
+                                  ?.track_title || "Unknown Track"}
+                              </h4>
+                              <div className={styles.duplicateUri}>
+                                <strong>URI:</strong> {selectedDuplicateTrackId}
+                              </div>
+                              <div className={styles.filesList}>
+                                {trackValidationResult.duplicate_track_ids[
+                                  selectedDuplicateTrackId
+                                ]?.files.map((file, index) => (
                                   <div key={index} className={styles.fileItem}>
                                     <div className={styles.fileInfo}>
-                                      <span className={styles.fileName}>{file.filename}</span>
-                                      <span
-                                        className={
-                                          file.duration < 5 * 60
-                                            ? styles.fileDurationShort
-                                            : styles.fileDuration
-                                        }
-                                      >
-                                        {file.duration_formatted}
-                                      </span>
+                                      <div className={styles.fileName}>{file.filename}</div>
+                                      <div className={styles.fileMeta}>
+                                        <span
+                                          className={
+                                            file.duration < 5 * 60
+                                              ? styles.fileDurationShort
+                                              : styles.fileDuration
+                                          }
+                                        >
+                                          {file.duration_formatted}
+                                        </span>
+                                        <span className={styles.fileSize}>
+                                          {file.file_size
+                                            ? `${(file.file_size / (1024 * 1024)).toFixed(1)}MB`
+                                            : "Unknown size"}
+                                        </span>
+                                        <span className={styles.fileModified}>
+                                          {file.last_modified
+                                            ? new Date(file.last_modified).toLocaleDateString()
+                                            : "Unknown date"}
+                                        </span>
+                                      </div>
+                                      <div className={styles.filePath}>{file.path}</div>
                                     </div>
                                     <button
-                                      className={styles.deleteButton}
-                                      onClick={() => deleteFile(file.path, file.filename)}
-                                      title="Delete file"
+                                      className={styles.removeButton}
+                                      onClick={() =>
+                                        removeDuplicateMapping(file.path, selectedDuplicateTrackId)
+                                      }
+                                      title="Remove this mapping"
                                     >
-                                      ×
+                                      Remove Mapping
                                     </button>
                                   </div>
-                                )
-                              )}
-                            </div>
-                            <div className={styles.duplicateWarning}>
-                              <p>
-                                Having multiple files with the same TrackId may cause inconsistent
-                                playlist behavior. Consider reassigning the correct TrackId to each
-                                file or delete duplicate files.
-                              </p>
-                            </div>
-                          </>
-                        )}
+                                ))}
+                              </div>
+                              <div className={styles.duplicateWarning}>
+                                <p>
+                                  Having multiple files mapped to the same Spotify track may cause
+                                  inconsistent playlist behavior. Consider removing duplicate
+                                  mappings or keeping only the best quality file.
+                                </p>
+                              </div>
+                            </>
+                          )}
                       </div>
                     </div>
                   ) : (
                     <div className={styles.noIssues}>
-                      No duplicate TrackIds found! Each TrackId is assigned to only one file.
+                      No duplicate mappings found! Each Spotify track is mapped to only one file.
                     </div>
                   )}
                 </div>
               ) : currentSection === "missing" ? (
-                // Missing TrackId section
+                // Missing Mapping section
                 <div className={styles.mismatchesContainer}>
-                  <h3>Files Missing TrackId</h3>
+                  <h3>Files Missing Mapping</h3>
 
                   {filesMissingTrackId.length > 0 ? (
                     <div className={styles.splitView}>
@@ -2563,10 +2683,10 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                   </div>
                                   <div>
                                     <strong>Reason:</strong>{" "}
-                                    {selectedMismatch.reason === "missing_track_id"
-                                      ? "No TrackId embedded"
+                                    {selectedMismatch.reason === "missing_mapping"
+                                      ? "No mapping found"
                                       : selectedMismatch.reason === "error_reading_tags"
-                                      ? "Error reading tags"
+                                      ? "Error reading file"
                                       : selectedMismatch.reason}
                                   </div>
                                   <div
@@ -2589,9 +2709,15 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                           <div className={styles.matchTitle}>
                                             {match.artist} - {match.title}
                                           </div>
+                                          <div className={styles.matchUri}>URI: {match.uri}</div>
                                           <div className={styles.matchTrackId}>
-                                            {match.track_id}
+                                            TrackId: {match.track_id}
                                           </div>
+                                          {match.album && (
+                                            <div className={styles.matchAlbum}>
+                                              Album: {match.album}
+                                            </div>
+                                          )}
                                           <div className={styles.matchConfidence}>
                                             Confidence: {(match.ratio * 100).toFixed(2)}%
                                           </div>
@@ -2599,13 +2725,14 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                         <button
                                           className={styles.applyButton}
                                           onClick={() =>
-                                            correctTrackId(
+                                            createFileMapping(
                                               selectedMismatch.full_path,
-                                              match.track_id
+                                              match.uri,
+                                              match
                                             )
                                           }
                                         >
-                                          Apply
+                                          Create Mapping
                                         </button>
                                       </div>
                                     ))}
@@ -2621,15 +2748,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                           </>
                         ) : (
                           <div className={styles.noSelection}>
-                            Select a file missing TrackId from the list to see options for adding a
-                            TrackId.
+                            Select a file missing mapping from the list to see options for creating
+                            a mapping.
                           </div>
                         )}
                       </div>
                     </div>
                   ) : (
                     <div className={styles.noIssues}>
-                      No files missing TrackId found! All files have a TrackId embedded.
+                      No files missing mapping found! All files have entries in the
+                      FileTrackMappings table.
                     </div>
                   )}
                 </div>
@@ -3033,7 +3161,9 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                     ) : currentSection === "missing" ? (
                                       <button
                                         className={styles.removeButton}
-                                        onClick={() => removeTrackId(selectedMismatch.full_path)}
+                                        onClick={() =>
+                                          removeFileMapping(selectedMismatch.full_path)
+                                        }
                                       >
                                         Remove TrackId
                                       </button>
