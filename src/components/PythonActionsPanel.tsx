@@ -556,8 +556,6 @@ const PythonActionsPanel: React.FC = () => {
         "direct-tracks-compare": { url: "/api/tracks/compare", method: "GET" },
         "fuzzy-match-track": { url: "/api/tracks/match", method: "POST" },
         "search-tracks": { url: "/api/tracks/search", method: "GET" },
-        "correct-track-id": { url: "/api/tracks/metadata", method: "PUT" },
-        "remove-track-id": { url: "/api/tracks/metadata", method: "DELETE" },
         "delete-file": { url: "/api/tracks", method: "DELETE" },
       };
 
