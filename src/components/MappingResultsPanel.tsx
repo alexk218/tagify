@@ -20,48 +20,29 @@ interface FileMappingResponse {
   failed_mappings: number;
   results: FileMappingResult[];
   total_processed: number;
-}
-
-interface FileToProcess {
-  file_path: string;
-  file_name: string;
-}
-
-interface AnalysisResultsFileMapping {
-  stage: string;
-  success: boolean;
-  message: string;
-  needs_confirmation: boolean;
-  requires_fuzzy_matching?: boolean;
-  requires_user_selection: boolean;
-  details: {
-    files_requiring_user_input: FileToProcess[];
-    auto_matched_files: any[];
-    total_files: number;
-    files_without_mappings: number;
-  };
+  pendingSelections?: any[];
 }
 
 interface MappingResultsPanelProps {
   mappingResults: FileMappingResponse | null;
   showMappingResults: boolean;
-  analysisResults: AnalysisResultsFileMapping | null;
-  onContinue: () => void;
   onFinish: () => void;
   onClose: () => void;
+  onConfirmChanges?: (selections: any[]) => Promise<void>;
 }
 
 const MappingResultsPanel: React.FC<MappingResultsPanelProps> = ({
   mappingResults,
   showMappingResults,
-  analysisResults,
-  onContinue,
   onFinish,
   onClose,
+  onConfirmChanges,
 }) => {
   const [successPage, setSuccessPage] = useState(1);
   const [failedPage, setFailedPage] = useState(1);
   const resultsPerPage = 20;
+
+  const isConfirmationStage = mappingResults?.stage === "confirmation";
 
   if (!mappingResults || !showMappingResults) return null;
 
@@ -73,19 +54,14 @@ const MappingResultsPanel: React.FC<MappingResultsPanelProps> = ({
     return results.slice(startIndex, startIndex + resultsPerPage);
   };
 
-  const handleContinue = () => {
-    onClose();
+  const handleConfirmApply = async () => {
+    if (!mappingResults?.pendingSelections || !onConfirmChanges) return;
 
-    // Get the current remaining files count (after successful mappings were removed)
-    const remainingFiles = analysisResults?.details?.files_requiring_user_input || [];
-
-    // If there are still files requiring user input, resume fuzzy matching
-    if (remainingFiles.length > 0) {
-      onContinue();
-    } else {
-      // All done, reset everything
-      onFinish();
-      Spicetify.showNotification("All files have been processed!");
+    try {
+      await onConfirmChanges(mappingResults.pendingSelections);
+    } catch (error) {
+      console.error("Error applying changes:", error);
+      Spicetify.showNotification(`Error applying changes: ${error}`, true);
     }
   };
 
@@ -99,32 +75,44 @@ const MappingResultsPanel: React.FC<MappingResultsPanelProps> = ({
       <div className={styles.modalOverlay}>
         <div className={styles.mappingResultsPanel}>
           <div className={styles.mappingResultsHeader}>
-            <h3>File Mapping Results</h3>
+            <h3>{isConfirmationStage ? "Confirm File Mappings" : "File Mapping Results"}</h3>
             <div className={styles.resultsSummary}>
               <div className={styles.summaryStats}>
-                <span className={styles.successStat}>
-                  ✓ {mappingResults.successful_mappings} Successful
-                </span>
-                <span className={styles.failedStat}>✗ {mappingResults.failed_mappings} Failed</span>
-                <span className={styles.totalStat}>Total: {mappingResults.total_processed}</span>
+                {isConfirmationStage ? (
+                  <span className={styles.totalStat}>
+                    Ready to map: {mappingResults.total_processed} files
+                  </span>
+                ) : (
+                  <>
+                    <span className={styles.successStat}>
+                      ✓ {mappingResults.successful_mappings} Successful
+                    </span>
+                    <span className={styles.failedStat}>
+                      ✗ {mappingResults.failed_mappings} Failed
+                    </span>
+                    <span className={styles.totalStat}>
+                      Total: {mappingResults.total_processed}
+                    </span>
+                  </>
+                )}
               </div>
               <p className={styles.summaryMessage}>{mappingResults.message}</p>
             </div>
           </div>
 
           <div className={styles.mappingResultsContent}>
-            {/* Successful Mappings Section */}
-            {successfulMappings.length > 0 && (
+            {(mappingResults.results.length > 0 || isConfirmationStage) && (
               <div className={styles.resultSection}>
                 <h4 className={styles.sectionTitle}>
-                  ✓ Successful Mappings ({successfulMappings.length})
+                  {isConfirmationStage
+                    ? `📋 Files to be mapped (${mappingResults.results.length})`
+                    : `✓ Successful Mappings (${successfulMappings.length})`}
                 </h4>
                 <div className={styles.resultsList}>
-                  {getPagedResults(successfulMappings, successPage).map((result, index) => (
+                  {mappingResults.results.map((result, index) => (
                     <div key={index} className={`${styles.resultItem} ${styles.successItem}`}>
                       <div className={styles.resultFileName}>{result.filename}</div>
                       <div className={styles.resultUri}>{result.uri}</div>
-                      {/* Add track info display */}
                       {result.track_info && (
                         <div className={styles.resultTrackInfo}>
                           <span className={styles.trackName}>→ {result.track_info}</span>
@@ -138,107 +126,36 @@ const MappingResultsPanel: React.FC<MappingResultsPanelProps> = ({
                         )}
                         {result.source && (
                           <span className={styles.source}>
-                            {result.source === "auto_match" ? "Auto-matched" : "User selected"}
+                            {result.source === "auto_match"
+                              ? "Auto-matched"
+                              : result.source === "user_selected"
+                              ? "User selected"
+                              : result.source}
                           </span>
                         )}
                       </div>
                     </div>
                   ))}
                 </div>
-
-                {/* Pagination for successful mappings */}
-                {successfulMappings.length > resultsPerPage && (
-                  <div className={styles.paginationControls}>
-                    <button
-                      disabled={successPage === 1}
-                      onClick={() => setSuccessPage((prev) => Math.max(1, prev - 1))}
-                    >
-                      Previous
-                    </button>
-                    <span>
-                      Page {successPage} of {Math.ceil(successfulMappings.length / resultsPerPage)}
-                    </span>
-                    <button
-                      disabled={
-                        successPage >= Math.ceil(successfulMappings.length / resultsPerPage)
-                      }
-                      onClick={() => setSuccessPage((prev) => prev + 1)}
-                    >
-                      Next
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Failed Mappings Section */}
-            {failedMappings.length > 0 && (
-              <div className={styles.resultSection}>
-                <h4 className={styles.sectionTitle}>✗ Failed Mappings ({failedMappings.length})</h4>
-                <div className={styles.resultsList}>
-                  {getPagedResults(failedMappings, failedPage).map((result, index) => (
-                    <div key={index} className={`${styles.resultItem} ${styles.failedItem}`}>
-                      <div className={styles.resultFileName}>{result.filename}</div>
-                      <div className={styles.resultUri}>{result.uri}</div>
-                      {/* Add track info display for failed mappings too */}
-                      {result.track_info && (
-                        <div className={styles.resultTrackInfo}>
-                          <span className={styles.trackName}>→ {result.track_info}</span>
-                        </div>
-                      )}
-                      <div className={styles.resultReason}>
-                        <span className={styles.errorReason}>
-                          {result.reason || "Unknown error"}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Pagination for failed mappings */}
-                {failedMappings.length > resultsPerPage && (
-                  <div className={styles.paginationControls}>
-                    <button
-                      disabled={failedPage === 1}
-                      onClick={() => setFailedPage((prev) => Math.max(1, prev - 1))}
-                    >
-                      Previous
-                    </button>
-                    <span>
-                      Page {failedPage} of {Math.ceil(failedMappings.length / resultsPerPage)}
-                    </span>
-                    <button
-                      disabled={failedPage >= Math.ceil(failedMappings.length / resultsPerPage)}
-                      onClick={() => setFailedPage((prev) => prev + 1)}
-                    >
-                      Next
-                    </button>
-                  </div>
-                )}
               </div>
             )}
           </div>
 
           <div className={styles.mappingResultsFooter}>
-            {(() => {
-              const remainingFiles = analysisResults?.details?.files_requiring_user_input || [];
-              const remainingCount = remainingFiles.length;
-
-              return remainingCount > 0 ? (
-                <>
-                  <button className={styles.continueButton} onClick={handleContinue}>
-                    Continue with Remaining Files ({remainingCount})
-                  </button>
-                  <button className={styles.finishButton} onClick={handleFinish}>
-                    Finish
-                  </button>
-                </>
-              ) : (
-                <button className={styles.finishButton} onClick={handleFinish}>
-                  Done - All Files Processed
+            {isConfirmationStage ? (
+              <>
+                <button className={styles.confirmButton} onClick={handleConfirmApply}>
+                  Confirm and Apply Changes
                 </button>
-              );
-            })()}
+                <button className={styles.cancelButton} onClick={onClose}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button className={styles.finishButton} onClick={handleFinish}>
+                Finish
+              </button>
+            )}
           </div>
         </div>
       </div>

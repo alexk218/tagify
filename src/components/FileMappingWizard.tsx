@@ -57,6 +57,7 @@ interface FileMappingResponse {
   failed_mappings: number;
   results: any[];
   total_processed: number;
+  pendingSelections?: any[];
 }
 
 interface FileMappingWizardProps {
@@ -241,8 +242,66 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
       file_name: match.fileName || match.file_name,
     }));
 
-    // Apply only the non-rejected auto-matches
-    await applyFileMapping(autoMatchSelections, "auto-matched files");
+    // Show confirmation panel
+    onMappingResultsChange({
+      success: true,
+      stage: "confirmation",
+      message: `Ready to apply ${autoMatchSelections.length} auto-matched files`,
+      successful_mappings: 0,
+      failed_mappings: 0,
+      results: autoMatchSelections.map((sel) => ({
+        filename: sel.file_name,
+        uri: sel.uri,
+        success: true,
+        confidence: sel.confidence,
+        source: "auto_match",
+        track_info: nonRejectedMatches.find((m) => m.file_path === sel.file_path)?.track_info,
+      })),
+      total_processed: autoMatchSelections.length,
+      pendingSelections: autoMatchSelections,
+    });
+    onShowMappingResultsChange(true);
+  };
+
+  const handleApplyPartialChanges = async () => {
+    if (userMatchSelections.length === 0) return;
+
+    // Create proper result objects with actual track info
+    const resultsWithTrackInfo = userMatchSelections.map((sel) => {
+      // Try to find track info from the matches we've seen
+      const matchInfo = localMatches.find(
+        (match) => match.uri === sel.uri || `spotify:track:${match.track_id}` === sel.uri
+      );
+
+      let trackInfo = "Manual selection";
+      if (matchInfo) {
+        trackInfo = `${matchInfo.artist} - ${matchInfo.title}`;
+        if (matchInfo.album) {
+          trackInfo += ` (${matchInfo.album})`;
+        }
+      }
+
+      return {
+        filename: sel.file_name,
+        uri: sel.uri,
+        success: true,
+        confidence: sel.confidence,
+        source: "user_selected",
+        track_info: trackInfo,
+      };
+    });
+
+    onMappingResultsChange({
+      success: true,
+      stage: "confirmation",
+      message: `Ready to apply ${userMatchSelections.length} manually selected files`,
+      successful_mappings: 0,
+      failed_mappings: 0,
+      results: resultsWithTrackInfo,
+      total_processed: userMatchSelections.length,
+      pendingSelections: userMatchSelections,
+    });
+    onShowMappingResultsChange(true);
   };
 
   const handleRejectAutoMatch = (fileToReject: any) => {
@@ -276,146 +335,6 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
     );
     onAllUnmappedFilesChange(filteredFiles);
     Spicetify.showNotification("Cleared all rejections - files moved back to auto-match");
-  };
-
-  const handleApplyPartialChanges = async () => {
-    if (userMatchSelections.length === 0) return;
-
-    // Apply the current user selections
-    await applyFileMapping(userMatchSelections, "manually selected files");
-  };
-
-  const applyFileMapping = async (selections: any[], description: string) => {
-    try {
-      const confirmData = {
-        masterTracksDir: settings.masterTracksDir,
-        confirmed: true,
-        user_selections: selections,
-        precomputed_changes_from_analysis: autoMatchResults || analysisResults,
-      };
-
-      // Make the API call to apply the mappings
-      const response = await fetch(`${settings.serverUrl}/api/tracks/mapping`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(confirmData),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
-      }
-
-      const result: FileMappingResponse = await response.json();
-
-      if (result.success) {
-        onMappingResultsChange(result);
-        onShowMappingResultsChange(true);
-
-        // Get successfully mapped file paths
-        const successfullyMappedFilePaths = new Set(
-          result.results
-            .filter((r) => r.success)
-            .map((r) => selections.find((s) => s.file_name === r.filename)?.file_path)
-            .filter(Boolean)
-        );
-
-        // Handle different scenarios based on the description
-        if (description.includes("auto-matched")) {
-          // For auto-matched files, clear the auto-match results
-          onAutoMatchResultsChange(null);
-
-          // Remove successfully mapped files from allUnmappedFiles
-          const filteredFiles = allUnmappedFiles.filter(
-            (file) => !successfullyMappedFilePaths.has(file.file_path)
-          );
-          onAllUnmappedFilesChange(filteredFiles);
-
-          // Update analysisResults to remove successfully mapped files
-          if (analysisResults && analysisResults.details.files_requiring_user_input) {
-            const updatedAnalysis = {
-              ...analysisResults,
-              details: {
-                ...analysisResults.details,
-                files_requiring_user_input:
-                  analysisResults.details.files_requiring_user_input.filter(
-                    (file) => !successfullyMappedFilePaths.has(file.file_path)
-                  ),
-                files_without_mappings: analysisResults.details.files_requiring_user_input.filter(
-                  (file) => !successfullyMappedFilePaths.has(file.file_path)
-                ).length,
-              },
-            };
-            onAnalysisResultsChange(updatedAnalysis);
-          }
-
-          // Clear rejected auto-matches since they've been processed
-          onRejectedAutoMatchesChange([]);
-        } else if (description.includes("manually selected")) {
-          // For manual selections, clear the current selections
-          onUserMatchSelectionsChange([]);
-
-          // Remove successfully mapped files from allUnmappedFiles
-          const filteredFiles = allUnmappedFiles.filter(
-            (file) => !successfullyMappedFilePaths.has(file.file_path)
-          );
-          onAllUnmappedFilesChange(filteredFiles);
-
-          // Update the analysis results to remove the files that were just processed
-          if (analysisResults && analysisResults.details.files_requiring_user_input) {
-            const updatedAnalysis = {
-              ...analysisResults,
-              details: {
-                ...analysisResults.details,
-                files_requiring_user_input:
-                  analysisResults.details.files_requiring_user_input.filter(
-                    (file) => !successfullyMappedFilePaths.has(file.file_path)
-                  ),
-                files_without_mappings: analysisResults.details.files_requiring_user_input.filter(
-                  (file) => !successfullyMappedFilePaths.has(file.file_path)
-                ).length,
-              },
-            };
-            onAnalysisResultsChange(updatedAnalysis);
-          }
-
-          // Reset fuzzy matching to first remaining file if there are any
-          const remainingFiles = allUnmappedFiles.filter(
-            (file) => !successfullyMappedFilePaths.has(file.file_path)
-          );
-
-          if (remainingFiles.length === 0) {
-            // No more files to process
-            onFuzzyMatchingStateChange({
-              isActive: false,
-              currentFileIndex: 0,
-              matches: [],
-              isLoading: false,
-            });
-          } else {
-            // Reset to first remaining file
-            onFuzzyMatchingStateChange({
-              ...fuzzyMatchingState,
-              currentFileIndex: 0,
-              matches: [],
-              isLoading: false,
-            });
-          }
-        }
-
-        const remainingCount = allUnmappedFiles.length - successfullyMappedFilePaths.size;
-        Spicetify.showNotification(
-          `Successfully mapped ${result.successful_mappings} files. ${remainingCount} files remaining.`
-        );
-      } else {
-        throw new Error(result.message || "Unknown error occurred");
-      }
-    } catch (error) {
-      console.error("Error applying file mappings:", error);
-      Spicetify.showNotification(`Error applying mappings: ${error}`, true);
-    }
   };
 
   const isCurrentFileAlreadyMapped = () => {
@@ -633,10 +552,7 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
                 Auto-Matched Files ({getNonRejectedAutoMatches().length} of{" "}
                 {autoMatchResults.details.auto_matched_files.length})
                 {rejectedAutoMatches.length > 0 && (
-                  <span>
-                    {" "}
-                    - {rejectedAutoMatches.length} rejected
-                  </span>
+                  <span> - {rejectedAutoMatches.length} rejected</span>
                 )}
               </h5>
               <p>
@@ -713,7 +629,7 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
                     className={styles.applyAutoMatchesButton}
                     onClick={handleApplyAutoMatches}
                   >
-                    Apply Auto-Matches ({getNonRejectedAutoMatches().length} files)
+                    Review Auto-Matches ({getNonRejectedAutoMatches().length} files)
                   </button>
                 </>
               )}
@@ -776,7 +692,7 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
           {/* Apply partial changes button */}
           {userMatchSelections.length > 0 && (
             <button className={styles.applyPartialButton} onClick={handleApplyPartialChanges}>
-              Apply Changes for {userMatchSelections.length} Selected Files
+              Review Changes for {userMatchSelections.length} Selected Files
             </button>
           )}
         </div>

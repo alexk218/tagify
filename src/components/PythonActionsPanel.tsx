@@ -1129,6 +1129,110 @@ const PythonActionsPanel: React.FC = () => {
     }));
   };
 
+  const applyFileMapping = async (selections: any[], description: string) => {
+    try {
+      const cleanMasterTracksDir = settings.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
+
+      const confirmData = {
+        masterTracksDir: cleanMasterTracksDir,
+        confirmed: true,
+        user_selections: selections,
+        precomputed_changes_from_analysis: autoMatchResults || analysisResults,
+      };
+
+      const response = await fetch(`${settings.serverUrl}/api/tracks/mapping`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(confirmData),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+      }
+
+      const result: FileMappingResponse = await response.json();
+
+      if (result.success) {
+        // Update the mapping results to show actual results instead of confirmation
+        setMappingResults(result);
+
+        // Get successfully mapped file paths
+        const successfullyMappedFilePaths = new Set(
+          result.results
+            .filter((r) => r.success)
+            .map((r) => selections.find((s) => s.file_name === r.filename)?.file_path)
+            .filter(Boolean)
+        );
+
+        // Clean up state based on what was applied
+        if (description.includes("auto-matched") || description.includes("auto")) {
+          // Clear auto-match results since they've been applied
+          setAutoMatchResults(null);
+          setRejectedAutoMatches([]);
+        }
+
+        if (description.includes("manual") || description.includes("user")) {
+          // Clear user selections since they've been applied
+          setUserMatchSelections([]);
+        }
+
+        // Update analysisResults to remove successfully mapped files
+        if (analysisResults && analysisResults.details.files_requiring_user_input) {
+          const updatedAnalysis = {
+            ...analysisResults,
+            details: {
+              ...analysisResults.details,
+              files_requiring_user_input: analysisResults.details.files_requiring_user_input.filter(
+                (file) => !successfullyMappedFilePaths.has(file.file_path)
+              ),
+              files_without_mappings: analysisResults.details.files_requiring_user_input.filter(
+                (file) => !successfullyMappedFilePaths.has(file.file_path)
+              ).length,
+            },
+          };
+          setAnalysisResults(updatedAnalysis);
+        }
+
+        // Update allUnmappedFiles
+        const filteredFiles = allUnmappedFiles.filter(
+          (file) => !successfullyMappedFilePaths.has(file.file_path)
+        );
+        setAllUnmappedFiles(filteredFiles);
+
+        // Reset fuzzy matching if no more files
+        if (filteredFiles.length === 0) {
+          setFuzzyMatchingState({
+            isActive: false,
+            currentFileIndex: 0,
+            matches: [],
+            isLoading: false,
+          });
+        } else {
+          // Reset to first remaining file
+          setFuzzyMatchingState((prev) => ({
+            ...prev,
+            currentFileIndex: 0,
+            matches: [],
+            isLoading: false,
+          }));
+        }
+
+        const remainingCount = filteredFiles.length;
+        Spicetify.showNotification(
+          `Successfully mapped ${result.successful_mappings} files. ${remainingCount} files remaining.`
+        );
+      } else {
+        throw new Error(result.message || "Unknown error occurred");
+      }
+    } catch (error) {
+      console.error("Error applying file mappings:", error);
+      Spicetify.showNotification(`Error applying mappings: ${error}`, true);
+    }
+  };
+
   // Render the confirmation UI when needed
   const renderConfirmation = () => {
     if (!isAwaitingConfirmation) return null;
@@ -1795,15 +1899,6 @@ const PythonActionsPanel: React.FC = () => {
       <MappingResultsPanel
         mappingResults={mappingResults}
         showMappingResults={showMappingResults}
-        analysisResults={analysisResults}
-        onContinue={() => {
-          setFuzzyMatchingState({
-            isActive: true,
-            currentFileIndex: 0,
-            matches: [],
-            isLoading: false,
-          });
-        }}
         onFinish={() => {
           setAnalysisResults(null);
           setIsAwaitingConfirmation(false);
@@ -1820,6 +1915,18 @@ const PythonActionsPanel: React.FC = () => {
         onClose={() => {
           setShowMappingResults(false);
           setMappingResults(null);
+        }}
+        onConfirmChanges={async (selections) => {
+          // Determine the description based on the source
+          const description = selections.some(
+            (s: any) =>
+              mappingResults?.results?.find((r: any) => r.filename === s.file_name)?.source ===
+              "auto_match"
+          )
+            ? "auto-matched selections"
+            : "manually selected files";
+
+          await applyFileMapping(selections, description);
         }}
       />
 
