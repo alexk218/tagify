@@ -5,14 +5,27 @@ import PlaylistStructureView from "./PlaylistStructureView";
 
 interface PotentialMismatch {
   file: string;
+  uri: string | null;
   track_id: string | null;
-  embedded_artist_title: string;
+  track_info: string;
   filename: string;
   confidence: number;
   full_path: string;
   reason?: string;
   duration?: number;
   duration_formatted?: string;
+}
+
+interface FuzzyMatchResults {
+  uri: string;
+  track_id: string | null;
+  artist: string;
+  title: string;
+  album: string;
+  is_local: boolean;
+  confidence: number;
+  match_type: string;
+  match_details: string;
 }
 
 interface FileDetail {
@@ -33,7 +46,7 @@ interface TrackValidationResult {
   success: boolean;
   summary: {
     total_files: number;
-    files_with_track_id: number;
+    files_with_track_id: number; // TODO: RENAME. on server-side too
     files_without_track_id: number;
     potential_mismatches: number;
     duplicate_track_ids: number;
@@ -74,7 +87,8 @@ interface PlaylistValidationResult {
 interface SearchResult {
   file: string;
   track_id: string | null;
-  embedded_artist_title: string;
+  uri: string | null;
+  track_info: string;
   filename: string;
   confidence: number;
   full_path: string;
@@ -175,7 +189,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
       validationType === "playlist" && cachedData ? cachedData : null
     );
   const [selectedMismatch, setSelectedMismatch] = useState<PotentialMismatch | null>(null);
-  const [possibleMatches, setPossibleMatches] = useState<any[]>([]);
+  const [possibleMatches, setPossibleMatches] = useState<FuzzyMatchResults[]>([]);
   const [isFetchingMatches, setIsFetchingMatches] = useState<boolean>(false);
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.75);
   const [page, setPage] = useState<number>(1);
@@ -1060,7 +1074,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
         },
         body: JSON.stringify({
           fileName: mismatch.file,
-          currentTrackId: mismatch.track_id,
+          currentTrackId: mismatch.track_id, // TODO: FIX. and fix server-side...
         }),
       });
 
@@ -1111,42 +1125,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     } catch (error) {
       console.error("Error creating file mapping:", error);
       Spicetify.showNotification("Error creating file mapping", true);
-    }
-  };
-
-  // TODO: remove this and all references to it
-  const correctTrackId = async (filePath: string, newTrackId: string) => {
-    try {
-      const response = await fetch(`${serverUrl}/api/tracks/metadata`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          file_path: filePath,
-          new_track_id: newTrackId,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          Spicetify.showNotification("TrackId updated successfully");
-          // Refresh validation after correction
-          setSelectedMismatch(null);
-          setPossibleMatches([]);
-          validateTrackMetadata();
-        } else {
-          Spicetify.showNotification(`Error: ${data.message}`, true);
-        }
-      } else {
-        const error = await response.json();
-        console.error("Error correcting track ID:", error);
-        Spicetify.showNotification(`Error: ${error.message || "Unknown error"}`, true);
-      }
-    } catch (error) {
-      console.error("Error correcting track ID:", error);
-      Spicetify.showNotification("Error correcting track ID", true);
     }
   };
 
@@ -1371,11 +1349,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const handleSelectMismatch = (mismatch: PotentialMismatch | SearchResult) => {
     setSelectedMismatch(mismatch);
     findPossibleMatches(mismatch);
-  };
-
-  const getDuplicateTrackIds = () => {
-    if (!trackValidationResult) return {};
-    return trackValidationResult.duplicate_track_ids;
   };
 
   const ignoreTrack = (filePath: string) => {
@@ -2370,13 +2343,13 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   <span className={styles.value}>{trackValidationResult.summary.total_files}</span>
                 </div>
                 <div className={styles.summaryItem}>
-                  <span className={styles.label}>Files with TrackId:</span>
+                  <span className={styles.label}>Files with Mapping:</span>
                   <span className={styles.value}>
                     {trackValidationResult.summary.files_with_track_id}
                   </span>
                 </div>
                 <div className={styles.summaryItem}>
-                  <span className={styles.label}>Files without TrackId:</span>
+                  <span className={styles.label}>Files without Mapping:</span>
                   <span className={styles.value}>
                     {trackValidationResult.summary.files_without_track_id}
                   </span>
@@ -2637,19 +2610,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                             onClick={() => handleSelectMismatch(file)}
                           >
                             <div className={styles.mismatchFile}>{file.file}</div>
-                            <div className={styles.mismatchDetails}>
-                              <div>
-                                <strong>Reason:</strong>{" "}
-                                {file.reason === "missing_track_id"
-                                  ? "No TrackId embedded"
-                                  : file.reason === "error_reading_tags"
-                                  ? "Error reading tags"
-                                  : file.reason}
-                              </div>
-                              <div>
-                                <strong>Filename:</strong> {file.filename}
-                              </div>
-                            </div>
                           </div>
                         ))}
 
@@ -2676,18 +2636,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                               <>
                                 <div className={styles.currentInfo}>
                                   <div>
-                                    <strong>Filename:</strong> {selectedMismatch.filename}
-                                  </div>
-                                  <div>
                                     <strong>Full Path:</strong> {selectedMismatch.full_path}
-                                  </div>
-                                  <div>
-                                    <strong>Reason:</strong>{" "}
-                                    {selectedMismatch.reason === "missing_mapping"
-                                      ? "No mapping found"
-                                      : selectedMismatch.reason === "error_reading_tags"
-                                      ? "Error reading file"
-                                      : selectedMismatch.reason}
                                   </div>
                                   <div
                                     className={
@@ -2709,17 +2658,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                           <div className={styles.matchTitle}>
                                             {match.artist} - {match.title}
                                           </div>
-                                          <div className={styles.matchUri}>URI: {match.uri}</div>
-                                          <div className={styles.matchTrackId}>
-                                            TrackId: {match.track_id}
-                                          </div>
                                           {match.album && (
-                                            <div className={styles.matchAlbum}>
+                                            <div className={styles.matchConfidence}>
                                               Album: {match.album}
                                             </div>
                                           )}
+                                          <div className={styles.matchTrackId}>
+                                            TrackId: {match.track_id}
+                                          </div>
                                           <div className={styles.matchConfidence}>
-                                            Confidence: {(match.ratio * 100).toFixed(2)}%
+                                            Confidence: {(match.confidence * 100).toFixed(2)}%
                                           </div>
                                         </div>
                                         <button
@@ -2785,10 +2733,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                               <div className={styles.mismatchFile}>{mismatch.file}</div>
                               <div className={styles.mismatchDetails}>
                                 <div>
-                                  <strong>Embedded:</strong> {mismatch.embedded_artist_title}
-                                </div>
-                                <div>
-                                  <strong>Filename:</strong> {mismatch.filename}
+                                  <strong>Mapped to:</strong> {mismatch.track_info}
                                 </div>
                                 <div className={styles.confidenceBar}>
                                   <div
@@ -2823,14 +2768,10 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                             <h3>Confirmed Track: {selectedMismatch.file}</h3>
                             <div className={styles.currentInfo}>
                               <div>
-                                <strong>Current TrackId:</strong> {selectedMismatch.track_id}
+                                <strong>URI:</strong> {selectedMismatch.uri}
                               </div>
                               <div>
-                                <strong>Embedded as:</strong>{" "}
-                                {selectedMismatch.embedded_artist_title}
-                              </div>
-                              <div>
-                                <strong>Filename:</strong> {selectedMismatch.filename}
+                                <strong>Mapped to:</strong> {selectedMismatch.track_info}
                               </div>
                             </div>
 
@@ -2868,7 +2809,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     </div>
                   ) : (
                     <div className={styles.noIssues}>
-                      No confirmed tracks found. Mark tracks as correctly embedded to see them here.
+                      No confirmed tracks found. Mark tracks as correctly mapped to see them here.
                     </div>
                   )}
                 </div>
@@ -2910,10 +2851,14 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                               <div className={styles.mismatchFile}>{result.file}</div>
                               <div className={styles.mismatchDetails}>
                                 <div>
-                                  <strong>Embedded:</strong> {result.embedded_artist_title}
+                                  <strong>Mapped to:</strong> {result.track_info}
                                 </div>
                                 <div>
-                                  <strong>TrackId:</strong> {result.track_id || "No TrackId"}
+                                  <strong>URI:</strong> {result.uri || "No URI"}
+                                </div>
+                                <div>
+                                  <strong>Confidence:</strong>{" "}
+                                  {(result.confidence * 100).toFixed(2)}%
                                 </div>
                               </div>
                             </div>
@@ -2938,15 +2883,14 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                             <>
                               <div className={styles.currentInfo}>
                                 <div>
-                                  <strong>Current TrackId:</strong>{" "}
-                                  {selectedMismatch.track_id || "No TrackId"}
+                                  <strong>Mapped to:</strong> {selectedMismatch.track_info}
                                 </div>
                                 <div>
-                                  <strong>Embedded as:</strong>{" "}
-                                  {selectedMismatch.embedded_artist_title}
+                                  <strong>URI:</strong> {selectedMismatch.uri || "No URI"}
                                 </div>
                                 <div>
-                                  <strong>Filename:</strong> {selectedMismatch.filename}
+                                  <strong>Confidence:</strong>{" "}
+                                  {(selectedMismatch.confidence * 100).toFixed(2)}%
                                 </div>
                                 <div
                                   className={
@@ -2958,12 +2902,12 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                               </div>
 
                               <div className={styles.actionButtons}>
-                                {selectedMismatch.track_id && (
+                                {selectedMismatch.uri && (
                                   <button
                                     className={styles.removeButton}
-                                    onClick={() => removeTrackId(selectedMismatch.full_path)}
+                                    onClick={() => removeFileMapping(selectedMismatch.full_path)}
                                   >
-                                    Remove TrackId
+                                    Remove File Mapping
                                   </button>
                                 )}
                               </div>
@@ -2979,13 +2923,17 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                         </div>
                                         <div className={styles.matchTrackId}>{match.track_id}</div>
                                         <div className={styles.matchConfidence}>
-                                          Confidence: {(match.ratio * 100).toFixed(2)}%
+                                          Confidence: {(match.confidence * 100).toFixed(2)}%
                                         </div>
                                       </div>
                                       <button
                                         className={styles.applyButton}
                                         onClick={() =>
-                                          correctTrackId(selectedMismatch.full_path, match.track_id)
+                                          createFileMapping(
+                                            selectedMismatch.full_path,
+                                            match.uri,
+                                            match
+                                          )
                                         }
                                       >
                                         Apply
@@ -3053,10 +3001,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                               <div className={styles.mismatchFile}>{mismatch.file}</div>
                               <div className={styles.mismatchDetails}>
                                 <div>
-                                  <strong>Embedded:</strong> {mismatch.embedded_artist_title}
-                                </div>
-                                <div>
-                                  <strong>Filename:</strong> {mismatch.filename}
+                                  <strong>Mapped to:</strong> {mismatch.track_info}
                                 </div>
                                 <div className={styles.confidenceBar}>
                                   <div
@@ -3092,14 +3037,10 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                 <>
                                   <div className={styles.currentInfo}>
                                     <div>
-                                      <strong>Current TrackId:</strong> {selectedMismatch.track_id}
+                                      <strong>Mapped to:</strong> {selectedMismatch.track_info}
                                     </div>
                                     <div>
-                                      <strong>Embedded as:</strong>{" "}
-                                      {selectedMismatch.embedded_artist_title}
-                                    </div>
-                                    <div>
-                                      <strong>Filename:</strong> {selectedMismatch.filename}
+                                      <strong>URI:</strong> {selectedMismatch.uri}
                                     </div>
                                     <div>
                                       <strong>Confidence:</strong>{" "}
@@ -3124,13 +3065,15 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                           className={styles.acceptButton}
                                           onClick={() => ignoreTrack(selectedMismatch.full_path)}
                                         >
-                                          Mark as Correctly Embedded
+                                          Mark as Correctly Mapped
                                         </button>
                                         <button
                                           className={styles.removeButton}
-                                          onClick={() => removeTrackId(selectedMismatch.full_path)}
+                                          onClick={() =>
+                                            removeFileMapping(selectedMismatch.full_path)
+                                          }
                                         >
-                                          Remove TrackId
+                                          Remove File Mapping
                                         </button>
                                       </>
                                     ) : currentSection === "ignored" ? (
@@ -3182,15 +3125,16 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                               {match.track_id}
                                             </div>
                                             <div className={styles.matchConfidence}>
-                                              Confidence: {(match.ratio * 100).toFixed(2)}%
+                                              Confidence: {(match.confidence * 100).toFixed(2)}%
                                             </div>
                                           </div>
                                           <button
                                             className={styles.applyButton}
                                             onClick={() =>
-                                              correctTrackId(
+                                              createFileMapping(
                                                 selectedMismatch.full_path,
-                                                match.track_id
+                                                match.uri,
+                                                match
                                               )
                                             }
                                           >
@@ -3220,7 +3164,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     ) : (
                       <div className={styles.noIssues}>
                         {showIgnoredTracks
-                          ? "No confirmed tracks found. Mark tracks as correctly embedded to see them here."
+                          ? "No confirmed tracks found. Mark tracks as correctly mapped to see them here."
                           : "No potential mismatches found! All track metadata appears to be correct."}
                       </div>
                     )}
