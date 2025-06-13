@@ -475,7 +475,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
           masterTracksDir: masterTracksDir,
         });
 
-        const response = await fetch(`${serverUrl}/api/validation/track-metadata?${queryParams}`, {
+        const response = await fetch(`${serverUrl}/api/validation/file-mappings?${queryParams}`, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",

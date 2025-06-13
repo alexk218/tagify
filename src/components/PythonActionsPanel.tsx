@@ -548,7 +548,6 @@ const PythonActionsPanel: React.FC = () => {
         "generate-m3u": { url: "/api/playlists/generate", method: "POST" },
         "validate-tracks": { url: "/api/validation/tracks", method: "GET" },
         "validate-playlists": { url: "/api/validation/playlists", method: "GET" },
-        "validate-track-metadata": { url: "/api/validation/track-metadata", method: "GET" },
         "generate-rekordbox-xml": { url: "/api/rekordbox/generate-xml", method: "POST" },
         "regenerate-playlist": {
           url: "/api/playlists/" + requestData.playlist_id + "/regenerate",
@@ -1052,7 +1051,7 @@ const PythonActionsPanel: React.FC = () => {
           minLengthMinutes: settings.minTrackLengthMinutes.toString(),
         });
       } else {
-        endpoint = type === "track" ? "track-metadata" : "playlists";
+        endpoint = type === "track" ? "file-mappings" : "playlists";
         queryParams = new URLSearchParams({
           masterTracksDir: settings.masterTracksDir,
           playlistsDir: settings.playlistsDir,
