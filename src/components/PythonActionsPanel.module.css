@@ -2925,3 +2925,1066 @@
 .actionButton.dangerButton:hover:not(:disabled) {
   background-color: #c53030;
 }
+
+/* Add these styles to src/components/PythonActionsPanel.module.css */
+
+/* Duplicate Resolution Panel */
+.duplicateResolutionPanel {
+  background: var(--spice-card);
+  border-radius: 12px;
+  padding: 24px;
+  width: 90vw;
+  max-width: 900px;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.panelHeader {
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  padding-bottom: 16px;
+}
+
+.panelHeader h3 {
+  margin: 0 0 12px 0;
+  color: var(--spice-text);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.summaryStats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.statItem {
+  background: var(--spice-button-disabled);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--spice-text);
+}
+
+/* Auto Resolution Section */
+.resolutionOptions {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: var(--spice-main);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.resolutionOptions h4 {
+  margin: 0 0 12px 0;
+  color: var(--spice-text);
+  font-size: 16px;
+}
+
+.autoResolveControls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.autoResolveControls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--spice-text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.autoResolveControls input[type="radio"] {
+  accent-color: var(--spice-button);
+}
+
+.autoResolveButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.autoResolveButton:hover {
+  background: var(--spice-button-active);
+}
+
+.autoResolveButton:disabled {
+  background: var(--spice-button-disabled);
+  cursor: not-allowed;
+}
+
+/* Conflicts List */
+.conflictsList {
+  margin-bottom: 24px;
+}
+
+.conflictsList h4 {
+  margin: 0 0 16px 0;
+  color: var(--spice-text);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.conflictGroup {
+  background: var(--spice-main);
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.conflictHeader {
+  margin-bottom: 12px;
+}
+
+.conflictHeader h5 {
+  margin: 0 0 4px 0;
+  color: var(--spice-text);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.conflictUri {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--spice-subtext);
+  background: var(--spice-button-disabled);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.conflictDescription {
+  margin-bottom: 12px;
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.mappingOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mappingOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 6px;
+  background: var(--spice-card);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mappingOption:hover {
+  border-color: var(--spice-button);
+  background: var(--spice-button-disabled);
+}
+
+.mappingOption.selected {
+  border-color: var(--spice-button);
+  background: var(--spice-button-disabled);
+  box-shadow: 0 0 0 1px var(--spice-button);
+}
+
+.mappingOption.recommended {
+  border-color: #4caf50;
+}
+
+.mappingOption.recommended.selected {
+  border-color: #4caf50;
+  box-shadow: 0 0 0 1px #4caf50;
+}
+
+.mappingSelector input[type="radio"] {
+  margin-top: 2px;
+  accent-color: var(--spice-button);
+}
+
+.mappingDetails {
+  flex: 1;
+}
+
+.mappingFilename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.mappingFilename strong {
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.recommendedBadge {
+  background: #4caf50;
+  color: white;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.mappingMetadata {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+  align-items: center;
+}
+
+.confidenceScore {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: white;
+}
+
+.mappingSource {
+  font-size: 11px;
+  color: var(--spice-subtext);
+  background: var(--spice-button-disabled);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.mappingPath {
+  font-size: 12px;
+  color: var(--spice-subtext);
+  font-family: monospace;
+  word-break: break-all;
+}
+
+/* Resolution Actions */
+.resolutionActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid var(--spice-button-disabled);
+}
+
+.resolutionSummary {
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+.actionButtons {
+  display: flex;
+  gap: 12px;
+}
+
+.cancelButton,
+.resolveButton {
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.cancelButton {
+  background: var(--spice-button-disabled);
+  color: var(--spice-text);
+}
+
+.cancelButton:hover {
+  background: var(--spice-main);
+}
+
+.resolveButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+}
+
+.resolveButton:hover {
+  background: var(--spice-button-active);
+}
+
+.resolveButton:disabled {
+  background: var(--spice-button-disabled);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Duplicate Detection Status */
+.duplicateDetectionStatus {
+  margin: 16px 0;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--spice-main);
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.duplicateDetectionStatus h4 {
+  margin: 0 0 12px 0;
+  color: var(--spice-text);
+  font-size: 16px;
+}
+
+.detectionStats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.conflictsFound,
+.noConflicts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conflictsFound {
+  color: #ff9800;
+}
+
+.noConflicts {
+  color: #4caf50;
+}
+
+.warningIcon,
+.successIcon {
+  font-size: 16px;
+}
+
+.conflictsFound strong,
+.noConflicts strong {
+  font-weight: 600;
+}
+
+.conflictsFound span:last-child,
+.noConflicts span:last-child {
+  font-size: 13px;
+  color: var(--spice-subtext);
+  margin-left: 4px;
+}
+
+/* Add these styles to src/components/PythonActionsPanel.module.css */
+
+/* Wizard Structure */
+.wizardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.wizardProgress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.progressSummary {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.progressItem {
+  background: var(--spice-button-disabled);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--spice-text);
+}
+
+/* Controls */
+.thresholdControls {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--spice-main);
+  border-radius: 6px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.thresholdControl label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.thresholdSlider {
+  width: 100%;
+  height: 4px;
+  background: var(--spice-button-disabled);
+  outline: none;
+  border-radius: 2px;
+}
+
+.thresholdSlider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--spice-button);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* Analysis Section */
+.analysisSection {
+  margin-bottom: 20px;
+}
+
+.enhancedAnalysisButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  padding: 12px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-bottom: 12px;
+}
+
+.enhancedAnalysisButton:hover {
+  background: var(--spice-button-active);
+}
+
+.enhancedAnalysisButton:disabled {
+  background: var(--spice-button-disabled);
+  cursor: not-allowed;
+}
+
+.analysisResults {
+  margin-top: 12px;
+}
+
+.analysisMessage {
+  color: var(--spice-text);
+  font-size: 14px;
+  margin: 0;
+}
+
+/* Auto-matched Section */
+.autoMatchedSection {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: var(--spice-main);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.autoMatchedSection h4 {
+  margin: 0 0 12px 0;
+  color: var(--spice-text);
+  font-size: 16px;
+}
+
+.rejectedCount {
+  color: var(--spice-subtext);
+  font-weight: normal;
+}
+
+/* File Status */
+.fileStatusSummary {
+  margin-bottom: 20px;
+  padding: 12px;
+  background: var(--spice-main);
+  border-radius: 6px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.fileCountInfo {
+  margin-bottom: 12px;
+}
+
+.fileCountInfo p {
+  margin: 4px 0;
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.selectedCount {
+  color: var(--spice-subtext);
+  font-style: italic;
+}
+
+.applyPartialButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.applyPartialButton:hover {
+  background: var(--spice-button-active);
+}
+
+/* File Info */
+.fileInfo {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--spice-main);
+  border-radius: 6px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.fileName {
+  color: var(--spice-text);
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.fileName strong {
+  font-weight: 600;
+}
+
+.progress {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.mappedIndicator {
+  color: #4caf50;
+  font-weight: 500;
+}
+
+/* Already Mapped Section */
+.alreadyMappedSection {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--spice-card);
+  border-radius: 6px;
+  border: 1px solid #4caf50;
+}
+
+.alreadyMappedSection h4 {
+  margin: 0 0 8px 0;
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.mappedDetails p {
+  margin: 4px 0;
+  color: var(--spice-text);
+  font-size: 13px;
+}
+
+.remapButton {
+  background: var(--spice-button-disabled);
+  color: var(--spice-text);
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.remapButton:hover {
+  background: var(--spice-button);
+}
+
+/* Matches Section */
+.matchesSection {
+  margin-bottom: 16px;
+}
+
+.matchesSection h4 {
+  margin: 0 0 12px 0;
+  color: var(--spice-text);
+  font-size: 16px;
+}
+
+.matchesList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.matchItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: var(--spice-card);
+  border-radius: 6px;
+  border: 1px solid var(--spice-button-disabled);
+  transition: border-color 0.2s;
+}
+
+.matchItem:hover {
+  border-color: var(--spice-button);
+}
+
+.matchInfo {
+  flex: 1;
+}
+
+.trackName {
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.trackDetails {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.localBadge {
+  background: #ff9800;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.selectMatchButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.selectMatchButton:hover {
+  background: var(--spice-button-active);
+}
+
+/* No Matches */
+.noMatchesSection {
+  text-align: center;
+  padding: 20px;
+  color: var(--spice-subtext);
+}
+
+.noMatchesSection p {
+  margin-bottom: 12px;
+}
+
+.searchButton {
+  background: var(--spice-button-disabled);
+  color: var(--spice-text);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.searchButton:hover {
+  background: var(--spice-button);
+}
+
+/* Search Section */
+.searchSection {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--spice-main);
+  border-radius: 6px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.searchInput {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.searchInput input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  background: var(--spice-card);
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.searchInput button {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.searchInput button:hover {
+  background: var(--spice-button-active);
+}
+
+.searchInput button:disabled {
+  background: var(--spice-button-disabled);
+  cursor: not-allowed;
+}
+
+.searchResults h5 {
+  margin: 0 0 8px 0;
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.searchResultsList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.searchResultItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background: var(--spice-card);
+  border-radius: 4px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.resultInfo {
+  flex: 1;
+}
+
+.resultTrack {
+  color: var(--spice-text);
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.resultDetails {
+  color: var(--spice-subtext);
+  font-size: 11px;
+}
+
+.selectSearchButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.selectSearchButton:hover {
+  background: var(--spice-button-active);
+}
+
+/* File Navigation */
+.fileNavigation {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 12px;
+  background: var(--spice-main);
+  border-radius: 6px;
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.skipButton,
+.prevButton,
+.nextButton {
+  background: var(--spice-button-disabled);
+  color: var(--spice-text);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.skipButton:hover,
+.prevButton:hover,
+.nextButton:hover {
+  background: var(--spice-button);
+}
+
+.skipButton:disabled,
+.prevButton:disabled,
+.nextButton:disabled {
+  background: var(--spice-button-disabled);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Manual Matching Start */
+.manualMatchingStart {
+  text-align: center;
+  padding: 20px;
+}
+
+.startManualMatchingButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.startManualMatchingButton:hover {
+  background: var(--spice-button-active);
+}
+
+/* All Done */
+.allDoneMessage {
+  text-align: center;
+  padding: 20px;
+  color: var(--spice-text);
+}
+
+.allDoneMessage p {
+  margin: 0;
+  font-size: 16px;
+}
+
+/* Wizard Actions */
+.wizardActions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 20px 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--spice-button-disabled);
+}
+
+.applyAllButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.applyAllButton:hover {
+  background: var(--spice-button-active);
+}
+
+.applyAllButton:disabled {
+  background: var(--spice-button-disabled);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.clearMappingsButton {
+  background: #f44336;
+  color: white;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.clearMappingsButton:hover {
+  background: #d32f2f;
+}
+
+.clearMappingsButton:disabled {
+  background: var(--spice-button-disabled);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Clear Confirmation */
+.clearConfirmation {
+  margin: 16px 0;
+  padding: 16px;
+  background: var(--spice-main);
+  border-radius: 6px;
+  border: 1px solid #f44336;
+}
+
+.clearConfirmation p {
+  margin: 0 0 12px 0;
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.confirmationButtons {
+  display: flex;
+  gap: 8px;
+}
+
+.confirmClearButton {
+  background: #f44336;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.confirmClearButton:hover {
+  background: #d32f2f;
+}
+
+.confirmClearButton:disabled {
+  background: var(--spice-button-disabled);
+  cursor: not-allowed;
+}
+
+.cancelClearButton {
+  background: var(--spice-button-disabled);
+  color: var(--spice-text);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cancelClearButton:hover {
+  background: var(--spice-button);
+}
+
+/* Panel Footer */
+.panelFooter {
+  text-align: center;
+  padding-top: 16px;
+  border-top: 1px solid var(--spice-button-disabled);
+}
+
+.closePanelButton {
+  background: var(--spice-button-disabled);
+  color: var(--spice-text);
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.closePanelButton:hover {
+  background: var(--spice-button);
+}
+
+/* Duplicate Detection Status */
+.duplicateDetectionStatus {
+  margin: 16px 0;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--spice-main);
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.duplicateDetectionStatus h4 {
+  margin: 0 0 12px 0;
+  color: var(--spice-text);
+  font-size: 16px;
+}
+
+.detectionStats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.conflictsFound,
+.noConflicts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conflictsFound {
+  color: #ff9800;
+}
+
+.noConflicts {
+  color: #4caf50;
+}
+
+.warningIcon,
+.successIcon {
+  font-size: 16px;
+}
+
+.conflictsFound strong,
+.noConflicts strong {
+  font-weight: 600;
+}
+
+.conflictsFound span:last-child,
+.noConflicts span:last-child {
+  font-size: 13px;
+  color: var(--spice-subtext);
+  margin-left: 4px;
+}
+
+.autoMatchActions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--spice-button-disabled);
+}
+
+.applyAutoMatchesButton {
+  background: #4caf50;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.applyAutoMatchesButton:hover {
+  background: #45a049;
+}
+
+.applyAutoMatchesButton:disabled {
+  background: var(--spice-button-disabled);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.clearRejectionsButton {
+  background: var(--spice-button-disabled);
+  color: var(--spice-text);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.clearRejectionsButton:hover {
+  background: var(--spice-button);
+}

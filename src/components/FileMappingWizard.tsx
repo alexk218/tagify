@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import styles from "./PythonActionsPanel.module.css";
 import "../styles/globals.css";
 import Portal from "../utils/Portal";
+import DuplicateResolutionPanel from "./DuplicateResolutionPanel";
 
 interface Match {
   track_id: string;
@@ -48,6 +49,15 @@ interface AnalysisResultsFileMapping {
     total_files: number;
     files_without_mappings: number;
   };
+  duplicate_detection?: DuplicateDetectionResult;
+}
+
+interface DuplicateDetectionResult {
+  performed: boolean;
+  conflicts_found: number;
+  clean_mappings: number;
+  needs_resolution: boolean;
+  duplicate_groups?: any[];
 }
 
 interface FileMappingResponse {
@@ -156,6 +166,10 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
 
   const isFileMapping = currentAction?.name === "create-file-mappings";
 
+  const [showDuplicateResolution, setShowDuplicateResolution] = useState(false);
+  const [duplicateDetectionResult, setDuplicateDetectionResult] = useState<any>(null);
+  const [isResolvingDuplicates, setIsResolvingDuplicates] = useState(false);
+
   // Use allUnmappedFiles if available, otherwise fall back to analysisResults
   const manualFiles =
     allUnmappedFiles.length > 0
@@ -190,6 +204,189 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
   const getPagedItems = <T,>(items: T[], page: number, perPage: number): T[] => {
     const startIndex = (page - 1) * perPage;
     return items.slice(startIndex, startIndex + perPage);
+  };
+
+  // Enhanced analysis function that uses the new endpoint
+  const runEnhancedAnalysis = async () => {
+    if (!settings.masterTracksDir) {
+      Spicetify.showNotification("Master tracks directory not configured", true);
+      return;
+    }
+
+    onIsLoadingChange({ ...isLoading, "create-file-mappings": true });
+
+    try {
+      const cleanMasterTracksDir = settings.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
+
+      const response = await fetch(`${settings.serverUrl}/api/tracks/mapping/analyze-enhanced`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          masterTracksDir: cleanMasterTracksDir,
+          confidenceThreshold: fileMappingConfidenceThreshold,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const enhancedResults: AnalysisResultsFileMapping = {
+          stage: result.stage,
+          success: result.success,
+          message: result.message,
+          needs_confirmation: result.needs_confirmation || result.requires_user_selection,
+          requires_user_selection: result.requires_user_selection,
+          details: {
+            files_requiring_user_input: result.files_requiring_user_input || [],
+            auto_matched_files: result.auto_matched_files || [],
+            total_files: result.total_files || 0,
+            files_without_mappings: result.files_without_mappings || 0,
+          },
+          duplicate_detection: result.duplicate_detection,
+        };
+
+        onAnalysisResultsChange(enhancedResults);
+        onAllUnmappedFilesChange(result.files_requiring_user_input || []);
+
+        // Check if duplicate resolution is needed
+        if (result.duplicate_detection?.needs_resolution) {
+          setDuplicateDetectionResult(result.duplicate_detection);
+          setShowDuplicateResolution(true);
+
+          Spicetify.showNotification(
+            `Analysis complete! Found ${result.duplicate_detection.conflicts_found} duplicate conflicts that need resolution.`,
+            false
+          );
+        } else {
+          Spicetify.showNotification(
+            `Analysis complete! ${
+              result.auto_matched_files?.length || 0
+            } files can be auto-matched.`,
+            false
+          );
+        }
+      } else {
+        throw new Error(result.message || "Analysis failed");
+      }
+    } catch (error) {
+      console.error("Enhanced analysis error:", error);
+      Spicetify.showNotification(`Analysis failed: ${error}`, true);
+    } finally {
+      onIsLoadingChange({ ...isLoading, "create-file-mappings": false });
+    }
+  };
+
+  // Enhanced mapping creation with duplicate resolution
+  const createMappingsWithResolution = async (duplicateResolutions?: Record<string, string>) => {
+    if (!settings.masterTracksDir) {
+      Spicetify.showNotification("Master tracks directory not configured", true);
+      return;
+    }
+
+    setIsResolvingDuplicates(true);
+
+    try {
+      const cleanMasterTracksDir = settings.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
+
+      const requestBody = {
+        masterTracksDir: cleanMasterTracksDir,
+        userSelections: userMatchSelections,
+        precomputedChanges: {
+          auto_matched_files: analysisResults?.details?.auto_matched_files || [],
+        },
+        duplicateResolutions: duplicateResolutions || {},
+      };
+
+      const response = await fetch(
+        `${settings.serverUrl}/api/tracks/mapping/create-with-resolution`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        }
+      );
+
+      const result = await response.json();
+
+      if (result.success) {
+        if (result.stage === "duplicate_resolution_required") {
+          // More duplicates found - show resolution panel
+          setDuplicateDetectionResult(result.duplicate_detection);
+          setShowDuplicateResolution(true);
+
+          Spicetify.showNotification(
+            `Found ${result.duplicate_detection.duplicate_groups} additional conflicts requiring resolution.`,
+            false
+          );
+        } else {
+          // Success - show results
+          onMappingResultsChange(result);
+          onShowMappingResultsChange(true);
+          setShowDuplicateResolution(false);
+
+          Spicetify.showNotification(
+            `Successfully created ${result.successful_mappings} file mappings!`,
+            false
+          );
+        }
+      } else {
+        throw new Error(result.message || "Mapping creation failed");
+      }
+    } catch (error) {
+      console.error("Enhanced mapping creation error:", error);
+      Spicetify.showNotification(`Mapping creation failed: ${error}`, true);
+    } finally {
+      setIsResolvingDuplicates(false);
+    }
+  };
+
+  // Handle duplicate resolution
+  const handleDuplicateResolution = async (resolutions: Record<string, string>) => {
+    await createMappingsWithResolution(resolutions);
+  };
+
+  const handleDuplicateResolutionCancel = () => {
+    setShowDuplicateResolution(false);
+    setDuplicateDetectionResult(null);
+  };
+
+  // Updated apply mappings function
+  const applyAllMappings = async () => {
+    if (duplicateDetectionResult?.needs_user_resolution) {
+      // Show duplicate resolution first
+      setShowDuplicateResolution(true);
+      return;
+    }
+
+    await createMappingsWithResolution();
+  };
+
+  // Show duplicate detection status in the UI
+  const renderDuplicateDetectionStatus = () => {
+    const detection = (analysisResults as AnalysisResultsFileMapping)?.duplicate_detection;
+
+    if (!detection?.performed) return null;
+
+    return (
+      <div className={styles.duplicateDetectionStatus}>
+        <h4>🔍 Duplicate Detection Results</h4>
+        <div className={styles.detectionStats}>
+          {detection.needs_resolution ? (
+            <div className={styles.conflictsFound}>
+              <span className={styles.warningIcon}>⚠️</span>
+              <strong>{detection.conflicts_found} duplicate conflicts found</strong>
+              <span>These need to be resolved before creating mappings</span>
+            </div>
+          ) : (
+            <div className={styles.noConflicts}>
+              <span className={styles.successIcon}>✅</span>
+              <strong>No duplicate conflicts found</strong>
+              <span>{detection.clean_mappings} clean mappings ready</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   const handleClearMappingsTable = async () => {
@@ -311,44 +508,13 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
   };
 
   const handleApplyPartialChanges = async () => {
-    if (userMatchSelections.length === 0) return;
+    if (duplicateDetectionResult?.needs_user_resolution) {
+      // Show duplicate resolution first
+      setShowDuplicateResolution(true);
+      return;
+    }
 
-    // Create proper result objects with actual track info
-    const resultsWithTrackInfo = userMatchSelections.map((sel) => {
-      // Try to find track info from the matches we've seen
-      const matchInfo = localMatches.find(
-        (match) => match.uri === sel.uri || `spotify:track:${match.track_id}` === sel.uri
-      );
-
-      let trackInfo = "Manual selection";
-      if (matchInfo) {
-        trackInfo = `${matchInfo.artist} - ${matchInfo.title}`;
-        if (matchInfo.album) {
-          trackInfo += ` (${matchInfo.album})`;
-        }
-      }
-
-      return {
-        filename: sel.file_name,
-        uri: sel.uri,
-        success: true,
-        confidence: sel.confidence,
-        source: "user_selected",
-        track_info: trackInfo,
-      };
-    });
-
-    onMappingResultsChange({
-      success: true,
-      stage: "confirmation",
-      message: `Ready to apply ${userMatchSelections.length} manually selected files`,
-      successful_mappings: 0,
-      failed_mappings: 0,
-      results: resultsWithTrackInfo,
-      total_processed: userMatchSelections.length,
-      pendingSelections: userMatchSelections,
-    });
-    onShowMappingResultsChange(true);
+    await createMappingsWithResolution();
   };
 
   const handleRejectAutoMatch = (fileToReject: any) => {
@@ -589,524 +755,536 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
   const processedFilesCount = userMatchSelections.length + skippedFiles.length;
 
   return (
-    <div className={styles.fuzzyMatchContainer}>
-      <h3>Map Files to Tracks</h3>
+    <>
+      {/* Main Wizard Panel */}
 
-      {/* Clear FileTrackMappings table */}
-      <button
-        className={styles.confirmButton}
-        onClick={handleClearMappingsClick}
-        disabled={isLoading["clear-file-mappings-table"]}
-      >
-        {isLoading["clear-file-mappings-table"] ? "Clearing mappings..." : "Clear File Mappings"}
-      </button>
+      <Portal>
+        <div className={styles.modalOverlay}>
+          <div className={styles.fileMappingWizard}>
+            <div className={styles.wizardHeader}>
+              <h3>🎵 File Mapping Wizard</h3>
+              <div className={styles.wizardProgress}>
+                <ClearMappingsConfirmationDialog />
 
-      <ClearMappingsConfirmationDialog />
-
-      {/* Show loading state while fetching files */}
-      {isLoading["fetch-unmapped-files"] && (
-        <div className={styles.loadingFiles}>
-          <p>Scanning for unmapped files...</p>
-        </div>
-      )}
-
-      {/* Auto-matching section */}
-      <div className={styles.autoMatchingSection}>
-        <div className={styles.autoMatchingHeader}>
-          <h4>Auto-Matching</h4>
-          <p>Automatically match files with high confidence based on filename similarity:</p>
-
-          {/* Confidence threshold control */}
-          <div className={styles.settingGroup}>
-            <label className={styles.settingLabel}>Auto-Match Confidence Threshold</label>
-            <div className={styles.sliderGroup}>
-              <input
-                type="range"
-                min="0.5"
-                max="0.95"
-                step="0.05"
-                value={fileMappingConfidenceThreshold}
-                onChange={(e) => onFileMappingConfidenceThresholdChange(Number(e.target.value))}
-                className={styles.confidenceSlider}
-              />
-              <span className={styles.sliderValue}>
-                {(fileMappingConfidenceThreshold * 100).toFixed(0)}%
-              </span>
-            </div>
-          </div>
-
-          {/* Auto-match analysis button */}
-          <button
-            className={styles.autoMatchButton}
-            onClick={handleAutoMatchAnalysis}
-            disabled={
-              isLoading["auto-match-analysis"] ||
-              !settings.masterTracksDir ||
-              allUnmappedFiles.length === 0
-            }
-          >
-            {isLoading["auto-match-analysis"] ? "Analyzing..." : "Run Auto-Match Analysis"}
-          </button>
-        </div>
-
-        {/* Auto-match results with full pagination and reject functionality */}
-        {autoMatchResults &&
-          autoMatchResults.details &&
-          autoMatchResults.details.auto_matched_files &&
-          autoMatchResults.details.auto_matched_files.length > 0 && (
-            <div className={styles.autoMatchResults}>
-              <h5>
-                Auto-Matched Files ({getNonRejectedAutoMatches().length} of{" "}
-                {autoMatchResults.details.files_without_mappings})
-                {rejectedAutoMatches.length > 0 && (
-                  <span> - {rejectedAutoMatches.length} rejected</span>
+                {analysisResults && (
+                  <div className={styles.progressSummary}>
+                    <span className={styles.progressItem}>
+                      Total Files: <strong>{analysisResults.details.total_files}</strong>
+                    </span>
+                    <span className={styles.progressItem}>
+                      Auto-matched:{" "}
+                      <strong>{analysisResults.details.auto_matched_files.length}</strong>
+                    </span>
+                    <span className={styles.progressItem}>
+                      Manual:{" "}
+                      <strong>{analysisResults.details.files_requiring_user_input.length}</strong>
+                    </span>
+                  </div>
                 )}
-              </h5>
-              <p>
-                These files were automatically matched with{" "}
-                {(analysisConfidenceThreshold * 100).toFixed(0)}%+ confidence:
-              </p>
 
-              {/* Show warning if all files are rejected */}
-              {getNonRejectedAutoMatches().length === 0 && rejectedAutoMatches.length > 0 && (
-                <div className={styles.allRejectedWarning}>
-                  <p>⚠️ All auto-matched files have been rejected for manual matching.</p>
-                  <button className="btn" onClick={handleClearRejections}>
-                    Clear All Rejections
-                  </button>
+                <button
+                  className={styles.clearMappingsButton}
+                  onClick={() => setShowClearConfirmation(true)}
+                  disabled={isLoading["clear-file-mappings-table"]}
+                >
+                  {isLoading["clear-file-mappings-table"]
+                    ? "Clearing mappings..."
+                    : "🗑️ Clear All Mappings"}
+                </button>
+              </div>
+            </div>
+
+            {/* Confidence Threshold Controls */}
+            <div className={styles.thresholdControls}>
+              <div className={styles.thresholdControl}>
+                <label>
+                  Analysis Confidence Threshold: {(fileMappingConfidenceThreshold * 100).toFixed(0)}%
+                </label>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="0.95"
+                  step="0.05"
+                  value={fileMappingConfidenceThreshold}
+                  onChange={(e) =>
+                    onFileMappingConfidenceThresholdChange(Number(e.target.value))
+                  }
+                  className={styles.thresholdSlider}
+                />
+              </div>
+            </div>
+
+            {/* Enhanced Analysis Button */}
+            <div className={styles.analysisSection}>
+              <button
+                className={styles.enhancedAnalysisButton}
+                onClick={runEnhancedAnalysis}
+                disabled={isLoading["create-file-mappings"]}
+              >
+                {isLoading["create-file-mappings"] ? "🔍 Analyzing..." : "🔍 Run Analysis"}
+              </button>
+
+              {analysisResults && (
+                <div className={styles.analysisResults}>
+                  <p className={styles.analysisMessage}>{analysisResults.message}</p>
                 </div>
               )}
+            </div>
 
-              {/* Only show the list if there are non-rejected matches */}
-              {getNonRejectedAutoMatches().length > 0 && (
-                <>
+            {/* Duplicate Detection Status */}
+            {renderDuplicateDetectionStatus()}
+
+            {/* Auto-matched Files Preview */}
+            {analysisResults?.details?.auto_matched_files &&
+              analysisResults.details.auto_matched_files.length > 0 && (
+                <div className={styles.autoMatchedSection}>
+                  <h4>
+                    ✅ Auto-matched Files ({analysisResults.details.auto_matched_files.length})
+                    {rejectedAutoMatches.length > 0 && (
+                      <span className={styles.rejectedCount}>
+                        ({rejectedAutoMatches.length} rejected)
+                      </span>
+                    )}
+                  </h4>
+
                   <div className={styles.autoMatchedList}>
-                    {/* Show paginated results with individual confidence */}
                     {getPagedItems(
                       getNonRejectedAutoMatches(),
                       autoMatchedPage,
                       autoMatchedPerPage
-                    ).map((match: any, index: number) => (
-                      <div key={index} className={styles.autoMatchedItem}>
-                        <div className={styles.autoMatchContent}>
-                          <span className={styles.fileName}>{match.file_name}</span>
-                          <span className={styles.trackInfo}>{match.track_info}</span>
-                          <span className={styles.confidence}>
-                            {((match.confidence || 0) * 100).toFixed(1)}% confidence
-                          </span>
-                        </div>
-                        <button
-                          className={styles.rejectAutoMatchButton}
-                          onClick={() => handleRejectAutoMatch(match)}
-                          title="Reject this auto-match and move to manual matching"
+                    ).map((match, index) => {
+                      const isRejected = rejectedAutoMatches.includes(match.file_path);
+                      return (
+                        <div
+                          key={match.file_path}
+                          className={`${styles.autoMatchedItem} ${
+                            isRejected ? styles.rejected : ""
+                          }`}
                         >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
+                          <div className={styles.matchInfo}>
+                            <div className={styles.fileName}>{match.file_name}</div>
+                            <div className={styles.trackInfo}>
+                              → {match.track_info} ({(match.confidence * 100).toFixed(1)}%)
+                            </div>
+                          </div>
+                          <button
+                            className={styles.rejectButton}
+                            onClick={() => handleRejectAutoMatch(match)}
+                            title={isRejected ? "Accept this match" : "Reject this match"}
+                          >
+                            {isRejected ? "✓" : "✗"}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
-
-                  {/* Pagination controls for auto-matched files */}
-                  {getNonRejectedAutoMatches().length > autoMatchedPerPage && (
-                    <div className={styles.paginationControls}>
+                  {/* TODO: keep this? */}
+                  {getNonRejectedAutoMatches().length > 0 && (
+                    <div className={styles.autoMatchActions}>
                       <button
-                        disabled={autoMatchedPage === 1}
+                        className={styles.applyAutoMatchesButton}
+                        onClick={handleApplyAutoMatches}
+                        disabled={isLoading["create-file-mappings"]}
+                      >
+                        Apply {getNonRejectedAutoMatches().length} Auto-Matches
+                      </button>
+
+                      {rejectedAutoMatches.length > 0 && (
+                        <button
+                          className={styles.clearRejectionsButton}
+                          onClick={handleClearRejections}
+                        >
+                          Clear {rejectedAutoMatches.length} Rejections
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Pagination for auto-matched files */}
+                  {analysisResults.details.auto_matched_files.length > autoMatchedPerPage && (
+                    <div className={styles.pagination}>
+                      <button
                         onClick={() => onAutoMatchedPageChange(Math.max(1, autoMatchedPage - 1))}
+                        disabled={autoMatchedPage === 1}
                       >
                         Previous
                       </button>
                       <span>
                         Page {autoMatchedPage} of{" "}
-                        {Math.ceil(getNonRejectedAutoMatches().length / autoMatchedPerPage)}
+                        {Math.ceil(
+                          analysisResults.details.auto_matched_files.length / autoMatchedPerPage
+                        )}
                       </span>
                       <button
+                        onClick={() => onAutoMatchedPageChange(autoMatchedPage + 1)}
                         disabled={
                           autoMatchedPage >=
-                          Math.ceil(getNonRejectedAutoMatches().length / autoMatchedPerPage)
+                          Math.ceil(
+                            analysisResults.details.auto_matched_files.length / autoMatchedPerPage
+                          )
                         }
-                        onClick={() => onAutoMatchedPageChange(autoMatchedPage + 1)}
                       >
                         Next
                       </button>
                     </div>
                   )}
-
-                  {/* Apply auto-matches button */}
-                  <button
-                    className={styles.applyAutoMatchesButton}
-                    onClick={handleApplyAutoMatches}
-                  >
-                    Review Auto-Matches ({getNonRejectedAutoMatches().length} files)
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
-        {/* Show analysis results summary */}
-        {autoMatchResults && (
-          <div className={styles.analysisStats}>
-            <div className={styles.statItem}>
-              <span className={styles.statLabel}>Total files:</span>
-              <span className={styles.statValue}>{autoMatchResults.details.total_files}</span>
-            </div>
-            <div className={styles.statItem}>
-              <span className={styles.statLabel}>Auto-matched:</span>
-              <span className={styles.statValue}>{getNonRejectedAutoMatches().length}</span>
-            </div>
-            <div className={styles.statItem}>
-              <span className={styles.statLabel}>Rejected auto-matches:</span>
-              <span className={styles.statValue}>{rejectedAutoMatches.length}</span>
-            </div>
-            <div className={styles.statItem}>
-              <span className={styles.statLabel}>For manual matching:</span>
-              <span className={styles.statValue}>{allUnmappedFiles.length}</span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Manual matching section - always visible when files are available */}
-      <div className={styles.manualMatchingSection}>
-        <div className={styles.manualMatchingHeader}>
-          <h4>Manual Matching</h4>
-          <p>For files that need your input:</p>
-
-          {/* Show file count immediately - use dynamic count */}
-          {(() => {
-            const manualFiles =
-              allUnmappedFiles.length > 0
-                ? allUnmappedFiles
-                : analysisResults?.details?.files_requiring_user_input || [];
-            const remainingManualFiles = manualFiles.length;
-
-            return remainingManualFiles > 0 ? (
-              <div className={styles.fileCountInfo}>
-                <p>{remainingManualFiles} files available for manual matching</p>
-                {userMatchSelections.length > 0 && (
-                  <p className={styles.selectedCount}>
-                    {userMatchSelections.length} files selected for mapping
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className={styles.fileCountInfo}>
-                <p>✅ No files need manual matching</p>
-              </div>
-            );
-          })()}
-
-          {/* Apply partial changes button */}
-          {userMatchSelections.length > 0 && (
-            <button className={styles.applyPartialButton} onClick={handleApplyPartialChanges}>
-              Review Changes for {userMatchSelections.length} Selected Files
-            </button>
-          )}
-        </div>
-
-        {/* MANUAL MATCHING INTERFACE */}
-        {(() => {
-          const manualFiles =
-            allUnmappedFiles.length > 0
-              ? allUnmappedFiles
-              : analysisResults?.details?.files_requiring_user_input || [];
-
-          return manualFiles.length > 0 ? (
-            <>
-              {/* Always show file info and controls */}
-              {currentFileName ? (
-                <>
-                  <div className={styles.fileInfo}>
-                    <div className={styles.fileName}>
-                      <strong>Current file:</strong> {currentFileName}
-                      {isCurrentFileAlreadyMapped() && (
-                        <span className={styles.mappedIndicator}> ✓ Already Mapped</span>
-                      )}
-                    </div>
-                    <div className={styles.progress}>
-                      File {fuzzyMatchingState.currentFileIndex + 1} of {manualFiles.length}(
-                      {processedFilesCount} complete)
-                    </div>
-                  </div>
-
-                  {/* Show mapped file details if already mapped */}
-                  {isCurrentFileAlreadyMapped() && (
-                    <div className={styles.alreadyMappedSection}>
-                      <h4>This file has already been mapped:</h4>
-                      {(() => {
-                        const mappedSelection = userMatchSelections.find((selection) => {
-                          if ("file_path" in selection) {
-                            return selection.file_path === currentFilePath;
-                          }
-                          return false;
-                        });
-
-                        if (mappedSelection && "uri" in mappedSelection) {
-                          return (
-                            <div className={styles.mappedDetails}>
-                              <div>
-                                <strong>URI:</strong> {mappedSelection.uri}
-                              </div>
-                              <div>
-                                <strong>Confidence:</strong>{" "}
-                                {(mappedSelection.confidence * 100).toFixed(1)}%
-                              </div>
-                              <button
-                                className={styles.removeMappingButton}
-                                onClick={() => {
-                                  // Remove this mapping from userMatchSelections
-                                  const updatedSelections = userMatchSelections.filter(
-                                    (selection) => {
-                                      if ("file_path" in selection) {
-                                        return selection.file_path !== currentFilePath;
-                                      }
-                                      return true;
-                                    }
-                                  );
-                                  onUserMatchSelectionsChange(updatedSelections);
-                                  Spicetify.showNotification(
-                                    `Removed mapping for ${currentFileName}`
-                                  );
-                                }}
-                              >
-                                Remove This Mapping
-                              </button>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-                  )}
-
-                  {/* Only show search and matching interface if not already mapped */}
-                  {!isCurrentFileAlreadyMapped() && (
-                    <>
-                      {/* Search Section */}
-                      <div className={styles.searchSection}>
-                        <h4>Search for Track</h4>
-                        <form onSubmit={handleSearchSubmit} className={styles.searchInputContainer}>
-                          <input
-                            type="text"
-                            className={styles.searchInput}
-                            placeholder="Search by artist, title, or album... (Press Enter to search)"
-                            value={searchQuery}
-                            onChange={(e) => onSearchQueryChange(e.target.value)}
-                          />
-                          <button
-                            type="submit"
-                            className={styles.actionButton}
-                            disabled={isSearching}
-                          >
-                            {isSearching ? "🔍" : "Search"}
-                          </button>
-                        </form>
-
-                        {/* Search Results */}
-                        {showSearchResults && searchResults.length > 0 && (
-                          <div className={styles.searchResults}>
-                            <div className={styles.searchResultsHeader}>
-                              <h5>Search Results ({searchResults.length})</h5>
-                              <button
-                                className={styles.closeSearchButton}
-                                onClick={() => {
-                                  onShowSearchResultsChange(false);
-                                  onSearchResultsChange([]);
-                                  onSearchQueryChange("");
-                                }}
-                                title="Close search results"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                            <div className={styles.searchResultsList}>
-                              {searchResults.map((match, index) => (
-                                <div
-                                  key={match.track_id || index}
-                                  className={styles.searchResultItem}
-                                  onClick={() => {
-                                    handleSelectMatch(match);
-                                    onSearchQueryChange("");
-                                    onSearchResultsChange([]);
-                                    onShowSearchResultsChange(false);
-                                  }}
-                                >
-                                  <div className={styles.searchResultContent}>
-                                    <div className={styles.searchResultTitle}>
-                                      {match.artist} - {match.title}
-                                    </div>
-                                    <div className={styles.searchResultAlbum}>{match.album}</div>
-                                    <div className={styles.searchResultConfidence}>
-                                      Match:{" "}
-                                      {((match.confidence || match.ratio || 0) * 100).toFixed(1)}%
-                                      {match.is_local && (
-                                        <span className={styles.localIndicator}> (LOCAL)</span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {showSearchResults &&
-                          searchResults.length === 0 &&
-                          searchQuery.trim() &&
-                          !isSearching && (
-                            <div className={styles.noSearchResults}>
-                              <div className={styles.noSearchResultsContent}>
-                                <span>No tracks found for "{searchQuery}"</span>
-                                <button
-                                  className={styles.closeSearchButton}
-                                  onClick={() => {
-                                    onShowSearchResultsChange(false);
-                                    onSearchQueryChange("");
-                                  }}
-                                  title="Close search results"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                      </div>
-
-                      {/* Existing fuzzy match results */}
-                      {isLocalLoading ? (
-                        <div className={styles.loadingMatches}>
-                          <div>Loading potential matches...</div>
-                          <button
-                            className={styles.skipButton}
-                            onClick={() => {
-                              setIsLocalLoading(false);
-                              handleSkip();
-                            }}
-                          >
-                            Skip this file
-                          </button>
-                        </div>
-                      ) : (
-                        <div className={styles.matchesList}>
-                          <h4>Suggested Matches</h4>
-                          <div className={styles.matchOption} onClick={handleSkip}>
-                            <div className={styles.matchNumber}>0.</div>
-                            <div className={styles.matchText}>Skip this file (no match)</div>
-                          </div>
-
-                          {localMatches.map((match, index) => (
-                            <div
-                              key={match.track_id || index}
-                              className={styles.matchOption}
-                              onClick={() => handleSelectMatch(match)}
-                            >
-                              <div className={styles.matchNumber}>{index + 1}.</div>
-                              <div className={styles.matchContent}>
-                                <div className={styles.matchTitle}>
-                                  {match.artist} - {match.title}
-                                </div>
-                                <div className={styles.matchAlbum}>{match.album}</div>
-                                <div className={styles.confidence}>
-                                  {((match.ratio || match.confidence || 0) * 100).toFixed(1)}%
-                                  confidence
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-
-                          {localMatches.length === 0 && !isLocalLoading && hasCalledAPI && (
-                            <div className={styles.noMatches}>
-                              <p>No potential matches found.</p>
-                              <button
-                                className={styles.retryButton}
-                                onClick={() => {
-                                  setHasCalledAPI(false);
-                                }}
-                              >
-                                Retry
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {/* Navigation controls */}
-                  <div className={styles.manualMatchingControls}>
-                    <button
-                      className={styles.prevFileButton}
-                      onClick={() => {
-                        if (fuzzyMatchingState.currentFileIndex > 0) {
-                          onFuzzyMatchingStateChange({
-                            ...fuzzyMatchingState,
-                            currentFileIndex: fuzzyMatchingState.currentFileIndex - 1,
-                            matches: [],
-                          });
-                        }
-                      }}
-                      disabled={fuzzyMatchingState.currentFileIndex === 0}
-                    >
-                      ← Previous File
-                    </button>
-
-                    <button
-                      className={styles.nextFileButton}
-                      onClick={() => {
-                        if (fuzzyMatchingState.currentFileIndex < manualFiles.length - 1) {
-                          onFuzzyMatchingStateChange({
-                            ...fuzzyMatchingState,
-                            currentFileIndex: fuzzyMatchingState.currentFileIndex + 1,
-                            matches: [],
-                          });
-                        } else {
-                          // All files processed
-                          onFuzzyMatchingStateChange({
-                            ...fuzzyMatchingState,
-                            isActive: false,
-                          });
-                        }
-                      }}
-                      disabled={fuzzyMatchingState.currentFileIndex >= manualFiles.length - 1}
-                    >
-                      Next File →
-                    </button>
-                  </div>
-                </>
-              ) : (
-                /* Show start button when no current file is selected */
-                <div className={styles.manualMatchingStart}>
-                  <button
-                    className={styles.startManualMatchingButton}
-                    onClick={() => {
-                      onFuzzyMatchingStateChange({
-                        isActive: true,
-                        currentFileIndex: 0,
-                        matches: [],
-                        isLoading: false,
-                      });
-                    }}
-                  >
-                    Start Manual Matching ({manualFiles.length} files)
-                  </button>
                 </div>
               )}
-            </>
-          ) : (
-            <div className={styles.allDoneMessage}>
-              <p>🎉 All files have been processed or mapped!</p>
-            </div>
-          );
-        })()}
-      </div>
 
-      {/* Close panel button */}
-      <div className={styles.panelFooter}>
-        <button className={styles.closePanelButton} onClick={onClosePanel}>
-          Close
-        </button>
-      </div>
-    </div>
+            {/* File Status Summary */}
+            <div className={styles.fileStatusSummary}>
+              {(() => {
+                const manualFiles =
+                  allUnmappedFiles.length > 0
+                    ? allUnmappedFiles
+                    : analysisResults?.details?.files_requiring_user_input || [];
+                const remainingManualFiles = manualFiles.length;
+
+                return remainingManualFiles > 0 ? (
+                  <div className={styles.fileCountInfo}>
+                    <p>{remainingManualFiles} files available for manual matching</p>
+                    {userMatchSelections.length > 0 && (
+                      <p className={styles.selectedCount}>
+                        {userMatchSelections.length} files selected for mapping
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className={styles.fileCountInfo}>
+                    <p>✅ No files need manual matching</p>
+                  </div>
+                );
+              })()}
+
+              {/* Apply partial changes button */}
+              {userMatchSelections.length > 0 && (
+                <button className={styles.applyPartialButton} onClick={handleApplyPartialChanges}>
+                  Review Changes for {userMatchSelections.length} Selected Files
+                </button>
+              )}
+            </div>
+
+            {/* Manual Matching Interface */}
+            {(() => {
+              const manualFiles =
+                allUnmappedFiles.length > 0
+                  ? allUnmappedFiles
+                  : analysisResults?.details?.files_requiring_user_input || [];
+
+              return manualFiles.length > 0 ? (
+                <>
+                  {/* Always show file info and controls */}
+                  {currentFileName ? (
+                    <>
+                      <div className={styles.fileInfo}>
+                        <div className={styles.fileName}>
+                          <strong>Current file:</strong> {currentFileName}
+                          {isCurrentFileAlreadyMapped() && (
+                            <span className={styles.mappedIndicator}> ✓ Already Mapped</span>
+                          )}
+                        </div>
+                        <div className={styles.progress}>
+                          File {fuzzyMatchingState.currentFileIndex + 1} of {manualFiles.length}(
+                          {processedFilesCount} complete)
+                        </div>
+                      </div>
+
+                      {/* Show mapped file details if already mapped */}
+                      {isCurrentFileAlreadyMapped() && (
+                        <div className={styles.alreadyMappedSection}>
+                          <h4>This file has already been mapped:</h4>
+                          {(() => {
+                            const mappedSelection = userMatchSelections.find((selection) => {
+                              if ("file_path" in selection) {
+                                return selection.file_path === currentFilePath;
+                              }
+                              return false;
+                            });
+
+                            if (mappedSelection && "uri" in mappedSelection) {
+                              return (
+                                <div className={styles.mappedDetails}>
+                                  <p>URI: {mappedSelection.uri}</p>
+                                  <p>
+                                    Confidence: {(mappedSelection.confidence * 100).toFixed(1)}%
+                                  </p>
+                                  <button
+                                    className={styles.remapButton}
+                                    onClick={() => {
+                                      // Remove from selections and show matches again
+                                      const filtered = userMatchSelections.filter((s) => {
+                                        if ("file_path" in s) {
+                                          return s.file_path !== currentFilePath;
+                                        }
+                                        return true;
+                                      });
+                                      onUserMatchSelectionsChange(filtered);
+                                    }}
+                                  >
+                                    Re-map this file
+                                  </button>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
+                      )}
+
+                      {/* Fuzzy matching results - only show if not already mapped */}
+                      {!isCurrentFileAlreadyMapped() && (
+                        <>
+                          {fuzzyMatchingState.isLoading ? (
+                            <div className={styles.loadingMatches}>
+                              <p>🔍 Finding matches for {currentFileName}...</p>
+                            </div>
+                          ) : fuzzyMatchingState.matches.length > 0 ? (
+                            <div className={styles.matchesSection}>
+                              <h4>Potential matches for: {currentFileName}</h4>
+                              <div className={styles.matchesList}>
+                                {fuzzyMatchingState.matches.map((match, index) => (
+                                  <div key={index} className={styles.matchItem}>
+                                    <div className={styles.matchInfo}>
+                                      <div className={styles.trackName}>
+                                        {match.artist} - {match.title}
+                                      </div>
+                                      <div className={styles.trackDetails}>
+                                        Album: {match.album} | Confidence:{" "}
+                                        {(match.confidence * 100).toFixed(1)}%
+                                        {match.is_local && (
+                                          <span className={styles.localBadge}>Local</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <button
+                                      className={styles.selectMatchButton}
+                                      onClick={() => handleSelectMatch(match)}
+                                    >
+                                      Select
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : fuzzyMatchingState.isActive ? (
+                            <div className={styles.noMatchesSection}>
+                              <p>No good matches found for: {currentFileName}</p>
+                              <button
+                                className={styles.searchButton}
+                                onClick={() => onShowSearchResultsChange(true)}
+                              >
+                                🔍 Search manually
+                              </button>
+                            </div>
+                          ) : null}
+
+                          {/* Manual search interface */}
+                          {showSearchResults && (
+                            <div className={styles.searchSection}>
+                              <div className={styles.searchInput}>
+                                <input
+                                  type="text"
+                                  placeholder="Search for track..."
+                                  value={searchQuery}
+                                  onChange={(e) => onSearchQueryChange(e.target.value)}
+                                  onKeyPress={(e) => e.key === "Enter" && handleSearch(searchQuery)}
+                                />
+                                <button
+                                  onClick={() => handleSearch(searchQuery)}
+                                  disabled={isSearching}
+                                >
+                                  {isSearching ? "Searching..." : "Search"}
+                                </button>
+                              </div>
+
+                              {searchResults.length > 0 && (
+                                <div className={styles.searchResults}>
+                                  <h5>Search results:</h5>
+                                  <div className={styles.searchResultsList}>
+                                    {searchResults.map((result, index) => (
+                                      <div key={index} className={styles.searchResultItem}>
+                                        <div className={styles.resultInfo}>
+                                          <div className={styles.resultTrack}>
+                                            {result.artist} - {result.title}
+                                          </div>
+                                          <div className={styles.resultDetails}>
+                                            Album: {result.album} | Confidence:{" "}
+                                            {(result.confidence * 100).toFixed(1)}%
+                                            {result.is_local && (
+                                              <span className={styles.localBadge}>Local</span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <button
+                                          className={styles.selectSearchButton}
+                                          onClick={() => handleSelectMatch(result)}
+                                        >
+                                          Select
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {/* File navigation controls */}
+                      <div className={styles.fileNavigation}>
+                        <button
+                          className={styles.skipButton}
+                          onClick={() => {
+                            const skippedFilePath =
+                              manualFiles[fuzzyMatchingState.currentFileIndex]?.file_path;
+                            if (skippedFilePath) {
+                              onSkippedFilesChange([...skippedFiles, skippedFilePath]);
+                            }
+
+                            if (fuzzyMatchingState.currentFileIndex < manualFiles.length - 1) {
+                              onFuzzyMatchingStateChange({
+                                ...fuzzyMatchingState,
+                                currentFileIndex: fuzzyMatchingState.currentFileIndex + 1,
+                                matches: [],
+                                isLoading: false,
+                              });
+                            } else {
+                              // All files processed
+                              onFuzzyMatchingStateChange({
+                                ...fuzzyMatchingState,
+                                isActive: false,
+                              });
+                            }
+                          }}
+                        >
+                          Skip This File
+                        </button>
+
+                        <button
+                          className={styles.prevButton}
+                          onClick={() => {
+                            onFuzzyMatchingStateChange({
+                              ...fuzzyMatchingState,
+                              currentFileIndex: Math.max(
+                                0,
+                                fuzzyMatchingState.currentFileIndex - 1
+                              ),
+                              matches: [],
+                            });
+                          }}
+                          disabled={fuzzyMatchingState.currentFileIndex === 0}
+                        >
+                          ← Previous File
+                        </button>
+
+                        <button
+                          className={styles.nextButton}
+                          onClick={() => {
+                            if (fuzzyMatchingState.currentFileIndex < manualFiles.length - 1) {
+                              onFuzzyMatchingStateChange({
+                                ...fuzzyMatchingState,
+                                currentFileIndex: fuzzyMatchingState.currentFileIndex + 1,
+                                matches: [],
+                              });
+                            } else {
+                              // All files processed
+                              onFuzzyMatchingStateChange({
+                                ...fuzzyMatchingState,
+                                isActive: false,
+                              });
+                            }
+                          }}
+                          disabled={fuzzyMatchingState.currentFileIndex >= manualFiles.length - 1}
+                        >
+                          Next File →
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    /* Show start button when no current file is selected */
+                    <div className={styles.manualMatchingStart}>
+                      <button
+                        className={styles.startManualMatchingButton}
+                        onClick={() => {
+                          onFuzzyMatchingStateChange({
+                            isActive: true,
+                            currentFileIndex: 0,
+                            matches: [],
+                            isLoading: false,
+                          });
+                        }}
+                      >
+                        Start Manual Matching ({manualFiles.length} files)
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className={styles.allDoneMessage}>
+                  <p>🎉 All files have been processed or mapped!</p>
+                </div>
+              );
+            })()}
+
+            {/* Action Buttons */}
+            <div className={styles.wizardActions}>
+              {analysisResults && (
+                <button
+                  className={styles.applyAllButton}
+                  onClick={applyAllMappings}
+                  disabled={isLoading["create-file-mappings"] || isResolvingDuplicates}
+                >
+                  {isResolvingDuplicates
+                    ? "Processing..."
+                    : duplicateDetectionResult?.needs_user_resolution
+                    ? "⚠️ Resolve Conflicts & Apply"
+                    : "✅ Apply All Mappings"}
+                </button>
+              )}
+
+              {/* Clear confirmation dialog */}
+              {showClearConfirmation && (
+                <div className={styles.clearConfirmation}>
+                  <p>Are you sure you want to clear all file mappings? This cannot be undone.</p>
+                  <div className={styles.confirmationButtons}>
+                    <button
+                      className={styles.confirmClearButton}
+                      onClick={handleClearMappingsTable}
+                      disabled={isLoading["clear-file-mappings-table"]}
+                    >
+                      {isLoading["clear-file-mappings-table"] ? "Clearing..." : "Yes, Clear All"}
+                    </button>
+                    <button
+                      className={styles.cancelClearButton}
+                      onClick={() => setShowClearConfirmation(false)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Close panel button */}
+            <div className={styles.panelFooter}>
+              <button className={styles.closePanelButton} onClick={onClosePanel}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </Portal>
+
+      {/* Duplicate Resolution Panel */}
+      <DuplicateResolutionPanel
+        duplicateDetection={duplicateDetectionResult}
+        isVisible={showDuplicateResolution}
+        onResolve={handleDuplicateResolution}
+        onCancel={handleDuplicateResolutionCancel}
+        isLoading={isResolvingDuplicates}
+      />
+    </>
   );
 };
 
