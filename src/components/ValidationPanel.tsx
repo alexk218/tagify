@@ -201,8 +201,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   const [possibleMatches, setPossibleMatches] = useState<FuzzyMatchResults[]>([]);
   const [isFetchingMatches, setIsFetchingMatches] = useState<boolean>(false);
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.75);
-  const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(25);
   const [selectedDuplicateTrackId, setSelectedDuplicateTrackId] = useState<string | null>(null);
 
   const [ignoredTrackPaths, setIgnoredTrackPaths] = useState<Set<string>>(
@@ -210,8 +208,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
   );
   const [showIgnoredTracks, setShowIgnoredTracks] = useState<boolean>(false);
   const [filteredMismatches, setFilteredMismatches] = useState<PotentialMismatch[]>([]);
-  const [loadingMore, setLoadingMore] = useState<boolean>(false);
-  const [hasMoreItems, setHasMoreItems] = useState<boolean>(true);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -390,7 +386,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     } else {
       // Fall back to local refresh functions if onRefresh not provided
       if (currentTab === "track") {
-        validateTrackMetadata(true, true); // reset page to 1, force refresh
+        validateTrackMetadata(true); // force refresh
       } else if (currentTab === "playlist") {
         validatePlaylists(true); // force refresh
       }
@@ -447,11 +443,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     );
   };
 
-  const validateTrackMetadata = async (resetPageToOne = true, forceRefresh = false) => {
-    if (resetPageToOne) {
-      setPage(1);
-    }
-
+  const validateTrackMetadata = async (forceRefresh = false) => {
     if (trackValidationResult && !forceRefresh) {
       // Make sure filtered mismatches are up to date with current settings
       updateFilteredMismatches(
@@ -660,14 +652,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     } finally {
       setIsCreatingPlaylist(false);
     }
-  };
-
-  const loadMoreItems = async () => {
-    if (loadingMore || !hasMoreItems) return;
-
-    setLoadingMore(true);
-    setPage(page + 1);
-    setLoadingMore(false);
   };
 
   const getLastUpdatedText = () => {
@@ -1459,7 +1443,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
     const finalFiltered = getFilteredMismatchesByConfidence(ignoredFiltered, confidenceThreshold);
 
     setFilteredMismatches(finalFiltered);
-    setHasMoreItems(finalFiltered.length > pageSize * page);
 
     // Select first item if none is selected and there are items to select
     if (!selectedMismatch && finalFiltered.length > 0) {
@@ -2639,7 +2622,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                   {filesMissingTrackId.length > 0 ? (
                     <div className={styles.splitView}>
                       <div className={styles.mismatchList}>
-                        {filesMissingTrackId.slice(0, page * pageSize).map((file, index) => (
+                        {filesMissingTrackId.map((file, index) => (
                           <div
                             key={index}
                             className={`${styles.mismatchItem} ${
@@ -2652,18 +2635,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                             <div className={styles.mismatchFile}>{file.file}</div>
                           </div>
                         ))}
-
-                        {filesMissingTrackId.length > page * pageSize && (
-                          <div className={styles.loadMoreContainer}>
-                            <button
-                              className={styles.loadMoreButton}
-                              onClick={loadMoreItems}
-                              disabled={loadingMore}
-                            >
-                              {loadingMore ? "Loading..." : "Load More"}
-                            </button>
-                          </div>
-                        )}
                       </div>
 
                       <div className={styles.matchPanel}>
@@ -2759,7 +2730,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                       <div className={styles.mismatchList}>
                         {trackValidationResult.potential_mismatches
                           .filter((mismatch) => ignoredTrackPaths.has(mismatch.full_path))
-                          .slice(0, page * pageSize)
                           .map((mismatch, index) => (
                             <div
                               key={index}
@@ -2785,21 +2755,6 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                               </div>
                             </div>
                           ))}
-
-                        {trackValidationResult.potential_mismatches.filter((mismatch) =>
-                          ignoredTrackPaths.has(mismatch.full_path)
-                        ).length >
-                          page * pageSize && (
-                          <div className={styles.loadMoreContainer}>
-                            <button
-                              className={styles.loadMoreButton}
-                              onClick={loadMoreItems}
-                              disabled={loadingMore}
-                            >
-                              {loadingMore ? "Loading..." : "Load More"}
-                            </button>
-                          </div>
-                        )}
                       </div>
 
                       <div className={styles.matchPanel}>
@@ -3028,7 +2983,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                     {filteredMismatches.length > 0 ? (
                       <div className={styles.splitView}>
                         <div className={styles.mismatchList}>
-                          {filteredMismatches.slice(0, page * pageSize).map((mismatch, index) => (
+                          {filteredMismatches.map((mismatch, index) => (
                             <div
                               key={index}
                               className={`${styles.mismatchItem} ${
@@ -3054,7 +3009,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                             </div>
                           ))}
 
-                          {hasMoreItems && (
+                          {/* {hasMoreItems && (
                             <div className={styles.loadMoreContainer}>
                               <button
                                 className={styles.loadMoreButton}
@@ -3064,7 +3019,7 @@ const ValidationPanel: React.FC<ValidationPanelProps> = ({
                                 {loadingMore ? "Loading..." : "Load More"}
                               </button>
                             </div>
-                          )}
+                          )} */}
                         </div>
 
                         <div className={styles.matchPanel}>
