@@ -2574,3 +2574,354 @@
   color: var(--spice-subtext);
   font-style: italic;
 }
+
+/* Clear Mappings table confirmation */
+.confirmationDialog {
+  background: var(--spice-card);
+  border-radius: 8px;
+  padding: 0;
+  width: 90%;
+  max-width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--spice-button-disabled);
+}
+
+.confirmationHeader {
+  padding: 24px 24px 16px 24px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.confirmationHeader h3 {
+  margin: 0 0 12px 0;
+  color: var(--spice-text);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.confirmationHeader p {
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.confirmationContent {
+  padding: 20px 24px;
+}
+
+.warningMessage {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  border-radius: 6px;
+  color: var(--spice-text);
+}
+
+.warningIcon {
+  font-size: 20px;
+  line-height: 1;
+  margin-top: 2px;
+}
+
+.warningMessage div {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.warningMessage strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--spice-text);
+}
+
+.confirmationFooter {
+  padding: 16px 24px 24px 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.confirmButton {
+  background: #e74c3c;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.confirmButton:hover:not(:disabled) {
+  background: #c0392b;
+  transform: translateY(-1px);
+}
+
+.confirmButton:disabled {
+  background: #95a5a6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.cancelButton {
+  background: transparent;
+  color: var(--spice-text);
+  border: 1px solid var(--spice-button-disabled);
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cancelButton:hover:not(:disabled) {
+  background: var(--spice-button-disabled);
+  transform: translateY(-1px);
+}
+
+.cancelButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Duplicates Panel */
+.duplicatesPanel {
+  background: var(--spice-card);
+  border-radius: 12px;
+  padding: 0;
+  max-width: 800px;
+  width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--spice-button-disabled);
+  display: flex;
+  flex-direction: column;
+}
+
+.duplicatesHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  background: var(--spice-button-disabled);
+}
+
+.duplicatesHeader h3 {
+  color: var(--spice-text);
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.duplicatesContent {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.duplicatesFooter {
+  padding: 16px 24px;
+  border-top: 1px solid var(--spice-button-disabled);
+  background: var(--spice-button-disabled);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.closeButton {
+  background: none;
+  border: none;
+  color: var(--spice-subtext);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.closeButton:hover {
+  background: var(--spice-button);
+  color: var(--spice-text);
+}
+
+/* No Duplicates State */
+.noDuplicates {
+  text-align: center;
+  padding: 40px;
+  color: var(--spice-text);
+}
+
+.noDuplicates p:first-child {
+  font-size: 1.2rem;
+  margin-bottom: 8px;
+}
+
+.noDuplicates p:last-child {
+  color: var(--spice-subtext);
+  margin: 0;
+}
+
+/* Duplicates Summary */
+.duplicatesSummary {
+  background: var(--spice-button-disabled);
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border-left: 4px solid var(--spice-notification-error);
+}
+
+.duplicatesSummary p {
+  margin: 0;
+  color: var(--spice-text);
+}
+
+.duplicatesSummary strong {
+  color: var(--spice-notification-error);
+}
+
+/* Duplicates Actions */
+.duplicatesActions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  justify-content: center;
+}
+
+.previewButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.95rem;
+}
+
+.previewButton:hover:not(:disabled) {
+  background: var(--spice-button-active);
+  transform: translateY(-1px);
+}
+
+.previewButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cleanupButton {
+  background: var(--spice-notification-error);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.95rem;
+}
+
+.cleanupButton:hover:not(:disabled) {
+  background: #c53030;
+  transform: translateY(-1px);
+}
+
+.cleanupButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Duplicates List */
+.duplicatesList {
+  background: var(--spice-main);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button-disabled);
+  overflow: hidden;
+}
+
+.duplicatesList h4 {
+  margin: 0 0 16px 0;
+  color: var(--spice-text);
+  font-size: 1.1rem;
+  font-weight: 600;
+  padding: 16px 16px 0 16px;
+}
+
+.duplicateGroup {
+  padding: 16px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  background: var(--spice-card);
+}
+
+.duplicateGroup:last-child {
+  border-bottom: none;
+}
+
+.primaryTrack {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  background: rgba(29, 185, 84, 0.1);
+  border-left: 3px solid #1db954;
+  border-radius: 4px;
+  color: var(--spice-text);
+  font-size: 0.9rem;
+}
+
+.duplicateTracks {
+  margin-bottom: 8px;
+  color: var(--spice-text);
+  font-size: 0.9rem;
+}
+
+.duplicateTrack {
+  padding: 4px 12px;
+  margin: 4px 0;
+  background: rgba(231, 76, 60, 0.1);
+  border-left: 3px solid #e74c3c;
+  border-radius: 4px;
+  color: var(--spice-text);
+  font-size: 0.85rem;
+}
+
+.album {
+  color: var(--spice-subtext);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.playlistsAffected {
+  padding: 6px 12px;
+  background: rgba(255, 193, 7, 0.1);
+  border-left: 3px solid #ffc107;
+  border-radius: 4px;
+  color: var(--spice-text);
+  font-size: 0.85rem;
+}
+
+.moreGroups {
+  padding: 16px;
+  text-align: center;
+  color: var(--spice-subtext);
+  font-style: italic;
+  background: var(--spice-button-disabled);
+}
+
+/* General button improvements */
+.actionButton.dangerButton {
+  background-color: var(--spice-notification-error);
+  color: white;
+}
+
+.actionButton.dangerButton:hover:not(:disabled) {
+  background-color: #c53030;
+}

@@ -4,6 +4,7 @@ import "../styles/globals.css";
 import ValidationPanel from "./ValidationPanel";
 import FileMappingWizard from "./FileMappingWizard";
 import MappingResultsPanel from "./MappingResultsPanel";
+import DuplicateTracksPanel from "./DuplicateTracksPanel";
 import Portal from "../utils/Portal";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 
@@ -207,6 +208,7 @@ const PythonActionsPanel: React.FC = () => {
     "sequential-tracks": false,
     "sequential-associations": false,
     "create-file-mappings": false,
+    "clear-file-mappings-table": false,
   });
   const [results, setResults] = useState<
     Record<string, { success: boolean; message: string } | null>
@@ -277,6 +279,10 @@ const PythonActionsPanel: React.FC = () => {
   } | null>(null);
 
   const [activeValidationRequests, setActiveValidationRequests] = useState<Set<string>>(new Set());
+
+  const [duplicateTracksReport, setDuplicateTracksReport] = useState<any>(null);
+  const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
+  const [showDuplicatesPanel, setShowDuplicatesPanel] = useState(false);
 
   const [validationResults, setValidationResults] = useLocalStorage<{
     track: any | null;
@@ -513,6 +519,91 @@ const PythonActionsPanel: React.FC = () => {
 
     // Immediately fetch all unmapped files
     fetchAllUnmappedFiles();
+  };
+
+  const handleDetectDuplicates = async () => {
+    setIsLoading((prev) => ({ ...prev, "detect-duplicates": true }));
+
+    try {
+      const response = await fetch(`${settings.serverUrl}/api/tracks/duplicates/detect`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        setDuplicateTracksReport(result);
+        setShowDuplicatesModal(true);
+
+        if (result.total_duplicates === 0) {
+          Spicetify.showNotification("No duplicate tracks found!");
+        } else {
+          Spicetify.showNotification(
+            `Found ${result.total_groups} duplicate groups with ${result.total_duplicates} tracks to remove`
+          );
+        }
+      } else {
+        throw new Error(result.message || "Unknown error");
+      }
+    } catch (error) {
+      console.error("Error detecting duplicates:", error);
+      Spicetify.showNotification(`Error detecting duplicates: ${error}`, true);
+    } finally {
+      setIsLoading((prev) => ({ ...prev, "detect-duplicates": false }));
+    }
+  };
+
+  const handleCleanupDuplicates = async (dryRun: boolean = false) => {
+    setIsLoading((prev) => ({ ...prev, "cleanup-duplicates": true }));
+
+    try {
+      const response = await fetch(`${settings.serverUrl}/api/tracks/duplicates/cleanup`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ dry_run: dryRun }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        setResults((prev) => ({ ...prev, "cleanup-duplicates": result }));
+
+        if (dryRun) {
+          Spicetify.showNotification(
+            `Dry run complete: Would remove ${result.tracks_removed} tracks and merge ${result.playlists_merged} playlists`
+          );
+        } else {
+          Spicetify.showNotification(
+            `Cleanup complete: Removed ${result.tracks_removed} duplicate tracks, merged ${result.playlists_merged} playlists`
+          );
+
+          // Refresh the duplicates report
+          handleDetectDuplicates();
+        }
+      } else {
+        throw new Error(result.message || "Unknown error");
+      }
+    } catch (error) {
+      console.error("Error cleaning up duplicates:", error);
+      Spicetify.showNotification(`Error cleaning up duplicates: ${error}`, true);
+    } finally {
+      setIsLoading((prev) => ({ ...prev, "cleanup-duplicates": false }));
+    }
   };
 
   const performAction = async (action: string, data: any = {}) => {
@@ -1232,6 +1323,10 @@ const PythonActionsPanel: React.FC = () => {
     }
   };
 
+  const handleIsLoadingChange = (newLoadingState: Record<string, boolean>) => {
+    setIsLoading(newLoadingState);
+  };
+
   // Render the confirmation UI when needed
   const renderConfirmation = () => {
     if (!isAwaitingConfirmation) return null;
@@ -1271,6 +1366,7 @@ const PythonActionsPanel: React.FC = () => {
           onShowSearchResultsChange={setShowSearchResults}
           onMappingResultsChange={setMappingResults}
           onShowMappingResultsChange={setShowMappingResults}
+          onIsLoadingChange={handleIsLoadingChange}
           onClosePanel={() => {
             // 1. Close the panel
             setShowFileMappingPanel(false);
@@ -2054,11 +2150,6 @@ const PythonActionsPanel: React.FC = () => {
               onClick={() => performAction("validate-tracks")}
               disabled={isLoading["validate-tracks"] || serverStatus !== "connected"}
             />
-            <ActionButton
-              label="Clean Up Stale Mappings"
-              onClick={() => performAction("cleanup-stale-mappings")}
-              disabled={isLoading["cleanup-stale-mappings"] || serverStatus !== "connected"}
-            />
           </div>
         </div>
 
@@ -2173,6 +2264,27 @@ const PythonActionsPanel: React.FC = () => {
         </div>
 
         <div className={styles.actionGroup}>
+          <h4>Data Quality</h4>
+          <div className={styles.actionButtons}>
+            {/* <ActionButton
+              label="Detect Duplicate Tracks"
+              onClick={handleDetectDuplicates}
+              disabled={isLoading["detect-duplicates"] || serverStatus !== "connected"}
+            /> */}
+            <ActionButton
+              label="Manage Duplicate Tracks"
+              onClick={() => setShowDuplicatesPanel(!showDuplicatesPanel)}
+              disabled={serverStatus !== "connected"}
+            />
+            <ActionButton
+              label="Clean Up Stale Mappings"
+              onClick={() => performAction("cleanup-stale-mappings")}
+              disabled={isLoading["cleanup-stale-mappings"] || serverStatus !== "connected"}
+            />
+          </div>
+        </div>
+
+        <div className={styles.actionGroup}>
           <h4>Spotify Integration</h4>
           <div className={styles.actionButtons}>
             <ActionButton
@@ -2239,6 +2351,127 @@ const PythonActionsPanel: React.FC = () => {
             )
         )}
       </div>
+
+      {showDuplicatesPanel && (
+        <DuplicateTracksPanel
+          serverUrl={settings.serverUrl}
+          onDetectDuplicates={() => {
+            // Callback when duplicates are detected
+            console.log("Duplicates detected");
+          }}
+          onCleanupDuplicates={(dryRun) => {
+            // Callback when duplicates are cleaned up
+            console.log(`Duplicates cleanup completed (dry run: ${dryRun})`);
+            if (!dryRun) {
+              Spicetify.showNotification("Duplicate tracks have been cleaned up successfully!");
+            }
+          }}
+        />
+      )}
+
+      {/* {showDuplicatesModal && duplicateTracksReport && (
+        <Portal>
+          <div className={styles.modalOverlay}>
+            <div className={styles.duplicatesPanel}>
+              <div className={styles.duplicatesHeader}>
+                <h3>Duplicate Tracks Report</h3>
+                <button
+                  className={styles.closeButton}
+                  onClick={() => setShowDuplicatesModal(false)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className={styles.duplicatesContent}>
+                {duplicateTracksReport.total_duplicates === 0 ? (
+                  <div className={styles.noDuplicates}>
+                    <p>🎉 No duplicate tracks found!</p>
+                    <p>Your music library is clean.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className={styles.duplicatesSummary}>
+                      <p>
+                        Found <strong>{duplicateTracksReport.total_groups}</strong> duplicate groups
+                        with <strong>{duplicateTracksReport.total_duplicates}</strong> tracks to
+                        remove.
+                      </p>
+                    </div>
+
+                    <div className={styles.duplicatesActions}>
+                      <button
+                        className={styles.previewButton}
+                        onClick={() => handleCleanupDuplicates(true)}
+                        disabled={isLoading["cleanup-duplicates"]}
+                      >
+                        {isLoading["cleanup-duplicates"]
+                          ? "Analyzing..."
+                          : "Preview Cleanup (Dry Run)"}
+                      </button>
+                      <button
+                        className={styles.cleanupButton}
+                        onClick={() => handleCleanupDuplicates(false)}
+                        disabled={isLoading["cleanup-duplicates"]}
+                      >
+                        {isLoading["cleanup-duplicates"] ? "Cleaning..." : "Clean Up Duplicates"}
+                      </button>
+                    </div>
+
+                    <div className={styles.duplicatesList}>
+                      <h4>Duplicate Groups:</h4>
+                      {duplicateTracksReport.duplicate_groups
+                        .slice(0, 10)
+                        .map((group: any, index: number) => (
+                          <div key={index} className={styles.duplicateGroup}>
+                            <div className={styles.primaryTrack}>
+                              <strong>✓ Keeping:</strong> {group.primary_track.artists} -{" "}
+                              {group.primary_track.title}
+                              {group.primary_track.album && (
+                                <span className={styles.album}> ({group.primary_track.album})</span>
+                              )}
+                            </div>
+                            <div className={styles.duplicateTracks}>
+                              <strong>✗ Removing:</strong>
+                              {group.duplicates.map((dup: any, dupIndex: number) => (
+                                <div key={dupIndex} className={styles.duplicateTrack}>
+                                  • {dup.artists} - {dup.title}
+                                  {dup.album && (
+                                    <span className={styles.album}> ({dup.album})</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                            {group.playlists_affected.length > 0 && (
+                              <div className={styles.playlistsAffected}>
+                                <strong>Playlists:</strong> {group.playlists_affected.length}{" "}
+                                affected
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      {duplicateTracksReport.duplicate_groups.length > 10 && (
+                        <div className={styles.moreGroups}>
+                          ... and {duplicateTracksReport.duplicate_groups.length - 10} more groups
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className={styles.duplicatesFooter}>
+                <button
+                  className={styles.closeButton}
+                  onClick={() => setShowDuplicatesModal(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )} */}
 
       <ValidationPanel
         serverUrl={settings.serverUrl}
