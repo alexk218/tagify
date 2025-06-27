@@ -253,6 +253,7 @@ const PythonActionsPanel: React.FC = () => {
   const [showFileMappingPanel, setShowFileMappingPanel] = useState(false);
   const [autoMatchResults, setAutoMatchResults] = useState<AnalysisResultsFileMapping | null>(null);
   const [allUnmappedFiles, setAllUnmappedFiles] = useState<FileToProcess[]>([]);
+  const [isApplyingMapping, setIsApplyingMapping] = useState(false);
 
   const [settingsVisible, setSettingsVisible] = useState<boolean>(false);
   const [settings, setSettings] = useState({
@@ -1220,6 +1221,10 @@ const PythonActionsPanel: React.FC = () => {
   };
 
   const applyFileMapping = async (selections: any[], description: string) => {
+    if (isApplyingMapping) return; // Prevent multiple calls
+
+    setIsApplyingMapping(true); // Set loading state
+
     try {
       const cleanMasterTracksDir = settings.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
 
@@ -1244,7 +1249,6 @@ const PythonActionsPanel: React.FC = () => {
       }
 
       const result: FileMappingResponse = await response.json();
-
       if (result.success) {
         // Update the mapping results to show actual results instead of confirmation
         setMappingResults(result);
@@ -1320,6 +1324,8 @@ const PythonActionsPanel: React.FC = () => {
     } catch (error) {
       console.error("Error applying file mappings:", error);
       Spicetify.showNotification(`Error applying mappings: ${error}`, true);
+    } finally {
+      setIsApplyingMapping(false);
     }
   };
 
@@ -2023,6 +2029,7 @@ const PythonActionsPanel: React.FC = () => {
 
           await applyFileMapping(selections, description);
         }}
+        isApplyingMapping={isApplyingMapping}
       />
 
       {settingsVisible && (

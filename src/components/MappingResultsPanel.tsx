@@ -29,6 +29,7 @@ interface MappingResultsPanelProps {
   onFinish: () => void;
   onClose: () => void;
   onConfirmChanges?: (selections: any[]) => Promise<void>;
+  isApplyingMapping: boolean;
 }
 
 const MappingResultsPanel: React.FC<MappingResultsPanelProps> = ({
@@ -37,6 +38,7 @@ const MappingResultsPanel: React.FC<MappingResultsPanelProps> = ({
   onFinish,
   onClose,
   onConfirmChanges,
+  isApplyingMapping,
 }) => {
   const [successPage, setSuccessPage] = useState(1);
   const [failedPage, setFailedPage] = useState(1);
@@ -55,7 +57,7 @@ const MappingResultsPanel: React.FC<MappingResultsPanelProps> = ({
   };
 
   const handleConfirmApply = async () => {
-    if (!mappingResults?.pendingSelections || !onConfirmChanges) return;
+    if (!mappingResults?.pendingSelections || !onConfirmChanges || isApplyingMapping) return;
 
     try {
       await onConfirmChanges(mappingResults.pendingSelections);
@@ -144,10 +146,18 @@ const MappingResultsPanel: React.FC<MappingResultsPanelProps> = ({
           <div className={styles.mappingResultsFooter}>
             {isConfirmationStage ? (
               <>
-                <button className={styles.confirmButton} onClick={handleConfirmApply}>
-                  Confirm and Apply Changes
+                <button
+                  className={styles.confirmButton}
+                  onClick={handleConfirmApply}
+                  disabled={isApplyingMapping}
+                >
+                  {isApplyingMapping ? "Applying Changes..." : "Confirm and Apply Changes"}
                 </button>
-                <button className={styles.cancelButton} onClick={onClose}>
+                <button
+                  className={styles.cancelButton}
+                  onClick={onClose}
+                  disabled={isApplyingMapping}
+                >
                   Cancel
                 </button>
               </>
