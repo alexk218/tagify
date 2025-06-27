@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import styles from "./PythonActionsPanel.module.css";
 import "../styles/globals.css";
+import Portal from "../utils/Portal";
 
 interface Match {
   track_id: string;
@@ -106,6 +107,7 @@ interface FileMappingWizardProps {
   onMappingResultsChange: (results: FileMappingResponse | null) => void;
   onShowMappingResultsChange: (show: boolean) => void;
   onClosePanel: () => void;
+  onIsLoadingChange: (loadingState: Record<string, boolean>) => void;
 }
 
 const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
@@ -142,10 +144,13 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
   onMappingResultsChange,
   onShowMappingResultsChange,
   onClosePanel,
+  onIsLoadingChange,
 }) => {
   const [localMatches, setLocalMatches] = useState<any[]>([]);
   const [isLocalLoading, setIsLocalLoading] = useState(false);
   const [hasCalledAPI, setHasCalledAPI] = useState(false);
+
+  const [showClearConfirmation, setShowClearConfirmation] = useState(false);
 
   const autoMatchedPerPage = 20;
 
@@ -189,6 +194,9 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
 
   const handleClearMappingsTable = async () => {
     try {
+      // Set loading state to true
+      onIsLoadingChange({ ...isLoading, "clear-file-mappings-table": true });
+
       const response = await fetch(`${settings.serverUrl}/api/tracks/cleanup-mappings`, {
         method: "DELETE",
         headers: {
@@ -210,6 +218,11 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
     } catch (error) {
       console.error("Error clearing file mappings:", error);
       Spicetify.showNotification(`Failed to clear file mappings: ${error}`, true);
+    } finally {
+      // Set loading state back to false
+      onIsLoadingChange({ ...isLoading, "clear-file-mappings-table": false });
+      // Close the confirmation dialog
+      setShowClearConfirmation(false);
     }
   };
 
@@ -524,6 +537,55 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
     }
   };
 
+  const handleClearMappingsClick = () => {
+    setShowClearConfirmation(true);
+  };
+
+  const ClearMappingsConfirmationDialog = () => {
+    if (!showClearConfirmation) return null;
+
+    return (
+      <Portal>
+        <div className={styles.modalOverlay}>
+          <div className={styles.confirmationDialog}>
+            <div className={styles.confirmationHeader}>
+              <h3>Clear File Mappings</h3>
+              <p>Are you sure you want to clear all file mappings from the database?</p>
+            </div>
+
+            <div className={styles.confirmationContent}>
+              <div className={styles.warningMessage}>
+                <span className={styles.warningIcon}>⚠️</span>
+                <div>
+                  <strong>This action cannot be undone.</strong>
+                  <br />
+                  All existing file-to-track mappings will be permanently deleted.
+                </div>
+              </div>
+            </div>
+
+            <div className={styles.confirmationFooter}>
+              <button
+                className={styles.confirmButton}
+                onClick={handleClearMappingsTable}
+                disabled={isLoading["clear-file-mappings-table"]}
+              >
+                {isLoading["clear-file-mappings-table"] ? "Clearing..." : "Yes, Clear Mappings"}
+              </button>
+              <button
+                className={styles.cancelButton}
+                onClick={() => setShowClearConfirmation(false)}
+                disabled={isLoading["clear-file-mappings-table"]}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </Portal>
+    );
+  };
+
   const processedFilesCount = userMatchSelections.length + skippedFiles.length;
 
   return (
@@ -532,12 +594,14 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
 
       {/* Clear FileTrackMappings table */}
       <button
-        className="btn"
-        onClick={handleClearMappingsTable}
+        className={styles.confirmButton}
+        onClick={handleClearMappingsClick}
         disabled={isLoading["clear-file-mappings-table"]}
       >
         {isLoading["clear-file-mappings-table"] ? "Clearing mappings..." : "Clear File Mappings"}
       </button>
+
+      <ClearMappingsConfirmationDialog />
 
       {/* Show loading state while fetching files */}
       {isLoading["fetch-unmapped-files"] && (
