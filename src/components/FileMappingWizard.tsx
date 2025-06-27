@@ -187,6 +187,32 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
     return items.slice(startIndex, startIndex + perPage);
   };
 
+  const handleClearMappingsTable = async () => {
+    try {
+      const response = await fetch(`${settings.serverUrl}/api/tracks/cleanup-mappings`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      if (result) {
+        Spicetify.showNotification(
+          `Successfully cleared file mappings. Deleted: ${result.deleted_count} mappings`
+        );
+      }
+    } catch (error) {
+      console.error("Error clearing file mappings:", error);
+      Spicetify.showNotification(`Failed to clear file mappings: ${error}`, true);
+    }
+  };
+
   const handleAutoMatchAnalysis = async () => {
     try {
       const cleanMasterTracksDir = settings.masterTracksDir.replace(/^["'](.*)["']$/, "$1");
@@ -503,6 +529,15 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
   return (
     <div className={styles.fuzzyMatchContainer}>
       <h3>Map Files to Tracks</h3>
+
+      {/* Clear FileTrackMappings table */}
+      <button
+        className="btn"
+        onClick={handleClearMappingsTable}
+        disabled={isLoading["clear-file-mappings-table"]}
+      >
+        {isLoading["clear-file-mappings-table"] ? "Clearing mappings..." : "Clear File Mappings"}
+      </button>
 
       {/* Show loading state while fetching files */}
       {isLoading["fetch-unmapped-files"] && (
