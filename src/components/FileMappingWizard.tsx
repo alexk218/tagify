@@ -657,7 +657,7 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
             <div className={styles.autoMatchResults}>
               <h5>
                 Auto-Matched Files ({getNonRejectedAutoMatches().length} of{" "}
-                {autoMatchResults.details.auto_matched_files.length})
+                {autoMatchResults.details.files_without_mappings})
                 {rejectedAutoMatches.length > 0 && (
                   <span> - {rejectedAutoMatches.length} rejected</span>
                 )}
