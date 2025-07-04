@@ -624,6 +624,8 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
           `Successfully cleared file mappings. Deleted: ${result.deleted_count} mappings`
         );
       }
+
+      onClosePanel();
     } catch (error) {
       console.error("Error clearing file mappings:", error);
       Spicetify.showNotification(`Failed to clear file mappings: ${error}`, true);
