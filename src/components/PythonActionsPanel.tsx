@@ -1988,6 +1988,7 @@ const PythonActionsPanel: React.FC = () => {
         mappingResults={mappingResults}
         showMappingResults={showMappingResults}
         onFinish={() => {
+          setAutoMatchedPage(1);
           setAnalysisResults(null);
           setIsAwaitingConfirmation(false);
           setCurrentAction(null);
