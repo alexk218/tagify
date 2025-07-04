@@ -177,6 +177,7 @@
   justify-content: center;
   align-items: center;
   z-index: 1000;
+  padding: 20px;
 }
 
 /* Settings Panel */
@@ -638,14 +639,6 @@
 .matchingComplete {
   text-align: center;
   padding: 20px;
-}
-
-.autoMatchedSection {
-  margin-bottom: 20px;
-  padding: 12px;
-  background-color: rgba(46, 204, 113, 0.1);
-  border-radius: 4px;
-  border-left: 4px solid #2ecc71;
 }
 
 .autoMatchedList {
@@ -3378,21 +3371,6 @@
   margin: 0;
 }
 
-/* Auto-matched Section */
-.autoMatchedSection {
-  margin-bottom: 20px;
-  padding: 16px;
-  background: var(--spice-main);
-  border-radius: 8px;
-  border: 1px solid var(--spice-button-disabled);
-}
-
-.autoMatchedSection h4 {
-  margin: 0 0 12px 0;
-  color: var(--spice-text);
-  font-size: 16px;
-}
-
 .rejectedCount {
   color: var(--spice-subtext);
   font-weight: normal;
@@ -3975,28 +3953,86 @@
   opacity: 0.6;
 }
 
-.clearRejectionsButton {
-  background: var(--spice-button-disabled);
-  color: var(--spice-text);
-  border: none;
-  padding: 8px 16px;
-  border-radius: 4px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.clearRejectionsButton:hover {
-  background: var(--spice-button);
-}
-
 /* File Mapping Wizard Styles */
+.paginationContainer {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  margin: 16px 0 0 0;
+  padding: 12px 16px; /* Add left/right padding to move content away from edges */
+  border-top: 1px solid var(--spice-button-disabled);
+  background: transparent;
+  min-height: 48px;
+}
+
+.paginationLeft {
+  /* First column - left aligned but content will be in center column */
+  display: flex;
+  justify-content: flex-start;
+}
+
+.paginationCenter {
+  /* Center column - always centered */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.paginationRight {
+  /* Third column - right aligned with some margin from edge */
+  display: flex;
+  justify-content: flex-end;
+  margin-right: 8px; /* Add some space from the right edge */
+}
+
+@media (max-height: 700px) {
+  .fileMappingWizard {
+    max-height: 95vh;
+  }
+
+  .wizardContent {
+    padding: 16px 20px;
+  }
+}
+
+@media (max-width: 768px) {
+  .fileMappingWizard {
+    width: 98vw;
+    max-height: 90vh;
+  }
+
+  .wizardHeader {
+    padding: 16px 20px 0 20px;
+  }
+
+  .panelFooter {
+    padding: 12px 20px 16px 20px;
+  }
+}
+
+.fileMappingWizard {
+  background: var(--spice-card);
+  border-radius: 12px;
+  padding: 0;
+  max-width: 1000px;
+  width: 95vw;
+  max-height: 85vh;
+  min-height: 60vh;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--spice-button-disabled);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
 
 /* Tab Navigation */
 .tabNavigation {
   display: flex;
   gap: 4px;
-  margin-bottom: 20px;
+  margin: 16px 0;
   border-bottom: 2px solid var(--spice-button);
+  flex-shrink: 0;
 }
 
 .tab {
@@ -4036,7 +4072,7 @@
 .reviewTab,
 .manualTab {
   min-height: 400px;
-  padding: 20px 0;
+  padding: 0;
 }
 
 /* Analysis Tab Styles */
@@ -4169,6 +4205,16 @@
   border-bottom: 1px solid var(--spice-button);
 }
 
+.autoMatchedSection:empty,
+.manualMatchesSection:empty {
+  display: none;
+}
+
+.autoMatchedSection:last-child,
+.manualMatchesSection:last-child {
+  margin-bottom: 0;
+}
+
 .rejectedCount {
   color: var(--spice-subtext);
   font-weight: 400;
@@ -4239,8 +4285,10 @@
   justify-content: center;
   align-items: center;
   gap: 12px;
-  padding: 16px;
-  background: var(--spice-button);
+  margin: 16px 0 0 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--spice-button-disabled);
+  background: transparent;
 }
 
 .pagination button {

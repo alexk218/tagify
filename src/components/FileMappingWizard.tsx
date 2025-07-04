@@ -747,36 +747,45 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
           </div>
 
           {/* Pagination */}
-          {getAutoMatchedFiles().length > autoMatchedPerPage && (
-            <div className={styles.pagination}>
-              <button
-                onClick={() => onAutoMatchedPageChange(Math.max(1, autoMatchedPage - 1))}
-                disabled={autoMatchedPage === 1}
-              >
-                Previous
-              </button>
-              <span>
-                Page {autoMatchedPage} of{" "}
-                {Math.ceil(getAutoMatchedFiles().length / autoMatchedPerPage)}
-              </span>
-              <button
-                onClick={() => onAutoMatchedPageChange(autoMatchedPage + 1)}
-                disabled={
-                  autoMatchedPage >= Math.ceil(getAutoMatchedFiles().length / autoMatchedPerPage)
-                }
-              >
-                Next
-              </button>
-            </div>
-          )}
+          <div className={styles.paginationContainer}>
+            {/* Left side: Empty for balance */}
+            <div className={styles.paginationLeft}>{/* Empty - just for grid balance */}</div>
 
-          {/* Actions */}
-          <div className={styles.autoMatchActions}>
-            {rejectedAutoMatches.length > 0 && (
-              <button className={styles.clearRejectionsButton} onClick={handleClearRejections}>
-                Clear {rejectedAutoMatches.length} Rejections
-              </button>
-            )}
+            {/* Center: Pagination (if needed) */}
+            <div className={styles.paginationCenter}>
+              {getAutoMatchedFiles().length > autoMatchedPerPage && (
+                <div className={styles.pagination}>
+                  <button
+                    onClick={() => onAutoMatchedPageChange(Math.max(1, autoMatchedPage - 1))}
+                    disabled={autoMatchedPage === 1}
+                  >
+                    Previous
+                  </button>
+                  <span>
+                    Page {autoMatchedPage} of{" "}
+                    {Math.ceil(getAutoMatchedFiles().length / autoMatchedPerPage)}
+                  </span>
+                  <button
+                    onClick={() => onAutoMatchedPageChange(autoMatchedPage + 1)}
+                    disabled={
+                      autoMatchedPage >=
+                      Math.ceil(getAutoMatchedFiles().length / autoMatchedPerPage)
+                    }
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Right side: Clear Rejections */}
+            <div className={styles.paginationRight}>
+              {rejectedAutoMatches.length > 0 && (
+                <button className={styles.clearRejectionsButton} onClick={handleClearRejections}>
+                  Clear {rejectedAutoMatches.length} Rejections
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
