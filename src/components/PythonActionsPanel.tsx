@@ -141,6 +141,15 @@ interface MatchSelection {
   confidence: number;
 }
 
+interface AutoMatchedFile {
+  file_path: string;
+  file_name: string;
+  uri: string;
+  confidence: number;
+  match_type: string;
+  track_info: string;
+}
+
 interface FileToProcess {
   file_path: string;
   file_name: string;
@@ -155,7 +164,7 @@ interface AnalysisResultsFileMapping {
   requires_user_selection: boolean;
   details: {
     files_requiring_user_input: FileToProcess[];
-    auto_matched_files: any[];
+    auto_matched_files: AutoMatchedFile[]; // TODO: duplicate interfaces in FileMappingWizard
     total_files: number;
     files_without_mappings: number;
   };
@@ -209,6 +218,7 @@ const PythonActionsPanel: React.FC = () => {
     "sequential-associations": false,
     "create-file-mappings": false,
     "clear-file-mappings-table": false,
+    "fetch-unmapped-files": false,
   });
   const [results, setResults] = useState<
     Record<string, { success: boolean; message: string } | null>
@@ -251,7 +261,6 @@ const PythonActionsPanel: React.FC = () => {
   const [analysisConfidenceThreshold, setAnalysisConfidenceThreshold] = useState<number>(0.75);
 
   const [showFileMappingPanel, setShowFileMappingPanel] = useState(false);
-  const [autoMatchResults, setAutoMatchResults] = useState<AnalysisResultsFileMapping | null>(null);
   const [allUnmappedFiles, setAllUnmappedFiles] = useState<FileToProcess[]>([]);
   const [isApplyingMapping, setIsApplyingMapping] = useState(false);
 
@@ -462,8 +471,8 @@ const PythonActionsPanel: React.FC = () => {
 
       const requestData = {
         masterTracksDir: cleanMasterTracksDir,
-        confidence_threshold: 0.0, // Set to 0 to get ALL files without mappings
-        confirmed: false, // Analysis only
+        confidence_threshold: 0.75,
+        confirmed: false,
       };
 
       const response = await fetch(`${settings.serverUrl}/api/tracks/mapping`, {
@@ -481,25 +490,9 @@ const PythonActionsPanel: React.FC = () => {
 
       const result: AnalysisResultsFileMapping = await response.json();
 
-      // Combine all files that need mapping (both auto-matched and requiring user input)
-      const allFiles = [
-        ...(result.details.auto_matched_files || []).map((file: any) => ({
-          file_path: file.file_path,
-          file_name: file.fileName || file.file_name,
-        })),
-        ...(result.details.files_requiring_user_input || []),
-      ];
+      setAllUnmappedFiles(result.details.files_requiring_user_input || []);
+      setAnalysisResults(result);
 
-      setAllUnmappedFiles(allFiles);
-
-      // Also set analysisResults for compatibility with existing manual matching logic
-      setAnalysisResults({
-        ...result,
-        details: {
-          ...result.details,
-          files_requiring_user_input: allFiles, // Use all files for manual matching
-        },
-      });
     } catch (error) {
       console.error("Error fetching unmapped files:", error);
       Spicetify.showNotification(`Failed to fetch unmapped files: ${error}`, true);
@@ -1232,7 +1225,7 @@ const PythonActionsPanel: React.FC = () => {
         masterTracksDir: cleanMasterTracksDir,
         confirmed: true,
         user_selections: selections,
-        precomputed_changes_from_analysis: autoMatchResults || analysisResults,
+        precomputed_changes_from_analysis: analysisResults,
       };
 
       const response = await fetch(`${settings.serverUrl}/api/tracks/mapping`, {
@@ -1263,13 +1256,10 @@ const PythonActionsPanel: React.FC = () => {
 
         // Clean up state based on what was applied
         if (description.includes("auto-matched") || description.includes("auto")) {
-          // Clear auto-match results since they've been applied
-          setAutoMatchResults(null);
           setRejectedAutoMatches([]);
         }
 
         if (description.includes("manual") || description.includes("user")) {
-          // Clear user selections since they've been applied
           setUserMatchSelections([]);
         }
 
@@ -1342,7 +1332,6 @@ const PythonActionsPanel: React.FC = () => {
         <FileMappingWizard
           currentAction={currentAction}
           analysisResults={analysisResults}
-          autoMatchResults={autoMatchResults}
           allUnmappedFiles={allUnmappedFiles}
           userMatchSelections={userMatchSelections}
           skippedFiles={skippedFiles}
@@ -1363,7 +1352,6 @@ const PythonActionsPanel: React.FC = () => {
           onRejectedAutoMatchesChange={setRejectedAutoMatches}
           onAutoMatchedPageChange={setAutoMatchedPage}
           onFileMappingConfidenceThresholdChange={setFileMappingConfidenceThreshold}
-          onAutoMatchResultsChange={setAutoMatchResults}
           onAnalysisResultsChange={setAnalysisResults}
           onAllUnmappedFilesChange={setAllUnmappedFiles}
           onSearchQueryChange={setSearchQuery}
@@ -1382,7 +1370,6 @@ const PythonActionsPanel: React.FC = () => {
             setCurrentAction(null);
 
             // 3. Clear analysis results
-            setAutoMatchResults(null);
             setAnalysisResults(null);
 
             // 4. Clear file lists

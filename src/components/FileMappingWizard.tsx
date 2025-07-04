@@ -15,6 +15,15 @@ interface Match {
   uri?: string;
 }
 
+interface AutoMatchedFile {
+  file_path: string;
+  file_name: string;
+  uri: string;
+  confidence: number;
+  match_type: string;
+  track_info: string;
+}
+
 interface FileMappingSelection {
   file_path: string;
   uri: string;
@@ -45,7 +54,7 @@ interface AnalysisResultsFileMapping {
   requires_user_selection: boolean;
   details: {
     files_requiring_user_input: FileToProcess[];
-    auto_matched_files: any[];
+    auto_matched_files: AutoMatchedFile[];
     total_files: number;
     files_without_mappings: number;
   };
@@ -74,7 +83,6 @@ interface FileMappingResponse {
 interface FileMappingWizardProps {
   currentAction: any;
   analysisResults: AnalysisResultsFileMapping | null;
-  autoMatchResults: AnalysisResultsFileMapping | null;
   allUnmappedFiles: FileToProcess[];
   userMatchSelections: (MatchSelection | FileMappingSelection)[];
   skippedFiles: string[];
@@ -107,7 +115,6 @@ interface FileMappingWizardProps {
   onRejectedAutoMatchesChange: (rejected: string[]) => void;
   onAutoMatchedPageChange: (page: number) => void;
   onFileMappingConfidenceThresholdChange: (threshold: number) => void;
-  onAutoMatchResultsChange: (results: AnalysisResultsFileMapping | null) => void;
   onAnalysisResultsChange: (results: AnalysisResultsFileMapping | null) => void;
   onAllUnmappedFilesChange: (files: FileToProcess[]) => void;
   onSearchQueryChange: (query: string) => void;
@@ -123,7 +130,6 @@ interface FileMappingWizardProps {
 const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
   currentAction,
   analysisResults,
-  autoMatchResults,
   allUnmappedFiles,
   userMatchSelections,
   skippedFiles,
@@ -144,7 +150,6 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
   onRejectedAutoMatchesChange,
   onAutoMatchedPageChange,
   onFileMappingConfidenceThresholdChange,
-  onAutoMatchResultsChange,
   onAnalysisResultsChange,
   onAllUnmappedFilesChange,
   onSearchQueryChange,
@@ -165,19 +170,21 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
   const [isResolvingDuplicates, setIsResolvingDuplicates] = useState(false);
   const [currentTab, setCurrentTab] = useState<"analysis" | "review" | "manual">("analysis");
 
-  const autoMatchedPerPage = 20;
+  const autoMatchedPerPage = 40;
   const isFileMapping = currentAction?.name === "create-file-mappings";
 
   // Get consolidated auto-matched files
-  const getAutoMatchedFiles = () => {
+  const getAutoMatchedFiles = (): AutoMatchedFile[] => {
     return analysisResults?.details?.auto_matched_files || [];
   };
 
   // Get manual files
   const getManualFiles = () => {
-    return allUnmappedFiles.length > 0
-      ? allUnmappedFiles
-      : analysisResults?.details?.files_requiring_user_input || [];
+    // TODO: keep this?
+    // return allUnmappedFiles.length > 0
+    //   ? allUnmappedFiles
+    //   : analysisResults?.details?.files_requiring_user_input || [];
+    return analysisResults?.details?.files_requiring_user_input || [];
   };
 
   // Get current file for manual matching
@@ -198,9 +205,11 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
     return "";
   })();
 
-  const getNonRejectedAutoMatches = () => {
+  const getNonRejectedAutoMatches = (): AutoMatchedFile[] => {
     const autoMatches = getAutoMatchedFiles();
-    return autoMatches.filter((match: any) => !rejectedAutoMatches.includes(match.file_path));
+    return autoMatches.filter(
+      (match: AutoMatchedFile) => !rejectedAutoMatches.includes(match.file_path)
+    );
   };
 
   const getPagedItems = <T,>(items: T[], page: number, perPage: number): T[] => {
@@ -438,7 +447,9 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
     onRejectedAutoMatchesChange([]);
     const filteredFiles = allUnmappedFiles.filter(
       (file) =>
-        !getAutoMatchedFiles()?.some((autoMatch: any) => autoMatch.file_path === file.file_path)
+        !getAutoMatchedFiles()?.some(
+          (autoMatch: AutoMatchedFile) => autoMatch.file_path === file.file_path
+        )
     );
     onAllUnmappedFilesChange(filteredFiles);
     Spicetify.showNotification("Cleared all rejections - files moved back to auto-match");
@@ -449,11 +460,11 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
     const manualMatches = userMatchSelections;
 
     const totalSelections = [
-      ...autoMatches.map((match: any) => ({
+      ...autoMatches.map((match: AutoMatchedFile) => ({
         file_path: match.file_path,
         uri: match.uri,
         confidence: match.confidence,
-        file_name: match.fileName || match.file_name,
+        file_name: match.file_name,
       })),
       ...manualMatches,
     ];
@@ -475,10 +486,11 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
         uri: sel.uri,
         success: true,
         confidence: sel.confidence,
-        source: autoMatches.find((m: any) => m.file_path === sel.file_path)
+        source: autoMatches.find((m: AutoMatchedFile) => m.file_path === sel.file_path)
           ? "auto_match"
           : "user_selected",
-        track_info: autoMatches.find((m: any) => m.file_path === sel.file_path)?.track_info || "",
+        track_info:
+          autoMatches.find((m: AutoMatchedFile) => m.file_path === sel.file_path)?.track_info || "",
       })),
       total_processed: totalSelections.length,
       pendingSelections: totalSelections,
@@ -650,9 +662,11 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
         <button
           className={styles.enhancedAnalysisButton}
           onClick={runEnhancedAnalysis}
-          disabled={isLoading["create-file-mappings"]}
+          disabled={isLoading["create-file-mappings"] || isLoading["fetch-unmapped-files"]}
         >
-          {isLoading["create-file-mappings"] ? "🔍 Analyzing..." : "🔍 Run Analysis"}
+          {isLoading["create-file-mappings"] || isLoading["fetch-unmapped-files"]
+            ? "🔍 Analyzing..."
+            : "🔍 Run Analysis"}
         </button>
 
         {analysisResults && (
@@ -704,7 +718,7 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
 
           <div className={styles.autoMatchedList}>
             {getPagedItems(getNonRejectedAutoMatches(), autoMatchedPage, autoMatchedPerPage).map(
-              (match, index) => {
+              (match: AutoMatchedFile) => {
                 const isRejected = rejectedAutoMatches.includes(match.file_path);
                 return (
                   <div
