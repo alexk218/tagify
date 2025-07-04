@@ -3268,8 +3268,6 @@
   margin-left: 4px;
 }
 
-/* Add these styles to src/components/PythonActionsPanel.module.css */
-
 /* Wizard Structure */
 .wizardHeader {
   display: flex;

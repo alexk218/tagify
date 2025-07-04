@@ -32,7 +32,6 @@ interface FileMappingSelection {
 }
 
 interface MatchSelection {
-  fileName?: string;
   trackId?: string;
   file_name?: string;
   file_path?: string;
@@ -383,7 +382,7 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
             Accept: "application/json",
           },
           body: JSON.stringify({
-            filename: currentFileName,
+            fileName: currentFileName,
             master_tracks_dir: cleanMasterTracksDir,
           }),
         });
@@ -482,7 +481,7 @@ const FileMappingWizard: React.FC<FileMappingWizardProps> = ({
       successful_mappings: 0,
       failed_mappings: 0,
       results: totalSelections.map((sel) => ({
-        filename: sel.file_name,
+        file_name: sel.file_name, // TODO: ???
         uri: sel.uri,
         success: true,
         confidence: sel.confidence,

@@ -3,7 +3,7 @@ import styles from "./PythonActionsPanel.module.css";
 import Portal from "../utils/Portal";
 
 interface FileMappingResult {
-  filename: string;
+  file_name: string;
   uri: string;
   success: boolean;
   confidence?: number;
@@ -113,7 +113,7 @@ const MappingResultsPanel: React.FC<MappingResultsPanelProps> = ({
                 <div className={styles.resultsList}>
                   {mappingResults.results.map((result, index) => (
                     <div key={index} className={`${styles.resultItem} ${styles.successItem}`}>
-                      <div className={styles.resultFileName}>{result.filename}</div>
+                      <div className={styles.resultFileName}>{result.file_name}</div>
                       <div className={styles.resultUri}>{result.uri}</div>
                       {result.track_info && (
                         <div className={styles.resultTrackInfo}>

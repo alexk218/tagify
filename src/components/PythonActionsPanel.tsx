@@ -113,7 +113,7 @@ interface FileMappingSelection {
 }
 
 interface FileMappingResult {
-  filename: string;
+  file_name: string;
   uri: string;
   success: boolean;
   confidence?: number;
@@ -133,7 +133,6 @@ interface FileMappingResponse {
 }
 
 interface MatchSelection {
-  fileName?: string;
   trackId?: string;
   file_name?: string;
   file_path?: string;
@@ -1250,7 +1249,7 @@ const PythonActionsPanel: React.FC = () => {
         const successfullyMappedFilePaths = new Set(
           result.results
             .filter((r) => r.success)
-            .map((r) => selections.find((s) => s.file_name === r.filename)?.file_path)
+            .map((r) => selections.find((s) => s.file_name === r.file_name)?.file_path)
             .filter(Boolean)
         );
 
@@ -2009,7 +2008,7 @@ const PythonActionsPanel: React.FC = () => {
           // Determine the description based on the source
           const description = selections.some(
             (s: any) =>
-              mappingResults?.results?.find((r: any) => r.filename === s.file_name)?.source ===
+              mappingResults?.results?.find((r: any) => r.file_name === s.file_name)?.source ===
               "auto_match"
           )
             ? "auto-matched selections"
