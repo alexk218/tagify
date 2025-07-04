@@ -3988,3 +3988,663 @@
 .clearRejectionsButton:hover {
   background: var(--spice-button);
 }
+
+/* File Mapping Wizard Styles */
+
+/* Tab Navigation */
+.tabNavigation {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid var(--spice-button);
+}
+
+.tab {
+  background: var(--spice-card);
+  border: 1px solid var(--spice-button);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  padding: 12px 16px;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.tab:hover:not(:disabled) {
+  background: var(--spice-button);
+  color: var(--spice-text);
+}
+
+.tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.activeTab {
+  background: var(--spice-main) !important;
+  color: var(--spice-text) !important;
+  border-bottom: 2px solid var(--spice-main);
+  margin-bottom: -2px;
+  z-index: 1;
+}
+
+/* Tab Content Areas */
+.analysisTab,
+.reviewTab,
+.manualTab {
+  min-height: 400px;
+  padding: 20px 0;
+}
+
+/* Analysis Tab Styles */
+.thresholdControls {
+  margin-bottom: 24px;
+  background: var(--spice-card);
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+}
+
+.thresholdControl label {
+  display: block;
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.thresholdSlider {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--spice-button);
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.thresholdSlider::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--spice-notification);
+  cursor: pointer;
+  border: 2px solid var(--spice-main);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.enhancedAnalysisButton {
+  background: var(--spice-notification);
+  border: 1px solid var(--spice-notification);
+  border-radius: 8px;
+  padding: 16px 24px;
+  color: var(--spice-main);
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+  width: 100%;
+  margin-bottom: 16px;
+  transition: all 0.2s ease;
+}
+
+.enhancedAnalysisButton:hover:not(:disabled) {
+  background: var(--spice-notification-error);
+  border-color: var(--spice-notification-error);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.enhancedAnalysisButton:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.clearMappingsSection {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--spice-button);
+}
+
+.clearMappingsButton {
+  background: var(--spice-notification-error);
+  border: 1px solid var(--spice-notification-error);
+  border-radius: 6px;
+  padding: 12px 20px;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.clearMappingsButton:hover:not(:disabled) {
+  background: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* Review Tab Styles */
+.progressSummary {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+  background: var(--spice-card);
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+  flex-wrap: wrap;
+}
+
+.progressItem {
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+.progressItem strong {
+  color: var(--spice-text);
+  font-weight: 600;
+}
+
+.autoMatchedSection,
+.manualMatchesSection {
+  margin-bottom: 24px;
+  background: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+  overflow: hidden;
+}
+
+.autoMatchedSection h4,
+.manualMatchesSection h4 {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--spice-button);
+}
+
+.rejectedCount {
+  color: var(--spice-subtext);
+  font-weight: 400;
+  font-size: 14px;
+}
+
+.autoMatchedList,
+.manualMatchesList {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.autoMatchedItem,
+.manualMatchItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--spice-button);
+  transition: background 0.2s ease;
+}
+
+.autoMatchedItem:hover,
+.manualMatchItem:hover {
+  background: var(--spice-button);
+}
+
+.autoMatchedItem.rejected {
+  opacity: 0.6;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.matchInfo {
+  flex: 1;
+}
+
+.fileName {
+  color: var(--spice-text);
+  font-weight: 500;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.trackInfo {
+  color: var(--spice-subtext);
+  font-size: 13px;
+}
+
+.rejectButton {
+  background: transparent;
+  border: 1px solid var(--spice-subtext);
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+.rejectButton:hover {
+  background: var(--spice-notification-error);
+  border-color: var(--spice-notification-error);
+  color: white;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--spice-button);
+}
+
+.pagination button {
+  background: var(--spice-main);
+  border: 1px solid var(--spice-text);
+  border-radius: 4px;
+  padding: 8px 12px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.pagination button:hover:not(:disabled) {
+  background: var(--spice-button-active);
+}
+
+.pagination button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination span {
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.autoMatchActions {
+  padding: 16px;
+  background: var(--spice-button);
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.clearRejectionsButton {
+  background: var(--spice-card);
+  border: 1px solid var(--spice-text);
+  border-radius: 6px;
+  padding: 8px 16px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.clearRejectionsButton:hover {
+  background: var(--spice-button-active);
+}
+
+.moreItemsIndicator {
+  padding: 8px 16px;
+  color: var(--spice-subtext);
+  font-size: 13px;
+  font-style: italic;
+  text-align: center;
+}
+
+.reviewActions {
+  background: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+  padding: 20px;
+}
+
+.reviewSummary {
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.reviewSummary p {
+  color: var(--spice-text);
+  font-size: 16px;
+  margin: 0;
+}
+
+.reviewButton,
+.manualMatchButton {
+  background: var(--spice-notification);
+  border: 1px solid var(--spice-notification);
+  border-radius: 6px;
+  padding: 12px 20px;
+  color: var(--spice-main);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  text-decoration: none;
+}
+
+.reviewButton:hover:not(:disabled),
+.manualMatchButton:hover:not(:disabled) {
+  background: var(--spice-notification-error);
+  border-color: var(--spice-notification-error);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.reviewButton:disabled,
+.manualMatchButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Manual Tab Styles */
+.fileInfo {
+  background: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.fileInfo .fileName {
+  color: var(--spice-text);
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.mappedIndicator {
+  color: var(--spice-notification);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.progress {
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+.searchSection {
+  background: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.searchForm {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.searchInput {
+  flex: 1;
+  background: var(--spice-main);
+  border: 1px solid var(--spice-button);
+  border-radius: 6px;
+  padding: 12px 16px;
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: var(--spice-notification);
+  box-shadow: 0 0 0 2px rgba(29, 185, 84, 0.2);
+}
+
+.searchButton {
+  background: var(--spice-notification);
+  border: 1px solid var(--spice-notification);
+  border-radius: 6px;
+  padding: 12px 20px;
+  color: var(--spice-main);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.searchButton:hover:not(:disabled) {
+  background: var(--spice-notification-error);
+  border-color: var(--spice-notification-error);
+}
+
+.searchButton:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.searchResults,
+.fuzzyMatchesSection {
+  background: var(--spice-main);
+  border: 1px solid var(--spice-button);
+  border-radius: 6px;
+  margin-top: 16px;
+}
+
+.searchResults h5,
+.fuzzyMatchesSection h5 {
+  background: var(--spice-button);
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--spice-button);
+}
+
+.searchResultsList,
+.matchesList {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.searchResultItem,
+.matchItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--spice-button);
+  transition: background 0.2s ease;
+}
+
+.searchResultItem:hover,
+.matchItem:hover {
+  background: var(--spice-button);
+}
+
+.trackDetails {
+  flex: 1;
+}
+
+.trackDetails strong {
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.album {
+  color: var(--spice-subtext);
+  font-size: 13px;
+}
+
+.confidence {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.selectButton {
+  background: var(--spice-notification);
+  border: 1px solid var(--spice-notification);
+  border-radius: 4px;
+  padding: 8px 16px;
+  color: var(--spice-main);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.selectButton:hover {
+  background: var(--spice-notification-error);
+  border-color: var(--spice-notification-error);
+}
+
+.loadingIndicator {
+  padding: 20px;
+  text-align: center;
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+.fileNavigation {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 24px;
+  padding: 20px;
+  background: var(--spice-card);
+  border-radius: 8px;
+  border: 1px solid var(--spice-button);
+  flex-wrap: wrap;
+}
+
+.skipButton,
+.prevButton,
+.nextButton,
+.backToReviewButton {
+  background: var(--spice-main);
+  border: 1px solid var(--spice-text);
+  border-radius: 6px;
+  padding: 10px 16px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.skipButton:hover:not(:disabled),
+.prevButton:hover:not(:disabled),
+.nextButton:hover:not(:disabled),
+.backToReviewButton:hover:not(:disabled) {
+  background: var(--spice-button-active);
+  transform: translateY(-1px);
+}
+
+.skipButton:disabled,
+.prevButton:disabled,
+.nextButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.backToReviewButton {
+  background: var(--spice-button);
+  border-color: var(--spice-button);
+}
+
+/* Confirmation Dialog */
+.confirmationDialog {
+  background: var(--spice-main);
+  border-radius: 12px;
+  border: 2px solid var(--spice-button);
+  padding: 24px;
+  max-width: 400px;
+  margin: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.confirmationDialog h3 {
+  color: var(--spice-text);
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 16px 0;
+  text-align: center;
+}
+
+.confirmationDialog p {
+  color: var(--spice-subtext);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 24px 0;
+  text-align: center;
+}
+
+.confirmationFooter {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.confirmButton {
+  background: var(--spice-notification-error);
+  border: 1px solid var(--spice-notification-error);
+  border-radius: 6px;
+  padding: 12px 20px;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.confirmButton:hover:not(:disabled) {
+  background: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.cancelButton {
+  background: var(--spice-main);
+  border: 1px solid var(--spice-text);
+  border-radius: 6px;
+  padding: 12px 20px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.cancelButton:hover:not(:disabled) {
+  background: var(--spice-button-active);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .progressSummary {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .actionButtons {
+    flex-direction: column;
+  }
+
+  .fileNavigation {
+    flex-direction: column;
+  }
+
+  .searchForm {
+    flex-direction: column;
+  }
+
+  .tabNavigation {
+    flex-wrap: wrap;
+  }
+}
