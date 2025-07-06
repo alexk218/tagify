@@ -641,13 +641,6 @@
   padding: 20px;
 }
 
-.autoMatchedList {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-}
-
 .autoMatchedItem {
   display: flex;
   justify-content: space-between;
@@ -2245,20 +2238,6 @@
   margin: 0 0 16px 0;
 }
 
-.autoMatchedList {
-  max-height: 400px;
-  overflow-y: auto;
-  margin-bottom: 16px;
-}
-
-/* Panel footer */
-.panelFooter {
-  margin-top: 32px;
-  padding-top: 20px;
-  border-top: 2px solid var(--spice-button);
-  text-align: center;
-}
-
 .closePanelButton {
   background: var(--spice-button);
   border: 1px solid var(--spice-text);
@@ -3275,7 +3254,9 @@
   align-items: center;
   margin-bottom: 20px;
   padding-bottom: 16px;
-  border-bottom: 1px solid var(--spice-button-disabled);
+  flex-shrink: 0; /* Prevent shrinking */
+  padding: 20px 24px 0 24px;
+  border-bottom: none;
 }
 
 .wizardProgress {
@@ -3850,9 +3831,12 @@
 
 /* Panel Footer */
 .panelFooter {
+  flex-shrink: 0; /* Prevent shrinking */
+  margin-top: 0; /* Remove margin since it's now at bottom */
+  padding: 16px 24px;
+  border-top: 2px solid var(--spice-button);
   text-align: center;
-  padding-top: 16px;
-  border-top: 1px solid var(--spice-button-disabled);
+  background: var(--spice-card);
 }
 
 .closePanelButton {
@@ -3983,6 +3967,13 @@
   margin-right: 8px; /* Add some space from the right edge */
 }
 
+.wizardContent {
+  flex: 1; /* Take up remaining space */
+  overflow-y: auto; /* Enable vertical scrolling */
+  padding: 20px 24px;
+  min-height: 0; /* Allow flex shrinking */
+}
+
 @media (max-height: 700px) {
   .fileMappingWizard {
     max-height: 95vh;
@@ -3990,6 +3981,11 @@
 
   .wizardContent {
     padding: 16px 20px;
+  }
+
+  .autoMatchedList,
+  .manualMatchesList {
+    max-height: 200px; /* Further reduce on smaller screens */
   }
 }
 
@@ -4004,7 +4000,11 @@
   }
 
   .panelFooter {
-    padding: 12px 20px 16px 20px;
+    padding: 12px 20px;
+  }
+
+  .wizardContent {
+    padding: 16px 20px;
   }
 }
 
@@ -4069,8 +4069,8 @@
 .analysisTab,
 .reviewTab,
 .manualTab {
-  min-height: 400px;
   padding: 0;
+  height: 100%;
 }
 
 /* Analysis Tab Styles */
@@ -4221,8 +4221,10 @@
 
 .autoMatchedList,
 .manualMatchesList {
-  max-height: 300px;
+  max-height: 250px;
   overflow-y: auto;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
 }
 
 .autoMatchedItem,
