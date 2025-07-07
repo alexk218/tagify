@@ -578,46 +578,46 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
 
   return (
     <Portal>
-      <div className={styles.modalOverlay} onClick={handleCancel}>
-        <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-          {/* Custom notification */}
+      <div className="modal-overlay" onClick={handleCancel}>
+        <div className={`modal modal--wide ${styles.modal}`} onClick={(e) => e.stopPropagation()}>
           {notification && (
             <div
-              className={`${styles.modalNotification} ${
-                notification.isError ? styles.error : styles.success
-              }`}
+              className={`notification ${
+                notification.isError ? "notification--error" : "notification--success"
+              } ${styles.modalNotification}`}
             >
               {notification.message}
             </div>
           )}
 
-          <div className={styles.modalHeader}>
-            <h2 className={styles.modalTitle}>Manage Tag Hierarchy</h2>
-            <button className={styles.closeButton} onClick={handleCancel}>
+          <div className="modal-header">
+            <h2 className="modal-title">Manage Tags</h2>
+            <button className="modal-close-button" onClick={handleCancel}>
               ×
             </button>
           </div>
 
-          <div className={styles.modalBody}>
-            {/* Categories */}
+          <div className="modal-body">
             <div className={styles.categoriesList}>
               {localCategories?.map((category) => (
-                <div key={category.id} className={styles.categorySection}>
+                <div key={category.id} className={`container ${styles.categorySection}`}>
                   <div
-                    className={styles.categoryHeader}
+                    className={`expandable-header ${styles.categoryHeader}`}
                     onClick={() => toggleCategory(category.id)}
                   >
                     <span
-                      className={`${styles.expandIcon} ${
-                        expandedCategories.includes(category.id) ? styles.expanded : ""
+                      className={`expand-icon ${
+                        expandedCategories.includes(category.id) ? "expand-icon--expanded" : ""
                       }`}
                     >
                       {expandedCategories.includes(category.id) ? "▼" : "►"}
                     </span>
-                    <h3 className={styles.categoryTitle}>{category.name}</h3>
-                    <div className={styles.categoryActions}>
+                    <h3 className="section-title" style={{ margin: 0, flexGrow: 1 }}>
+                      {category.name}
+                    </h3>
+                    <div className="flex gap-2">
                       <button
-                        className={styles.actionButton}
+                        className="btn btn--small"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleRenameCategory(category.id);
@@ -626,7 +626,7 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                         Rename
                       </button>
                       <button
-                        className={`${styles.actionButton} ${styles.deleteButton}`}
+                        className="btn btn--danger btn--small"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleRemoveCategory(category.id);
@@ -638,28 +638,29 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                   </div>
 
                   {expandedCategories.includes(category.id) && (
-                    <div className={styles.categoryContent}>
-                      {/* Subcategories */}
-                      <div className={styles.subcategoriesList}>
+                    <div className="flex flex-col gap-3" style={{ marginLeft: "8px" }}>
+                      <div className="flex flex-col gap-2" style={{ marginBottom: "12px" }}>
                         {category.subcategories?.map((subcategory) => (
                           <div key={subcategory.id} className={styles.subcategorySection}>
                             <div
-                              className={styles.subcategoryHeader}
+                              className={`expandable-header ${styles.subcategoryHeader}`}
                               onClick={() => toggleSubcategory(subcategory.id)}
                             >
                               <span
-                                className={`${styles.expandIcon} ${
+                                className={`expand-icon ${
                                   expandedSubcategories.includes(subcategory.id)
-                                    ? styles.expanded
+                                    ? "expand-icon--expanded"
                                     : ""
                                 }`}
                               >
                                 {expandedSubcategories.includes(subcategory.id) ? "▼" : "►"}
                               </span>
-                              <h4 className={styles.subcategoryTitle}>{subcategory.name}</h4>
-                              <div className={styles.subcategoryActions}>
+                              <h4 className="section-subtitle" style={{ margin: 0, flexGrow: 1 }}>
+                                {subcategory.name}
+                              </h4>
+                              <div className="flex gap-1">
                                 <button
-                                  className={styles.actionButton}
+                                  className="btn btn--small"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleRenameSubcategory(category.id, subcategory.id);
@@ -668,7 +669,7 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                                   Rename
                                 </button>
                                 <button
-                                  className={`${styles.actionButton} ${styles.deleteButton}`}
+                                  className="btn btn--danger btn--small"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleRemoveSubcategory(category.id, subcategory.id);
@@ -681,7 +682,6 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
 
                             {expandedSubcategories.includes(subcategory.id) && (
                               <div className={styles.subcategoryContent}>
-                                {/* Tags */}
                                 <div className={styles.tagList}>
                                   {subcategory.tags.map((tag, tagIndex) => {
                                     const isDragging = dragState.draggedTag?.tagId === tag.id;
@@ -715,8 +715,10 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                                           handleDrop(e, category.id, subcategory.id, tagIndex)
                                         }
                                       >
-                                        <span className={styles.dragHandle}>⋮⋮</span>
-                                        <span className={styles.tagName}>{tag.name}</span>
+                                        <div className={styles.tagContent}>
+                                          <span className={styles.dragHandle}>⋮⋮</span>
+                                          <span className={styles.tagName}>{tag.name}</span>
+                                        </div>
                                         <div className={styles.tagActions}>
                                           <button
                                             className={styles.tagAction}
@@ -732,7 +734,7 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                                               handleRemoveTag(category.id, subcategory.id, tag.id)
                                             }
                                           >
-                                            Delete
+                                            ×
                                           </button>
                                         </div>
                                       </div>
@@ -740,12 +742,11 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                                   })}
                                 </div>
 
-                                {/* DROP ZONE */}
                                 {dragState.draggedTag?.subcategoryId === subcategory.id && (
                                   <div
-                                    className={`${styles.tagDropZone} ${
+                                    className={`drop-zone ${
                                       dragState.dragOverIndex === subcategory.tags.length
-                                        ? styles.tagDropTarget
+                                        ? "drop-zone--active"
                                         : ""
                                     }`}
                                     onDragOver={(e) =>
@@ -765,8 +766,7 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                                   </div>
                                 )}
 
-                                {/* Add new tag form */}
-                                <div className={styles.addTagForm}>
+                                <div className="form-row">
                                   <input
                                     type="text"
                                     placeholder="New tag..."
@@ -777,7 +777,7 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                                         [`${category.id}-${subcategory.id}`]: e.target.value,
                                       })
                                     }
-                                    className={styles.input}
+                                    className="form-input"
                                     onKeyDown={(e) => {
                                       if (e.key === "Enter") {
                                         handleAddTag(category.id, subcategory.id);
@@ -785,7 +785,7 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                                     }}
                                   />
                                   <button
-                                    className={styles.addButton}
+                                    className="btn"
                                     onClick={() => handleAddTag(category.id, subcategory.id)}
                                   >
                                     Add Tag
@@ -797,8 +797,7 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                         ))}
                       </div>
 
-                      {/* Add new subcategory form */}
-                      <div className={styles.addSubcategoryForm}>
+                      <div className="form-row">
                         <input
                           type="text"
                           placeholder="New subcategory..."
@@ -809,17 +808,14 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                               [category.id]: e.target.value,
                             })
                           }
-                          className={styles.input}
+                          className="form-input"
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
                               handleAddSubcategory(category.id);
                             }
                           }}
                         />
-                        <button
-                          className={styles.addButton}
-                          onClick={() => handleAddSubcategory(category.id)}
-                        >
+                        <button className="btn" onClick={() => handleAddSubcategory(category.id)}>
                           Add Subcategory
                         </button>
                       </div>
@@ -829,43 +825,34 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
               ))}
             </div>
 
-            {/* Add new category form */}
             <div className={styles.addCategorySection}>
-              <div className={styles.addCategoryForm}>
+              <div className="form-row">
                 <input
                   type="text"
                   placeholder="New category name..."
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
-                  className={styles.input}
+                  className="form-input"
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       handleAddCategory();
                     }
                   }}
                 />
-                <button className={styles.addButton} onClick={handleAddCategory}>
+                <button className="btn" onClick={handleAddCategory}>
                   Add Category
                 </button>
               </div>
             </div>
+          </div>
 
-            {/* Modal Footer with Save/Cancel buttons */}
-            <div className={styles.modalFooter}>
-              <button
-                className={`${styles.actionButton} ${styles.cancelButton}`}
-                onClick={handleCancel}
-              >
-                Cancel
-              </button>
-              <button
-                className={`${styles.actionButton} ${styles.saveButton}`}
-                onClick={handleSaveChanges}
-                disabled={!hasChanges}
-              >
-                Save Changes
-              </button>
-            </div>
+          <div className="modal-footer">
+            <button className="btn" onClick={handleCancel}>
+              Cancel
+            </button>
+            <button className="btn btn--primary" onClick={handleSaveChanges} disabled={!hasChanges}>
+              Save Changes
+            </button>
           </div>
         </div>
       </div>

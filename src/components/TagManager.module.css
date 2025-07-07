@@ -1,4 +1,329 @@
+/* Categories layout */
+.categoriesList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.categorySection {
+  /* Using container pattern */
+  background: var(--spice-card);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.categoryHeader {
+  /* Using expandable-header pattern */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.2);
+  transition: background 0.2s ease;
+}
+
+.categoryHeader:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.categoryTitle {
+  /* Using section-title pattern */
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--spice-text);
+  flex-grow: 1;
+}
+
+.categoryActions {
+  /* Using flex gap pattern */
+  display: flex;
+  gap: 8px;
+}
+
+.categoryContent {
+  /* Using flex column pattern */
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-left: 8px;
+}
+
+/* Subcategories */
+.subcategoriesList {
+  /* Using flex column pattern */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.subcategorySection {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.subcategoryHeader {
+  /* Using expandable-header pattern */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  transition: background 0.2s ease;
+}
+
+.subcategoryHeader:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.subcategoryTitle {
+  /* Using section-subtitle pattern */
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0;
+  color: var(--spice-text);
+  flex-grow: 1;
+}
+
+.subcategoryActions {
+  /* Using flex gap pattern */
+  display: flex;
+  gap: 4px;
+}
+
+.subcategoryContent {
+  padding: 12px;
+  background: var(--spice-main);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Fixed tag layout - 3 columns with fixed width */
+.tagList {
+  display: grid;
+  grid-template-columns: repeat(3, 200px); /* Fixed 200px width per column */
+  gap: 12px;
+  margin-bottom: 8px;
+  justify-content: start; /* Align to left if container is wider */
+}
+
+.tagItem {
+  /* Fixed width tag items with proper truncation */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  padding: 8px 8px 8px 12px;
+  font-size: 12px;
+  cursor: move;
+  transition: background-color 0.2s ease;
+  gap: 8px;
+  position: relative;
+  min-height: 32px;
+  width: 200px; /* Fixed width */
+  max-width: 200px; /* Enforce max width */
+  box-sizing: border-box;
+  overflow: hidden; /* Hide overflow */
+}
+
+.tagItem:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tagContent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0; /* Allows text truncation */
+  overflow: hidden; /* Hide overflow */
+}
+
+.tagName {
+  color: var(--spice-text);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.tagActions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0; /* Prevents actions from shrinking */
+  width: 70px; /* Fixed width for actions */
+  justify-content: flex-end;
+}
+
+.tagAction {
+  /* Using btn pattern */
+  background: transparent;
+  border: none;
+  color: var(--spice-subtext);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 2px;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.tagAction:hover {
+  color: var(--spice-text);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tagDelete:hover {
+  color: white;
+  background: rgba(255, 0, 0, 0.3);
+}
+
+/* Action buttons - using shared button pattern */
+.actionButton {
+  /* Using btn pattern */
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.actionButton:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.deleteButton {
+  /* Using btn--danger pattern */
+  background: rgba(255, 0, 0, 0.2);
+  color: var(--spice-text);
+}
+
+.deleteButton:hover {
+  background: rgba(255, 0, 0, 0.3);
+}
+
+.addButton {
+  /* Using btn pattern */
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.addButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.saveButton {
+  /* Using btn--primary pattern */
+  background: #1e90ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.saveButton:hover:not(:disabled) {
+  background: #1a7ee0;
+}
+
+.saveButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.cancelButton {
+  /* Using btn pattern */
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.cancelButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Form elements - using shared form pattern */
+.input {
+  /* Using form-input pattern */
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: var(--spice-main);
+  border: 1px solid var(--spice-button-disabled);
+  color: var(--spice-text);
+  font-size: 14px;
+  flex-grow: 1;
+}
+
+.input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.addTagForm,
+.addSubcategoryForm,
+.addCategoryForm {
+  /* Using form-row pattern */
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.addCategorySection {
+  border-top: 1px solid var(--spice-button-disabled);
+  padding-top: 16px;
+}
+
+/* Expand/collapse icons - using shared pattern */
+.expandIcon {
+  /* Using expand-icon pattern */
+  font-size: 10px;
+  transition: transform 0.2s ease;
+  display: inline-block;
+  width: 10px;
+  text-align: center;
+  margin-right: 8px;
+}
+
+.expanded {
+  transform: rotate(0deg);
+}
+
+/* Modal styles - using shared modal pattern */
 .modalOverlay {
+  /* Using modal-overlay pattern */
   position: fixed;
   top: 0;
   left: 0;
@@ -8,10 +333,12 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 1000;
+  z-index: 9999;
+  overflow: auto;
 }
 
 .modal {
+  /* Using modal pattern */
   background: var(--spice-card);
   border-radius: 8px;
   width: 90%;
@@ -20,9 +347,12 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  margin: auto;
+  position: relative;
 }
 
 .modalHeader {
+  /* Using modal-header pattern */
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -31,6 +361,7 @@
 }
 
 .modalTitle {
+  /* Using modal-title pattern */
   margin: 0;
   font-size: 20px;
   font-weight: 700;
@@ -38,6 +369,7 @@
 }
 
 .closeButton {
+  /* Using modal-close-button pattern */
   background: transparent;
   border: none;
   color: var(--spice-text);
@@ -50,269 +382,34 @@
 }
 
 .modalBody {
+  /* Using modal-body pattern */
   padding: 24px;
   overflow-y: auto;
   max-height: calc(90vh - 70px);
   display: flex;
   flex-direction: column;
-  gap: 24px;
-}
-
-/* Categories */
-.categoriesList {
-  display: flex;
-  flex-direction: column;
   gap: 16px;
 }
 
-.categorySection {
-  border: 1px solid var(--spice-button-disabled);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.categoryHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  background-color: var(--spice-card);
-  cursor: pointer;
-  user-select: none;
-  position: relative;
-}
-
-.categoryHeader:hover {
-  background-color: var(--spice-highlight);
-}
-
-.categoryTitle {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--spice-text);
-  flex-grow: 1;
-}
-
-.categoryActions {
-  display: flex;
-  gap: 8px;
-}
-
-.categoryContent {
-  padding: 16px;
-  background-color: var(--spice-main);
-  border-top: 1px solid var(--spice-button-disabled);
-}
-
-/* Subcategories */
-.subcategoriesList {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.subcategorySection {
-  border: 1px solid var(--spice-button-disabled);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.subcategoryHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background-color: var(--spice-card);
-  cursor: pointer;
-  user-select: none;
-}
-
-.subcategoryHeader:hover {
-  background-color: var(--spice-highlight);
-}
-
-.subcategoryTitle {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--spice-text);
-  flex-grow: 1;
-}
-
-.subcategoryActions {
-  display: flex;
-  gap: 4px;
-}
-
-.subcategoryContent {
-  padding: 12px;
-  background-color: var(--spice-main);
-  border-top: 1px solid var(--spice-button-disabled);
-}
-
-/* Tags */
-.tagList {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.tagItem {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 10px;
-  background-color: var(--spice-main);
-  border: 1px solid var(--spice-button-disabled);
-  border-radius: 4px;
-}
-
-.tagName {
-  font-size: 13px;
-  color: var(--spice-text);
-}
-
-.tagActions {
-  display: flex;
-  gap: 4px;
-}
-
-/* Common button and input styles */
-.actionButton {
-  background-color: var(--spice-button);
-  color: var(--spice-text);
-  border: none;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.actionButton:hover {
-  background-color: var(--spice-button-active);
-}
-
-.deleteButton {
-  background-color: var(--spice-notification-error);
-}
-
-.deleteButton:hover {
-  opacity: 0.8;
-}
-
-.tagAction {
-  background: transparent;
-  border: none;
-  color: var(--spice-subtext);
-  font-size: 11px;
-  cursor: pointer;
-  padding: 2px 4px;
-}
-
-.tagAction:hover {
-  color: var(--spice-text);
-}
-
-.tagDelete:hover {
-  color: var(--spice-notification-error);
-}
-
-.input {
-  padding: 8px 12px;
-  border-radius: 4px;
-  border: 1px solid var(--spice-button-disabled);
-  background: var(--spice-main);
-  color: var(--spice-text);
-  font-size: 14px;
-  flex-grow: 1;
-}
-
-.input:focus {
-  outline: none;
-  border-color: var(--spice-button-active);
-}
-
-.addButton {
-  background-color: var(--spice-button-active);
-  color: var(--spice-text);
-  border: none;
-  border-radius: 4px;
-  padding: 8px 12px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.addButton:hover {
-  opacity: 0.9;
-}
-
-/* Form containers */
-.addTagForm,
-.addSubcategoryForm,
-.addCategoryForm {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.addCategorySection {
-  border-top: 1px solid var(--spice-button-disabled);
-  padding-top: 16px;
-}
-
-/* Expand/collapse icons */
-.expandIcon {
-  margin-right: 8px;
-  font-size: 12px;
-  transition: transform 0.2s;
-  display: inline-block;
-  width: 12px;
-  text-align: center;
-}
-
-.expanded {
-  transform: rotate(0deg);
-}
-
 .modalFooter {
+  /* Using modal-footer pattern */
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  padding-top: 16px;
+  padding: 16px 24px;
   border-top: 1px solid var(--spice-button-disabled);
-  margin-top: 16px;
+  margin-top: auto;
 }
 
-.saveButton {
-  background-color: var(--spice-button-active);
-  color: var(--spice-text);
-}
-
-.saveButton:hover:not(:disabled) {
-  background-color: var(--spice-button);
-}
-
-.saveButton:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.cancelButton {
-  background-color: rgba(0, 0, 0, 0.3);
-}
-
+/* Notifications - using shared notification pattern */
 .modalNotification {
+  /* Using notification pattern */
   position: absolute;
   top: 16px;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--spice-notification);
-  color: var(--spice-text);
+  background: #1e90ff;
+  color: white;
   padding: 12px 16px;
   border-radius: 4px;
   z-index: 1001;
@@ -324,12 +421,11 @@
 }
 
 .modalNotification.error {
-  background: var(--spice-notification-error);
-  color: white;
+  background: #ff4c4c;
 }
 
 .modalNotification.success {
-  background: var(--spice-notification);
+  background: #1e90ff;
 }
 
 @keyframes slideDown {
@@ -343,50 +439,39 @@
   }
 }
 
-/* Drag and drop styles */
-.tagItem {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 10px;
-  background-color: var(--spice-main);
-  border: 1px solid var(--spice-button-disabled);
-  border-radius: 4px;
-  cursor: move;
-  transition: all 0.2s ease;
-}
-
-.tagItem:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
+/* Drag and drop - using shared drag pattern */
 .tagDragging {
+  /* Using dragging pattern */
   opacity: 0.5;
   transform: scale(0.95);
-  background-color: rgba(30, 144, 255, 0.2);
-  border-color: #1e90ff;
+  background: rgba(30, 144, 255, 0.2);
+  border: 1px solid #1e90ff;
 }
 
 .tagDropTarget {
-  background-color: rgba(30, 144, 255, 0.3);
-  border-color: #1e90ff;
-  border-style: dashed;
+  /* Using drop-target pattern */
+  background: rgba(30, 144, 255, 0.3);
+  border: 1px solid #1e90ff;
   transform: scale(1.02);
 }
 
 .dragHandle {
   color: var(--spice-subtext);
   font-size: 12px;
-  margin-right: 8px;
   cursor: move;
   opacity: 0.6;
+  transition: opacity 0.2s ease, color 0.2s ease;
+  flex-shrink: 0;
+  width: 12px; /* Fixed width for handle */
 }
 
 .dragHandle:hover {
   opacity: 1;
+  color: var(--spice-text);
 }
 
 .tagDropZone {
+  /* Using drop-zone pattern */
   padding: 8px;
   margin: 4px 0;
   border: 2px dashed transparent;
@@ -402,8 +487,9 @@
 }
 
 .tagDropZone.tagDropTarget {
+  /* Using drop-zone--active pattern */
   border-color: #1e90ff;
-  background-color: rgba(30, 144, 255, 0.1);
+  background: rgba(30, 144, 255, 0.1);
   color: var(--spice-text);
 }
 
