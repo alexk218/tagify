@@ -5,7 +5,7 @@ import {
   resetToDefaultSettings,
   savePlaylistSettings,
 } from "../utils/PlaylistSettings";
-import styles from "./PlaylistSettings.module.css";
+import Portal from "../utils/Portal";
 
 interface PlaylistSettingsModalProps {
   onClose: () => void;
@@ -76,116 +76,116 @@ const PlaylistSettingsModal: React.FC<PlaylistSettingsModalProps> = ({
     onClose();
   };
 
-  // Handle resetting to defaults
+  // Handle resetting to defaults with confirmation
   const handleResetDefaults = () => {
-    resetToDefaultSettings();
-    setSettings(getPlaylistSettings());
+    const confirmed = window.confirm(
+      "Are you sure you want to reset all playlist settings to their default values? This action cannot be undone."
+    );
+
+    if (confirmed) {
+      resetToDefaultSettings();
+      setSettings(getPlaylistSettings());
+      Spicetify.showNotification("Settings reset to defaults");
+    }
   };
 
   return (
-    <div className={styles.modalOverlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHeader}>
-          <h2 className={styles.modalTitle}>Playlist Cache Settings</h2>
-          <button className={styles.closeButton} onClick={onClose}>
-            ×
-          </button>
-        </div>
+    <Portal>
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2 className="modal-title">Playlist Cache Settings</h2>
+            <button className="modal-close-button" onClick={onClose}>
+              ×
+            </button>
+          </div>
 
-        <div className={styles.modalBody}>
-          <div className={styles.settingSection}>
-            <div className={styles.settingRow}>
-              <label className={styles.settingLabel}>
-                <input
-                  type="checkbox"
-                  checked={settings.excludeNonOwnedPlaylists}
-                  onChange={handleToggleExcludeNonOwned}
-                  className={styles.checkbox}
-                />
-                Exclude playlists not created by me
-              </label>
-            </div>
-
-            <div className={styles.settingSection}>
-              <h3 className={styles.sectionTitle}>Exclude Playlists Containing Keywords</h3>
-              <div className={styles.inputRow}>
-                <input
-                  type="text"
-                  value={keywordInput}
-                  onChange={(e) => setKeywordInput(e.target.value)}
-                  className={styles.input}
-                  placeholder="Enter keyword..."
-                  onKeyDown={(e) => e.key === "Enter" && handleAddKeyword()}
-                />
-                <button className={styles.addButton} onClick={handleAddKeyword}>
-                  Add
-                </button>
+          <div className="modal-body">
+            <div className="container">
+              <div className="form-field">
+                <label className="form-checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.excludeNonOwnedPlaylists}
+                    onChange={handleToggleExcludeNonOwned}
+                    className="form-checkbox"
+                  />
+                  Exclude playlists not created by me
+                </label>
               </div>
 
-              <div className={styles.tagList}>
-                {settings.excludedPlaylistKeywords.map((keyword) => (
-                  <div key={keyword} className={styles.tag}>
-                    <span className={styles.tagName}>{keyword}</span>
-                    <button
-                      className={styles.removeTag}
-                      onClick={() => handleRemoveKeyword(keyword)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
+              <div className="container">
+                <h3 className="section-title">Exclude Playlists Containing Keywords</h3>
+                <div className="form-row">
+                  <input
+                    type="text"
+                    value={keywordInput}
+                    onChange={(e) => setKeywordInput(e.target.value)}
+                    className="form-input"
+                    placeholder="Enter keyword..."
+                    onKeyDown={(e) => e.key === "Enter" && handleAddKeyword()}
+                  />
+                  <button className="btn" onClick={handleAddKeyword}>
+                    Add
+                  </button>
+                </div>
 
-            <div className={styles.settingSection}>
-              <h3 className={styles.sectionTitle}>Exclude by Description</h3>
-              <div className={styles.inputRow}>
-                <input
-                  type="text"
-                  value={descriptionTermInput}
-                  onChange={(e) => setDescriptionTermInput(e.target.value)}
-                  className={styles.input}
-                  placeholder="Enter term to find in description..."
-                  onKeyDown={(e) => e.key === "Enter" && handleAddDescriptionTerm()}
-                />
-                <button className={styles.addButton} onClick={handleAddDescriptionTerm}>
-                  Add
-                </button>
+                <div className="tag-list">
+                  {settings.excludedPlaylistKeywords.map((keyword) => (
+                    <div key={keyword} className="tag-item">
+                      <span className="tag-name">{keyword}</span>
+                      <button className="tag-remove" onClick={() => handleRemoveKeyword(keyword)}>
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              <div className={styles.tagList}>
-                {settings.excludeByDescription.map((term) => (
-                  <div key={term} className={styles.tag}>
-                    <span className={styles.tagName}>{term}</span>
-                    <button
-                      className={styles.removeTag}
-                      onClick={() => handleRemoveDescriptionTerm(term)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
+              <div className="container">
+                <h3 className="section-title">Exclude by Description</h3>
+                <div className="form-row">
+                  <input
+                    type="text"
+                    value={descriptionTermInput}
+                    onChange={(e) => setDescriptionTermInput(e.target.value)}
+                    className="form-input"
+                    placeholder="Enter term to find in description..."
+                    onKeyDown={(e) => e.key === "Enter" && handleAddDescriptionTerm()}
+                  />
+                  <button className="btn" onClick={handleAddDescriptionTerm}>
+                    Add
+                  </button>
+                </div>
+
+                <div className="tag-list">
+                  {settings.excludeByDescription.map((term) => (
+                    <div key={term} className="tag-item">
+                      <span className="tag-name">{term}</span>
+                      <button
+                        className="tag-remove"
+                        onClick={() => handleRemoveDescriptionTerm(term)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
 
-          <div className={styles.actionButtons}>
-            <button
-              className={`${styles.actionButton} ${styles.dangerButton}`}
-              onClick={handleResetDefaults}
-            >
+          <div className="modal-footer">
+            <button className="btn btn--danger" onClick={handleResetDefaults}>
               Reset to Defaults
             </button>
-            <button
-              className={`${styles.actionButton} ${styles.primaryButton}`}
-              onClick={handleSaveSettings}
-            >
+            <button className="btn btn--primary" onClick={handleSaveSettings}>
               Save Settings
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </Portal>
   );
 };
 
