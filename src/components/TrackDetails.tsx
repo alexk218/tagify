@@ -718,13 +718,6 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
     <div className={styles.container}>
       {onToggleLock && (
         <div className={styles.lockControlContainer}>
-          <button
-            className={`${styles.lockButton} ${isLocked ? styles.locked : styles.unlocked}`}
-            onClick={handleToggleLock}
-            title={isLocked ? "Unlock to follow currently playing track" : "Lock to this track"}
-          >
-            {isLocked ? "🔒" : "🔓"}
-          </button>
           {isLocked && currentTrack && currentTrack.uri !== track.uri && (
             <button
               className={styles.switchTrackButton}
@@ -735,9 +728,18 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
               }}
               title="Switch to currently playing track"
             >
-              <span className={styles.buttonIcon}>🔄</span>
+              <span className={styles.buttonIcon}></span>
+              Switch to current
             </button>
           )}
+
+          <button
+            className={`${styles.lockButton} ${isLocked ? styles.locked : styles.unlocked}`}
+            onClick={handleToggleLock}
+            title={isLocked ? "Unlock to follow currently playing track" : "Lock to this track"}
+          >
+            {isLocked ? "🔒" : "🔓"}
+          </button>
         </div>
       )}
       <div className={styles.contentLayout}>
@@ -777,16 +779,6 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
                 {"Play"}
               </button>
             </div>
-
-            {/* Warning icon now properly below album cover */}
-            {showLikedOnlyWarning && (
-              <div
-                className={styles.warningIconCentered}
-                title="This track is only in Liked Songs or excluded playlists. Consider organizing it into appropriate playlists."
-              >
-                <span className={styles.warningIcon}>⚠️</span>
-              </div>
-            )}
           </div>
 
           <div className={styles.trackInfo}>
@@ -967,7 +959,18 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
         {containingPlaylists.length > 0 ? (
           <>
             <div className={styles.playlistsSection}>
-              <h4 className={styles.sectionTitle}>In Playlists:</h4>
+              <div className={styles.playlistSectionHeader}>
+                <h4 className={styles.sectionTitle}>In Playlists:</h4>
+                {showLikedOnlyWarning && (
+                  <span
+                    className={styles.playlistWarning}
+                    title="This track is only in Liked Songs or excluded playlists. Consider organizing it into appropriate playlists."
+                  >
+                    <span className={styles.playlistWarningIcon}>⚠️</span>
+                    Only in Liked Songs
+                  </span>
+                )}
+              </div>
               <div className={styles.playlistList}>
                 {containingPlaylists.map((playlist) => (
                   <div
@@ -983,7 +986,19 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
             </div>
           </>
         ) : (
-          <div className={styles.noPlaylists}>Not found in any playlists in cache</div>
+          <div className={styles.playlistsSection}>
+            <div className={styles.playlistSectionHeader}>
+              <h4 className={styles.sectionTitle}>In Playlists:</h4>
+              <span
+                className={styles.playlistWarning}
+                title="This track was not found in any playlists in the cache. Consider adding it to appropriate playlists."
+              >
+                <span className={styles.playlistWarningIcon}>⚠️</span>
+                Not in any playlists
+              </span>
+            </div>
+            <div className={styles.noPlaylists}>Not found in any playlists in cache</div>
+          </div>
         )}
       </div>
 

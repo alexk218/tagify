@@ -499,11 +499,41 @@
   border-top: 1px solid var(--spice-button-disabled);
 }
 
+.playlistSectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .sectionTitle {
   font-size: 14px;
   font-weight: 600;
-  margin: 0 0 8px 0;
+  margin: 0;
   color: var(--spice-text);
+}
+
+.playlistWarning {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #ffcc00;
+  font-weight: 500;
+  cursor: help;
+  padding: 2px 6px;
+  background: rgba(255, 204, 0, 0.1);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 204, 0, 0.3);
+  transition: background-color 0.2s ease;
+}
+
+.playlistWarning:hover {
+  background: rgba(255, 204, 0, 0.15);
+}
+
+.playlistWarningIcon {
+  font-size: 12px;
 }
 
 .playlistList {
@@ -558,46 +588,7 @@
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  min-height: 148px; /* Fixed height: 100px album + 40px play button + 8px gap */
-}
-
-.warningIndicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background-color: rgba(255, 204, 0, 0.15);
-  border-left: 3px solid #ffcc00;
-  padding: 8px 12px;
-  border-radius: 4px;
-  margin-bottom: 8px;
-}
-
-.warningIconContainer {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 10;
-  cursor: help; /* Changes cursor to indicate there's a tooltip */
-}
-
-.warningIcon {
-  color: #ffcc00;
-  font-size: 18px;
-  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
-}
-
-.warningIconCentered {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  cursor: help;
-  height: 24px;
-}
-
-.warningIconCentered .warningIcon {
-  color: #ffcc00;
-  font-size: 18px;
-  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
+  min-height: 124px;
 }
 
 .playButton {
@@ -625,13 +616,16 @@
   border: none;
   border-radius: 4px;
   padding: 6px 12px;
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 600;
   display: flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
   transition: background-color 0.2s ease;
   white-space: nowrap;
+  height: 36px; /* Match lock button height */
+  box-sizing: border-box;
 }
 
 .switchTrackButton:hover {
@@ -640,6 +634,7 @@
 
 .buttonIcon {
   font-size: 12px;
+  flex-shrink: 0;
 }
 
 .lockControlContainer {
@@ -648,9 +643,9 @@
   right: 12px;
   z-index: 10;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 8px;
-  align-items: flex-end;
+  align-items: center;
 }
 
 .lockButton {
@@ -666,6 +661,7 @@
   cursor: pointer;
   transition: background-color 0.2s ease;
   font-size: 16px;
+  flex-shrink: 0; /* Prevent shrinking */
 }
 
 .lockButton.locked {
@@ -679,6 +675,7 @@
 .lockButton:hover {
   background-color: rgba(255, 255, 255, 0.1);
 }
+
 .lockedTrackInfo {
   font-size: 14px;
   color: var(--spice-subtext);
