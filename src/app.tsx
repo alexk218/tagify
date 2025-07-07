@@ -5,12 +5,9 @@ import TrackDetails from "./components/TrackDetails";
 import TagSelector from "./components/TagSelector";
 import TrackList from "./components/TrackList";
 import TagManager from "./components/TagManager";
-import ExportPanel from "./components/ExportPanel";
 import DataManager from "./components/DataManager";
-import MissingTracksPanel from "./components/MissingTracksPanel";
 import MultiTrackDetails from "./components/MultiTrackDetails";
 import LocalTracksModal from "./components/LocalTracksModal";
-import PythonActionsPanel from "./components/PythonActionsPanel";
 import { useTagData } from "./hooks/useTagData";
 import { useTrackState } from "./hooks/useTrackState";
 import { useFilterState } from "./hooks/useFilterState";
@@ -19,7 +16,6 @@ import { useFontAwesome } from "./hooks/useFontAwesome";
 import { checkAndUpdateCacheIfNeeded } from "./utils/PlaylistCache";
 import { trackService } from "./services/TrackService";
 import { useSpicetifyHistory } from "./hooks/useSpicetifyHistory";
-import { useCustomEvents } from "./hooks/useCustomEvents";
 
 function App() {
   const {
@@ -32,7 +28,6 @@ function App() {
     setBpm,
     toggleTagForMultipleTracks,
     replaceCategories,
-    exportData,
     exportBackup,
     importBackup,
     findCommonTags,
@@ -74,14 +69,6 @@ function App() {
   } = usePlaylistState();
 
   const [showTagManager, setShowTagManager] = useState(false);
-  const [showExport, setShowExport] = useState(false);
-
-  const [showMissingTracks, setShowMissingTracks] = useState(() => {
-    return localStorage.getItem("tagify:activePanel") === "missingTracks";
-  });
-  const [showActions, setShowActions] = useState<boolean>(() => {
-    return localStorage.getItem("tagify:showActions") === "true";
-  });
 
   useFontAwesome();
 
@@ -103,50 +90,16 @@ function App() {
     currentTrack,
   });
 
-  // Set up custom event listener for toggling missing tracks panel
-  useCustomEvents({
-    eventName: "tagify:toggleMissingTracks",
-    handler: (event: Event) => {
-      // Fixed type casting to handle the custom event
-      const customEvent = event as CustomEvent<{ show: boolean }>;
-      setShowMissingTracks(customEvent.detail.show);
-    },
-    dependencies: [],
-  });
-
-  useCustomEvents({
-    eventName: "tagify:toggleActions",
-    handler: (event: Event) => {
-      // Fixed type casting to handle the custom event
-      const customEvent = event as CustomEvent<{ show: boolean }>;
-      setShowActions(customEvent.detail.show);
-    },
-    dependencies: [],
-  });
-
-  // Helper functions moved to custom hooks, leaving only render-related code here
   const playTrackViaQueue = trackService.playTrackViaQueue;
   const getLegacyFormatTracks = () => trackService.getLegacyFormatTracksFromTagData(tagData);
 
-  // Render the appropriate UI based on state
+  // Render appropriate UI based on state
   const renderContent = () => {
     if (isLoading) {
       return (
         <div className={styles.loadingContainer}>
           <p className={styles.loadingText}>Loading tag data...</p>
         </div>
-      );
-    }
-
-    if (showMissingTracks) {
-      return <MissingTracksPanel />;
-    }
-
-    if (showActions) {
-      return (
-        <>
-          <PythonActionsPanel />
-        </>
       );
     }
 
@@ -215,7 +168,7 @@ function App() {
     );
   };
 
-  // Helper function to render the tag selector conditionally
+  // Render the tag selector conditionally
   const renderTagSelector = () => {
     if (!activeTrack && !(isMultiTagging && selectedTracks.length > 0)) {
       return null;
@@ -244,7 +197,6 @@ function App() {
     );
   };
 
-  // Handler for toggling tags
   const handleToggleTag = (categoryId: string, subcategoryId: string, tagId: string) => {
     if (isMultiTagging) {
       if (lockedMultiTrackUri) {
@@ -322,11 +274,8 @@ function App() {
       <DataManager
         onExportBackup={exportBackup}
         onImportBackup={importBackup}
-        onExportRekordbox={() => setShowExport(true)}
         lastSaved={lastSaved}
         taggedTracks={tagData.tracks}
-        showMissingTracks={showMissingTracks}
-        showActions={showActions}
       />
 
       {renderContent()}
@@ -338,8 +287,6 @@ function App() {
           onReplaceCategories={replaceCategories}
         />
       )}
-
-      {showExport && <ExportPanel data={exportData()} onClose={() => setShowExport(false)} />}
 
       {showLocalTracksModal && (
         <LocalTracksModal

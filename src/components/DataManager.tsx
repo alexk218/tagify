@@ -8,11 +8,8 @@ import PlaylistSettingsModal from "./PlaylistSettings";
 interface DataManagerProps {
   onExportBackup: () => void;
   onImportBackup: (data: TagDataStructure) => void;
-  onExportRekordbox: () => void;
   lastSaved: Date | null;
   taggedTracks: Record<string, any>;
-  showMissingTracks: boolean;
-  showActions: boolean;
 }
 
 const DataManager: React.FC<DataManagerProps> = ({
