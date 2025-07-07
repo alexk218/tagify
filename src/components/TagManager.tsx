@@ -48,6 +48,8 @@ const ensureUniqueId = (id: string, existingIds: string[]): string => {
 // Deep clone utility
 const deepClone = <T,>(obj: T): T => JSON.parse(JSON.stringify(obj));
 
+const MAX_NAME_LENGTH: number = 30;
+
 const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceCategories }) => {
   // Local state for categories
   const [localCategories, setLocalCategories] = useState<TagCategory[]>(() =>
@@ -185,6 +187,11 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
     if (newCategoryName.trim()) {
       if (!isCategoryNameUnique(newCategoryName.trim())) return;
 
+      if (newCategoryName.trim().length > MAX_NAME_LENGTH) {
+        showModalNotification(`Name must be less than ${MAX_NAME_LENGTH} characters.`, true);
+        return;
+      }
+
       const existingCategoryIds = localCategories.map((c) => c.id);
       const baseId = generateTagCategoryIdFromName(newCategoryName.trim());
       const uniqueId = ensureUniqueId(baseId, existingCategoryIds);
@@ -206,6 +213,11 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
     const name = newSubcategoryInputs[categoryId]?.trim();
     if (name) {
       if (!isSubcategoryNameUnique(name)) return;
+
+      if (name.length > MAX_NAME_LENGTH) {
+        showModalNotification(`Name must be less than ${MAX_NAME_LENGTH} characters.`, true);
+        return;
+      }
 
       const category = localCategories.find((c) => c.id === categoryId);
       if (!category) return;
@@ -244,6 +256,11 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
     const name = newTagInputs[key]?.trim();
     if (name) {
       if (!isTagNameUnique(name)) return;
+
+      if (name.length > MAX_NAME_LENGTH) {
+        showModalNotification(`Name must be less than ${MAX_NAME_LENGTH} characters.`, true);
+        return;
+      }
 
       const category = localCategories.find((c) => c.id === categoryId);
       if (!category) return;
@@ -294,6 +311,11 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
     if (newName && newName.trim() && newName !== category.name) {
       if (!isCategoryNameUnique(newName.trim(), categoryId)) return;
 
+      if (newName.trim().length > MAX_NAME_LENGTH) {
+        showModalNotification(`Name must be less than ${MAX_NAME_LENGTH} characters.`, true);
+        return;
+      }
+
       const updatedCategories = localCategories.map((cat) =>
         cat.id === categoryId ? { ...cat, name: newName.trim() } : cat
       );
@@ -314,6 +336,11 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
     const newName = window.prompt("Enter new name for subcategory:", subcategory.name);
     if (newName && newName.trim() && newName !== subcategory.name) {
       if (!isSubcategoryNameUnique(newName.trim(), subcategoryId)) return;
+
+      if (newName.trim().length > MAX_NAME_LENGTH) {
+        showModalNotification(`Name must be less than ${MAX_NAME_LENGTH} characters.`, true);
+        return;
+      }
 
       const updatedCategories = localCategories.map((cat) =>
         cat.id === categoryId
@@ -345,6 +372,11 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
     const newName = window.prompt("Enter new name for tag:", tag.name);
     if (newName && newName.trim() && newName !== tag.name) {
       if (!isTagNameUnique(newName.trim(), tagId)) return;
+
+      if (newName.trim().length > MAX_NAME_LENGTH) {
+        showModalNotification(`Name must be less than ${MAX_NAME_LENGTH} characters.`, true);
+        return;
+      }
 
       const updatedCategories = localCategories.map((cat) =>
         cat.id === categoryId
