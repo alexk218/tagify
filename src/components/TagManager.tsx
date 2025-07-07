@@ -1,41 +1,54 @@
 import React, { useState, useEffect } from "react";
 import styles from "./TagManager.module.css";
-import { TagCategory } from "../hooks/useTagData";
+import { TagCategory, Tag, TagSubcategory } from "../hooks/useTagData";
 import Portal from "../utils/Portal";
 
 interface TagManagerProps {
   categories: TagCategory[];
   onClose: () => void;
-
-  // Category operations
-  onAddCategory: (name: string) => void;
-  onRemoveCategory: (categoryId: string) => void;
-  onRenameCategory: (categoryId: string, name: string) => void;
-
-  // Subcategory operations
-  onAddSubcategory: (categoryId: string, name: string) => void;
-  onRemoveSubcategory: (categoryId: string, subcategoryId: string) => void;
-  onRenameSubcategory: (categoryId: string, subcategoryId: string, name: string) => void;
-
-  // Tag operations
-  onAddTag: (categoryId: string, subcategoryId: string, name: string) => void;
-  onRemoveTag: (categoryId: string, subcategoryId: string, tagId: string) => void;
-  onRenameTag: (categoryId: string, subcategoryId: string, tagId: string, name: string) => void;
+  onReplaceCategories: (newCategories: TagCategory[]) => void;
 }
 
-const TagManager: React.FC<TagManagerProps> = ({
-  categories,
-  onClose,
-  onAddCategory,
-  onRemoveCategory,
-  onRenameCategory,
-  onAddSubcategory,
-  onRemoveSubcategory,
-  onRenameSubcategory,
-  onAddTag,
-  onRemoveTag,
-  onRenameTag,
-}) => {
+// Utilities copied from useTagData.ts
+const generateTagCategoryIdFromName = (name: string): string => {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, "") // Remove special characters
+    .replace(/[\s_]+/g, "-") // Replace spaces and underscores with hyphens
+    .replace(/-+/g, "-") // Replace multiple hyphens with single hyphen
+    .replace(/^-+|-+$/g, ""); // Remove leading and trailing hyphens
+};
+
+const ensureUniqueId = (id: string, existingIds: string[]): string => {
+  if (!existingIds.includes(id)) return id;
+
+  let counter = 1;
+  let newId = `${id}-${counter}`;
+
+  while (existingIds.includes(newId)) {
+    counter++;
+    newId = `${id}-${counter}`;
+  }
+
+  return newId;
+};
+
+// Deep clone utility
+const deepClone = <T,>(obj: T): T => JSON.parse(JSON.stringify(obj));
+
+const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceCategories }) => {
+  // Local state for categories
+  const [localCategories, setLocalCategories] = useState<TagCategory[]>(() =>
+    deepClone(categories)
+  );
+  const [hasChanges, setHasChanges] = useState(false);
+
+  // Custom notification state
+  const [notification, setNotification] = useState<{ message: string; isError: boolean } | null>(
+    null
+  );
+
   // State for new items
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newSubcategoryInputs, setNewSubcategoryInputs] = useState<{
@@ -47,13 +60,19 @@ const TagManager: React.FC<TagManagerProps> = ({
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   const [expandedSubcategories, setExpandedSubcategories] = useState<string[]>([]);
 
+  // Reset local state when categories prop changes
+  useEffect(() => {
+    setLocalCategories(deepClone(categories));
+    setHasChanges(false);
+  }, [categories]);
+
   // Initialize input states
   useEffect(() => {
     // Initialize empty inputs for all categories
     const initialSubInputs: { [categoryId: string]: string } = {};
     const initialTagInputs: { [key: string]: string } = {};
 
-    categories.forEach((category) => {
+    localCategories.forEach((category) => {
       initialSubInputs[category.id] = "";
 
       category.subcategories.forEach((subcategory) => {
@@ -64,7 +83,69 @@ const TagManager: React.FC<TagManagerProps> = ({
 
     setNewSubcategoryInputs(initialSubInputs);
     setNewTagInputs(initialTagInputs);
-  }, [categories]);
+  }, [localCategories]);
+
+  // Custom notification function
+  const showModalNotification = (message: string, isError: boolean = false) => {
+    setNotification({ message, isError });
+    setTimeout(() => setNotification(null), 4000);
+  };
+
+  // Validation functions
+  const isTagNameUnique = (name: string, excludeTagId?: string): boolean => {
+    const existingTagNames = localCategories.flatMap((category) =>
+      category.subcategories.flatMap((subcategory) =>
+        subcategory.tags
+          .filter((tag) => tag.id !== excludeTagId)
+          .map((tag) => tag.name.toLowerCase())
+      )
+    );
+
+    if (existingTagNames.includes(name.toLowerCase())) {
+      const subcategoryWithExistingTagName = localCategories
+        .flatMap((category) =>
+          category.subcategories.map((subcategory) => ({
+            category: category.name,
+            subcategory: subcategory.name,
+            tags: subcategory.tags,
+          }))
+        )
+        .find((item) => item.tags.some((tag) => tag.name.toLowerCase() === name.toLowerCase()));
+
+      showModalNotification(
+        `Tag "${name}" already exists in category "${subcategoryWithExistingTagName?.category}" > subcategory "${subcategoryWithExistingTagName?.subcategory}"`,
+        true
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const isCategoryNameUnique = (name: string, excludeCategoryId?: string): boolean => {
+    const categoryNameExists = localCategories
+      .filter((category) => category.id !== excludeCategoryId)
+      .some((category) => category.name.toLowerCase() === name.toLowerCase());
+
+    if (categoryNameExists) {
+      showModalNotification(`Category "${name}" already exists`, true);
+      return false;
+    }
+    return true;
+  };
+
+  const isSubcategoryNameUnique = (name: string, excludeSubcategoryId?: string): boolean => {
+    const subcategoryNameExists = localCategories.some((category) =>
+      category.subcategories
+        .filter((subcategory) => subcategory.id !== excludeSubcategoryId)
+        .some((subcategory) => subcategory.name.toLowerCase() === name.toLowerCase())
+    );
+
+    if (subcategoryNameExists) {
+      showModalNotification(`Subcategory "${name}" already exists`, true);
+      return false;
+    }
+    return true;
+  };
 
   // Toggle category expansion
   const toggleCategory = (categoryId: string) => {
@@ -85,8 +166,21 @@ const TagManager: React.FC<TagManagerProps> = ({
   // Handle adding a new category
   const handleAddCategory = () => {
     if (newCategoryName.trim()) {
-      onAddCategory(newCategoryName.trim());
+      if (!isCategoryNameUnique(newCategoryName.trim())) return;
+
+      const existingCategoryIds = localCategories.map((c) => c.id);
+      const baseId = generateTagCategoryIdFromName(newCategoryName.trim());
+      const uniqueId = ensureUniqueId(baseId, existingCategoryIds);
+
+      const newCategory: TagCategory = {
+        name: newCategoryName.trim(),
+        id: uniqueId,
+        subcategories: [],
+      };
+
+      setLocalCategories([...localCategories, newCategory]);
       setNewCategoryName("");
+      setHasChanges(true);
     }
   };
 
@@ -94,11 +188,36 @@ const TagManager: React.FC<TagManagerProps> = ({
   const handleAddSubcategory = (categoryId: string) => {
     const name = newSubcategoryInputs[categoryId]?.trim();
     if (name) {
-      onAddSubcategory(categoryId, name);
+      if (!isSubcategoryNameUnique(name)) return;
+
+      const category = localCategories.find((c) => c.id === categoryId);
+      if (!category) return;
+
+      const existingSubcategoryIds = category.subcategories.map((s) => s.id);
+      const baseId = generateTagCategoryIdFromName(name);
+      const uniqueId = ensureUniqueId(baseId, existingSubcategoryIds);
+
+      const newSubcategory: TagSubcategory = {
+        name,
+        id: uniqueId,
+        tags: [],
+      };
+
+      const updatedCategories = localCategories.map((cat) =>
+        cat.id === categoryId
+          ? {
+              ...cat,
+              subcategories: [...cat.subcategories, newSubcategory],
+            }
+          : cat
+      );
+
+      setLocalCategories(updatedCategories);
       setNewSubcategoryInputs((prev) => ({
         ...prev,
         [categoryId]: "",
       }));
+      setHasChanges(true);
     }
   };
 
@@ -107,28 +226,69 @@ const TagManager: React.FC<TagManagerProps> = ({
     const key = `${categoryId}-${subcategoryId}`;
     const name = newTagInputs[key]?.trim();
     if (name) {
-      onAddTag(categoryId, subcategoryId, name);
+      if (!isTagNameUnique(name)) return;
+
+      const category = localCategories.find((c) => c.id === categoryId);
+      if (!category) return;
+
+      const subcategory = category.subcategories.find((s) => s.id === subcategoryId);
+      if (!subcategory) return;
+
+      const existingTagIds = subcategory.tags.map((t) => t.id);
+      const baseId = generateTagCategoryIdFromName(name);
+      const uniqueId = ensureUniqueId(baseId, existingTagIds);
+
+      const newTag: Tag = {
+        name,
+        id: uniqueId,
+      };
+
+      const updatedCategories = localCategories.map((cat) =>
+        cat.id === categoryId
+          ? {
+              ...cat,
+              subcategories: cat.subcategories.map((sub) =>
+                sub.id === subcategoryId
+                  ? {
+                      ...sub,
+                      tags: [...sub.tags, newTag],
+                    }
+                  : sub
+              ),
+            }
+          : cat
+      );
+
+      setLocalCategories(updatedCategories);
       setNewTagInputs((prev) => ({
         ...prev,
         [key]: "",
       }));
+      setHasChanges(true);
     }
   };
 
   // Handle renaming a category
   const handleRenameCategory = (categoryId: string) => {
-    const category = categories.find((c) => c.id === categoryId);
+    const category = localCategories.find((c) => c.id === categoryId);
     if (!category) return;
 
     const newName = window.prompt("Enter new name for category:", category.name);
     if (newName && newName.trim() && newName !== category.name) {
-      onRenameCategory(categoryId, newName.trim());
+      if (!isCategoryNameUnique(newName.trim(), categoryId)) return;
+
+      const updatedCategories = localCategories.map((cat) =>
+        cat.id === categoryId ? { ...cat, name: newName.trim() } : cat
+      );
+
+      setLocalCategories(updatedCategories);
+      setHasChanges(true);
     }
   };
 
   // Handle renaming a subcategory
   const handleRenameSubcategory = (categoryId: string, subcategoryId: string) => {
-    const category = categories.find((c) => c.id === categoryId);
+    const category = localCategories.find((c) => c.id === categoryId);
     if (!category) return;
 
     const subcategory = category.subcategories.find((s) => s.id === subcategoryId);
@@ -136,13 +296,27 @@ const TagManager: React.FC<TagManagerProps> = ({
 
     const newName = window.prompt("Enter new name for subcategory:", subcategory.name);
     if (newName && newName.trim() && newName !== subcategory.name) {
-      onRenameSubcategory(categoryId, subcategoryId, newName.trim());
+      if (!isSubcategoryNameUnique(newName.trim(), subcategoryId)) return;
+
+      const updatedCategories = localCategories.map((cat) =>
+        cat.id === categoryId
+          ? {
+              ...cat,
+              subcategories: cat.subcategories.map((sub) =>
+                sub.id === subcategoryId ? { ...sub, name: newName.trim() } : sub
+              ),
+            }
+          : cat
+      );
+
+      setLocalCategories(updatedCategories);
+      setHasChanges(true);
     }
   };
 
   // Handle renaming a tag
   const handleRenameTag = (categoryId: string, subcategoryId: string, tagId: string) => {
-    const category = categories.find((c) => c.id === categoryId);
+    const category = localCategories.find((c) => c.id === categoryId);
     if (!category) return;
 
     const subcategory = category.subcategories.find((s) => s.id === subcategoryId);
@@ -153,26 +327,49 @@ const TagManager: React.FC<TagManagerProps> = ({
 
     const newName = window.prompt("Enter new name for tag:", tag.name);
     if (newName && newName.trim() && newName !== tag.name) {
-      onRenameTag(categoryId, subcategoryId, tagId, newName.trim());
+      if (!isTagNameUnique(newName.trim(), tagId)) return;
+
+      const updatedCategories = localCategories.map((cat) =>
+        cat.id === categoryId
+          ? {
+              ...cat,
+              subcategories: cat.subcategories.map((sub) =>
+                sub.id === subcategoryId
+                  ? {
+                      ...sub,
+                      tags: sub.tags.map((t) =>
+                        t.id === tagId ? { ...t, name: newName.trim() } : t
+                      ),
+                    }
+                  : sub
+              ),
+            }
+          : cat
+      );
+
+      setLocalCategories(updatedCategories);
+      setHasChanges(true);
     }
   };
 
   // Handle removing a category with confirmation
   const handleRemoveCategory = (categoryId: string) => {
-    const category = categories.find((c) => c.id === categoryId);
+    const category = localCategories.find((c) => c.id === categoryId);
     if (!category) return;
 
     const confirm = window.confirm(
       `Are you sure you want to delete the category "${category.name}" and all its subcategories and tags?`
     );
     if (confirm) {
-      onRemoveCategory(categoryId);
+      const updatedCategories = localCategories.filter((cat) => cat.id !== categoryId);
+      setLocalCategories(updatedCategories);
+      setHasChanges(true);
     }
   };
 
   // Handle removing a subcategory with confirmation
   const handleRemoveSubcategory = (categoryId: string, subcategoryId: string) => {
-    const category = categories.find((c) => c.id === categoryId);
+    const category = localCategories.find((c) => c.id === categoryId);
     if (!category) return;
 
     const subcategory = category.subcategories.find((s) => s.id === subcategoryId);
@@ -182,13 +379,23 @@ const TagManager: React.FC<TagManagerProps> = ({
       `Are you sure you want to delete the subcategory "${subcategory.name}" and all its tags?`
     );
     if (confirm) {
-      onRemoveSubcategory(categoryId, subcategoryId);
+      const updatedCategories = localCategories.map((cat) =>
+        cat.id === categoryId
+          ? {
+              ...cat,
+              subcategories: cat.subcategories.filter((sub) => sub.id !== subcategoryId),
+            }
+          : cat
+      );
+
+      setLocalCategories(updatedCategories);
+      setHasChanges(true);
     }
   };
 
   // Handle removing a tag with confirmation
   const handleRemoveTag = (categoryId: string, subcategoryId: string, tagId: string) => {
-    const category = categories.find((c) => c.id === categoryId);
+    const category = localCategories.find((c) => c.id === categoryId);
     if (!category) return;
 
     const subcategory = category.subcategories.find((s) => s.id === subcategoryId);
@@ -199,17 +406,64 @@ const TagManager: React.FC<TagManagerProps> = ({
 
     const confirm = window.confirm(`Are you sure you want to delete the tag "${tag.name}"?`);
     if (confirm) {
-      onRemoveTag(categoryId, subcategoryId, tagId);
+      const updatedCategories = localCategories.map((cat) =>
+        cat.id === categoryId
+          ? {
+              ...cat,
+              subcategories: cat.subcategories.map((sub) =>
+                sub.id === subcategoryId
+                  ? {
+                      ...sub,
+                      tags: sub.tags.filter((t) => t.id !== tagId),
+                    }
+                  : sub
+              ),
+            }
+          : cat
+      );
+
+      setLocalCategories(updatedCategories);
+      setHasChanges(true);
     }
+  };
+
+  // Save and cancel handlers
+  const handleSaveChanges = () => {
+    onReplaceCategories(localCategories);
+    setHasChanges(false);
+    onClose();
+  };
+
+  const handleCancel = () => {
+    if (hasChanges) {
+      const confirmDiscard = window.confirm(
+        "You have unsaved changes. Are you sure you want to discard them?"
+      );
+      if (!confirmDiscard) return;
+    }
+    setLocalCategories(deepClone(categories));
+    setHasChanges(false);
+    onClose();
   };
 
   return (
     <Portal>
-      <div className={styles.modalOverlay} onClick={onClose}>
+      <div className={styles.modalOverlay} onClick={handleCancel}>
         <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+          {/* Custom notification */}
+          {notification && (
+            <div
+              className={`${styles.modalNotification} ${
+                notification.isError ? styles.error : styles.success
+              }`}
+            >
+              {notification.message}
+            </div>
+          )}
+
           <div className={styles.modalHeader}>
             <h2 className={styles.modalTitle}>Manage Tag Hierarchy</h2>
-            <button className={styles.closeButton} onClick={onClose}>
+            <button className={styles.closeButton} onClick={handleCancel}>
               ×
             </button>
           </div>
@@ -217,7 +471,7 @@ const TagManager: React.FC<TagManagerProps> = ({
           <div className={styles.modalBody}>
             {/* Categories */}
             <div className={styles.categoriesList}>
-              {categories?.map((category) => (
+              {localCategories?.map((category) => (
                 <div key={category.id} className={styles.categorySection}>
                   <div
                     className={styles.categoryHeader}
@@ -390,7 +644,6 @@ const TagManager: React.FC<TagManagerProps> = ({
 
             {/* Add new category form */}
             <div className={styles.addCategorySection}>
-              <h3 className={styles.sectionTitle}>Add New Category</h3>
               <div className={styles.addCategoryForm}>
                 <input
                   type="text"
@@ -408,6 +661,23 @@ const TagManager: React.FC<TagManagerProps> = ({
                   Add Category
                 </button>
               </div>
+            </div>
+
+            {/* Modal Footer with Save/Cancel buttons */}
+            <div className={styles.modalFooter}>
+              <button
+                className={`${styles.actionButton} ${styles.cancelButton}`}
+                onClick={handleCancel}
+              >
+                Cancel
+              </button>
+              <button
+                className={`${styles.actionButton} ${styles.saveButton}`}
+                onClick={handleSaveChanges}
+                disabled={!hasChanges}
+              >
+                Save Changes
+              </button>
             </div>
           </div>
         </div>

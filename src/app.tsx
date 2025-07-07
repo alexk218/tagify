@@ -26,20 +26,12 @@ function App() {
     tagData,
     lastSaved,
     isLoading,
-    toggleTrackTag,
+    toggleTagForTrack,
     setRating,
     setEnergy,
     setBpm,
     toggleTagForMultipleTracks,
-    addCategory,
-    removeCategory,
-    renameCategory,
-    addSubcategory,
-    removeSubcategory,
-    renameSubcategory,
-    addTag,
-    removeTag,
-    renameTag,
+    replaceCategories,
     exportData,
     exportBackup,
     importBackup,
@@ -194,7 +186,7 @@ function App() {
               onSetEnergy={(energy) => setEnergy(activeTrack.uri, energy)}
               onSetBpm={(bpm) => setBpm(activeTrack.uri, bpm)}
               onRemoveTag={(categoryId, subcategoryId, tagId) =>
-                toggleTrackTag(activeTrack.uri, categoryId, subcategoryId, tagId)
+                toggleTagForTrack(activeTrack.uri, categoryId, subcategoryId, tagId)
               }
               onFilterByTagOnOff={onFilterByTagOnOff}
               onFilterByTag={onFilterByTag}
@@ -262,7 +254,7 @@ function App() {
         handleTagAllTracks(categoryId, subcategoryId, tagId);
       }
     } else if (activeTrack) {
-      toggleTrackTag(activeTrack.uri, categoryId, subcategoryId, tagId);
+      toggleTagForTrack(activeTrack.uri, categoryId, subcategoryId, tagId);
     }
   };
 
@@ -273,7 +265,7 @@ function App() {
     subcategoryId: string,
     tagId: string
   ) => {
-    toggleTrackTag(trackUri, categoryId, subcategoryId, tagId);
+    toggleTagForTrack(trackUri, categoryId, subcategoryId, tagId);
   };
 
   // Handler for toggling a tag on all tracks
@@ -345,15 +337,7 @@ function App() {
         <TagManager
           categories={tagData.categories}
           onClose={() => setShowTagManager(false)}
-          onAddCategory={addCategory}
-          onRemoveCategory={removeCategory}
-          onRenameCategory={renameCategory}
-          onAddSubcategory={addSubcategory}
-          onRemoveSubcategory={removeSubcategory}
-          onRenameSubcategory={renameSubcategory}
-          onAddTag={addTag}
-          onRemoveTag={removeTag}
-          onRenameTag={renameTag}
+          onReplaceCategories={replaceCategories}
         />
       )}
 

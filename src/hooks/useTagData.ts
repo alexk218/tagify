@@ -38,30 +38,6 @@ export interface TagDataStructure {
   };
 }
 
-const generateTagCategoryIdFromName = (name: string): string => {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, "") // Remove special characters
-    .replace(/[\s_]+/g, "-") // Replace spaces and underscores with hyphens
-    .replace(/-+/g, "-") // Replace multiple hyphens with single hyphen
-    .replace(/^-+|-+$/g, ""); // Remove leading and trailing hyphens
-};
-
-const ensureUniqueId = (id: string, existingIds: string[]): string => {
-  if (!existingIds.includes(id)) return id;
-
-  let counter = 1;
-  let newId = `${id}-${counter}`;
-
-  while (existingIds.includes(newId)) {
-    counter++;
-    newId = `${id}-${counter}`;
-  }
-
-  return newId;
-};
-
 // Default tag structure with 4 main categories
 const defaultTagData: TagDataStructure = {
   categories: [
@@ -300,65 +276,6 @@ export function useTagData() {
     Spicetify.showNotification("Backup created and downloaded");
   };
 
-  const isTagNameUnique = (name: string, excludeTagId?: string): boolean => {
-    const existingTagNames = tagData.categories.flatMap((category) =>
-      category.subcategories.flatMap((subcategory) =>
-        subcategory.tags
-          .filter((tag) => tag.id !== excludeTagId) // skip the tag being named
-          .map((tag) => tag.name.toLowerCase())
-      )
-    );
-
-    if (existingTagNames.includes(name.toLowerCase())) {
-      const subcategoryWithExistingTagName = tagData.categories
-        .flatMap((category) =>
-          category.subcategories.map((subcategory) => ({
-            category: category.name,
-            subcategory: subcategory.name,
-            tags: subcategory.tags,
-          }))
-        )
-        .find((item) => item.tags.some((tag) => tag.name.toLowerCase() === name.toLowerCase()));
-
-      Spicetify.showNotification(
-        `Tag "${name}" already exists in category "${subcategoryWithExistingTagName?.category}" > subcategory "${subcategoryWithExistingTagName?.subcategory}"`,
-        true
-      );
-
-      return false;
-    }
-
-    return true;
-  };
-
-  const isCategoryNameUnique = (name: string, excludeCategoryId?: string): boolean => {
-    const categoryNameExists = tagData.categories
-      .filter((category) => category.id !== excludeCategoryId) // skip the category being named
-      .some((category) => category.name.toLowerCase() === name.toLowerCase());
-
-    if (categoryNameExists) {
-      Spicetify.showNotification(`Category "${name}" already exists`, true);
-      return false;
-    }
-
-    return true;
-  };
-
-  const isSubcategoryNameUnique = (name: string, excludeSubcategoryId?: string): boolean => {
-    const subcategoryNameExists = tagData.categories.some((category) =>
-      category.subcategories
-        .filter((subcategory) => subcategory.id !== excludeSubcategoryId) // skip the subcategory being named
-        .some((subcategory) => subcategory.name.toLowerCase() === name.toLowerCase())
-    );
-
-    if (subcategoryNameExists) {
-      Spicetify.showNotification(`Subcategory "${name}" already exists`, true);
-      return false;
-    }
-
-    return true;
-  };
-
   const importBackup = (backupData: TagDataStructure) => {
     setTagData(backupData);
     saveTagData(backupData);
@@ -426,247 +343,38 @@ export function useTagData() {
 
   // ! CATEGORY MANAGEMENT
 
-  // Add a new main category
-  const createTagCategory = (name: string) => {
-    if (!isCategoryNameUnique(name)) return;
-
-    const existingCategoryIds = tagData.categories.map((c) => c.id);
-
-    const baseId = generateTagCategoryIdFromName(name);
-    const uniqueId = ensureUniqueId(baseId, existingCategoryIds);
-
-    const newCategory: TagCategory = {
-      name,
-      id: uniqueId,
-      subcategories: [],
-    };
-
-    setTagData({
-      ...tagData,
-      categories: [...tagData.categories, newCategory],
-    });
-  };
-
-  const deleteTagCategory = (categoryId: string) => {
-    // Create updated categories without the removed one
-    const updatedCategories = tagData.categories.filter((category) => category.id !== categoryId);
-
-    // Remove tags from this category from all tracks
+  const replaceCategories = (newCategories: TagCategory[]) => {
+    // Clean up orphaned tags in tracks
     const updatedTracks = { ...tagData.tracks };
+
     Object.keys(updatedTracks).forEach((uri) => {
+      const trackTags = updatedTracks[uri].tags;
+      const validTags = trackTags.filter((tag) => {
+        const category = newCategories.find((c) => c.id === tag.categoryId);
+        if (!category) return false;
+
+        const subcategory = category.subcategories.find((s) => s.id === tag.subcategoryId);
+        if (!subcategory) return false;
+
+        const tagExists = subcategory.tags.find((t) => t.id === tag.tagId);
+        return !!tagExists;
+      });
+
       updatedTracks[uri] = {
         ...updatedTracks[uri],
-        tags: updatedTracks[uri].tags.filter((tag) => tag.categoryId !== categoryId),
+        tags: validTags,
       };
+
+      // Remove track if it becomes empty after tag cleanup
+      if (isTrackEmpty(updatedTracks[uri])) {
+        cancelAddToTaggedPlaylist(uri);
+        delete updatedTracks[uri];
+      }
     });
 
     setTagData({
-      categories: updatedCategories,
+      categories: newCategories,
       tracks: updatedTracks,
-    });
-  };
-
-  const renameTagCategory = (categoryId: string, newName: string) => {
-    if (!isCategoryNameUnique(newName, categoryId)) return;
-    const updatedCategories = tagData.categories?.map((category) =>
-      category.id === categoryId ? { ...category, name: newName } : category
-    );
-
-    setTagData({
-      ...tagData,
-      categories: updatedCategories,
-    });
-  };
-
-  // ! SUBCATEGORY MANAGEMENT
-
-  // Add a new subcategory to a main category
-  const createTagSubcategory = (categoryId: string, name: string) => {
-    // Find the category first
-    const category = tagData.categories.find((c) => c.id === categoryId);
-    if (!category) return;
-
-    if (!isSubcategoryNameUnique(name)) return;
-
-    // Get existing subcategory IDs in this category
-    const existingSubcategoryIds = category.subcategories.map((s) => s.id);
-
-    const baseId = generateTagCategoryIdFromName(name);
-    const uniqueId = ensureUniqueId(baseId, existingSubcategoryIds);
-
-    const newSubcategory: TagSubcategory = {
-      name,
-      id: uniqueId,
-      tags: [],
-    };
-
-    const updatedCategories = tagData.categories?.map((category) =>
-      category.id === categoryId
-        ? {
-            ...category,
-            subcategories: [...category.subcategories, newSubcategory],
-          }
-        : category
-    );
-
-    setTagData({
-      ...tagData,
-      categories: updatedCategories,
-    });
-  };
-
-  const deleteTagSubcategory = (categoryId: string, subcategoryId: string) => {
-    const updatedCategories = tagData.categories?.map((category) => {
-      if (category.id !== categoryId) return category;
-
-      return {
-        ...category,
-        subcategories: category.subcategories.filter((sub) => sub.id !== subcategoryId),
-      };
-    });
-
-    // Remove tags from this subcategory from all tracks
-    const updatedTracks = { ...tagData.tracks };
-    Object.keys(updatedTracks).forEach((uri) => {
-      updatedTracks[uri] = {
-        ...updatedTracks[uri],
-        tags: updatedTracks[uri].tags.filter(
-          (tag) => !(tag.categoryId === categoryId && tag.subcategoryId === subcategoryId)
-        ),
-      };
-    });
-
-    setTagData({
-      categories: updatedCategories,
-      tracks: updatedTracks,
-    });
-  };
-
-  const renameTagSubcategory = (categoryId: string, subcategoryId: string, newName: string) => {
-    if (!isSubcategoryNameUnique(newName, subcategoryId)) return;
-    const updatedCategories = tagData.categories?.map((category) => {
-      if (category.id !== categoryId) return category;
-
-      return {
-        ...category,
-        subcategories: category.subcategories?.map((sub) =>
-          sub.id === subcategoryId ? { ...sub, name: newName } : sub
-        ),
-      };
-    });
-
-    setTagData({
-      ...tagData,
-      categories: updatedCategories,
-    });
-  };
-
-  // ! TAG MANAGEMENT
-
-  // Add a new tag to a subcategory
-  const createNewTag = (categoryId: string, subcategoryId: string, name: string) => {
-    // Find the subcategory first
-    const category = tagData.categories.find((c) => c.id === categoryId);
-    if (!category) return;
-
-    const subcategory = category.subcategories.find((s) => s.id === subcategoryId);
-    if (!subcategory) return;
-
-    // Check if the name already exists
-    if (!isTagNameUnique(name)) return;
-
-    const existingTagIds = subcategory.tags.map((t) => t.id);
-
-    const baseId = generateTagCategoryIdFromName(name);
-    const uniqueId = ensureUniqueId(baseId, existingTagIds);
-
-    const newTag: Tag = {
-      name,
-      id: uniqueId,
-    };
-
-    const updatedCategories = tagData.categories?.map((category) => {
-      if (category.id !== categoryId) return category;
-
-      return {
-        ...category,
-        subcategories: category.subcategories?.map((sub) => {
-          if (sub.id !== subcategoryId) return sub;
-
-          return {
-            ...sub,
-            tags: [...sub.tags, newTag],
-          };
-        }),
-      };
-    });
-
-    setTagData({
-      ...tagData,
-      categories: updatedCategories,
-    });
-  };
-
-  const removeTag = (categoryId: string, subcategoryId: string, tagId: string) => {
-    const updatedCategories = tagData.categories?.map((category) => {
-      if (category.id !== categoryId) return category;
-
-      return {
-        ...category,
-        subcategories: category.subcategories?.map((sub) => {
-          if (sub.id !== subcategoryId) return sub;
-
-          return {
-            ...sub,
-            tags: sub.tags.filter((tag) => tag.id !== tagId),
-          };
-        }),
-      };
-    });
-
-    const updatedTracks = { ...tagData.tracks };
-    Object.keys(updatedTracks).forEach((uri) => {
-      updatedTracks[uri] = {
-        ...updatedTracks[uri],
-        tags: updatedTracks[uri].tags.filter(
-          (tag) =>
-            !(
-              tag.categoryId === categoryId &&
-              tag.subcategoryId === subcategoryId &&
-              tag.tagId === tagId
-            )
-        ),
-      };
-    });
-
-    setTagData({
-      categories: updatedCategories,
-      tracks: updatedTracks,
-    });
-  };
-
-  const renameTag = (categoryId: string, subcategoryId: string, tagId: string, newName: string) => {
-    if (!isTagNameUnique(newName, tagId)) return;
-
-    const updatedCategories = tagData.categories?.map((category) => {
-      if (category.id !== categoryId) return category;
-
-      return {
-        ...category,
-        subcategories: category.subcategories?.map((sub) => {
-          if (sub.id !== subcategoryId) return sub;
-
-          return {
-            ...sub,
-            tags: sub.tags.map((tag) => (tag.id === tagId ? { ...tag, name: newName } : tag)),
-          };
-        }),
-      };
-    });
-
-    setTagData({
-      ...tagData,
-      categories: updatedCategories,
     });
   };
 
@@ -872,7 +580,7 @@ export function useTagData() {
     );
   };
 
-  const ToggleTagForTrack = (
+  const toggleTagForTrack = (
     trackUri: string,
     categoryId: string,
     subcategoryId: string,
@@ -1195,31 +903,13 @@ export function useTagData() {
     return exportResult;
   };
 
-  // Find tag in hierarchy by IDs
-  const getTagInfo = (categoryId: string, subcategoryId: string, tagId: string) => {
-    const category = tagData.categories.find((c) => c.id === categoryId);
-    if (!category) return null;
-
-    const subcategory = category.subcategories.find((s) => s.id === subcategoryId);
-    if (!subcategory) return null;
-
-    const tag = subcategory.tags.find((t) => t.id === tagId);
-    if (!tag) return null;
-
-    return {
-      categoryName: category.name,
-      subcategoryName: subcategory.name,
-      tagName: tag.name,
-    };
-  };
-
   return {
     tagData,
     isLoading,
     lastSaved,
 
     // Track tag management
-    toggleTrackTag: ToggleTagForTrack,
+    toggleTagForTrack,
     setRating,
     setEnergy,
     setBpm,
@@ -1228,22 +918,7 @@ export function useTagData() {
     findCommonTags,
 
     // Category management
-    addCategory: createTagCategory,
-    removeCategory: deleteTagCategory,
-    renameCategory: renameTagCategory,
-
-    // Subcategory management
-    addSubcategory: createTagSubcategory,
-    removeSubcategory: deleteTagSubcategory,
-    renameSubcategory: renameTagSubcategory,
-
-    // Tag management
-    addTag: createNewTag,
-    removeTag,
-    renameTag,
-
-    // Helpers
-    getTagInfo,
+    replaceCategories,
 
     // Import/Export
     exportData,
