@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { addTrackToTaggedPlaylist } from "../utils/PlaylistManager";
+import { TrackInfoCacheManager } from "../utils/TrackInfoCache";
 
 export interface Tag {
   name: string;
@@ -651,6 +652,7 @@ export function useTagData() {
 
     // Check if the track is now empty
     if (isTrackEmpty(updatedTrackData)) {
+      TrackInfoCacheManager.removeTrackInfo(trackUri);
       // Cancel any pending addition to TAGGED playlist
       cancelAddToTaggedPlaylist(trackUri);
 
@@ -779,6 +781,7 @@ export function useTagData() {
 
     // Check if this would make the track empty
     if (rating === 0 && trackData.energy === 0 && trackData.tags.length === 0) {
+      TrackInfoCacheManager.removeTrackInfo(trackUri);
       // Cancel any pending addition to TAGGED playlist
       cancelAddToTaggedPlaylist(trackUri);
 
@@ -822,6 +825,7 @@ export function useTagData() {
 
     // Check if this would make the track empty
     if (energy === 0 && trackData.rating === 0 && trackData.tags.length === 0) {
+      TrackInfoCacheManager.removeTrackInfo(trackUri);
       // Cancel any pending addition to TAGGED playlist
       cancelAddToTaggedPlaylist(trackUri);
 
