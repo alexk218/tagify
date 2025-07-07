@@ -17,7 +17,7 @@ import { useFilterState } from "./hooks/useFilterState";
 import { usePlaylistState } from "./hooks/usePlaylistState";
 import { useFontAwesome } from "./hooks/useFontAwesome";
 import { checkAndUpdateCacheIfNeeded } from "./utils/PlaylistCache";
-import { trackService } from "./services/trackService";
+import { trackService } from "./services/TrackService";
 import { useSpicetifyHistory } from "./hooks/useSpicetifyHistory";
 import { useCustomEvents } from "./hooks/useCustomEvents";
 
