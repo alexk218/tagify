@@ -38,7 +38,7 @@ export interface TagDataStructure {
   };
 }
 
-const generateIdFromName = (name: string): string => {
+const generateTagCategoryIdFromName = (name: string): string => {
   return name
     .toLowerCase()
     .trim()
@@ -371,7 +371,7 @@ export function useTagData() {
   const createTagCategory = (name: string) => {
     const existingCategoryIds = tagData.categories.map((c) => c.id);
 
-    const baseId = generateIdFromName(name);
+    const baseId = generateTagCategoryIdFromName(name);
     const uniqueId = ensureUniqueId(baseId, existingCategoryIds);
 
     const newCategory: TagCategory = {
@@ -427,7 +427,7 @@ export function useTagData() {
     // Get existing subcategory IDs in this category
     const existingSubcategoryIds = category.subcategories.map((s) => s.id);
 
-    const baseId = generateIdFromName(name);
+    const baseId = generateTagCategoryIdFromName(name);
     const uniqueId = ensureUniqueId(baseId, existingSubcategoryIds);
 
     const newSubcategory: TagSubcategory = {
@@ -509,7 +509,7 @@ export function useTagData() {
 
     const existingTagIds = subcategory.tags.map((t) => t.id);
 
-    const baseId = generateIdFromName(name);
+    const baseId = generateTagCategoryIdFromName(name);
     const uniqueId = ensureUniqueId(baseId, existingTagIds);
 
     const newTag: Tag = {
@@ -699,7 +699,6 @@ export function useTagData() {
   };
 
   const backfillBPMData = async () => {
-    // Check if we have tracks that need BPM data - more comprehensive check
     const tracksMissingBPM = Object.entries(tagData.tracks)
       .filter(([uri, data]) => {
         // Only process Spotify tracks, and check for null, undefined, 0, or missing bpm
