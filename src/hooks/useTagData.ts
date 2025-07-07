@@ -300,6 +300,65 @@ export function useTagData() {
     Spicetify.showNotification("Backup created and downloaded");
   };
 
+  const isTagNameUnique = (name: string, excludeTagId?: string): boolean => {
+    const existingTagNames = tagData.categories.flatMap((category) =>
+      category.subcategories.flatMap((subcategory) =>
+        subcategory.tags
+          .filter((tag) => tag.id !== excludeTagId) // skip the tag being named
+          .map((tag) => tag.name.toLowerCase())
+      )
+    );
+
+    if (existingTagNames.includes(name.toLowerCase())) {
+      const subcategoryWithExistingTagName = tagData.categories
+        .flatMap((category) =>
+          category.subcategories.map((subcategory) => ({
+            category: category.name,
+            subcategory: subcategory.name,
+            tags: subcategory.tags,
+          }))
+        )
+        .find((item) => item.tags.some((tag) => tag.name.toLowerCase() === name.toLowerCase()));
+
+      Spicetify.showNotification(
+        `Tag "${name}" already exists in category "${subcategoryWithExistingTagName?.category}" > subcategory "${subcategoryWithExistingTagName?.subcategory}"`,
+        true
+      );
+
+      return false;
+    }
+
+    return true;
+  };
+
+  const isCategoryNameUnique = (name: string, excludeCategoryId?: string): boolean => {
+    const categoryNameExists = tagData.categories
+      .filter((category) => category.id !== excludeCategoryId) // skip the category being named
+      .some((category) => category.name.toLowerCase() === name.toLowerCase());
+
+    if (categoryNameExists) {
+      Spicetify.showNotification(`Category "${name}" already exists`, true);
+      return false;
+    }
+
+    return true;
+  };
+
+  const isSubcategoryNameUnique = (name: string, excludeSubcategoryId?: string): boolean => {
+    const subcategoryNameExists = tagData.categories.some((category) =>
+      category.subcategories
+        .filter((subcategory) => subcategory.id !== excludeSubcategoryId) // skip the subcategory being named
+        .some((subcategory) => subcategory.name.toLowerCase() === name.toLowerCase())
+    );
+
+    if (subcategoryNameExists) {
+      Spicetify.showNotification(`Subcategory "${name}" already exists`, true);
+      return false;
+    }
+
+    return true;
+  };
+
   const importBackup = (backupData: TagDataStructure) => {
     setTagData(backupData);
     saveTagData(backupData);
@@ -369,6 +428,8 @@ export function useTagData() {
 
   // Add a new main category
   const createTagCategory = (name: string) => {
+    if (!isCategoryNameUnique(name)) return;
+
     const existingCategoryIds = tagData.categories.map((c) => c.id);
 
     const baseId = generateTagCategoryIdFromName(name);
@@ -406,6 +467,7 @@ export function useTagData() {
   };
 
   const renameTagCategory = (categoryId: string, newName: string) => {
+    if (!isCategoryNameUnique(newName, categoryId)) return;
     const updatedCategories = tagData.categories?.map((category) =>
       category.id === categoryId ? { ...category, name: newName } : category
     );
@@ -423,6 +485,8 @@ export function useTagData() {
     // Find the category first
     const category = tagData.categories.find((c) => c.id === categoryId);
     if (!category) return;
+
+    if (!isSubcategoryNameUnique(name)) return;
 
     // Get existing subcategory IDs in this category
     const existingSubcategoryIds = category.subcategories.map((s) => s.id);
@@ -479,6 +543,7 @@ export function useTagData() {
   };
 
   const renameTagSubcategory = (categoryId: string, subcategoryId: string, newName: string) => {
+    if (!isSubcategoryNameUnique(newName, subcategoryId)) return;
     const updatedCategories = tagData.categories?.map((category) => {
       if (category.id !== categoryId) return category;
 
@@ -506,6 +571,9 @@ export function useTagData() {
 
     const subcategory = category.subcategories.find((s) => s.id === subcategoryId);
     if (!subcategory) return;
+
+    // Check if the name already exists
+    if (!isTagNameUnique(name)) return;
 
     const existingTagIds = subcategory.tags.map((t) => t.id);
 
@@ -578,6 +646,8 @@ export function useTagData() {
   };
 
   const renameTag = (categoryId: string, subcategoryId: string, tagId: string, newName: string) => {
+    if (!isTagNameUnique(newName, tagId)) return;
+
     const updatedCategories = tagData.categories?.map((category) => {
       if (category.id !== categoryId) return category;
 
