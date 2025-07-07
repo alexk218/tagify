@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { addTrackToTaggedPlaylist } from "../utils/PlaylistManager";
 import { TrackInfoCacheManager } from "../utils/TrackInfoCache";
 
 export interface Tag {
@@ -313,35 +312,6 @@ export function useTagData() {
     };
   }, []);
 
-  const scheduleAddToTaggedPlaylist = (trackUri: string) => {
-    // Clear any existing timeout for this track
-    const existingTimeoutId = playlistAdditionTimeouts.current.get(trackUri);
-    if (existingTimeoutId) {
-      clearTimeout(existingTimeoutId);
-    }
-
-    // Only schedule for Spotify tracks (not local files)
-    if (!trackUri.startsWith("spotify:local:")) {
-      // Schedule adding to playlist after 2 seconds
-      const timeoutId = setTimeout(async () => {
-        await addTrackToTaggedPlaylist(trackUri);
-        playlistAdditionTimeouts.current.delete(trackUri);
-      }, 2000);
-
-      playlistAdditionTimeouts.current.set(trackUri, timeoutId);
-    }
-  };
-
-  // Function to cancel pending addition to playlist
-  const cancelAddToTaggedPlaylist = (trackUri: string) => {
-    const timeoutid = playlistAdditionTimeouts.current.get(trackUri);
-
-    if (timeoutid) {
-      clearTimeout(timeoutid);
-      playlistAdditionTimeouts.current.delete(trackUri);
-    }
-  };
-
   // ! CATEGORY MANAGEMENT
 
   const replaceCategories = (newCategories: TagCategory[]) => {
@@ -368,8 +338,7 @@ export function useTagData() {
 
       // Remove track if it becomes empty after tag cleanup
       if (isTrackEmpty(updatedTracks[uri])) {
-        cancelAddToTaggedPlaylist(uri);
-        delete updatedTracks[uri];
+        TrackInfoCacheManager.removeTrackInfo(uri);
       }
     });
 
@@ -452,8 +421,7 @@ export function useTagData() {
       trackData.energy === 0 &&
       trackData.tags.length === 0
     ) {
-      // Cancel any pending addition to TAGGED playlist
-      cancelAddToTaggedPlaylist(trackUri);
+      TrackInfoCacheManager.removeTrackInfo(trackUri);
 
       // Create new state by removing this track
       const { [trackUri]: _, ...remainingTracks } = currentData.tracks;
@@ -475,79 +443,6 @@ export function useTagData() {
         },
       });
     }
-  };
-
-  const backfillBPMData = async () => {
-    const tracksMissingBPM = Object.entries(tagData.tracks)
-      .filter(([uri, data]) => {
-        // Only process Spotify tracks, and check for null, undefined, 0, or missing bpm
-        return (
-          !uri.startsWith("spotify:local:") &&
-          (data.bpm === undefined || data.bpm === null || data.bpm === 0 || !data.bpm)
-        );
-      })
-      .map(([uri]) => uri);
-
-    if (tracksMissingBPM.length === 0) {
-      console.log("No tracks need BPM backfilling");
-      return;
-    }
-
-    console.log(`Backfilling BPM data for ${tracksMissingBPM.length} tracks...`);
-
-    // Create a copy of the current track data to work with
-    const updatedTracks = { ...tagData.tracks };
-    let successfulUpdates = 0;
-
-    // Process in smaller batches to avoid rate limiting
-    const batchSize = 10;
-    for (let i = 0; i < tracksMissingBPM.length; i += batchSize) {
-      const batch = tracksMissingBPM.slice(i, i + batchSize);
-
-      console.log(
-        `Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(
-          tracksMissingBPM.length / batchSize
-        )}`
-      );
-
-      await Promise.all(
-        batch.map(async (uri) => {
-          try {
-            console.log(`Fetching BPM for track: ${uri}`);
-            const bpm = await fetchBPM(uri);
-
-            if (bpm !== null && bpm > 0) {
-              // Create a new track data object instead of mutating
-              updatedTracks[uri] = {
-                ...updatedTracks[uri],
-                bpm,
-              };
-              successfulUpdates++;
-              console.log(`Successfully updated BPM for ${uri}: ${bpm}`);
-            } else {
-              console.log(`No BPM data available for ${uri}`);
-            }
-          } catch (error) {
-            console.error(`Error backfilling BPM for track ${uri}:`, error);
-          }
-        })
-      );
-
-      // Wait a second between batches to be nice to the API
-      if (i + batchSize < tracksMissingBPM.length) {
-        console.log("Waiting 1 second before next batch...");
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-    }
-
-    // Update the state with the new track data
-    const newTagData = {
-      ...tagData,
-      tracks: updatedTracks,
-    };
-
-    setTagData(newTagData);
-    console.log(`BPM backfilling complete! Successfully updated ${successfulUpdates} tracks.`);
   };
 
   const findCommonTags = (trackUris: string[]): TrackTag[] => {
@@ -603,16 +498,12 @@ export function useTagData() {
         ...trackData.tags.slice(0, existingTagIndex),
         ...trackData.tags.slice(existingTagIndex + 1),
       ];
-      // cancel any pending playlist addition when removing ANY tag
-      cancelAddToTaggedPlaylist(trackUri);
     } else {
       // Add tag if it doesn't exist
       updatedTags = [...trackData.tags, { categoryId, subcategoryId, tagId }];
 
       // Schedule adding to TAGGED playlist if this makes the track non-empty
       if (updatedTags.length === 1 && trackData.rating === 0 && trackData.energy === 0) {
-        scheduleAddToTaggedPlaylist(trackUri);
-
         // Instead of immediately updating BPM, we'll only get it
         // but not update the state directly to avoid race conditions
         fetchBPM(trackUri)
@@ -653,8 +544,6 @@ export function useTagData() {
     // Check if the track is now empty
     if (isTrackEmpty(updatedTrackData)) {
       TrackInfoCacheManager.removeTrackInfo(trackUri);
-      // Cancel any pending addition to TAGGED playlist
-      cancelAddToTaggedPlaylist(trackUri);
 
       // Create new state by removing this track
       const { [trackUri]: _, ...remainingTracks } = currentData.tracks;
@@ -731,7 +620,7 @@ export function useTagData() {
             updatedTagData.tracks[uri].rating === 0 &&
             updatedTagData.tracks[uri].energy === 0
           ) {
-            cancelAddToTaggedPlaylist(uri);
+            TrackInfoCacheManager.removeTrackInfo(uri);
           }
         }
       } else {
@@ -741,11 +630,6 @@ export function useTagData() {
             ...trackData,
             tags: [...trackData.tags, { categoryId, subcategoryId, tagId }],
           };
-
-          // Schedule adding to TAGGED playlist if this makes the track non-empty
-          if (trackData.tags.length === 0 && trackData.rating === 0 && trackData.energy === 0) {
-            scheduleAddToTaggedPlaylist(uri);
-          }
         }
       }
     });
@@ -769,21 +653,40 @@ export function useTagData() {
     const currentData = getOrCreateTrackData(trackUri);
     const trackData = currentData.tracks[trackUri];
 
-    // If this is the first rating for an otherwise empty track, schedule adding to TAGGED playlist
+    // If this is the first rating for an otherwise empty track, fetch BPM
     if (
       rating > 0 &&
       trackData.rating === 0 &&
       trackData.energy === 0 &&
       trackData.tags.length === 0
     ) {
-      scheduleAddToTaggedPlaylist(trackUri);
+      fetchBPM(trackUri)
+        .then((bpm) => {
+          if (bpm !== null) {
+            setTagData((prevState) => {
+              const currentTrackData = prevState.tracks[trackUri];
+              if (!currentTrackData) return prevState;
+              return {
+                ...prevState,
+                tracks: {
+                  ...prevState.tracks,
+                  [trackUri]: {
+                    ...currentTrackData,
+                    bpm: bpm,
+                  },
+                },
+              };
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("Error fetching BPM:", error);
+        });
     }
 
     // Check if this would make the track empty
     if (rating === 0 && trackData.energy === 0 && trackData.tags.length === 0) {
       TrackInfoCacheManager.removeTrackInfo(trackUri);
-      // Cancel any pending addition to TAGGED playlist
-      cancelAddToTaggedPlaylist(trackUri);
 
       // Create new state by removing this track
       const { [trackUri]: _, ...remainingTracks } = currentData.tracks;
@@ -813,21 +716,40 @@ export function useTagData() {
     const currentData = getOrCreateTrackData(trackUri);
     const trackData = currentData.tracks[trackUri];
 
-    // If this is the first energy setting for an otherwise empty track, schedule adding to TAGGED playlist
+    // If this is the first energy setting for an otherwise empty track, fetch BPM.
     if (
       energy > 0 &&
       trackData.rating === 0 &&
       trackData.energy === 0 &&
       trackData.tags.length === 0
     ) {
-      scheduleAddToTaggedPlaylist(trackUri);
+      fetchBPM(trackUri)
+        .then((bpm) => {
+          if (bpm !== null) {
+            setTagData((prevState) => {
+              const currentTrackData = prevState.tracks[trackUri];
+              if (!currentTrackData) return prevState;
+              return {
+                ...prevState,
+                tracks: {
+                  ...prevState.tracks,
+                  [trackUri]: {
+                    ...currentTrackData,
+                    bmp: bpm,
+                  },
+                },
+              };
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("Error fetching BPM:", error);
+        });
     }
 
     // Check if this would make the track empty
     if (energy === 0 && trackData.rating === 0 && trackData.tags.length === 0) {
       TrackInfoCacheManager.removeTrackInfo(trackUri);
-      // Cancel any pending addition to TAGGED playlist
-      cancelAddToTaggedPlaylist(trackUri);
 
       // Create new state by removing this track
       const { [trackUri]: _, ...remainingTracks } = currentData.tracks;
@@ -918,7 +840,6 @@ export function useTagData() {
     setEnergy,
     setBpm,
     toggleTagForMultipleTracks,
-    backfillBPMData,
     findCommonTags,
 
     // Category management

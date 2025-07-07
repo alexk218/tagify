@@ -35,7 +35,6 @@ function App() {
     exportData,
     exportBackup,
     importBackup,
-    backfillBPMData,
     findCommonTags,
   } = useTagData();
 
@@ -326,7 +325,6 @@ function App() {
         onExportRekordbox={() => setShowExport(true)}
         lastSaved={lastSaved}
         taggedTracks={tagData.tracks}
-        onBackfillBPM={backfillBPMData}
         showMissingTracks={showMissingTracks}
         showActions={showActions}
       />
