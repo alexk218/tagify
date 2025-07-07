@@ -342,3 +342,73 @@
     transform: translateX(-50%) translateY(0);
   }
 }
+
+/* Drag and drop styles */
+.tagItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background-color: var(--spice-main);
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 4px;
+  cursor: move;
+  transition: all 0.2s ease;
+}
+
+.tagItem:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.tagDragging {
+  opacity: 0.5;
+  transform: scale(0.95);
+  background-color: rgba(30, 144, 255, 0.2);
+  border-color: #1e90ff;
+}
+
+.tagDropTarget {
+  background-color: rgba(30, 144, 255, 0.3);
+  border-color: #1e90ff;
+  border-style: dashed;
+  transform: scale(1.02);
+}
+
+.dragHandle {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  margin-right: 8px;
+  cursor: move;
+  opacity: 0.6;
+}
+
+.dragHandle:hover {
+  opacity: 1;
+}
+
+.tagDropZone {
+  padding: 8px;
+  margin: 4px 0;
+  border: 2px dashed transparent;
+  border-radius: 4px;
+  text-align: center;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  transition: all 0.2s ease;
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tagDropZone.tagDropTarget {
+  border-color: #1e90ff;
+  background-color: rgba(30, 144, 255, 0.1);
+  color: var(--spice-text);
+}
+
+/* Prevent text selection during drag */
+.tagItem.tagDragging * {
+  user-select: none;
+  pointer-events: none;
+}

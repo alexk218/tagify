@@ -3,6 +3,17 @@ import styles from "./TagManager.module.css";
 import { TagCategory, Tag, TagSubcategory } from "../hooks/useTagData";
 import Portal from "../utils/Portal";
 
+interface DragState {
+  draggedTag: {
+    categoryId: string;
+    subcategoryId: string;
+    tagId: string;
+    tagIndex: number;
+  } | null;
+  dragOverIndex: number | null;
+  dragOverSubcategory: string | null;
+}
+
 interface TagManagerProps {
   categories: TagCategory[];
   onClose: () => void;
@@ -59,6 +70,12 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
   // State for expanded categories and subcategories
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   const [expandedSubcategories, setExpandedSubcategories] = useState<string[]>([]);
+
+  const [dragState, setDragState] = useState<DragState>({
+    draggedTag: null,
+    dragOverIndex: null,
+    dragOverSubcategory: null,
+  });
 
   // Reset local state when categories prop changes
   useEffect(() => {
@@ -446,6 +463,119 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
     onClose();
   };
 
+  // Drag and Drop handlers
+  const handleDragStart = (
+    e: React.DragEvent,
+    categoryId: string,
+    subcategoryId: string,
+    tagId: string,
+    tagIndex: number
+  ) => {
+    setDragState({
+      draggedTag: { categoryId, subcategoryId, tagId, tagIndex },
+      dragOverIndex: null,
+      dragOverSubcategory: null,
+    });
+
+    // Set drag effect
+    e.dataTransfer.effectAllowed = "move";
+
+    // Add some visual feedback
+    e.currentTarget.classList.add("dragging");
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    // Clean up
+    setDragState({
+      draggedTag: null,
+      dragOverIndex: null,
+      dragOverSubcategory: null,
+    });
+
+    e.currentTarget.classList.remove("dragging");
+  };
+
+  const handleDragOver = (e: React.DragEvent, subcategoryId: string, targetIndex: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+
+    // Only allow drop within the same subcategory
+    if (dragState.draggedTag && dragState.draggedTag.subcategoryId === subcategoryId) {
+      setDragState((prev) => ({
+        ...prev,
+        dragOverIndex: targetIndex,
+        dragOverSubcategory: subcategoryId,
+      }));
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    // Only clear if we're actually leaving the drop zone
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDragState((prev) => ({
+        ...prev,
+        dragOverIndex: null,
+        dragOverSubcategory: null,
+      }));
+    }
+  };
+
+  const handleDrop = (
+    e: React.DragEvent,
+    targetCategoryId: string,
+    targetSubcategoryId: string,
+    targetIndex: number
+  ) => {
+    e.preventDefault();
+
+    if (!dragState.draggedTag) return;
+
+    const {
+      categoryId: sourceCategoryId,
+      subcategoryId: sourceSubcategoryId,
+      tagIndex: sourceIndex,
+    } = dragState.draggedTag;
+
+    // Only allow reordering within the same subcategory
+    if (sourceSubcategoryId !== targetSubcategoryId) return;
+
+    // Don't do anything if dropping in the same position
+    if (sourceIndex === targetIndex) return;
+
+    // Reorder the tags
+    const updatedCategories = localCategories.map((category) => {
+      if (category.id === sourceCategoryId) {
+        return {
+          ...category,
+          subcategories: category.subcategories.map((subcategory) => {
+            if (subcategory.id === sourceSubcategoryId) {
+              const newTags = [...subcategory.tags];
+              const [draggedTag] = newTags.splice(sourceIndex, 1);
+              newTags.splice(targetIndex, 0, draggedTag);
+
+              return {
+                ...subcategory,
+                tags: newTags,
+              };
+            }
+            return subcategory;
+          }),
+        };
+      }
+      return category;
+    });
+
+    setLocalCategories(updatedCategories);
+    setHasChanges(true);
+
+    // Clear drag state
+    setDragState({
+      draggedTag: null,
+      dragOverIndex: null,
+      dragOverSubcategory: null,
+    });
+  };
+
   return (
     <Portal>
       <div className={styles.modalOverlay} onClick={handleCancel}>
@@ -553,30 +683,87 @@ const TagManager: React.FC<TagManagerProps> = ({ categories, onClose, onReplaceC
                               <div className={styles.subcategoryContent}>
                                 {/* Tags */}
                                 <div className={styles.tagList}>
-                                  {subcategory.tags.map((tag) => (
-                                    <div key={tag.id} className={styles.tagItem}>
-                                      <span className={styles.tagName}>{tag.name}</span>
-                                      <div className={styles.tagActions}>
-                                        <button
-                                          className={styles.tagAction}
-                                          onClick={() =>
-                                            handleRenameTag(category.id, subcategory.id, tag.id)
-                                          }
-                                        >
-                                          Rename
-                                        </button>
-                                        <button
-                                          className={`${styles.tagAction} ${styles.tagDelete}`}
-                                          onClick={() =>
-                                            handleRemoveTag(category.id, subcategory.id, tag.id)
-                                          }
-                                        >
-                                          Delete
-                                        </button>
+                                  {subcategory.tags.map((tag, tagIndex) => {
+                                    const isDragging = dragState.draggedTag?.tagId === tag.id;
+                                    const isDropTarget =
+                                      dragState.dragOverSubcategory === subcategory.id &&
+                                      dragState.dragOverIndex === tagIndex &&
+                                      dragState.draggedTag?.subcategoryId === subcategory.id;
+
+                                    return (
+                                      <div
+                                        key={tag.id}
+                                        className={`${styles.tagItem} ${
+                                          isDragging ? styles.tagDragging : ""
+                                        } ${isDropTarget ? styles.tagDropTarget : ""}`}
+                                        draggable={true}
+                                        onDragStart={(e) =>
+                                          handleDragStart(
+                                            e,
+                                            category.id,
+                                            subcategory.id,
+                                            tag.id,
+                                            tagIndex
+                                          )
+                                        }
+                                        onDragEnd={handleDragEnd}
+                                        onDragOver={(e) =>
+                                          handleDragOver(e, subcategory.id, tagIndex)
+                                        }
+                                        onDragLeave={handleDragLeave}
+                                        onDrop={(e) =>
+                                          handleDrop(e, category.id, subcategory.id, tagIndex)
+                                        }
+                                      >
+                                        <span className={styles.dragHandle}>⋮⋮</span>
+                                        <span className={styles.tagName}>{tag.name}</span>
+                                        <div className={styles.tagActions}>
+                                          <button
+                                            className={styles.tagAction}
+                                            onClick={() =>
+                                              handleRenameTag(category.id, subcategory.id, tag.id)
+                                            }
+                                          >
+                                            Rename
+                                          </button>
+                                          <button
+                                            className={`${styles.tagAction} ${styles.tagDelete}`}
+                                            onClick={() =>
+                                              handleRemoveTag(category.id, subcategory.id, tag.id)
+                                            }
+                                          >
+                                            Delete
+                                          </button>
+                                        </div>
                                       </div>
-                                    </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
+
+                                {/* DROP ZONE */}
+                                {dragState.draggedTag?.subcategoryId === subcategory.id && (
+                                  <div
+                                    className={`${styles.tagDropZone} ${
+                                      dragState.dragOverIndex === subcategory.tags.length
+                                        ? styles.tagDropTarget
+                                        : ""
+                                    }`}
+                                    onDragOver={(e) =>
+                                      handleDragOver(e, subcategory.id, subcategory.tags.length)
+                                    }
+                                    onDragLeave={handleDragLeave}
+                                    onDrop={(e) =>
+                                      handleDrop(
+                                        e,
+                                        category.id,
+                                        subcategory.id,
+                                        subcategory.tags.length
+                                      )
+                                    }
+                                  >
+                                    Drop here to place at end
+                                  </div>
+                                )}
 
                                 {/* Add new tag form */}
                                 <div className={styles.addTagForm}>
