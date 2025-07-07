@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import styles from "./TagManager.module.css";
 import { TagCategory } from "../hooks/useTagData";
+import Portal from "../utils/Portal";
 
 interface TagManagerProps {
   categories: TagCategory[];
@@ -46,18 +47,8 @@ const TagManager: React.FC<TagManagerProps> = ({
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   const [expandedSubcategories, setExpandedSubcategories] = useState<string[]>([]);
 
-  // Initialize expanded states
+  // Initialize input states
   useEffect(() => {
-    // By default expand the first category
-    if (categories.length > 0 && expandedCategories.length === 0) {
-      setExpandedCategories([categories[0].id]);
-
-      // And first subcategory within that category
-      if (categories[0].subcategories.length > 0) {
-        setExpandedSubcategories([categories[0].subcategories[0].id]);
-      }
-    }
-
     // Initialize empty inputs for all categories
     const initialSubInputs: { [categoryId: string]: string } = {};
     const initialTagInputs: { [key: string]: string } = {};
@@ -213,210 +204,215 @@ const TagManager: React.FC<TagManagerProps> = ({
   };
 
   return (
-    <div className={styles.modalOverlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHeader}>
-          <h2 className={styles.modalTitle}>Manage Tag Hierarchy</h2>
-          <button className={styles.closeButton} onClick={onClose}>
-            ×
-          </button>
-        </div>
+    <Portal>
+      <div className={styles.modalOverlay} onClick={onClose}>
+        <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+          <div className={styles.modalHeader}>
+            <h2 className={styles.modalTitle}>Manage Tag Hierarchy</h2>
+            <button className={styles.closeButton} onClick={onClose}>
+              ×
+            </button>
+          </div>
 
-        <div className={styles.modalBody}>
-          {/* Categories */}
-          <div className={styles.categoriesList}>
-            {categories?.map((category) => (
-              <div key={category.id} className={styles.categorySection}>
-                <div className={styles.categoryHeader} onClick={() => toggleCategory(category.id)}>
-                  <span
-                    className={`${styles.expandIcon} ${
-                      expandedCategories.includes(category.id) ? styles.expanded : ""
-                    }`}
+          <div className={styles.modalBody}>
+            {/* Categories */}
+            <div className={styles.categoriesList}>
+              {categories?.map((category) => (
+                <div key={category.id} className={styles.categorySection}>
+                  <div
+                    className={styles.categoryHeader}
+                    onClick={() => toggleCategory(category.id)}
                   >
-                    {expandedCategories.includes(category.id) ? "▼" : "►"}
-                  </span>
-                  <h3 className={styles.categoryTitle}>{category.name}</h3>
-                  <div className={styles.categoryActions}>
-                    <button
-                      className={styles.actionButton}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleRenameCategory(category.id);
-                      }}
+                    <span
+                      className={`${styles.expandIcon} ${
+                        expandedCategories.includes(category.id) ? styles.expanded : ""
+                      }`}
                     >
-                      Rename
-                    </button>
-                    <button
-                      className={`${styles.actionButton} ${styles.deleteButton}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleRemoveCategory(category.id);
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-
-                {expandedCategories.includes(category.id) && (
-                  <div className={styles.categoryContent}>
-                    {/* Subcategories */}
-                    <div className={styles.subcategoriesList}>
-                      {category.subcategories?.map((subcategory) => (
-                        <div key={subcategory.id} className={styles.subcategorySection}>
-                          <div
-                            className={styles.subcategoryHeader}
-                            onClick={() => toggleSubcategory(subcategory.id)}
-                          >
-                            <span
-                              className={`${styles.expandIcon} ${
-                                expandedSubcategories.includes(subcategory.id)
-                                  ? styles.expanded
-                                  : ""
-                              }`}
-                            >
-                              {expandedSubcategories.includes(subcategory.id) ? "▼" : "►"}
-                            </span>
-                            <h4 className={styles.subcategoryTitle}>{subcategory.name}</h4>
-                            <div className={styles.subcategoryActions}>
-                              <button
-                                className={styles.actionButton}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleRenameSubcategory(category.id, subcategory.id);
-                                }}
-                              >
-                                Rename
-                              </button>
-                              <button
-                                className={`${styles.actionButton} ${styles.deleteButton}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleRemoveSubcategory(category.id, subcategory.id);
-                                }}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-
-                          {expandedSubcategories.includes(subcategory.id) && (
-                            <div className={styles.subcategoryContent}>
-                              {/* Tags */}
-                              <div className={styles.tagList}>
-                                {subcategory.tags.map((tag) => (
-                                  <div key={tag.id} className={styles.tagItem}>
-                                    <span className={styles.tagName}>{tag.name}</span>
-                                    <div className={styles.tagActions}>
-                                      <button
-                                        className={styles.tagAction}
-                                        onClick={() =>
-                                          handleRenameTag(category.id, subcategory.id, tag.id)
-                                        }
-                                      >
-                                        Rename
-                                      </button>
-                                      <button
-                                        className={`${styles.tagAction} ${styles.tagDelete}`}
-                                        onClick={() =>
-                                          handleRemoveTag(category.id, subcategory.id, tag.id)
-                                        }
-                                      >
-                                        Delete
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-
-                              {/* Add new tag form */}
-                              <div className={styles.addTagForm}>
-                                <input
-                                  type="text"
-                                  placeholder="New tag..."
-                                  value={newTagInputs[`${category.id}-${subcategory.id}`] || ""}
-                                  onChange={(e) =>
-                                    setNewTagInputs({
-                                      ...newTagInputs,
-                                      [`${category.id}-${subcategory.id}`]: e.target.value,
-                                    })
-                                  }
-                                  className={styles.input}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      handleAddTag(category.id, subcategory.id);
-                                    }
-                                  }}
-                                />
-                                <button
-                                  className={styles.addButton}
-                                  onClick={() => handleAddTag(category.id, subcategory.id)}
-                                >
-                                  Add Tag
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Add new subcategory form */}
-                    <div className={styles.addSubcategoryForm}>
-                      <input
-                        type="text"
-                        placeholder="New subcategory..."
-                        value={newSubcategoryInputs[category.id] || ""}
-                        onChange={(e) =>
-                          setNewSubcategoryInputs({
-                            ...newSubcategoryInputs,
-                            [category.id]: e.target.value,
-                          })
-                        }
-                        className={styles.input}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            handleAddSubcategory(category.id);
-                          }
-                        }}
-                      />
+                      {expandedCategories.includes(category.id) ? "▼" : "►"}
+                    </span>
+                    <h3 className={styles.categoryTitle}>{category.name}</h3>
+                    <div className={styles.categoryActions}>
                       <button
-                        className={styles.addButton}
-                        onClick={() => handleAddSubcategory(category.id)}
+                        className={styles.actionButton}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRenameCategory(category.id);
+                        }}
                       >
-                        Add Subcategory
+                        Rename
+                      </button>
+                      <button
+                        className={`${styles.actionButton} ${styles.deleteButton}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveCategory(category.id);
+                        }}
+                      >
+                        Delete
                       </button>
                     </div>
                   </div>
-                )}
-              </div>
-            ))}
-          </div>
 
-          {/* Add new category form */}
-          <div className={styles.addCategorySection}>
-            <h3 className={styles.sectionTitle}>Add New Category</h3>
-            <div className={styles.addCategoryForm}>
-              <input
-                type="text"
-                placeholder="New category name..."
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                className={styles.input}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    handleAddCategory();
-                  }
-                }}
-              />
-              <button className={styles.addButton} onClick={handleAddCategory}>
-                Add Category
-              </button>
+                  {expandedCategories.includes(category.id) && (
+                    <div className={styles.categoryContent}>
+                      {/* Subcategories */}
+                      <div className={styles.subcategoriesList}>
+                        {category.subcategories?.map((subcategory) => (
+                          <div key={subcategory.id} className={styles.subcategorySection}>
+                            <div
+                              className={styles.subcategoryHeader}
+                              onClick={() => toggleSubcategory(subcategory.id)}
+                            >
+                              <span
+                                className={`${styles.expandIcon} ${
+                                  expandedSubcategories.includes(subcategory.id)
+                                    ? styles.expanded
+                                    : ""
+                                }`}
+                              >
+                                {expandedSubcategories.includes(subcategory.id) ? "▼" : "►"}
+                              </span>
+                              <h4 className={styles.subcategoryTitle}>{subcategory.name}</h4>
+                              <div className={styles.subcategoryActions}>
+                                <button
+                                  className={styles.actionButton}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRenameSubcategory(category.id, subcategory.id);
+                                  }}
+                                >
+                                  Rename
+                                </button>
+                                <button
+                                  className={`${styles.actionButton} ${styles.deleteButton}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemoveSubcategory(category.id, subcategory.id);
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+
+                            {expandedSubcategories.includes(subcategory.id) && (
+                              <div className={styles.subcategoryContent}>
+                                {/* Tags */}
+                                <div className={styles.tagList}>
+                                  {subcategory.tags.map((tag) => (
+                                    <div key={tag.id} className={styles.tagItem}>
+                                      <span className={styles.tagName}>{tag.name}</span>
+                                      <div className={styles.tagActions}>
+                                        <button
+                                          className={styles.tagAction}
+                                          onClick={() =>
+                                            handleRenameTag(category.id, subcategory.id, tag.id)
+                                          }
+                                        >
+                                          Rename
+                                        </button>
+                                        <button
+                                          className={`${styles.tagAction} ${styles.tagDelete}`}
+                                          onClick={() =>
+                                            handleRemoveTag(category.id, subcategory.id, tag.id)
+                                          }
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                {/* Add new tag form */}
+                                <div className={styles.addTagForm}>
+                                  <input
+                                    type="text"
+                                    placeholder="New tag..."
+                                    value={newTagInputs[`${category.id}-${subcategory.id}`] || ""}
+                                    onChange={(e) =>
+                                      setNewTagInputs({
+                                        ...newTagInputs,
+                                        [`${category.id}-${subcategory.id}`]: e.target.value,
+                                      })
+                                    }
+                                    className={styles.input}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        handleAddTag(category.id, subcategory.id);
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    className={styles.addButton}
+                                    onClick={() => handleAddTag(category.id, subcategory.id)}
+                                  >
+                                    Add Tag
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Add new subcategory form */}
+                      <div className={styles.addSubcategoryForm}>
+                        <input
+                          type="text"
+                          placeholder="New subcategory..."
+                          value={newSubcategoryInputs[category.id] || ""}
+                          onChange={(e) =>
+                            setNewSubcategoryInputs({
+                              ...newSubcategoryInputs,
+                              [category.id]: e.target.value,
+                            })
+                          }
+                          className={styles.input}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleAddSubcategory(category.id);
+                            }
+                          }}
+                        />
+                        <button
+                          className={styles.addButton}
+                          onClick={() => handleAddSubcategory(category.id)}
+                        >
+                          Add Subcategory
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Add new category form */}
+            <div className={styles.addCategorySection}>
+              <h3 className={styles.sectionTitle}>Add New Category</h3>
+              <div className={styles.addCategoryForm}>
+                <input
+                  type="text"
+                  placeholder="New category name..."
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  className={styles.input}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleAddCategory();
+                    }
+                  }}
+                />
+                <button className={styles.addButton} onClick={handleAddCategory}>
+                  Add Category
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </Portal>
   );
 };
 
