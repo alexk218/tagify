@@ -7,6 +7,7 @@ import MappingResultsPanel from "./MappingResultsPanel";
 import DuplicateTracksPanel from "./DuplicateTracksPanel";
 import Portal from "../utils/Portal";
 import { useLocalStorage } from "../hooks/useLocalStorage";
+import { getPlaylistSettings } from "../utils/PlaylistSettings";
 
 interface SyncStats {
   added: number;
@@ -438,30 +439,6 @@ const PythonActionsPanel: React.FC = () => {
     setPendingSyncAction(null);
   };
 
-  const getPlaylistSettings = () => {
-    try {
-      const settingsString = localStorage.getItem("tagify:playlistSettings");
-
-      if (settingsString) {
-        const settings = JSON.parse(settingsString);
-        return settings;
-      }
-    } catch (error) {
-      console.error("Error parsing playlist settings:", error);
-    }
-
-    // Default settings if none found
-    const defaultSettings = {
-      excludeNonOwnedPlaylists: true,
-      excludedKeywords: ["Daylist", "Unchartify", "Discover Weekly", "Release Radar"],
-      excludedPlaylistIds: [],
-      excludeByDescription: ["ignore"],
-    };
-
-    console.log("Using default playlist settings:", defaultSettings);
-    return defaultSettings;
-  };
-
   const fetchAllUnmappedFiles = async () => {
     setIsLoading((prev) => ({ ...prev, "fetch-unmapped-files": true }));
 
@@ -491,7 +468,6 @@ const PythonActionsPanel: React.FC = () => {
 
       setAllUnmappedFiles(result.details.files_requiring_user_input || []);
       setAnalysisResults(result);
-
     } catch (error) {
       console.error("Error fetching unmapped files:", error);
       Spicetify.showNotification(`Failed to fetch unmapped files: ${error}`, true);
