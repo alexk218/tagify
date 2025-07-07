@@ -28,6 +28,10 @@ interface TrackDetailsProps {
   onFilterByTag: (tag: string) => void;
   onFilterByTagOnOff?: (tag: string) => void;
   onPlayTrack?: (uri: string) => void;
+  isLocked?: boolean;
+  onToggleLock?: () => void;
+  currentTrack?: any; // The currently playing track
+  onSwitchToCurrentTrack?: (track: any) => void;
 }
 
 interface TrackMetadata {
@@ -51,6 +55,10 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   onFilterByTag,
   onFilterByTagOnOff,
   onPlayTrack,
+  isLocked = false,
+  onToggleLock,
+  currentTrack,
+  onSwitchToCurrentTrack,
 }) => {
   const [contextUri, setContextUri] = useState<string | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState(true);
@@ -66,6 +74,12 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
     sourceContext: null,
     genres: [],
   });
+
+  const handleToggleLock = () => {
+    if (onToggleLock) {
+      onToggleLock();
+    }
+  };
 
   // Format milliseconds to mm:ss
   const formatDuration = (ms: number): string => {
@@ -702,47 +716,79 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
 
   return (
     <div className={styles.container}>
-      {showLikedOnlyWarning && (
-        <div
-          className={styles.warningIconContainer}
-          title="This track is only in Liked Songs or excluded playlists. Consider organizing it into appropriate playlists."
-        >
-          <span className={styles.warningIcon}>⚠️</span>
+      {onToggleLock && (
+        <div className={styles.lockControlContainer}>
+          <button
+            className={`${styles.lockButton} ${isLocked ? styles.locked : styles.unlocked}`}
+            onClick={handleToggleLock}
+            title={isLocked ? "Unlock to follow currently playing track" : "Lock to this track"}
+          >
+            {isLocked ? "🔒" : "🔓"}
+          </button>
+          {isLocked && currentTrack && currentTrack.uri !== track.uri && (
+            <button
+              className={styles.switchTrackButton}
+              onClick={() => {
+                if (onSwitchToCurrentTrack) {
+                  onSwitchToCurrentTrack(currentTrack);
+                }
+              }}
+              title="Switch to currently playing track"
+            >
+              <span className={styles.buttonIcon}>🔄</span>
+            </button>
+          )}
         </div>
       )}
       <div className={styles.contentLayout}>
         {/* Left side - Track info with album art */}
         <div className={styles.trackInfoContainer}>
-          <div className={styles.albumCoverContainer}>
-            <div
-              className={styles.albumCoverClickable}
-              onClick={() => navigateToAlbum()}
-              title={track.uri?.startsWith("spotify:local:") ? "Go to Local Files" : "Go to album"}
-            >
-              {isLoadingCover ? (
-                <div className={styles.albumCoverPlaceholder}>
-                  <div className={styles.albumCoverLoading}></div>
-                </div>
-              ) : albumCover ? (
-                <img
-                  src={albumCover}
-                  alt={`${track.album?.name || "Album"} cover`}
-                  className={styles.albumCover}
-                />
-              ) : (
-                <div className={styles.albumCoverPlaceholder}>
-                  <span className={styles.albumCoverIcon}>♫</span>
-                </div>
-              )}
+          {/* Wrap album cover and warning in a column container */}
+          <div className={styles.albumSection}>
+            <div className={styles.albumCoverContainer}>
+              <div
+                className={styles.albumCoverClickable}
+                onClick={() => navigateToAlbum()}
+                title={
+                  track.uri?.startsWith("spotify:local:") ? "Go to Local Files" : "Go to album"
+                }
+              >
+                {isLoadingCover ? (
+                  <div className={styles.albumCoverPlaceholder}>
+                    <div className={styles.albumCoverLoading}></div>
+                  </div>
+                ) : albumCover ? (
+                  <img
+                    src={albumCover}
+                    alt={`${track.album?.name || "Album"} cover`}
+                    className={styles.albumCover}
+                  />
+                ) : (
+                  <div className={styles.albumCoverPlaceholder}>
+                    <span className={styles.albumCoverIcon}>♫</span>
+                  </div>
+                )}
+              </div>
+              <button
+                className={styles.playButton}
+                onClick={handlePlayTrack}
+                title={"Play this track"}
+              >
+                {"Play"}
+              </button>
             </div>
-            <button
-              className={styles.playButton}
-              onClick={handlePlayTrack}
-              title={"Play this track"}
-            >
-              {"Play"}
-            </button>
+
+            {/* Warning icon now properly below album cover */}
+            {showLikedOnlyWarning && (
+              <div
+                className={styles.warningIconCentered}
+                title="This track is only in Liked Songs or excluded playlists. Consider organizing it into appropriate playlists."
+              >
+                <span className={styles.warningIcon}>⚠️</span>
+              </div>
+            )}
           </div>
+
           <div className={styles.trackInfo}>
             <h2
               className={styles.trackTitle}

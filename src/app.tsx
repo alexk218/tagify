@@ -143,6 +143,10 @@ function App() {
               onFilterByTagOnOff={onFilterByTagOnOff}
               onFilterByTag={onFilterByTag}
               onPlayTrack={playTrackViaQueue}
+              isLocked={isLocked}
+              onToggleLock={toggleLock}
+              currentTrack={currentTrack}
+              onSwitchToCurrentTrack={setLockedTrack}
             />
           )
         )}
@@ -235,40 +239,7 @@ function App() {
       <div className={styles.header}>
         <div className={styles.titleArea}>
           <h1 className={styles.title}>Tagify</h1>
-
-          {activeTrack && (
-            <div className={styles.trackLockControl}>
-              <button
-                className={`${styles.lockButton} ${isLocked ? styles.locked : styles.unlocked}`}
-                onClick={toggleLock}
-                title={isLocked ? "Unlock to follow currently playing track" : "Lock to this track"}
-              >
-                {isLocked ? "🔒" : "🔓"}
-              </button>
-
-              {isLocked && currentTrack && currentTrack.uri !== activeTrack.uri && (
-                <button
-                  className={styles.switchTrackButton}
-                  onClick={() => {
-                    setLockedTrack(currentTrack);
-                  }}
-                  title="Switch to currently playing track"
-                >
-                  <span className={styles.buttonIcon}></span> Switch to current
-                </button>
-              )}
-            </div>
-          )}
         </div>
-
-        {isLocked && activeTrack && (
-          <div className={styles.lockedTrackInfo}>
-            Currently tagging: <span className={styles.lockedTrackName}>{activeTrack.name}</span> by{" "}
-            <span className={styles.lockedTrackArtist}>
-              {activeTrack.artists.map((a) => a.name).join(", ")}
-            </span>
-          </div>
-        )}
       </div>
 
       <DataManager
