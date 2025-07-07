@@ -11,8 +11,7 @@
 .header {
   display: flex;
   flex-direction: column;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
+  margin-bottom: 8px;
   border-bottom: 1px solid var(--spice-button-disabled);
 }
 
@@ -143,9 +142,8 @@
   grid-template-columns: 1fr;
   grid-template-rows: auto auto 1fr;
   gap: 16px;
-  height: calc(100% - 120px);
+  height: calc(100% - 80px);
   overflow: hidden;
-  margin-top: 16px;
 }
 
 .loadingContainer {
