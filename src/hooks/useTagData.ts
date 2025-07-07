@@ -614,7 +614,6 @@ export function useTagData() {
             ],
           };
 
-          // Handle playlist scheduling/cancellation if needed
           if (
             updatedTagData.tracks[uri].tags.length === 0 &&
             updatedTagData.tracks[uri].rating === 0 &&
@@ -735,7 +734,7 @@ export function useTagData() {
                   ...prevState.tracks,
                   [trackUri]: {
                     ...currentTrackData,
-                    bmp: bpm,
+                    bpm: bpm,
                   },
                 },
               };
