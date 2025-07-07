@@ -144,6 +144,8 @@ export function useTrackState() {
       // When unlocking, update the locked track to the current track
       setLockedTrack(currentTrack);
       setIsLocked(false);
+      // Clear URL parameters to prevent history hook from re-locking
+      Spicetify.Platform.History.push("/tagify");
     } else {
       // When locking, use current locked track (which should be current track)
       setIsLocked(true);
