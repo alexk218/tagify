@@ -136,12 +136,8 @@
         return true;
       }
 
-      // Explicitly exclude "Local Files" playlist and TAGGED
-      if (
-        playlistName === "MASTER" ||
-        playlistName === "TAGGED" ||
-        playlistName === "Local Files"
-      ) {
+      // Explicitly exclude "Local Files" playlist
+      if (playlistName === "MASTER" || playlistName === "Local Files") {
         return true;
       }
 

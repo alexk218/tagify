@@ -165,7 +165,7 @@ const TagSelector: React.FC<TagSelectorProps> = ({
           >
             Manage Tags
           </button>
-          <div className={styles.searchBox}>
+          <div className="search-box">
             <input
               type="text"
               placeholder="Search tags..."
