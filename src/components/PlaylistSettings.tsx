@@ -1,9 +1,9 @@
 import React, { useState } from "react";
 import {
-	getPlaylistSettings,
-	PlaylistSettings,
-	resetToDefaultSettings,
-	savePlaylistSettings,
+  getPlaylistSettings,
+  PlaylistSettings,
+  resetToDefaultSettings,
+  savePlaylistSettings,
 } from "../utils/PlaylistSettings";
 import styles from "./PlaylistSettings.module.css";
 
@@ -30,10 +30,10 @@ const PlaylistSettingsModal: React.FC<PlaylistSettingsModalProps> = ({
 
   // Handle adding a keyword
   const handleAddKeyword = () => {
-    if (keywordInput.trim() && !settings.excludedKeywords.includes(keywordInput.trim())) {
+    if (keywordInput.trim() && !settings.excludedPlaylistKeywords.includes(keywordInput.trim())) {
       setSettings({
         ...settings,
-        excludedKeywords: [...settings.excludedKeywords, keywordInput.trim()],
+        excludedPlaylistKeywords: [...settings.excludedPlaylistKeywords, keywordInput.trim()],
       });
       setKeywordInput("");
     }
@@ -43,7 +43,7 @@ const PlaylistSettingsModal: React.FC<PlaylistSettingsModalProps> = ({
   const handleRemoveKeyword = (keyword: string) => {
     setSettings({
       ...settings,
-      excludedKeywords: settings.excludedKeywords.filter((k) => k !== keyword),
+      excludedPlaylistKeywords: settings.excludedPlaylistKeywords.filter((k) => k !== keyword),
     });
   };
 
@@ -123,7 +123,7 @@ const PlaylistSettingsModal: React.FC<PlaylistSettingsModalProps> = ({
               </div>
 
               <div className={styles.tagList}>
-                {settings.excludedKeywords.map((keyword) => (
+                {settings.excludedPlaylistKeywords.map((keyword) => (
                   <div key={keyword} className={styles.tag}>
                     <span className={styles.tagName}>{keyword}</span>
                     <button

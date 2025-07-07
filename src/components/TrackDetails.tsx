@@ -465,7 +465,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
 
     // Check for excluded keywords in name
     if (
-      settings.excludedKeywords.some((keyword) =>
+      settings.excludedPlaylistKeywords.some((keyword) =>
         playlistName.toLowerCase().includes(keyword.toLowerCase())
       )
     ) {

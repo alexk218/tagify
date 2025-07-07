@@ -1,30 +1,19 @@
-// Define the settings structure
 export interface PlaylistSettings {
-  // Ownership filters
   excludeNonOwnedPlaylists: boolean;
-
-  // Keyword-based exclusions for playlist names
-  excludedKeywords: string[];
-
-  // Specific playlist exclusions
+  excludedPlaylistKeywords: string[];
   excludedPlaylistIds: string[];
-
-  // Description-based exclusions
   excludeByDescription: string[];
 }
 
-// Storage key for settings
 const SETTINGS_KEY = "tagify:playlistSettings";
 
-// Default settings
 const DEFAULT_SETTINGS: PlaylistSettings = {
   excludeNonOwnedPlaylists: true,
-  excludedKeywords: ["Daylist", "Unchartify", "Discover Weekly", "Release Radar"],
+  excludedPlaylistKeywords: ["Daylist", "Discover Weekly", "Release Radar"],
   excludedPlaylistIds: [],
   excludeByDescription: ["ignore"],
 };
 
-// Get settings from localStorage
 export function getPlaylistSettings(): PlaylistSettings {
   try {
     const settingsString = localStorage.getItem(SETTINGS_KEY);
@@ -35,11 +24,9 @@ export function getPlaylistSettings(): PlaylistSettings {
     console.error("Tagify: Error reading playlist settings:", error);
   }
 
-  // Return default settings if not found or error
   return DEFAULT_SETTINGS;
 }
 
-// Save settings to localStorage
 export function savePlaylistSettings(settings: PlaylistSettings): void {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -49,7 +36,6 @@ export function savePlaylistSettings(settings: PlaylistSettings): void {
   }
 }
 
-// Helper function to check if a playlist should be excluded
 export function shouldExcludePlaylist(
   playlistId: string,
   playlistName: string,
@@ -71,7 +57,7 @@ export function shouldExcludePlaylist(
 
   // Check for excluded keywords in name
   if (
-    settings.excludedKeywords.some((keyword) =>
+    settings.excludedPlaylistKeywords.some((keyword) =>
       playlistName.toLowerCase().includes(keyword.toLowerCase())
     )
   ) {
@@ -85,10 +71,6 @@ export function shouldExcludePlaylist(
         playlistDescription && playlistDescription.toLowerCase().includes(term.toLowerCase())
     )
   ) {
-    return true;
-  }
-
-  if (playlistName === "TAGGED") {
     return true;
   }
 
@@ -111,7 +93,6 @@ export function removeExcludedPlaylist(playlistId: string): void {
   savePlaylistSettings(settings);
 }
 
-// Helper to reset all settings to default
 export function resetToDefaultSettings(): void {
   savePlaylistSettings(DEFAULT_SETTINGS);
 }
