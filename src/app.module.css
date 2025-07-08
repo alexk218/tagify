@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 16px;
+  padding: 4px;
   color: var(--spice-text);
   background-color: var(--spice-main);
   font-family: var(--spice-font);
@@ -21,6 +21,7 @@
   align-items: flex-start;
   gap: 8px;
   margin-bottom: 8px;
+  margin-left: 6px;
 }
 
 .title {

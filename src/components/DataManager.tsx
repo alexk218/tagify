@@ -12,11 +12,7 @@ interface DataManagerProps {
   taggedTracks: Record<string, any>;
 }
 
-const DataManager: React.FC<DataManagerProps> = ({
-  onExportBackup,
-  onImportBackup,
-  lastSaved,
-}) => {
+const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBackup, lastSaved }) => {
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isRefreshingPlaylists, setIsRefreshingPlaylists] = useState(false);
@@ -97,12 +93,13 @@ const DataManager: React.FC<DataManagerProps> = ({
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <h3 className={styles.title}>Data Management</h3>
+        <div className={styles.titleSection}>
+          <h3 className={styles.title}>Data Management</h3>
+          {lastSaved && (
+            <div className={styles.lastSaved}>Last saved: {lastSaved.toLocaleString()}</div>
+          )}
+        </div>
       </div>
-
-      {lastSaved && (
-        <div className={styles.lastSaved}>Last saved: {lastSaved.toLocaleString()}</div>
-      )}
 
       <div className={styles.actions}>
         <button className={styles.actionButton} onClick={onExportBackup}>
