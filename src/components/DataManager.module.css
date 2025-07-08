@@ -84,7 +84,7 @@
 .info {
   font-size: 14px;
   color: var(--spice-subtext);
-  padding: 12px;
+  padding: 12px 0px 6px;
   background: rgba(var(--spice-rgb-card), 0.6);
   border-radius: 4px;
 }

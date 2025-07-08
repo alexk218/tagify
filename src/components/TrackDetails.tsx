@@ -59,7 +59,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   onToggleLock,
   currentTrack,
   onSwitchToCurrentTrack,
-}) => {
+}: TrackDetailsProps) => {
   const [contextUri, setContextUri] = useState<string | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState(true);
   const artistNames = track.artists ? track.artists.map((artist) => artist.name).join(", ") : "";
