@@ -136,12 +136,12 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
               </div>
 
               <div className={styles.formField}>
-                <label className={styles.checkboxLabel}>
+                <label className="form-checkbox-label">
                   <input
                     type="checkbox"
                     checked={isPublic}
                     onChange={(e) => setIsPublic(e.target.checked)}
-                    className={styles.checkbox}
+                    className="form-checkbox"
                   />
                   Make playlist public
                 </label>

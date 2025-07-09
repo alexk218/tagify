@@ -197,6 +197,24 @@
   font-size: 14px;
 }
 
+.form-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #1e90ff;
+  cursor: pointer;
+  transition: accent-color 0.2s ease;
+}
+
+.form-checkbox:hover {
+  accent-color: #1a7ee0;
+}
+
+.form-checkbox:focus {
+  outline: 2px solid rgba(30, 144, 255, 0.3);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .form-checkbox-label {
   display: flex;
   align-items: center;
@@ -204,12 +222,6 @@
   font-size: 14px;
   color: var(--spice-text);
   cursor: pointer;
-}
-
-.form-checkbox {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--spice-button);
 }
 
 /* ===== CONTAINER & CARD SYSTEM ===== */
