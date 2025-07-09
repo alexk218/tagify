@@ -19,6 +19,7 @@
     observer: null,
     nowPlayingWidgetTagInfo: null,
     lastTrackUri: null,
+    playlistCacheMemory: null,
     initialized: {
       menu: false,
       indicator: false,
@@ -63,20 +64,24 @@
      * @returns {Object} The playlist cache
      */
     getPlaylistCache: function () {
+      if (state.playlistCacheMemory) {
+        return state.playlistCacheMemory;
+      }
+
       try {
         const cacheString = localStorage.getItem(PLAYLIST_CACHE_KEY);
         if (cacheString) {
-          return JSON.parse(cacheString);
+          state.playlistCacheMemory = JSON.parse(cacheString);
+          return state.playlistCacheMemory;
         }
       } catch (error) {
         console.error("Tagify: Error reading playlist cache:", error);
       }
 
       // Return empty cache if not found or error
-      return {
-        tracks: {},
-        lastUpdated: 0,
-      };
+      const emptyCache = { tracks: {}, lastUpdated: 0 };
+      state.playlistCacheMemory = emptyCache;
+      return emptyCache;
     },
 
     /**
