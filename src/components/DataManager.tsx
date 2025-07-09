@@ -2,8 +2,9 @@ import React, { useState, useRef } from "react";
 import styles from "./DataManager.module.css";
 import "../styles/globals.css";
 import { TagDataStructure } from "../hooks/useTagData";
-import { refreshPlaylistCache } from "../utils/PlaylistCache";
+import { fullRefreshPlaylistCache, incrementalRefreshPlaylistCache } from "../utils/PlaylistCache";
 import PlaylistSettingsModal from "./PlaylistSettings";
+import RefreshModal from "./RefreshModal";
 
 interface DataManagerProps {
   onExportBackup: () => void;
@@ -15,25 +16,45 @@ interface DataManagerProps {
 const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBackup, lastSaved }) => {
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isRefreshingPlaylists, setIsRefreshingPlaylists] = useState(false);
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshType, setRefreshType] = useState<"quick" | "full" | null>(null);
+  const [showRefreshModal, setShowRefreshModal] = useState(false);
   const [showPlaylistSettings, setShowPlaylistSettings] = useState(false);
 
   const handlePlaylistSettingsSaved = async () => {
-    // When settings change, we should refresh the cache
-    setIsRefreshingPlaylists(true);
+    // When settings change, we should do a full refresh to respect new exclusion rules
+    setIsRefreshing(true);
+    setRefreshType("full");
     try {
-      await refreshPlaylistCache();
+      await fullRefreshPlaylistCache();
     } finally {
-      setIsRefreshingPlaylists(false);
+      setIsRefreshing(false);
+      setRefreshType(null);
     }
   };
 
-  const handleRefreshPlaylists = async () => {
-    setIsRefreshingPlaylists(true);
+  // MODIFIED: Handle full refresh from modal
+  const handleFullRefresh = async () => {
+    setIsRefreshing(true);
+    setRefreshType("full");
     try {
-      await refreshPlaylistCache();
+      await fullRefreshPlaylistCache();
     } finally {
-      setIsRefreshingPlaylists(false);
+      setIsRefreshing(false);
+      setRefreshType(null);
+    }
+  };
+
+  // MODIFIED: Handle quick refresh from modal
+  const handleQuickRefresh = async () => {
+    setIsRefreshing(true);
+    setRefreshType("quick");
+    try {
+      await incrementalRefreshPlaylistCache();
+    } finally {
+      setIsRefreshing(false);
+      setRefreshType(null);
     }
   };
 
@@ -112,10 +133,12 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
 
         <button
           className={styles.actionButton}
-          onClick={handleRefreshPlaylists}
-          disabled={isRefreshingPlaylists}
+          onClick={() => setShowRefreshModal(true)}
+          disabled={isRefreshing}
         >
-          {isRefreshingPlaylists ? "Refreshing..." : "Refresh Playlist Data"}
+          {isRefreshing
+            ? `${refreshType === "quick" ? "Quick" : "Full"} Refreshing...`
+            : "Refresh Playlist Data"}
         </button>
 
         <button className={styles.actionButton} onClick={() => setShowPlaylistSettings(true)}>
@@ -138,14 +161,28 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
         />
       )}
 
+      {showRefreshModal && (
+        <RefreshModal
+          onClose={() => setShowRefreshModal(false)}
+          onQuickRefresh={handleQuickRefresh}
+          onFullRefresh={handleFullRefresh}
+          isRefreshing={isRefreshing}
+          refreshType={refreshType}
+        />
+      )}
+
       <div className={styles.info}>
         <p>
           Backup your tag data regularly to prevent data loss. Your data is currently stored in the
           browser's localStorage.
         </p>
         <p>
-          Export a backup file to keep your tag data safe. You can import this file later to restore
-          your data.
+          <strong>Export</strong> a backup file to keep your tag data safe. You can{" "}
+          <strong>import</strong> this file later to restore your data.
+        </p>
+        <p>
+          Use <strong>Refresh Playlist Data</strong> to update which playlists contain your tracks.
+          Choose Quick Refresh for regular updates or Full Refresh for complete rebuilds.
         </p>
       </div>
     </div>
