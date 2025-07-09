@@ -6,12 +6,9 @@
   const APP_NAME = "tagify";
   const VERSION = "1.0.0";
 
-  // Shared constants
   const STORAGE_KEY = "tagify:tagData";
   const PLAYLIST_CACHE_KEY = "tagify:playlistCache";
   const SETTINGS_KEY = "tagify:playlistSettings";
-
-  console.log(`Tagify: Extension loading (v${VERSION})...`);
 
   // Shared state
   const state = {
@@ -40,7 +37,6 @@
           const data = JSON.parse(savedData);
           if (data && data.tracks) {
             state.taggedTracks = data.tracks;
-            console.log(`Tagify: Loaded ${Object.keys(state.taggedTracks).length} tagged tracks`);
             return true;
           }
         }
@@ -249,7 +245,6 @@
           if (name) tagNames.add(name);
         });
 
-        // Only add tag count if there are tags
         if (tagNames.size > 0) {
           summary.push(`Tags: ${tagNames.size}`);
         }
@@ -484,8 +479,6 @@
     initialize: function () {
       if (state.initialized.indicator) return;
 
-      console.log("Tagify: Initializing tracklist indicator feature...");
-
       try {
         // Set up mutation observer
         this.setupObserver();
@@ -571,7 +564,6 @@
      */
     updateTracklists: function () {
       const tracklists = document.getElementsByClassName("main-trackList-indexable");
-      // console.log(`Tagify: Found ${tracklists.length} tracklists to process`);
 
       for (const tracklist of tracklists) {
         indicatorFeature.processTracklist(tracklist);
@@ -750,7 +742,6 @@
           const tagList = indicatorFeature.createTagListTooltip(trackUri);
           tagText.title = tagList;
         }
-
         tagInfo.appendChild(tagText);
       }
 
@@ -949,7 +940,10 @@
       try {
         // Get the current track URI
         const trackUri = Spicetify.Player.data?.item?.uri;
-        if (!trackUri || !trackUri.includes("track")) {
+        if (
+          !trackUri ||
+          (!trackUri.startsWith("spotify:track:") && !trackUri.startsWith("spotify:local:"))
+        ) {
           if (state.nowPlayingWidgetTagInfo) {
             state.nowPlayingWidgetTagInfo.style.display = "none";
           }
@@ -993,11 +987,22 @@
         if (isTagged) {
           const summary = utils.getTrackTagSummary(trackUri);
 
+          if (
+            trackUri in state.taggedTracks &&
+            state.taggedTracks[trackUri].tags &&
+            state.taggedTracks[trackUri].tags.length > 0
+          ) {
+            const tagListTooltip = indicatorFeature.createTagListTooltip(trackUri);
+            state.nowPlayingWidgetTagInfo.title = tagListTooltip;
+          }
+
           // Use orange bullet for incomplete tags, green for complete tags
           const bulletColor = incomplete ? "#FFA500" : "#1DB954";
 
           htmlContent += `<span style="color:${bulletColor}; margin-right:4px;">●</span> ${summary} `;
         }
+
+        state.nowPlayingWidgetTagInfo.title = "";
 
         // Add status indicator
         if (needsWarning) {
