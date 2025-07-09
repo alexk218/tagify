@@ -77,22 +77,6 @@ export function shouldExcludePlaylist(
   return false;
 }
 
-// Add a specific playlist to exclusions
-export function addExcludedPlaylist(playlistId: string): void {
-  const settings = getPlaylistSettings();
-  if (!settings.excludedPlaylistIds.includes(playlistId)) {
-    settings.excludedPlaylistIds.push(playlistId);
-    savePlaylistSettings(settings);
-  }
-}
-
-// Remove a specific playlist from exclusions
-export function removeExcludedPlaylist(playlistId: string): void {
-  const settings = getPlaylistSettings();
-  settings.excludedPlaylistIds = settings.excludedPlaylistIds.filter((id) => id !== playlistId);
-  savePlaylistSettings(settings);
-}
-
 export function resetToDefaultSettings(): void {
   savePlaylistSettings(DEFAULT_SETTINGS);
 }
