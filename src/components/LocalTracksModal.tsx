@@ -75,7 +75,7 @@ const LocalTracksModal: React.FC<LocalTracksModalProps> = ({
 
   // Create a text representation of the local tracks for copying
   const localTracksList = parsedLocalTracks
-    .map((track) => `${track.name} - ${track.artist}`)
+    .map((track) => `${track.name}`)
     .join("\n");
 
   const copyToClipboard = () => {
