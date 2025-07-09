@@ -17,19 +17,20 @@ const CACHE_KEY = "tagify:trackInfoCache";
 const CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 export class TrackInfoCacheManager {
+  private static cachedData: TrackInfoCache | null = null;
+
   static getCache(): TrackInfoCache {
-    try {
-      const cached = localStorage.getItem(CACHE_KEY);
-      return cached ? JSON.parse(cached) : {};
-    } catch {
-      return {};
+    if (!this.cachedData) {
+      this.cachedData = JSON.parse(localStorage.getItem(CACHE_KEY) || "{}");
     }
+    return this.cachedData || {};
   }
 
   static setTrackInfo(uri: string, info: CachedTrackInfo) {
     const cache = this.getCache();
     cache[uri] = { ...info, cached_at: Date.now() };
     localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+    this.cachedData = cache;
   }
 
   static getTrackInfo(uri: string): CachedTrackInfo | null {
@@ -55,11 +56,12 @@ export class TrackInfoCacheManager {
   }
 
   static getCachedUris(uris: string[]): { cached: string[]; missing: string[] } {
+    const cache = this.getCache();
     const cached: string[] = [];
     const missing: string[] = [];
 
     uris.forEach((uri) => {
-      if (this.getTrackInfo(uri)) {
+      if (cache[uri]) {
         cached.push(uri);
       } else {
         missing.push(uri);

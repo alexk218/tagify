@@ -407,15 +407,15 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
     const groupedTags: {
       [categoryId: string]: {
         categoryName: string;
-        categoryOrder: number; // Add category order
+        categoryOrder: number;
         subcategories: {
           [subcategoryId: string]: {
             subcategoryName: string;
-            subcategoryOrder: number; // Add subcategory order
+            subcategoryOrder: number;
             tags: {
               id: string;
               name: string;
-              order: number; // Add tag order
+              order: number;
             }[];
           };
         };
