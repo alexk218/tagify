@@ -22,6 +22,7 @@
   align-items: flex-start;
   flex: 1;
   min-width: 0; /* Allows proper text truncation */
+  max-width: 40vw;
 }
 
 .controlsContainer {
