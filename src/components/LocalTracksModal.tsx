@@ -155,7 +155,6 @@ const LocalTracksModal: React.FC<LocalTracksModalProps> = ({
                 {parsedLocalTracks.map((track, index) => (
                   <div key={index} className={styles.trackItem}>
                     <span className={styles.trackName}>{track.name}</span>
-                    <span className={styles.trackArtist}>{track.artist}</span>
                   </div>
                 ))}
               </div>

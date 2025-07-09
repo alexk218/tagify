@@ -63,13 +63,7 @@
 }
 
 .trackStats {
-  margin-bottom: 8px;
-}
-
-.trackStats p {
-  margin: 0;
   color: var(--spice-text);
-  font-size: 14px;
 }
 
 .warning {
@@ -123,26 +117,10 @@
   gap: 8px;
 }
 
-.tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.tag {
-  background: rgba(0, 0, 0, 0.2);
-  color: var(--spice-text);
-  border-radius: 16px;
-  padding: 4px 12px;
-  font-size: 12px;
-  display: inline-block;
-}
-
 .formActions {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  margin-top: 8px;
 }
 
 .cancelButton {
@@ -175,4 +153,58 @@
 
 .createButton:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.filtersContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  /* border-left: 3px solid #1e90ff; */
+}
+
+.filterRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.compactFilterRow {
+  display: flex;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--spice-text);
+  flex-direction: column;
+}
+
+.compactFilter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filterLabel {
+  font-weight: 600;
+  color: var(--spice-text);
+  font-size: 13px;
+  min-width: fit-content;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag {
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border-radius: 12px;
+  padding: 2px 6px;
+  font-size: 11px;
+  display: inline-block;
 }

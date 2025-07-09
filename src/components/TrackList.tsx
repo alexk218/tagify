@@ -1196,9 +1196,16 @@ const TrackList: React.FC<TrackListProps> = ({
       )}
       {showCreatePlaylistModal && (
         <CreatePlaylistModal
-          trackCount={sortedTracks.length}
-          localTrackCount={sortedTracks.filter(([uri]) => uri.startsWith("spotify:local:")).length}
-          tags={activeTagFilters}
+          trackCount={allSortedTracks.length}
+          localTrackCount={
+            allSortedTracks.filter(([uri]) => uri.startsWith("spotify:local:")).length
+          }
+          tagsFilter={activeTagFilters}
+          energyMinFilter={energyMinFilter}
+          energyMaxFilter={energyMaxFilter}
+          ratingFilter={ratingFilters}
+          bpmMinFilter={bpmMinFilter}
+          bpmMaxFilter={bpmMaxFilter}
           onClose={() => setShowCreatePlaylistModal(false)}
           onCreatePlaylist={handleCreatePlaylist}
         />

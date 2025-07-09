@@ -5,7 +5,12 @@ import Portal from "../utils/Portal";
 interface CreatePlaylistModalProps {
   trackCount: number;
   localTrackCount: number;
-  tags: string[];
+  tagsFilter: string[];
+  energyMinFilter: number | null;
+  energyMaxFilter: number | null;
+  ratingFilter: number[];
+  bpmMinFilter: number | null;
+  bpmMaxFilter: number | null;
   onClose: () => void;
   onCreatePlaylist: (name: string, description: string, isPublic: boolean) => void;
 }
@@ -13,31 +18,110 @@ interface CreatePlaylistModalProps {
 const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   trackCount,
   localTrackCount,
-  tags,
+  tagsFilter,
+  energyMinFilter,
+  energyMaxFilter,
+  ratingFilter,
+  bpmMinFilter,
+  bpmMaxFilter,
   onClose,
   onCreatePlaylist,
 }) => {
-  // Generate a default name based on tags
-  const defaultName =
-    tags.length > 0
-      ? `Tagify - ${tags.join(", ")}`
-      : `Tagify Playlist ${new Date().toLocaleDateString()}`;
+  const defaultPlaylistName = (() => {
+    const filterParts = [];
 
-  // Generate a default description
-  const defaultDescription =
-    tags.length > 0
-      ? `Created with Tagify | Tags: ${tags.join(", ")}`
-      : "Created with Tagify";
+    if (tagsFilter.length > 0) {
+      filterParts.push(tagsFilter.slice(0, 2).join(", ")); // Limit to first 2 tags for brevity
+    }
 
-  const [playlistName, setPlaylistName] = useState(defaultName);
-  const [playlistDescription, setPlaylistDescription] = useState(defaultDescription);
+    if (ratingFilter.length > 0) {
+      filterParts.push(`${ratingFilter.sort((a, b) => a - b).join(",")}★`);
+    }
+
+    if (energyMinFilter !== null || energyMaxFilter !== null) {
+      if (energyMinFilter !== null && energyMaxFilter !== null) {
+        if (energyMinFilter === energyMaxFilter) {
+          filterParts.push(`E${energyMinFilter}`);
+        } else {
+          filterParts.push(`E${energyMinFilter}-${energyMaxFilter}`);
+        }
+      } else if (energyMinFilter !== null) {
+        filterParts.push(`E≥${energyMinFilter}`);
+      } else {
+        filterParts.push(`E≤${energyMaxFilter}`);
+      }
+    }
+
+    if (bpmMinFilter !== null || bpmMaxFilter !== null) {
+      if (bpmMinFilter !== null && bpmMaxFilter !== null) {
+        filterParts.push(`${bpmMinFilter}-${bpmMaxFilter}BPM`);
+      } else if (bpmMinFilter !== null) {
+        filterParts.push(`≥${bpmMinFilter}BPM`);
+      } else {
+        filterParts.push(`≤${bpmMaxFilter}BPM`);
+      }
+    }
+
+    let name =
+      filterParts.length > 0
+        ? `Tagify - ${filterParts.join(" ")}`
+        : `Tagify Playlist ${new Date().toLocaleDateString()}`;
+
+    // Truncate if too long
+    if (name.length > 100) {
+      name = name.substring(0, 97) + "...";
+    }
+
+    return name;
+  })();
+
+  const defaultPlaylistDescription = (() => {
+    const filterParts = [];
+
+    if (tagsFilter.length > 0) {
+      filterParts.push(`Tags: ${tagsFilter.join(", ")}`);
+    }
+
+    if (ratingFilter.length > 0) {
+      filterParts.push(`Rating: ${ratingFilter.sort((a, b) => a - b).join(", ")} ★`);
+    }
+
+    if (energyMinFilter !== null || energyMaxFilter !== null) {
+      if (energyMinFilter !== null && energyMaxFilter !== null) {
+        if (energyMinFilter === energyMaxFilter) {
+          filterParts.push(`Energy: ${energyMinFilter}`);
+        } else {
+          filterParts.push(`Energy: ${energyMinFilter} - ${energyMaxFilter}`);
+        }
+      } else if (energyMinFilter !== null) {
+        filterParts.push(`Energy: ≥${energyMinFilter}`);
+      } else {
+        filterParts.push(`Energy: ≤${energyMaxFilter}`);
+      }
+    }
+
+    let description =
+      filterParts.length > 0
+        ? `Created with Tagify | ${filterParts.join(" | ")}`
+        : "Created with Tagify";
+
+    // Truncate if too long
+    if (description.length > 300) {
+      description = description.substring(0, 297) + "...";
+    }
+
+    return description;
+  })();
+
+  const [playlistName, setPlaylistName] = useState(defaultPlaylistName);
+  const [playlistDescription, setPlaylistDescription] = useState(defaultPlaylistDescription);
   const [isPublic, setIsPublic] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onCreatePlaylist(
-      playlistName.trim() || defaultName,
-      playlistDescription.trim() || defaultDescription,
+      playlistName.trim() || defaultPlaylistName,
+      playlistDescription.trim() || defaultPlaylistDescription,
       isPublic
     );
   };
@@ -96,13 +180,12 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
             <div className={styles.trackStats}>
               <p>
                 Creating playlist with <strong>{trackCount}</strong> tracks
-                {localTrackCount > 0 && (
-                  <span className={styles.warning}>
-                    {" "}
-                    (Note: {localTrackCount} local tracks cannot be added automatically)
-                  </span>
-                )}
               </p>
+              {localTrackCount > 0 && (
+                <p className={styles.warning}>
+                  Note: {localTrackCount} local tracks cannot be added automatically
+                </p>
+              )}
             </div>
 
             <form onSubmit={handleSubmit} className={styles.playlistForm}>
@@ -147,16 +230,62 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
                 </label>
               </div>
 
-              {tags.length > 0 && (
-                <div className={styles.tagsSection}>
-                  <label className={styles.label}>Tags included:</label>
-                  <div className={styles.tags}>
-                    {tags.map((tag) => (
-                      <span key={tag} className={styles.tag}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
+              {(tagsFilter.length > 0 ||
+                ratingFilter.length > 0 ||
+                energyMinFilter !== null ||
+                energyMaxFilter !== null ||
+                bpmMinFilter !== null ||
+                bpmMaxFilter !== null) && (
+                <div className={styles.filtersContainer}>
+                  {/* Tags on their own row if they exist */}
+                  {tagsFilter.length > 0 && (
+                    <div className={styles.filterRow}>
+                      <span className={styles.filterLabel}>Tags:</span>
+                      <div className={styles.tags}>
+                        {tagsFilter.map((tag) => (
+                          <span key={tag} className={styles.tag}>
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* Rating, Energy, and BPM on separate rows */}
+                  {(ratingFilter.length > 0 ||
+                    energyMinFilter !== null ||
+                    energyMaxFilter !== null ||
+                    bpmMinFilter !== null ||
+                    bpmMaxFilter !== null) && (
+                    <div className={styles.compactFilterRow}>
+                      {ratingFilter.length > 0 && (
+                        <span className={styles.compactFilter}>
+                          <strong>Rating:</strong> {ratingFilter.sort((a, b) => a - b).join(", ")} ★
+                        </span>
+                      )}
+                      {(energyMinFilter !== null || energyMaxFilter !== null) && (
+                        <span className={styles.compactFilter}>
+                          <strong>Energy:</strong>{" "}
+                          {energyMinFilter !== null && energyMaxFilter !== null
+                            ? energyMinFilter === energyMaxFilter
+                              ? energyMinFilter
+                              : `${energyMinFilter} - ${energyMaxFilter}`
+                            : energyMinFilter !== null
+                            ? `≥${energyMinFilter}`
+                            : `≤${energyMaxFilter}`}
+                        </span>
+                      )}
+                      {(bpmMinFilter !== null || bpmMaxFilter !== null) && (
+                        <span className={styles.compactFilter}>
+                          <strong>BPM:</strong>{" "}
+                          {bpmMinFilter !== null && bpmMaxFilter !== null
+                            ? `${bpmMinFilter} - ${bpmMaxFilter}`
+                            : bpmMinFilter !== null
+                            ? `≥${bpmMinFilter}`
+                            : `≤${bpmMaxFilter}`}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
