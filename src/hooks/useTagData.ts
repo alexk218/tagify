@@ -273,7 +273,7 @@ export function useTagData() {
 
     URL.revokeObjectURL(url);
 
-    Spicetify.showNotification("Backup created and downloaded");
+    Spicetify.showNotification("Backup downloaded in 'Downloads' folder");
   };
 
   const importBackup = (backupData: TagDataStructure) => {

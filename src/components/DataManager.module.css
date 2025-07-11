@@ -5,15 +5,35 @@
   margin-bottom: 16px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
 }
 
 .header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  /* margin-bottom: 16px; */
-  width: 100%;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.titleGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  font-size: 16px;
+  margin: 0;
+  font-weight: 700;
+  color: var(--spice-text);
+  line-height: 1.2;
+}
+
+.lastSaved {
+  font-size: 11px;
+  color: var(--spice-subtext);
+  opacity: 0.7;
 }
 
 .settingsButton {
@@ -21,15 +41,15 @@
   color: var(--spice-text);
   border: none;
   border-radius: 6px;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 18px;
-  flex-shrink: 0; /* Prevents button from shrinking */
+  font-size: 14px;
+  flex-shrink: 0;
 }
 
 .settingsButton:hover {
@@ -37,59 +57,49 @@
   transform: scale(1.05);
 }
 
-.settingsButton:active {
-  transform: scale(0.95);
+/* Main content with side-by-side layout */
+.content {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 20px;
+  align-items: stretch;
 }
 
-.title {
-  font-size: 18px;
-  margin: 0;
-  font-weight: 700;
-  color: var(--spice-text);
-  line-height: 1.2;
-}
-
-.titleSection {
+/* Left panel - Action buttons */
+.actionsPanel {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  flex: 1;
+  gap: 8px;
+  height: fit-content;
 }
 
-.lastSaved {
-  font-size: 12px;
-  color: var(--spice-subtext);
-  margin: 0;
-  opacity: 0.7;
-}
-
-.actions {
+.actionGrid {
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 160px;
 }
 
-/* Base button style matching your app pattern */
 .actionButton {
-  background-color: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.2);
   color: var(--spice-text);
   border: none;
-  border-radius: 6px; /* Slightly more rounded */
-  padding: 10px 16px; /* Slightly more compact */
-  font-size: 13px; /* Slightly smaller */
+  border-radius: 6px;
+  padding: 12px 16px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   white-space: nowrap;
+  text-align: left;
 }
 
 .actionButton:hover:not(:disabled) {
-  background-color: rgba(255, 255, 255, 0.1);
-  transform: translateY(-1px); /* Subtle lift effect */
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
 }
 
 .actionButton:disabled {
@@ -98,35 +108,109 @@
   transform: none;
 }
 
-/* Specific button variants */
-.rekordboxButton {
-  background-color: #1e90ff;
-  color: white;
+.buttonIcon {
+  font-size: 16px;
+  flex-shrink: 0;
 }
 
-.rekordboxButton:hover:not(:disabled) {
-  background-color: #1a7ee0;
+.exportButton {
+  border: 1px solid rgba(30, 144, 255, 0.3);
+  background: rgba(30, 144, 255, 0.1);
 }
 
-.activeButton {
-  background-color: rgba(255, 255, 255, 0.1);
-  color: white;
+.exportButton:hover:not(:disabled) {
+  background: rgba(30, 144, 255, 0.2);
+  border-color: rgba(30, 144, 255, 0.5);
 }
 
-.info {
-  font-size: 13px; /* Slightly smaller */
-  color: var(--spice-subtext);
-  padding: 16px; /* More generous internal padding */
-  background: rgba(0, 0, 0, 0.1); /* Subtler background */
+.importButton {
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.importButton:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.5);
+}
+
+/* Right panel - Information */
+.infoPanel {
+  background: rgba(0, 0, 0, 0.1);
   border-radius: 6px;
-  border-left: 3px solid rgba(30, 144, 255, 0.3); /* Add accent border */
-  line-height: 1.4; /* Better readability */
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
 }
 
-.info p {
-  margin: 0 0 8px 0; /* Tighter paragraph spacing */
+.infoHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
-.info p:last-child {
-  margin-bottom: 0;
+.infoIcon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.infoTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--spice-text);
+}
+
+.infoContent {
+  font-size: 13px;
+  color: var(--spice-subtext);
+  line-height: 1.4;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.infoContent p {
+  margin: 0 0 8px 0;
+}
+
+.infoTips {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tip {
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  border-left: 3px solid rgba(30, 144, 255, 0.3);
+  font-size: 12px;
+}
+
+.tip strong {
+  color: var(--spice-text);
+}
+
+@media (max-width: 768px) {
+  .content {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .actionGrid {
+    min-width: auto;
+  }
+
+  .actionButton {
+    padding: 10px 14px;
+    font-size: 12px;
+  }
+
+  .infoPanel {
+    padding: 12px;
+  }
 }

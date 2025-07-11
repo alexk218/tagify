@@ -112,55 +112,76 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
 
   return (
     <div className={styles.container}>
+      {/* Compact header with title and settings */}
       <div className={styles.header}>
-        <div className={styles.titleSection}>
+        <div className={styles.titleGroup}>
           <h3 className={styles.title}>Data Management</h3>
           {lastSaved && (
-            <div className={styles.lastSaved}>Last saved: {lastSaved.toLocaleString()}</div>
+            <span className={styles.lastSaved}>Last saved: {lastSaved.toLocaleString()}</span>
           )}
         </div>
-
         <button
           className={styles.settingsButton}
           onClick={() => setShowMainSettings(true)}
-          title="Settings"
+          title="Extension Settings"
         >
           ⚙️
         </button>
       </div>
 
-      <div className={styles.actions}>
-        <button className={styles.actionButton} onClick={onExportBackup}>
-          Export Backup File
-        </button>
+      {/* Main content area with side-by-side layout */}
+      <div className={styles.content}>
+        {/* Left side - Action buttons */}
+        <div className={styles.actionsPanel}>
+          <div className={styles.actionGrid}>
+            <button
+              className={`${styles.actionButton} ${styles.exportButton}`}
+              onClick={onExportBackup}
+            >
+              <span className={styles.buttonIcon}>📤</span>
+              Export Backup
+            </button>
 
-        <button className={styles.actionButton} onClick={handleImportClick} disabled={isImporting}>
-          {isImporting ? "Importing..." : "Import Backup File"}
-        </button>
+            <button
+              className={`${styles.actionButton} ${styles.importButton}`}
+              onClick={handleImportClick}
+              disabled={isImporting}
+            >
+              <span className={styles.buttonIcon}>📥</span>
+              {isImporting ? "Importing..." : "Import Backup"}
+            </button>
+          </div>
+        </div>
 
-        {/* <button
-          className={styles.actionButton}
-          onClick={() => setShowRefreshModal(true)}
-          disabled={isRefreshing}
-        >
-          {isRefreshing
-            ? `${refreshType === "quick" ? "Quick" : "Full"} Refreshing...`
-            : "Refresh Playlist Data"}
-        </button> */}
-
-        {/* <button className={styles.actionButton} onClick={() => setShowPlaylistSettings(true)}>
-          Playlist Settings
-        </button> */}
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json"
-          onChange={handleFileChange}
-          style={{ display: "none" }}
-        />
+        {/* Right side - Information panel */}
+        <div className={styles.infoPanel}>
+          <div className={styles.infoContent}>
+            <p>
+              Your tag data is stored locally in your browser. Regular backups prevent data loss and
+              enable cross-device syncing.
+            </p>
+            <div className={styles.infoTips}>
+              <div className={styles.tip}>
+                <strong>Export:</strong> Creates a downloadable JSON file with all your tags in your Downloads folder
+              </div>
+              <div className={styles.tip}>
+                <strong>Import:</strong> Restores data from a previously exported backup file
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        onChange={handleFileChange}
+        style={{ display: "none" }}
+      />
+
+      {/* Modals */}
       {showPlaylistSettings && (
         <PlaylistSettingsModal
           onClose={() => setShowPlaylistSettings(false)}
@@ -179,24 +200,6 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
       )}
 
       {showMainSettings && <MainSettingsModal onClose={() => setShowMainSettings(false)} />}
-
-      <div className={styles.info}>
-        <p>
-          Backup your tag data regularly to prevent data loss. Your data is currently stored in the
-          browser's localStorage.
-        </p>
-        <p>
-          <strong>Export</strong> a backup file to keep your tag data safe, and to use across
-          devices. Exports can be found in your Downloads folder.
-        </p>
-        <p>
-          You can <strong>import</strong> this file later to restore your data.
-        </p>
-        {/* <p>
-          Use <strong>Refresh Playlist Data</strong> to update which playlists contain your tracks.
-          Choose Quick Refresh for regular updates or Full Refresh for complete rebuilds.
-        </p> */}
-      </div>
     </div>
   );
 };
