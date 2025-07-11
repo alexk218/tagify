@@ -6,8 +6,6 @@ class TrackService {
       try {
         // Special handling for local files
         if (uri.startsWith("spotify:local:")) {
-          console.log("Attempting to play local file:", uri);
-
           // Format for queue API
           const trackObject = [{ uri }];
 

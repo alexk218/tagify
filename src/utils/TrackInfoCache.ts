@@ -52,7 +52,6 @@ export class TrackInfoCacheManager {
     const cache = this.getCache();
     delete cache[uri];
     localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
-    console.log(`Removed track info for track ${uri}`);
   }
 
   static getCachedUris(uris: string[]): { cached: string[]; missing: string[] } {
@@ -86,7 +85,6 @@ export class TrackInfoCacheManager {
 
     if (removedCount > 0) {
       localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
-      console.log(`Cleaned up ${removedCount} orphaned cache entries`);
     }
 
     return removedCount;

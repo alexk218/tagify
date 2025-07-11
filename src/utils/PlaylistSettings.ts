@@ -30,7 +30,6 @@ export function getPlaylistSettings(): PlaylistSettings {
 export function savePlaylistSettings(settings: PlaylistSettings): void {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    console.log("Tagify: Saved playlist settings");
   } catch (error) {
     console.error("Tagify: Error saving playlist settings:", error);
   }

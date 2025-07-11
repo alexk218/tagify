@@ -27,7 +27,6 @@ export function useTrackState() {
         setIsLocked(true);
         const parsedTrack = JSON.parse(savedLockedTrack);
         setLockedTrack(parsedTrack);
-        console.log("Tagify: Restored locked state for track", parsedTrack.name);
       }
     } catch (error) {
       console.error("Tagify: Error loading saved lock state:", error);
@@ -51,7 +50,6 @@ export function useTrackState() {
   useEffect(() => {
     // Only set up the listener if storage has been loaded
     if (!isStorageLoaded) {
-      console.log("Tagify: Waiting for localStorage to load before setting up player listener");
       return;
     }
 
@@ -92,7 +90,6 @@ export function useTrackState() {
 
         // ONLY update lockedTrack if we're NOT locked
         if (!isLocked) {
-          console.log("Tagify: Updating lockedTrack because not locked:", newTrack.name);
           // Create a safe track object with defaults for missing values
           const safeTrack = {
             ...newTrack,
@@ -173,7 +170,6 @@ export function useTrackState() {
         setLockedTrack(trackInfo);
         setIsLocked(true);
 
-        console.log("Set locked track to local file:", trackInfo);
         return;
       }
 

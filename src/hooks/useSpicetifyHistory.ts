@@ -24,10 +24,6 @@ export function useSpicetifyHistory({
   useEffect(() => {
     // Define the track URI checker function
     const checkForTrackUris = async () => {
-      // Get the current location and log it for debugging
-      const currentLocation = Spicetify.Platform.History.location || window.location;
-      console.log("Tagify: Current location:", currentLocation);
-
       // Try multiple ways to get the URI parameter (for single track)
       let trackUri = null;
 
@@ -35,7 +31,6 @@ export function useSpicetifyHistory({
       const windowParams = new URLSearchParams(window.location.search);
       if (windowParams.has("uri")) {
         trackUri = windowParams.get("uri");
-        console.log("Tagify: Found URI in window.location.search:", trackUri);
       }
 
       // Try from Spicetify.Platform.History.location if available
@@ -47,13 +42,11 @@ export function useSpicetifyHistory({
         const historyParams = new URLSearchParams(location.search || "");
         if (historyParams.has("uri")) {
           trackUri = historyParams.get("uri");
-          console.log("Tagify: Found URI in History location search:", trackUri);
         }
 
         // Also check state
         if (!trackUri && location.state?.trackUri) {
           trackUri = location.state.trackUri;
-          console.log("Tagify: Found URI in History state:", trackUri);
         }
       }
 
@@ -63,7 +56,6 @@ export function useSpicetifyHistory({
       // Try from window.location.search
       if (windowParams.has("uris")) {
         trackUrisParam = windowParams.get("uris");
-        console.log("Tagify: Found URIs in window.location.search:", trackUrisParam);
       }
 
       // Try from Spicetify.Platform.History.location if available
@@ -74,20 +66,16 @@ export function useSpicetifyHistory({
         const historyParams = new URLSearchParams(location.search || "");
         if (historyParams.has("uris")) {
           trackUrisParam = historyParams.get("uris");
-          console.log("Tagify: Found URIs in History location search:", trackUrisParam);
         }
 
         // Also check state
         if (!trackUrisParam && location.state?.trackUris) {
           trackUrisParam = JSON.stringify(location.state.trackUris);
-          console.log("Tagify: Found URIs in History state:", trackUrisParam);
         }
       }
 
       // SINGLE TRACK HANDLING
       if (trackUri) {
-        console.log("Tagify: Processing track URI:", trackUri);
-
         try {
           // Check if this is a local file
           if (trackUri.startsWith("spotify:local:")) {
@@ -107,7 +95,6 @@ export function useSpicetifyHistory({
             setLockedTrack(trackInfo);
             setIsLocked(true);
 
-            console.log("Set locked track to local file:", trackInfo);
             return;
           }
 
@@ -134,8 +121,6 @@ export function useSpicetifyHistory({
               album: { name: response.album?.name || "Unknown Album" },
               duration_ms: response.duration_ms,
             };
-
-            console.log("Tagify: Setting locked track:", trackInfo.name);
 
             // Set as locked track and enable lock - IMPORTANT!
             setLockedTrack(trackInfo);
@@ -214,9 +199,6 @@ export function useSpicetifyHistory({
           }
 
           if (fetchedTracks.length > 0) {
-            console.log(
-              `Tagify: Successfully fetched ${fetchedTracks.length} tracks for mass tagging`
-            );
             setSelectedTracks(fetchedTracks);
             setIsMultiTagging(true);
 
@@ -243,12 +225,9 @@ export function useSpicetifyHistory({
       Spicetify.Platform.History &&
       typeof Spicetify.Platform.History.listen === "function"
     ) {
-      console.log("Tagify: Setting up history listener");
-
       try {
         // Try to set up the listener and get the unlisten function
-        const unlistenFunc = Spicetify.Platform.History.listen((location: any) => {
-          console.log("Tagify: History changed:", location);
+        const unlistenFunc = Spicetify.Platform.History.listen(() => {
           checkForTrackUris();
         });
 
@@ -257,7 +236,6 @@ export function useSpicetifyHistory({
           unlisten = unlistenFunc;
         } else {
           console.warn("Tagify: History.listen did not return a cleanup function");
-          // Create a fallback cleanup function if needed
           unlisten = () => {
             console.log("Tagify: Using fallback cleanup for history listener");
           };
@@ -270,7 +248,6 @@ export function useSpicetifyHistory({
     // Cleanup listener on unmount
     return () => {
       if (unlisten) {
-        console.log("Tagify: Cleaning up history listener");
         unlisten();
       }
     };

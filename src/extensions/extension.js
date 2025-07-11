@@ -1010,7 +1010,6 @@
 
       // Remove ALL existing tag columns immediately
       document.querySelectorAll(".tagify-header, .tagify-info").forEach((el) => {
-        console.log("Removing element:", el);
         el.remove();
       });
 

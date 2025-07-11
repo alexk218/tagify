@@ -207,9 +207,6 @@ async function processLikedSongs(
         }
       });
     } else {
-      console.log(
-        `Processing Liked Songs: Incremental sync since ${new Date(lastSync).toLocaleString()}`
-      );
       Spicetify.showNotification("Processing Liked Songs (checking for new additions)");
     }
 
@@ -231,9 +228,6 @@ async function processLikedSongs(
             const addedAt = new Date(item.added_at);
 
             if (!isFirstSync && !forceFullSync && addedAt <= lastSyncDate) {
-              console.log(
-                `Reached songs older than last sync (${addedAt.toLocaleString()} <= ${lastSyncDate.toLocaleString()}), stopping`
-              );
               foundOldTrack = true;
               break;
             }

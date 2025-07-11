@@ -175,7 +175,6 @@ const TrackList: React.FC<TrackListProps> = ({
 
       // Fetch missing tracks only
       if (missing.length > 0) {
-        console.log(`Fetching ${missing.length} missing tracks from Spotify API`);
         await fetchAndCacheMissingTracks(missing, newTrackInfo, setTrackInfo);
       }
 

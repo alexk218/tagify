@@ -213,7 +213,6 @@ export function useTagData() {
         detail: { type: "save" },
       });
       window.dispatchEvent(event);
-      console.log("Tagify: Data saved to localStorage");
       return true;
     } catch (error) {
       console.error("Tagify: Error saving to localStorage", error);
@@ -241,11 +240,9 @@ export function useTagData() {
     if (localData && localData.categories && Array.isArray(localData.categories)) {
       setTagData(localData);
       setLastSaved(new Date());
-      console.log("Tagify: Loaded data from localStorage");
     } else {
       // If no data in localStorage or data is invalid, use default
       setTagData(defaultTagData);
-      console.log("Tagify: Initialized with default data");
       // Save the default data to localStorage to prevent future issues
       saveToLocalStorage(defaultTagData);
     }
@@ -273,7 +270,7 @@ export function useTagData() {
 
     URL.revokeObjectURL(url);
 
-    Spicetify.showNotification("Backup downloaded in 'Downloads' folder");
+    Spicetify.showNotification("Backup saved in 'Downloads' folder");
   };
 
   const importBackup = (backupData: TagDataStructure) => {
@@ -284,9 +281,7 @@ export function useTagData() {
 
   // Load tag data on component mount
   useEffect(() => {
-    console.log("Loading tag data...");
     loadTagData();
-    console.log("Tag data loading complete");
   }, []);
 
   // Auto-save when data changes
