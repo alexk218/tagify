@@ -30,7 +30,7 @@
      * Load tagged tracks from localStorage
      * @returns {boolean} Whether data was successfully loaded
      */
-    loadTaggedTracks: function () {
+    loadTaggedTracks() {
       try {
         const savedData = localStorage.getItem(STORAGE_KEY);
         if (savedData) {
@@ -51,7 +51,7 @@
      * @param {string} trackUri - The track URI to check
      * @returns {boolean} Whether the track is tagged
      */
-    isTrackTagged: function (trackUri) {
+    isTrackTagged(trackUri) {
       return trackUri in state.taggedTracks;
     },
 
@@ -59,7 +59,7 @@
      * Get playlist cache from localStorage
      * @returns {Object} The playlist cache
      */
-    getPlaylistCache: function () {
+    getPlaylistCache() {
       if (state.playlistCacheMemory) {
         return state.playlistCacheMemory;
       }
@@ -84,7 +84,7 @@
      * Get playlist settings from localStorage
      * @returns {Object} The playlist settings
      */
-    getPlaylistSettings: function () {
+    getPlaylistSettings() {
       try {
         const settingsString = localStorage.getItem(SETTINGS_KEY);
         if (settingsString) {
@@ -109,7 +109,7 @@
      * @param {string} playlistName - The playlist name
      * @returns {boolean} Whether the playlist is excluded
      */
-    isPlaylistExcluded: function (playlistId, playlistName, playlistDescription = "") {
+    isPlaylistExcluded(playlistId, playlistName, playlistDescription = "") {
       const settings = this.getPlaylistSettings();
 
       // Check specific excluded playlists
@@ -150,7 +150,7 @@
      * @param {string} trackUri - The track URI to check
      * @returns {boolean} Whether to show the warning
      */
-    shouldShowLikedOnlyWarning: function (trackUri) {
+    shouldShowLikedOnlyWarning(trackUri) {
       const cache = this.getPlaylistCache();
       const containingPlaylists = cache.tracks[trackUri] || [];
 
@@ -174,7 +174,7 @@
      * @param {string} trackUri - The track URI
      * @returns {string} Comma-separated list of playlists
      */
-    getPlaylistListForTrack: function (trackUri) {
+    getPlaylistListForTrack(trackUri) {
       const cache = this.getPlaylistCache();
       const containingPlaylists = cache.tracks[trackUri] || [];
 
@@ -205,7 +205,7 @@
      * @param {string} trackUri - The track URI to check
      * @returns {boolean} Whether the track has incomplete tags
      */
-    hasIncompleteTags: function (trackUri) {
+    hasIncompleteTags(trackUri) {
       if (!state.taggedTracks[trackUri]) return true;
 
       const track = state.taggedTracks[trackUri];
@@ -222,7 +222,7 @@
      * @param {string} trackUri - The track URI
      * @returns {string} Summary of track tags
      */
-    getTrackTagSummary: function (trackUri) {
+    getTrackTagSummary(trackUri) {
       if (!this.isTrackTagged(trackUri)) return "";
 
       const track = state.taggedTracks[trackUri];
@@ -258,7 +258,7 @@
      * @param {HTMLElement} tracklistElement - The playlist row element
      * @returns {string|null} The track URI
      */
-    getTracklistTrackUri: function (tracklistElement) {
+    getTracklistTrackUri(tracklistElement) {
       let values = Object.values(tracklistElement);
       if (!values) {
         console.log("Error: Could not get tracklist element");
@@ -290,7 +290,7 @@
       }
     },
 
-    extractLocalFileUri: function (element) {
+    extractLocalFileUri(element) {
       try {
         // Try to find local file URI in various locations of the React component tree
         if (!element || !element.pendingProps) return null;
@@ -337,7 +337,7 @@
       }
     },
 
-    parseLocalFileUri: function (uri) {
+    parseLocalFileUri(uri) {
       if (!uri.startsWith("spotify:local:")) {
         return { title: "Unknown Track", artist: "Unknown Artist" };
       }
@@ -406,7 +406,7 @@
     /**
      * Initialize the context menu feature
      */
-    initialize: function () {
+    initialize() {
       if (state.initialized.menu) return;
 
       if (!Spicetify.ContextMenu) {
@@ -436,7 +436,7 @@
      * @param {string[]} uris - The URIs of the selected items
      * @returns {boolean} Whether to show the menu
      */
-    shouldShowMenu: function (uris) {
+    shouldShowMenu(uris) {
       return uris.some(
         (uri) => uri.startsWith("spotify:track:") || uri.startsWith("spotify:local:")
       );
@@ -446,7 +446,7 @@
      * Handle the menu item click
      * @param {string[]} uris - The URIs of the selected items
      */
-    handleMenuClick: function (uris) {
+    handleMenuClick(uris) {
       if (uris.length === 0) return;
 
       if (uris.length === 1) {
@@ -476,7 +476,7 @@
     /**
      * Initialize the tracklist indicator feature
      */
-    initialize: function () {
+    initialize() {
       if (state.initialized.indicator) return;
 
       try {
@@ -505,17 +505,17 @@
     /**
      * Set up mutation observer for tracking DOM changes
      */
-    setupObserver: function () {
+    setupObserver() {
       if (state.observer) {
         state.observer.disconnect();
       }
 
-      // This observer watches for tracklist changes
+      // Observer watches for tracklist changes
       const tracklistObserver = new MutationObserver(() => {
         indicatorFeature.updateTracklists();
       });
 
-      // Main observer to detect when track lists are added to the DOM
+      // Main observer - detects when tracklists are added to the DOM (when you change playlists)
       state.observer = new MutationObserver(async (mutations) => {
         for (const mutation of mutations) {
           if (mutation.type === "childList") {
@@ -527,7 +527,7 @@
             );
 
             if (addedTracklists.length > 0) {
-              console.log("Tagify: New tracklist detected, updating...");
+              // console.log("Tagify: New tracklist detected, updating...");
               indicatorFeature.updateTracklists();
 
               // Observe each tracklist for changes
@@ -562,7 +562,7 @@
     /**
      * Update all tracklists on the page
      */
-    updateTracklists: function () {
+    updateTracklists() {
       const tracklists = document.getElementsByClassName("main-trackList-indexable");
 
       for (const tracklist of tracklists) {
@@ -574,7 +574,7 @@
      * Process all tracks in a tracklist
      * @param {HTMLElement} tracklist - The tracklist to process
      */
-    processTracklist: function (tracklist) {
+    processTracklist(tracklist) {
       if (!tracklist) return;
 
       // Add column to header first
@@ -585,26 +585,18 @@
 
       // Process all track rows
       const trackRows = tracklist.querySelectorAll(".main-trackList-trackListRow");
-      let taggedCount = 0;
 
       trackRows.forEach((row) => {
-        // Check if the track is tagged before adding UI elements
-        const trackUri = utils.getTracklistTrackUri(row);
-        if (trackUri && utils.isTrackTagged(trackUri)) {
-          taggedCount++;
-        }
-
         indicatorFeature.addTagInfoToTrack(row);
       });
 
-      console.log(`Tagify: Processed ${trackRows.length} rows, found ${taggedCount} tagged tracks`);
     },
 
     /**
      * Add column to tracklist header
      * @param {HTMLElement} header - The header element
      */
-    addColumnToHeader: function (header) {
+    addColumnToHeader(header) {
       if (!header || header.querySelector(".tagify-header")) return;
 
       // Find the last column to insert before
@@ -661,7 +653,7 @@
      * Add Tagify info to track row
      * @param {HTMLElement} row - The track row element
      */
-    addTagInfoToTrack: function (row) {
+    addTagInfoToTrack(row) {
       // Skip if already processed
       if (row.querySelector(".tagify-info")) return;
 
@@ -808,7 +800,7 @@
      * @param {string} trackUri - The track URI
      * @returns {string} Formatted tooltip text
      */
-    createTagListTooltip: function (trackUri) {
+    createTagListTooltip(trackUri) {
       if (
         !state.taggedTracks[trackUri] ||
         !state.taggedTracks[trackUri].tags ||
