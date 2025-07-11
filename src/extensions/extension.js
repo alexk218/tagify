@@ -131,7 +131,17 @@
      * @returns {boolean} Whether the track is tagged
      */
     isTrackTagged(trackUri) {
-      return trackUri in state.taggedTracks;
+      if (!(trackUri in state.taggedTracks)) return false;
+
+      const track = state.taggedTracks[trackUri];
+
+      // Check if track has any meaningful data
+      const hasRating = track.rating > 0;
+      const hasEnergy = track.energy > 0;
+      const hasBpm = track.bpm !== null && track.bpm > 0;
+      const hasTags = track.tags && track.tags.length > 0;
+
+      return hasRating || hasEnergy || hasBpm || hasTags;
     },
 
     /**
@@ -852,34 +862,6 @@
       const statusContainer = document.createElement("div");
       statusContainer.style.marginLeft = "auto"; // Push to the right
 
-      // Check if we should show the warning icon
-      const needsWarning = utils.shouldShowLikedOnlyWarning(trackUri);
-      const playlistList = utils.getPlaylistListForTrack(trackUri);
-
-      if (needsWarning) {
-        // Add warning icon for tracks only in Liked Songs or excluded playlists
-        const warningIcon = document.createElement("span");
-        warningIcon.innerHTML = "⚠️";
-        warningIcon.style.color = "#ffcc00";
-        warningIcon.style.fontSize = "12px";
-        warningIcon.title = trackUri.startsWith("spotify:local:")
-          ? "Local file should be organized into playlists"
-          : "This track is only in Liked Songs or excluded playlists";
-        statusContainer.appendChild(warningIcon);
-      } else if (playlistList !== "No regular playlists") {
-        // Only add success icon if the track is actually in at least one regular playlist
-        const successIcon = document.createElement("span");
-        successIcon.innerHTML = "✓";
-        successIcon.style.color = "#1DB954"; // Spotify green
-        successIcon.style.fontSize = "12px";
-        successIcon.style.fontWeight = "bold";
-
-        // Add the list of playlists as a tooltip
-        successIcon.title = `${playlistList}`;
-
-        statusContainer.appendChild(successIcon);
-      }
-
       container.appendChild(statusContainer);
       tagColumn.appendChild(container);
 
@@ -1115,7 +1097,6 @@
 
         const isTagged = utils.isTrackTagged(trackUri);
 
-        const needsWarning = utils.shouldShowLikedOnlyWarning(trackUri);
         const incomplete = utils.hasIncompleteTags(trackUri);
 
         // Build the HTML content
@@ -1140,21 +1121,6 @@
 
         if (!isTagged || !state.taggedTracks[trackUri]?.tags?.length) {
           state.nowPlayingWidgetTagInfo.title = "";
-        }
-
-        // Add status indicator
-        if (needsWarning) {
-          // Warning icon for tracks only in Liked Songs/excluded playlists
-          htmlContent += `<span style="color:#ffcc00; margin-left:4px;" title="This track is only in Liked Songs or excluded playlists">⚠️</span>`;
-        } else {
-          // Get playlist list to check if track is in any regular playlists
-          const playlistList = utils.getPlaylistListForTrack(trackUri);
-
-          // Only add green checkmark if track is in at least one regular playlist
-          if (playlistList !== "No regular playlists") {
-            htmlContent += `<span style="color:#1DB954; margin-left:4px;" title="${playlistList}">✓</span>`;
-          }
-          // If no regular playlists, don't add any icon
         }
 
         // Update the content
@@ -1198,6 +1164,19 @@
     contextMenuItem.initialize();
     tracklistEnhancer.initialize();
     playbarEnhancer.initialize();
+
+    const dataUpdateListener = () => {
+      utils.loadTaggedTracks();
+      // Refresh any UI that depends on tagged tracks
+      if (state.activeExtensions.tracklistEnhancer) {
+        tracklistEnhancer.updateTracklists();
+      }
+      if (state.activeExtensions.playbarEnhancer) {
+        playbarEnhancer.updateNowPlayingWidget();
+      }
+    };
+
+    window.addEventListener("tagify:dataUpdated", dataUpdateListener);
   };
 
   // Start initialization
