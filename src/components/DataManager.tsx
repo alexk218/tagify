@@ -5,6 +5,7 @@ import { TagDataStructure } from "../hooks/useTagData";
 import { fullRefreshPlaylistCache, incrementalRefreshPlaylistCache } from "../utils/PlaylistCache";
 import PlaylistSettingsModal from "./PlaylistSettings";
 import RefreshModal from "./RefreshModal";
+import MainSettingsModal from "./MainSettingsModal";
 
 interface DataManagerProps {
   onExportBackup: () => void;
@@ -21,6 +22,7 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
   const [refreshType, setRefreshType] = useState<"quick" | "full" | null>(null);
   const [showRefreshModal, setShowRefreshModal] = useState(false);
   const [showPlaylistSettings, setShowPlaylistSettings] = useState(false);
+  const [showMainSettings, setShowMainSettings] = useState(false);
 
   const handlePlaylistSettingsSaved = async () => {
     // When settings change, we should do a full refresh to respect new exclusion rules
@@ -34,7 +36,6 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
     }
   };
 
-  // MODIFIED: Handle full refresh from modal
   const handleFullRefresh = async () => {
     setIsRefreshing(true);
     setRefreshType("full");
@@ -46,7 +47,6 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
     }
   };
 
-  // MODIFIED: Handle quick refresh from modal
   const handleQuickRefresh = async () => {
     setIsRefreshing(true);
     setRefreshType("quick");
@@ -76,7 +76,6 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
         const content = e.target?.result as string;
         const data = JSON.parse(content);
 
-        // More thorough validation of the data structure
         if (
           data &&
           typeof data === "object" &&
@@ -120,6 +119,14 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
             <div className={styles.lastSaved}>Last saved: {lastSaved.toLocaleString()}</div>
           )}
         </div>
+
+        <button
+          className={styles.settingsButton}
+          onClick={() => setShowMainSettings(true)}
+          title="Settings"
+        >
+          ⚙️
+        </button>
       </div>
 
       <div className={styles.actions}>
@@ -170,6 +177,8 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
           refreshType={refreshType}
         />
       )}
+
+      {showMainSettings && <MainSettingsModal onClose={() => setShowMainSettings(false)} />}
 
       <div className={styles.info}>
         <p>

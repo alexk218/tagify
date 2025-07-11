@@ -3,6 +3,9 @@
   border-radius: 8px;
   padding: 16px;
   margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .header {
@@ -10,12 +13,32 @@
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 16px;
+  width: 100%;
 }
 
-.headerButtons {
+.settingsButton {
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 6px;
+  width: 36px;
+  height: 36px;
   display: flex;
-  gap: 8px;
   align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 18px;
+  flex-shrink: 0; /* Prevents button from shrinking */
+}
+
+.settingsButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: scale(1.05);
+}
+
+.settingsButton:active {
+  transform: scale(0.95);
 }
 
 .title {
@@ -29,6 +52,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1;
 }
 
 .lastSaved {
