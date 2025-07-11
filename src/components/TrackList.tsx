@@ -120,9 +120,11 @@ const TrackList: React.FC<TrackListProps> = ({
     const date = new Date(timestamp);
 
     return date.toLocaleDateString([], {
-      year: "2-digit",
+      year: "numeric",
       month: "short",
       day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
@@ -1223,13 +1225,13 @@ const TrackList: React.FC<TrackListProps> = ({
 
                       {/* Timestamp display */}
                       {(trackData.dateCreated || trackData.dateModified) && (
-                        <div className={styles.trackItemTimestamps}>
+                        <div className={styles.trackItemTimestampsInline}>
                           {trackData.dateCreated && (
                             <span
                               className={styles.trackItemTimestamp}
                               title={`Created: ${new Date(trackData.dateCreated).toLocaleString()}`}
                             >
-                              Created: {formatTimestamp(trackData.dateCreated)}
+                              {formatTimestamp(trackData.dateCreated)}
                             </span>
                           )}
                           {trackData.dateModified &&
@@ -1240,7 +1242,7 @@ const TrackList: React.FC<TrackListProps> = ({
                                   trackData.dateModified
                                 ).toLocaleString()}`}
                               >
-                                {trackData.dateCreated ? " | " : ""}Updated:{" "}
+                                {trackData.dateCreated ? " | " : ""}
                                 {formatTimestamp(trackData.dateModified)}
                               </span>
                             )}

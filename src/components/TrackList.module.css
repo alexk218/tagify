@@ -299,6 +299,7 @@
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.2);
   transition: background 0.2s ease;
+  position: relative;
 }
 
 .trackItem:hover {
@@ -333,9 +334,11 @@
 
 /* Top row with fixed-width elements and action buttons */
 .trackItemMetaTop {
-  display: flex;
   justify-content: space-between;
   align-items: center;
+  /* position: relative; */
+  width: 100%;
+  padding-right: 0;
 }
 
 .trackItemFixedMeta {
@@ -343,6 +346,7 @@
   align-items: center;
   font-size: 12px;
   color: var(--spice-subtext);
+  flex-shrink: 0;
 }
 
 .trackItemRating {
@@ -841,21 +845,57 @@
 
 /* Timestamp styles */
 .trackItemTimestamps {
-  display: flex;
-  align-items: center;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 4px 8px;
   font-size: 10px;
   color: var(--spice-subtext);
-  opacity: 0.8;
-  margin-left: 8px;
+  backdrop-filter: blur(4px);
+  z-index: 2;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .trackItemTimestamp {
-  white-space: nowrap;
-  cursor: help;
+  display: inline;
+  font-size: 10px;
+  opacity: 0.8;
 }
 
-.trackItemTimestamp:hover {
+.trackItemTimestamps:hover {
+  background: rgba(0, 0, 0, 0.8);
+  border-color: rgba(255, 255, 255, 0.2);
   opacity: 1;
+  max-width: none;
+  overflow: visible;
+  z-index: 10;
+}
+
+.trackItemTimestamps:hover .trackItemTimestamp {
+  opacity: 1;
+}
+
+.trackItemTimestampsInline {
+  margin-left: auto;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  color: var(--spice-subtext);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.trackItemTimestampsInline .trackItemTimestamp {
+  font-size: 10px;
 }
 
 /* Update header layout to accommodate sort controls */
