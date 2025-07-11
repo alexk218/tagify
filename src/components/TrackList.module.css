@@ -153,12 +153,6 @@
 }
 
 /* Rating filters */
-.ratingFilters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .ratingFilter {
   background: rgba(0, 0, 0, 0.3);
   color: var(--spice-text);
@@ -175,6 +169,10 @@
 
 .ratingFilter.active {
   background: #1e90ff;
+}
+
+.ratingFilter.active:hover {
+  background: #1a7ee0;
 }
 
 /* Energy range filters */
