@@ -66,6 +66,14 @@
   gap: 20px;
 }
 
+.modalBodyExtensions {
+  overflow-y: auto;
+  max-height: calc(90vh - 70px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .description {
   color: var(--spice-text);
   font-size: 14px;
@@ -277,14 +285,23 @@
 .toggleGroup {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+  padding: 16px;
 }
 
 .toggleItem {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 0;
+  padding: 16px; /* Internal padding for each item */
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background-color 0.2s ease;
+}
+
+.toggleItem:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .toggleInfo {
@@ -297,11 +314,13 @@
   font-weight: 500;
   color: var(--spice-text);
   font-size: 14px;
+  margin: 0;
 }
 
 .toggleDescription {
   font-size: 12px;
   color: var(--spice-subtext);
+  opacity: 0.8;
 }
 
 .toggleSwitch {
@@ -310,6 +329,7 @@
   width: 44px;
   height: 24px;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .toggleSwitch input {

@@ -36,41 +36,43 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({ onClose }) => {
             </button>
           </div>
 
-          <div className={styles.toggleGroup}>
-            <div className={styles.toggleItem}>
-              <div className={styles.toggleInfo}>
-                <label className={styles.toggleLabel}>Tracklist Enhancer</label>
-                <span className={styles.toggleDescription}>Show tag info in playlist rows</span>
+          <div className={styles.modalBodyExtensions}>
+            <div className={styles.toggleGroup}>
+              <div className={styles.toggleItem}>
+                <div className={styles.toggleInfo}>
+                  <label className={styles.toggleLabel}>Tracklist Enhancer</label>
+                  <span className={styles.toggleDescription}>Show 'Tagify' column in your playlists</span>
+                </div>
+                <label className={styles.toggleSwitch}>
+                  <input
+                    type="checkbox"
+                    checked={extensionSettings.enableTracklistEnhancer}
+                    onChange={(e) =>
+                      updateExtensionSettings("enableTracklistEnhancer", e.target.checked)
+                    }
+                  />
+                  <span className={styles.slider}></span>
+                </label>
               </div>
-              <label className={styles.toggleSwitch}>
-                <input
-                  type="checkbox"
-                  checked={extensionSettings.enableTracklistEnhancer}
-                  onChange={(e) =>
-                    updateExtensionSettings("enableTracklistEnhancer", e.target.checked)
-                  }
-                />
-                <span className={styles.slider}></span>
-              </label>
-            </div>
 
-            <div className={styles.toggleItem}>
-              <div className={styles.toggleInfo}>
-                <label className={styles.toggleLabel}>Playbar Enhancer</label>
-                <span className={styles.toggleDescription}>
-                  Show tag info in now playing widget
-                </span>
+              <div className={styles.toggleItem}>
+                <div className={styles.toggleInfo}>
+                  <label className={styles.toggleLabel}>Playbar Enhancer</label>
+                  <span className={styles.toggleDescription}>
+                    Show tag info in Now Playing bar
+                  </span>
+                </div>
+                <label className={styles.toggleSwitch}>
+                  <input
+                    type="checkbox"
+                    checked={extensionSettings.enablePlaybarEnhancer}
+                    onChange={(e) =>
+                      updateExtensionSettings("enablePlaybarEnhancer", e.target.checked)
+                    }
+                  />
+                  <span className={styles.slider}></span>
+                </label>
               </div>
-              <label className={styles.toggleSwitch}>
-                <input
-                  type="checkbox"
-                  checked={extensionSettings.enablePlaybarEnhancer}
-                  onChange={(e) =>
-                    updateExtensionSettings("enablePlaybarEnhancer", e.target.checked)
-                  }
-                />
-                <span className={styles.slider}></span>
-              </label>
             </div>
           </div>
         </div>
