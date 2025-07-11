@@ -393,7 +393,7 @@
      * @param {string} selector - CSS selector to wait for
      * @returns {Promise<HTMLElement>} The found element
      */
-    waitForElement: async function (selector) {
+    async waitForElement(selector) {
       while (!document.querySelector(selector)) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
@@ -589,7 +589,6 @@
       trackRows.forEach((row) => {
         indicatorFeature.addTagInfoToTrack(row);
       });
-
     },
 
     /**
@@ -888,7 +887,7 @@
     /**
      * Initialize the playbar feature
      */
-    initialize: async function () {
+    async initialize() {
       if (state.initialized.playbar) return;
 
       try {
@@ -918,7 +917,6 @@
           subtree: true,
         });
 
-        console.log("Tagify: Playbar feature initialized successfully");
         state.initialized.playbar = true;
       } catch (error) {
         console.error("Tagify: Error initializing playbar feature:", error);
@@ -928,7 +926,7 @@
     /**
      * Update the Now Playing widget
      */
-    updateNowPlayingWidget: async function () {
+    async updateNowPlayingWidget() {
       try {
         // Get the current track URI
         const trackUri = Spicetify.Player.data?.item?.uri;
@@ -966,10 +964,8 @@
         // Make sure our element is visible
         state.nowPlayingWidgetTagInfo.style.display = "flex";
 
-        // Check if track is tagged
         const isTagged = utils.isTrackTagged(trackUri);
 
-        // Check various status flags
         const needsWarning = utils.shouldShowLikedOnlyWarning(trackUri);
         const incomplete = utils.hasIncompleteTags(trackUri);
 
@@ -988,13 +984,14 @@
             state.nowPlayingWidgetTagInfo.title = tagListTooltip;
           }
 
-          // Use orange bullet for incomplete tags, green for complete tags
           const bulletColor = incomplete ? "#FFA500" : "#1DB954";
 
           htmlContent += `<span style="color:${bulletColor}; margin-right:4px;">●</span> ${summary} `;
         }
 
-        state.nowPlayingWidgetTagInfo.title = "";
+        if (!isTagged || !state.taggedTracks[trackUri]?.tags?.length) {
+          state.nowPlayingWidgetTagInfo.title = "";
+        }
 
         // Add status indicator
         if (needsWarning) {
@@ -1030,9 +1027,7 @@
   };
 
   // Main initialization
-  const initialize = async function () {
-    console.log("Tagify: Starting initialization...");
-
+  const initialize = async () => {
     // Try to load tag data first since it's needed by all features
     if (!utils.loadTaggedTracks()) {
       console.log("Tagify: No tagged tracks found");
@@ -1042,8 +1037,6 @@
     menuFeature.initialize();
     indicatorFeature.initialize();
     playbarFeature.initialize();
-
-    console.log("Tagify: Initialization complete");
   };
 
   // Start initialization
