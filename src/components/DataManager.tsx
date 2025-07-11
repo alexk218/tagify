@@ -138,7 +138,7 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
           {isImporting ? "Importing..." : "Import Backup File"}
         </button>
 
-        <button
+        {/* <button
           className={styles.actionButton}
           onClick={() => setShowRefreshModal(true)}
           disabled={isRefreshing}
@@ -146,11 +146,11 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
           {isRefreshing
             ? `${refreshType === "quick" ? "Quick" : "Full"} Refreshing...`
             : "Refresh Playlist Data"}
-        </button>
+        </button> */}
 
-        <button className={styles.actionButton} onClick={() => setShowPlaylistSettings(true)}>
+        {/* <button className={styles.actionButton} onClick={() => setShowPlaylistSettings(true)}>
           Playlist Settings
-        </button>
+        </button> */}
 
         <input
           ref={fileInputRef}
@@ -186,13 +186,16 @@ const DataManager: React.FC<DataManagerProps> = ({ onExportBackup, onImportBacku
           browser's localStorage.
         </p>
         <p>
-          <strong>Export</strong> a backup file to keep your tag data safe. You can{" "}
-          <strong>import</strong> this file later to restore your data.
+          <strong>Export</strong> a backup file to keep your tag data safe, and to use across
+          devices. Exports can be found in your Downloads folder.
         </p>
         <p>
+          You can <strong>import</strong> this file later to restore your data.
+        </p>
+        {/* <p>
           Use <strong>Refresh Playlist Data</strong> to update which playlists contain your tracks.
           Choose Quick Refresh for regular updates or Full Refresh for complete rebuilds.
-        </p>
+        </p> */}
       </div>
     </div>
   );

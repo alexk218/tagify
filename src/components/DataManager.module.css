@@ -5,14 +5,14 @@
   margin-bottom: 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
 }
 
 .header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 16px;
+  /* margin-bottom: 16px; */
   width: 100%;
 }
 
@@ -46,26 +46,28 @@
   margin: 0;
   font-weight: 700;
   color: var(--spice-text);
+  line-height: 1.2;
 }
 
 .titleSection {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   flex: 1;
 }
 
 .lastSaved {
-  font-size: 14px;
+  font-size: 12px;
   color: var(--spice-subtext);
   margin: 0;
-  opacity: 0.8;
+  opacity: 0.7;
 }
 
 .actions {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 /* Base button style matching your app pattern */
@@ -73,21 +75,27 @@
   background-color: rgba(0, 0, 0, 0.2);
   color: var(--spice-text);
   border: none;
-  border-radius: 4px;
-  padding: 8px 16px;
-  font-size: 14px;
+  border-radius: 6px; /* Slightly more rounded */
+  padding: 10px 16px; /* Slightly more compact */
+  font-size: 13px; /* Slightly smaller */
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .actionButton:hover:not(:disabled) {
   background-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px); /* Subtle lift effect */
 }
 
 .actionButton:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
 /* Specific button variants */
@@ -106,15 +114,17 @@
 }
 
 .info {
-  font-size: 14px;
+  font-size: 13px; /* Slightly smaller */
   color: var(--spice-subtext);
-  padding: 12px 0px 6px;
-  background: rgba(var(--spice-rgb-card), 0.6);
-  border-radius: 4px;
+  padding: 16px; /* More generous internal padding */
+  background: rgba(0, 0, 0, 0.1); /* Subtler background */
+  border-radius: 6px;
+  border-left: 3px solid rgba(30, 144, 255, 0.3); /* Add accent border */
+  line-height: 1.4; /* Better readability */
 }
 
 .info p {
-  margin: 0 0 8px 0;
+  margin: 0 0 8px 0; /* Tighter paragraph spacing */
 }
 
 .info p:last-child {
