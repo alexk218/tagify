@@ -15,6 +15,8 @@ interface TrackDetailsProps {
     energy: number;
     bpm: number | null;
     tags: TrackTag[];
+    dateCreated?: number;
+    dateModified?: number;
   };
   categories: TagCategory[];
   onSetRating: (rating: number) => void;
@@ -100,6 +102,19 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
     } catch (e) {
       return dateStr;
     }
+  };
+
+  const formatTimestamp = (timestamp: number | undefined): string => {
+    if (!timestamp) return "Unknown";
+    const date = new Date(timestamp);
+
+    return date.toLocaleDateString([], {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   };
 
   // Fetch additional track metadata
@@ -804,6 +819,31 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
                         title="Go to source"
                       >
                         {trackMetadata.sourceContext}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Add timestamp metadata */}
+                  {trackData.dateCreated && (
+                    <div className={styles.metadataItem}>
+                      <span className={styles.metadataLabel}>Tagged:</span>
+                      <span
+                        className={styles.metadataValue}
+                        title={new Date(trackData.dateCreated).toLocaleString()}
+                      >
+                        {formatTimestamp(trackData.dateCreated)}
+                      </span>
+                    </div>
+                  )}
+
+                  {trackData.dateModified && trackData.dateModified !== trackData.dateCreated && (
+                    <div className={styles.metadataItem}>
+                      <span className={styles.metadataLabel}>Updated:</span>
+                      <span
+                        className={styles.metadataValue}
+                        title={new Date(trackData.dateModified).toLocaleString()}
+                      >
+                        {formatTimestamp(trackData.dateModified)}
                       </span>
                     </div>
                   )}

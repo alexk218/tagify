@@ -688,3 +688,13 @@
 .lockedTrackArtist {
   font-style: italic;
 }
+
+.metadataTimestamp {
+  color: var(--spice-subtext);
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.metadataTimestamp:hover {
+  opacity: 1;
+}

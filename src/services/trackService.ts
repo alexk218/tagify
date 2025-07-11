@@ -136,6 +136,8 @@ class TrackService {
         energy: number;
         bpm: number | null;
         tags: { tag: string; category: string }[];
+        dateCreated?: number;
+        dateModified?: number;
       };
     } = {};
 
@@ -174,6 +176,8 @@ class TrackService {
           energy: track.energy || 0,
           bpm: track.bpm || null,
           tags: [],
+          dateCreated: track.dateCreated,
+          dateModified: track.dateModified,
         };
 
         // Skip if no tags

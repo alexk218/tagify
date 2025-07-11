@@ -29,6 +29,8 @@ export interface TrackData {
   energy: number;
   bpm: number | null;
   tags: TrackTag[];
+  dateCreated?: number;
+  dateModified?: number;
 }
 
 export interface TagDataStructure {
@@ -365,6 +367,7 @@ export function useTagData() {
   // Ensure track data exists for a given URI
   const getOrCreateTrackData = (trackUri: string) => {
     if (!tagData.tracks[trackUri]) {
+      const now = Date.now();
       const newTagData = {
         ...tagData,
         tracks: {
@@ -374,6 +377,8 @@ export function useTagData() {
             energy: 0,
             bpm: null,
             tags: [],
+            dateCreated: now,
+            dateModified: now,
           },
         },
       };
@@ -381,6 +386,26 @@ export function useTagData() {
       return newTagData;
     }
     return tagData;
+  };
+
+  const updateTrackWithTimestamp = (trackUri: string, updates: Partial<TrackData>) => {
+    const currentData = getOrCreateTrackData(trackUri);
+    const existingTrack = currentData.tracks[trackUri];
+
+    const updatedTrack = {
+      ...existingTrack,
+      ...updates,
+      dateModified: Date.now(),
+      dateCreated: existingTrack.dateCreated || Date.now(),
+    };
+
+    setTagData({
+      ...currentData,
+      tracks: {
+        ...currentData.tracks,
+        [trackUri]: updatedTrack,
+      },
+    });
   };
 
   const fetchBPM = async (trackUri: string): Promise<number | null> => {
@@ -443,7 +468,8 @@ export function useTagData() {
         tracks: remainingTracks,
       });
     } else {
-      // Update state with modified track
+      // Update state with modified track and timestamps
+      const now = Date.now();
       setTagData({
         ...currentData,
         tracks: {
@@ -451,6 +477,8 @@ export function useTagData() {
           [trackUri]: {
             ...trackData,
             bpm,
+            dateCreated: trackData.dateCreated || now,
+            dateModified: now,
           },
         },
       });
@@ -516,18 +544,14 @@ export function useTagData() {
 
       // Schedule adding to TAGGED playlist if this makes the track non-empty
       if (updatedTags.length === 1 && trackData.rating === 0 && trackData.energy === 0) {
-        // Instead of immediately updating BPM, we'll only get it
-        // but not update the state directly to avoid race conditions
         fetchBPM(trackUri)
           .then((bpm) => {
             if (bpm !== null) {
-              // We need to get the CURRENT state at this point in time
-              // and ensure we preserve any tags that were added
               setTagData((prevState) => {
                 const currentTrackData = prevState.tracks[trackUri];
-                // If the track doesn't exist anymore, don't do anything
                 if (!currentTrackData) return prevState;
 
+                const now = Date.now();
                 return {
                   ...prevState,
                   tracks: {
@@ -535,6 +559,8 @@ export function useTagData() {
                     [trackUri]: {
                       ...currentTrackData,
                       bpm: bpm,
+                      dateCreated: currentTrackData.dateCreated || now,
+                      dateModified: now,
                     },
                   },
                 };
@@ -548,9 +574,12 @@ export function useTagData() {
     }
 
     // Prepare updated track data
+    const now = Date.now();
     const updatedTrackData = {
       ...trackData,
       tags: updatedTags,
+      dateCreated: trackData.dateCreated || now,
+      dateModified: now,
     };
 
     // Check if the track is now empty
@@ -584,6 +613,7 @@ export function useTagData() {
   ) => {
     // Create a copy of the current tagData
     const updatedTagData = { ...tagData };
+    const now = Date.now();
 
     // Check if all tracks have this tag
     const allHaveTag = trackUris.every((uri) => {
@@ -600,8 +630,10 @@ export function useTagData() {
         updatedTagData.tracks[uri] = {
           rating: 0,
           energy: 0,
-          bpm: 0,
+          bpm: null,
           tags: [],
+          dateCreated: now,
+          dateModified: now,
         };
       }
 
@@ -624,6 +656,8 @@ export function useTagData() {
               ...trackData.tags.slice(0, existingTagIndex),
               ...trackData.tags.slice(existingTagIndex + 1),
             ],
+            dateCreated: trackData.dateCreated || now,
+            dateModified: now,
           };
 
           if (
@@ -640,6 +674,8 @@ export function useTagData() {
           updatedTagData.tracks[uri] = {
             ...trackData,
             tags: [...trackData.tags, { categoryId, subcategoryId, tagId }],
+            dateCreated: trackData.dateCreated || now,
+            dateModified: now,
           };
         }
       }
@@ -677,6 +713,8 @@ export function useTagData() {
             setTagData((prevState) => {
               const currentTrackData = prevState.tracks[trackUri];
               if (!currentTrackData) return prevState;
+
+              const now = Date.now();
               return {
                 ...prevState,
                 tracks: {
@@ -684,6 +722,8 @@ export function useTagData() {
                   [trackUri]: {
                     ...currentTrackData,
                     bpm: bpm,
+                    dateCreated: currentTrackData.dateCreated || now,
+                    dateModified: now,
                   },
                 },
               };
@@ -707,7 +747,7 @@ export function useTagData() {
         tracks: remainingTracks,
       });
     } else {
-      // Update state with modified track
+      const now = Date.now();
       setTagData({
         ...currentData,
         tracks: {
@@ -715,6 +755,8 @@ export function useTagData() {
           [trackUri]: {
             ...trackData,
             rating,
+            dateCreated: trackData.dateCreated || now,
+            dateModified: now,
           },
         },
       });
@@ -727,7 +769,7 @@ export function useTagData() {
     const currentData = getOrCreateTrackData(trackUri);
     const trackData = currentData.tracks[trackUri];
 
-    // If this is the first energy setting for an otherwise empty track, fetch BPM.
+    // If this is the first energy setting for an otherwise empty track, fetch BPM
     if (
       energy > 0 &&
       trackData.rating === 0 &&
@@ -740,6 +782,8 @@ export function useTagData() {
             setTagData((prevState) => {
               const currentTrackData = prevState.tracks[trackUri];
               if (!currentTrackData) return prevState;
+
+              const now = Date.now();
               return {
                 ...prevState,
                 tracks: {
@@ -747,6 +791,8 @@ export function useTagData() {
                   [trackUri]: {
                     ...currentTrackData,
                     bpm: bpm,
+                    dateCreated: currentTrackData.dateCreated || now,
+                    dateModified: now,
                   },
                 },
               };
@@ -770,7 +816,8 @@ export function useTagData() {
         tracks: remainingTracks,
       });
     } else {
-      // Update state with modified track
+      // Update state with modified track and timestamps
+      const now = Date.now();
       setTagData({
         ...currentData,
         tracks: {
@@ -778,6 +825,8 @@ export function useTagData() {
           [trackUri]: {
             ...trackData,
             energy,
+            dateCreated: trackData.dateCreated || now,
+            dateModified: now,
           },
         },
       });

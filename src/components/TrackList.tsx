@@ -17,6 +17,8 @@ interface TrackData {
   energy: number;
   bpm: number | null;
   tags: Tag[];
+  dateCreated?: number;
+  dateModified?: number;
 }
 
 interface SpotifyTrackInfo {
@@ -97,6 +99,14 @@ const TrackList: React.FC<TrackListProps> = ({
     "tagify:bpmMaxFilter",
     null
   );
+  const [sortBy, setSortBy] = useLocalStorage<"alphabetical" | "dateCreated" | "dateModified">(
+    "tagify:trackListSortBy",
+    "alphabetical"
+  );
+  const [sortOrder, setSortOrder] = useLocalStorage<"asc" | "desc">(
+    "tagify:trackListSortOrder",
+    "asc"
+  );
 
   const allBpmValues = new Set<number>();
   Object.values(tracks).forEach((track) => {
@@ -104,6 +114,17 @@ const TrackList: React.FC<TrackListProps> = ({
       allBpmValues.add(track.bpm);
     }
   });
+
+  const formatTimestamp = (timestamp: number | undefined): string => {
+    if (!timestamp) return "Unknown";
+    const date = new Date(timestamp);
+
+    return date.toLocaleDateString([], {
+      year: "2-digit",
+      month: "short",
+      day: "numeric",
+    });
+  };
 
   // Sort tags based on their position in the hierarchy
   const sortTags = (tags: Tag[]) => {
@@ -128,6 +149,44 @@ const TrackList: React.FC<TrackListProps> = ({
       const posA = tagPositions[a.tag] || "999-999-999";
       const posB = tagPositions[b.tag] || "999-999-999";
       return posA.localeCompare(posB);
+    });
+  };
+
+  const getSortedTracks = (tracksToSort: [string, any][]) => {
+    return [...tracksToSort].sort((a, b) => {
+      const [uriA, dataA] = a;
+      const [uriB, dataB] = b;
+      const infoA = trackInfo[uriA];
+      const infoB = trackInfo[uriB];
+
+      let comparison = 0;
+
+      switch (sortBy) {
+        case "alphabetical": {
+          if (!infoA || !infoB) return 0;
+          comparison = infoA.name.localeCompare(infoB.name);
+          break;
+        }
+
+        case "dateCreated": {
+          const createdA = dataA.dateCreated || 0;
+          const createdB = dataB.dateCreated || 0;
+          comparison = createdA - createdB;
+          break;
+        }
+
+        case "dateModified": {
+          const modifiedA = dataA.dateModified || 0;
+          const modifiedB = dataB.dateModified || 0;
+          comparison = modifiedA - modifiedB;
+          break;
+        }
+
+        default:
+          return 0;
+      }
+
+      return sortOrder === "desc" ? -comparison : comparison;
     });
   };
 
@@ -396,16 +455,7 @@ const TrackList: React.FC<TrackListProps> = ({
   };
 
   // Sort filtered tracks by track name
-  const allSortedTracks = [...filteredTracks].sort((a, b) => {
-    const infoA = trackInfo[a[0]];
-    const infoB = trackInfo[b[0]];
-
-    if (!infoA || !infoB) return 0;
-
-    // Sort by track name
-    return infoA.name.localeCompare(infoB.name);
-  });
-
+  const allSortedTracks = getSortedTracks(filteredTracks);
   // get only the slice we want to display
   const sortedTracks = allSortedTracks.slice(0, displayCount);
 
@@ -694,6 +744,31 @@ const TrackList: React.FC<TrackListProps> = ({
               : `${Object.keys(tracks).length} tracks`}
           </span>
         </div>
+
+        {/* Sort Controls */}
+        <div className={styles.sortControls}>
+          <label className={styles.sortLabel}>Sort by:</label>
+          <select
+            value={sortBy}
+            onChange={(e) =>
+              setSortBy(e.target.value as "alphabetical" | "dateCreated" | "dateModified")
+            }
+            className={styles.sortSelect}
+          >
+            <option value="alphabetical">Name</option>
+            <option value="dateCreated">Date Created</option>
+            <option value="dateModified">Date Modified</option>
+          </select>
+
+          <button
+            className={styles.sortOrderButton}
+            onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+            title={`Sort ${sortOrder === "asc" ? "descending" : "ascending"}`}
+          >
+            {sortOrder === "asc" ? "↑" : "↓"}
+          </button>
+        </div>
+
         <div className={styles.searchBox}>
           <input
             type="text"
@@ -996,6 +1071,7 @@ const TrackList: React.FC<TrackListProps> = ({
           </p>
         ) : (
           sortedTracks.map(([uri, data]) => {
+            const trackData = tracks[uri];
             const info = trackInfo[uri];
             // Handle case when info isn't available yet (especially for local files)
             const isLocalFile = uri.startsWith("spotify:local:");
@@ -1144,13 +1220,39 @@ const TrackList: React.FC<TrackListProps> = ({
                           <span title="BPM">{data.bpm}</span>
                         </div>
                       )}
+
+                      {/* Timestamp display */}
+                      {(trackData.dateCreated || trackData.dateModified) && (
+                        <div className={styles.trackItemTimestamps}>
+                          {trackData.dateCreated && (
+                            <span
+                              className={styles.trackItemTimestamp}
+                              title={`Created: ${new Date(trackData.dateCreated).toLocaleString()}`}
+                            >
+                              Created: {formatTimestamp(trackData.dateCreated)}
+                            </span>
+                          )}
+                          {trackData.dateModified &&
+                            trackData.dateModified !== trackData.dateCreated && (
+                              <span
+                                className={styles.trackItemTimestamp}
+                                title={`Last updated: ${new Date(
+                                  trackData.dateModified
+                                ).toLocaleString()}`}
+                              >
+                                {trackData.dateCreated ? " | " : ""}Updated:{" "}
+                                {formatTimestamp(trackData.dateModified)}
+                              </span>
+                            )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   {/* Bottom row just for tags that can wrap */}
                   {sortedTagsArray.length > 0 ? (
                     <div className={styles.trackItemTags}>
-                      {sortedTagsArray.map(({ tag }, i) => (
+                      {sortedTagsArray.map(({ tag }: { tag: string }, i: number) => (
                         <span
                           key={i}
                           className={`${styles.trackItemTag} ${
