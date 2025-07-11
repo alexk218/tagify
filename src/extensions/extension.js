@@ -8,7 +8,9 @@
 
   const STORAGE_KEY = "tagify:tagData";
   const PLAYLIST_CACHE_KEY = "tagify:playlistCache";
-  const SETTINGS_KEY = "tagify:playlistSettings";
+  const PLAYLIST_SETTINGS_KEY = "tagify:playlistSettings";
+  const EXTENSION_SETTINGS_KEY = "tagify:extensionSettings";
+  const SETTINGS_CHANGED_EVENT = "tagify:settingsChanged";
 
   // Shared state
   const state = {
@@ -17,10 +19,87 @@
     nowPlayingWidgetTagInfo: null,
     lastTrackUri: null,
     playlistCacheMemory: null,
+    activeExtensions: {
+      tracklistEnhancer: true,
+      playbarEnhancer: true,
+    },
     initialized: {
       menu: false,
-      indicator: false,
-      playbar: false,
+      tracklistEnhancer: false,
+      playbarEnhancer: false,
+    },
+  };
+
+  const DEFAULT_EXTENSION_SETTINGS = {
+    enableTracklistEnhancer: true,
+    enablePlaybarEnhancer: true,
+  };
+
+  const settingsUtils = {
+    /**
+     * Load extension settings from localStorage
+     * @returns {boolean} whether data was successfully loaded
+     */
+    loadExtensionSettings() {
+      try {
+        const savedExtensionSettings = localStorage.getItem(EXTENSION_SETTINGS_KEY);
+        if (savedExtensionSettings) {
+          const data = JSON.parse(savedExtensionSettings);
+          state.activeExtensions.tracklistEnhancer = data.enableTracklistEnhancer ?? true;
+          state.activeExtensions.playbarEnhancer = data.enablePlaybarEnhancer ?? true;
+          return true;
+        } else {
+          // create initial localStorage item
+          this.saveExtensionSettings(DEFAULT_EXTENSION_SETTINGS);
+          state.activeExtensions.tracklistEnhancer =
+            DEFAULT_EXTENSION_SETTINGS.enableTracklistEnhancer;
+          state.activeExtensions.playbarEnhancer = DEFAULT_EXTENSION_SETTINGS.enablePlaybarEnhancer;
+          return false; // Indicates we created defaults
+        }
+      } catch (error) {
+        console.error("Tagify: Error loading extension settings", error);
+        this.saveExtensionSettings(DEFAULT_EXTENSION_SETTINGS);
+        return false;
+      }
+    },
+    saveExtensionSettings(settings) {
+      localStorage.setItem(EXTENSION_SETTINGS_KEY, JSON.stringify(settings));
+    },
+    subscribe() {
+      window.addEventListener(SETTINGS_CHANGED_EVENT, (event) => {
+        this.handleSettingsChange(event.detail);
+      });
+    },
+
+    handleSettingsChange(newSettings) {
+      const oldSettings = { ...state.activeExtensions };
+
+      state.activeExtensions.tracklistEnhancer = newSettings.enableTracklistEnhancer;
+      state.activeExtensions.playbarEnhancer = newSettings.enablePlaybarEnhancer;
+
+      if (oldSettings.tracklistEnhancer !== state.activeExtensions.tracklistEnhancer) {
+        if (state.activeExtensions.tracklistEnhancer) {
+          tracklistEnhancer.initialize();
+        } else {
+          tracklistEnhancer.disable();
+        }
+      }
+
+      if (oldSettings.playbarEnhancer !== state.activeExtensions.playbarEnhancer) {
+        if (state.activeExtensions.playbarEnhancer) {
+          playbarEnhancer.initialize();
+        } else {
+          playbarEnhancer.disable();
+        }
+      }
+    },
+
+    dispatchSettingsChange(settings) {
+      window.dispatchEvent(
+        new CustomEvent(SETTINGS_CHANGED_EVENT, {
+          detail: settings,
+        })
+      );
     },
   };
 
@@ -28,7 +107,7 @@
   const utils = {
     /**
      * Load tagged tracks from localStorage
-     * @returns {boolean} Whether data was successfully loaded
+     * @returns {boolean} whether data was successfully loaded
      */
     loadTaggedTracks() {
       try {
@@ -86,7 +165,7 @@
      */
     getPlaylistSettings() {
       try {
-        const settingsString = localStorage.getItem(SETTINGS_KEY);
+        const settingsString = localStorage.getItem(PLAYLIST_SETTINGS_KEY);
         if (settingsString) {
           return JSON.parse(settingsString);
         }
@@ -401,8 +480,8 @@
     },
   };
 
-  // Context menu feature
-  const menuFeature = {
+  // Context menu feature - adds "Tag with Tagify" to context menu
+  const contextMenuItem = {
     /**
      * Initialize the context menu feature
      */
@@ -471,13 +550,16 @@
     },
   };
 
-  // Tracklist indicator feature
-  const indicatorFeature = {
+  // Tracklist indicator feature - adds 'Tagify' column to tracklists
+  const tracklistEnhancer = {
+    tracklistObservers: new Set(),
+    updateInterval: null,
     /**
      * Initialize the tracklist indicator feature
      */
     initialize() {
-      if (state.initialized.indicator) return;
+      if (state.initialized.tracklistEnhancer) return;
+      if (!state.activeExtensions.tracklistEnhancer) return;
 
       try {
         // Set up mutation observer
@@ -486,8 +568,8 @@
         // Initial processing
         setTimeout(this.updateTracklists, 500);
 
-        // Periodic refresh to catch any missed updates
-        setInterval(this.updateTracklists, 3000);
+        // Store the interval reference for cleanup
+        this.updateInterval = setInterval(this.updateTracklists, 3000);
 
         // Setup debug utility
         window.tagifyDebug = {
@@ -496,9 +578,9 @@
           checkTrack: (uri) => console.log(`Track ${uri} is tagged: ${utils.isTrackTagged(uri)}`),
         };
 
-        state.initialized.indicator = true;
+        state.initialized.tracklistEnhancer = true;
       } catch (error) {
-        console.error("Tagify: Error initializing indicator feature:", error);
+        console.error("Tagify: Error initializing tracklist indicator feature:", error);
       }
     },
 
@@ -510,13 +592,25 @@
         state.observer.disconnect();
       }
 
+      // Clear any existing tracklist observers
+      this.tracklistObservers.forEach((observer) => observer.disconnect());
+      this.tracklistObservers.clear();
+
       // Observer watches for tracklist changes
       const tracklistObserver = new MutationObserver(() => {
-        indicatorFeature.updateTracklists();
+        // CHECK IF STILL ACTIVE BEFORE PROCESSING
+        if (!state.activeExtensions.tracklistEnhancer) return;
+        tracklistEnhancer.updateTracklists();
       });
+
+      // Store reference for cleanup
+      this.tracklistObservers.add(tracklistObserver);
 
       // Main observer - detects when tracklists are added to the DOM (when you change playlists)
       state.observer = new MutationObserver(async (mutations) => {
+        // CHECK IF STILL ACTIVE BEFORE PROCESSING
+        if (!state.activeExtensions.tracklistEnhancer) return;
+
         for (const mutation of mutations) {
           if (mutation.type === "childList") {
             const addedTracklists = Array.from(mutation.addedNodes).filter(
@@ -527,16 +621,23 @@
             );
 
             if (addedTracklists.length > 0) {
-              // console.log("Tagify: New tracklist detected, updating...");
-              indicatorFeature.updateTracklists();
+              tracklistEnhancer.updateTracklists();
 
               // Observe each tracklist for changes
               const tracklists = document.getElementsByClassName("main-trackList-indexable");
               for (const tracklist of tracklists) {
-                tracklistObserver.observe(tracklist, {
+                const newObserver = new MutationObserver(() => {
+                  if (!state.activeExtensions.tracklistEnhancer) return;
+                  tracklistEnhancer.updateTracklists();
+                });
+
+                newObserver.observe(tracklist, {
                   childList: true,
                   subtree: true,
                 });
+
+                // Store reference for cleanup
+                this.tracklistObservers.add(newObserver);
               }
             }
           }
@@ -552,10 +653,17 @@
       // Get all tracklists and observe them for changes
       const tracklists = document.getElementsByClassName("main-trackList-indexable");
       for (const tracklist of tracklists) {
-        tracklistObserver.observe(tracklist, {
+        const newObserver = new MutationObserver(() => {
+          if (!state.activeExtensions.tracklistEnhancer) return;
+          tracklistEnhancer.updateTracklists();
+        });
+
+        newObserver.observe(tracklist, {
           childList: true,
           subtree: true,
         });
+
+        this.tracklistObservers.add(newObserver);
       }
     },
 
@@ -563,10 +671,12 @@
      * Update all tracklists on the page
      */
     updateTracklists() {
-      const tracklists = document.getElementsByClassName("main-trackList-indexable");
+      // CHECK IF STILL ACTIVE BEFORE PROCESSING
+      if (!state.activeExtensions.tracklistEnhancer) return;
 
+      const tracklists = document.getElementsByClassName("main-trackList-indexable");
       for (const tracklist of tracklists) {
-        indicatorFeature.processTracklist(tracklist);
+        tracklistEnhancer.processTracklist(tracklist);
       }
     },
 
@@ -580,14 +690,14 @@
       // Add column to header first
       const header = tracklist.querySelector(".main-trackList-trackListHeaderRow");
       if (header) {
-        indicatorFeature.addColumnToHeader(header);
+        tracklistEnhancer.addColumnToHeader(header);
       }
 
       // Process all track rows
       const trackRows = tracklist.querySelectorAll(".main-trackList-trackListRow");
 
       trackRows.forEach((row) => {
-        indicatorFeature.addTagInfoToTrack(row);
+        tracklistEnhancer.addTagInfoToTrack(row);
       });
     },
 
@@ -730,7 +840,7 @@
           state.taggedTracks[trackUri].tags &&
           state.taggedTracks[trackUri].tags.length > 0
         ) {
-          const tagList = indicatorFeature.createTagListTooltip(trackUri);
+          const tagList = tracklistEnhancer.createTagListTooltip(trackUri);
           tagText.title = tagList;
         }
         tagInfo.appendChild(tagText);
@@ -880,15 +990,47 @@
 
       return "";
     },
+
+    disable() {
+      // Clear the interval
+      if (this.updateInterval) {
+        clearInterval(this.updateInterval);
+        this.updateInterval = null;
+      }
+
+      // Disconnect main observer
+      if (state.observer) {
+        state.observer.disconnect();
+        state.observer = null;
+      }
+
+      // Disconnect all tracklist observers
+      this.tracklistObservers.forEach((observer) => observer.disconnect());
+      this.tracklistObservers.clear();
+
+      // Remove ALL existing tag columns immediately
+      document.querySelectorAll(".tagify-header, .tagify-info").forEach((el) => {
+        console.log("Removing element:", el);
+        el.remove();
+      });
+
+      // Reset grid styles that were modified
+      document.querySelectorAll('[style*="grid-template-columns"]').forEach((el) => {
+        el.removeAttribute("style");
+      });
+
+      state.initialized.tracklistEnhancer = false;
+    },
   };
 
   // Playbar feature
-  const playbarFeature = {
+  const playbarEnhancer = {
     /**
      * Initialize the playbar feature
      */
     async initialize() {
-      if (state.initialized.playbar) return;
+      if (state.initialized.playbarEnhancer) return;
+      if (!state.activeExtensions.playbarEnhancer) return;
 
       try {
         // Wait for Player to be ready
@@ -917,7 +1059,7 @@
           subtree: true,
         });
 
-        state.initialized.playbar = true;
+        state.initialized.playbarEnhancer = true;
       } catch (error) {
         console.error("Tagify: Error initializing playbar feature:", error);
       }
@@ -928,6 +1070,14 @@
      */
     async updateNowPlayingWidget() {
       try {
+        if (!state.activeExtensions.playbarEnhancer) {
+          // If feature is disabled, hide existing element and return
+          if (state.nowPlayingWidgetTagInfo) {
+            state.nowPlayingWidgetTagInfo.style.display = "none";
+          }
+          return;
+        }
+
         // Get the current track URI
         const trackUri = Spicetify.Player.data?.item?.uri;
         if (
@@ -980,7 +1130,7 @@
             state.taggedTracks[trackUri].tags &&
             state.taggedTracks[trackUri].tags.length > 0
           ) {
-            const tagListTooltip = indicatorFeature.createTagListTooltip(trackUri);
+            const tagListTooltip = tracklistEnhancer.createTagListTooltip(trackUri);
             state.nowPlayingWidgetTagInfo.title = tagListTooltip;
           }
 
@@ -1024,19 +1174,31 @@
         console.error("Tagify: Error updating Now Playing widget", error);
       }
     },
+
+    disable() {
+      if (state.nowPlayingWidgetTagInfo) {
+        // Hide instead of removing (in case Spotify tries to reference it)
+        state.nowPlayingWidgetTagInfo.style.display = "none";
+        // Remove from DOM
+        state.nowPlayingWidgetTagInfo.remove();
+        state.nowPlayingWidgetTagInfo = null;
+      }
+
+      state.lastTrackUri = null;
+      state.initialized.playbarEnhancer = false;
+    },
   };
 
   // Main initialization
   const initialize = async () => {
-    // Try to load tag data first since it's needed by all features
-    if (!utils.loadTaggedTracks()) {
-      console.log("Tagify: No tagged tracks found");
-    }
+    utils.loadTaggedTracks();
+    settingsUtils.loadExtensionSettings();
+    settingsUtils.subscribe();
 
     // Initialize features
-    menuFeature.initialize();
-    indicatorFeature.initialize();
-    playbarFeature.initialize();
+    contextMenuItem.initialize();
+    tracklistEnhancer.initialize();
+    playbarEnhancer.initialize();
   };
 
   // Start initialization
