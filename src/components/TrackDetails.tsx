@@ -2,8 +2,6 @@ import React, { useEffect, useState } from "react";
 import styles from "./TrackDetails.module.css";
 import { TagCategory, TrackTag } from "../hooks/useTagData";
 import ReactStars from "react-rating-stars-component";
-import { findPlaylistsContainingTrack } from "../utils/PlaylistManager";
-import { getPlaylistSettings } from "../utils/PlaylistSettings";
 
 interface TrackDetailsProps {
   track: {
@@ -65,7 +63,6 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   const artistNames = track.artists ? track.artists.map((artist) => artist.name).join(", ") : "";
   const [albumCover, setAlbumCover] = useState<string | null>(null);
   const [isLoadingCover, setIsLoadingCover] = useState(true);
-  const containingPlaylists = track.uri ? findPlaylistsContainingTrack(track.uri) : [];
   const [trackMetadata, setTrackMetadata] = useState<TrackMetadata>({
     releaseDate: "",
     trackLength: "",
@@ -468,56 +465,6 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   // Handle removing energy rating
   const handleRemoveEnergy = () => {
     onSetEnergy(0);
-  };
-
-  const isPlaylistExcluded = (playlistId: string, playlistName: string): boolean => {
-    // Get the current playlist settings
-    const settings = getPlaylistSettings();
-
-    // Check if this is a playlist that's specifically excluded
-    if (settings.excludedPlaylistIds.includes(playlistId)) return true;
-
-    // Check for excluded keywords in name
-    if (
-      settings.excludedPlaylistKeywords.some((keyword) =>
-        playlistName.toLowerCase().includes(keyword.toLowerCase())
-      )
-    ) {
-      return true;
-    }
-
-    // Also check hardcoded exclusions like MASTER
-    if (playlistName === "MASTER") return true;
-
-    return false;
-  };
-
-  const shouldShowLikedOnlyWarning = (): boolean => {
-    // If no playlists at all, don't show warning
-    if (containingPlaylists.length === 0) return false;
-
-    // Find if there's at least one non-excluded, non-Liked Songs playlist
-    const hasNonExcludedPlaylists = containingPlaylists.some((playlist) => {
-      // Skip Liked Songs and excluded playlists
-      return playlist.id !== "liked" && !isPlaylistExcluded(playlist.id, playlist.name);
-    });
-
-    // Show warning if either:
-    // 1. Only in Liked Songs, or
-    // 2. Only in Liked Songs and excluded playlists
-    return !hasNonExcludedPlaylists;
-  };
-
-  const showLikedOnlyWarning = shouldShowLikedOnlyWarning();
-
-  const navigateToPlaylist = (playlistId: string) => {
-    if (playlistId === "liked") {
-      // Navigate to Liked Songs
-      Spicetify.Platform.History.push("/collection/tracks");
-    } else {
-      // Navigate to the playlist
-      Spicetify.Platform.History.push(`/playlist/${playlistId}`);
-    }
   };
 
   // Navigation functions
@@ -952,54 +899,6 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Playlists Section - moved to full-width below the main content */}
-      <div className={styles.playlistsWrapper}>
-        {containingPlaylists.length > 0 ? (
-          <>
-            <div className={styles.playlistsSection}>
-              <div className={styles.playlistSectionHeader}>
-                <h4 className={styles.sectionTitle}>In Playlists:</h4>
-                {showLikedOnlyWarning && (
-                  <span
-                    className={styles.playlistWarning}
-                    title="This track is only in Liked Songs or excluded playlists. Consider organizing it into appropriate playlists."
-                  >
-                    <span className={styles.playlistWarningIcon}>⚠️</span>
-                    Only in Liked Songs
-                  </span>
-                )}
-              </div>
-              <div className={styles.playlistList}>
-                {containingPlaylists.map((playlist) => (
-                  <div
-                    key={playlist.id}
-                    className={styles.playlistItem}
-                    onClick={() => navigateToPlaylist(playlist.id)}
-                    title={`Go to ${playlist.name} (Owner: ${playlist.owner})`}
-                  >
-                    <span className={styles.playlistName}>{playlist.name}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className={styles.playlistsSection}>
-            <div className={styles.playlistSectionHeader}>
-              <h4 className={styles.sectionTitle}>In Playlists:</h4>
-              <span
-                className={styles.playlistWarning}
-                title="This track was not found in any playlists in the cache. Consider adding it to appropriate playlists."
-              >
-                <span className={styles.playlistWarningIcon}>⚠️</span>
-                Not in any playlists
-              </span>
-            </div>
-            <div className={styles.noPlaylists}>Not found in any playlists in cache</div>
-          </div>
-        )}
       </div>
 
       {/* Tags section - Moved below in a horizontal layout */}
