@@ -6,6 +6,11 @@ Tagify is a powerful [Spicetify](https://github.com/spicetify/cli) custom app th
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/alexk218/tagify.svg)](https://github.com/alexk218/tagify/stargazers)
 
+## 🎬 Demo
+
+Check out a video walkthrough of Tagify in action:  
+🔗 [Watch YouTube demo](https://www.youtube.com/watch?v=0N1yp8--mTQ)
+
 ## Motivation
 
 As a DJ and obsessive music organizer, I spent _years_ searching for a good music tagging system - with no luck.
