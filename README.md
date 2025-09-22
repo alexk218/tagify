@@ -119,7 +119,7 @@ Soon you'll be able to...
 
 ## Community & Support
 Join the community and influence Tagify's roadmap.
-- **Upcoming Features**:[Tagify Roadmap](https://github.com/alexk218/tagify/discussions/4)
+- **Upcoming Features**: [Tagify Roadmap](https://github.com/alexk218/tagify/discussions/4)
 - **Feature Requests**: [Share your ideas](https://github.com/alexk218/tagify/discussions/categories/ideas-feature-requests)
 - **Get Help**: [Ask questions](https://github.com/alexk218/tagify/discussions/categories/q-a)
 - **Report Bugs**: [Bug reports](https://github.com/alexk218/tagify/discussions/categories/bug-report)
