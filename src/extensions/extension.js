@@ -440,29 +440,51 @@
       }
 
       try {
-        // First try standard approach
-        const uri =
-          values[0]?.pendingProps?.children[0]?.props?.children?.props?.uri ||
-          values[0]?.pendingProps?.children[0]?.props?.children?.props?.children
-            ?.props?.uri ||
-          values[0]?.pendingProps?.children[0]?.props?.children?.props?.children
-            ?.props?.children?.props?.uri ||
-          values[0]?.pendingProps?.children[0]?.props?.children[0]?.props?.uri;
+        const findUri = (obj, depth = 0, path = "values[0]") => {
+          if (depth > 10) return null;
 
-        // If we have a URI at this point, return it
-        if (uri) return uri;
+          if (obj && typeof obj === "object") {
+            if (
+              obj.uri &&
+              typeof obj.uri === "string" &&
+              obj.uri.startsWith("spotify:")
+            ) {
+              Logger.debug("🔍 FOUND URI at path:", path + ".uri");
+              Logger.debug("🔍 URI value:", obj.uri);
+              return { uri: obj.uri, path: path + ".uri" };
+            }
 
-        // Special handling for local files - they might have a different structure
-        const localUri = this.extractLocalFileUri(values[0]);
-        if (localUri) return localUri;
+            // Check arrays
+            if (Array.isArray(obj)) {
+              for (let i = 0; i < obj.length; i++) {
+                const result = findUri(obj[i], depth + 1, `${path}[${i}]`);
+                if (result) return result;
+              }
+            } else {
+              // Check object properties
+              for (let key in obj) {
+                if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                  const result = findUri(obj[key], depth + 1, `${path}.${key}`);
+                  if (result) return result;
+                }
+              }
+            }
+          }
+          return null;
+        };
 
-        // If we couldn't find a URI, log a warning and return null
-        Logger.warn("Warning: Could not extract URI from element");
-        return null;
-      } catch (e) {
-        Logger.error("Error getting URI from element:", e);
+        const result = findUri(values[0]);
+        if (result) {
+          Logger.debug("✅ Use this path:", result.path);
+          return result.uri;
+        }
+      } catch (error) {
+        Logger.error("Error in getTracklistTrackUri:", error);
         return null;
       }
+
+      Logger.warn("Warning: Could not extract URI from element");
+      return null;
     },
 
     extractLocalFileUri(element) {
@@ -851,8 +873,8 @@
                 });
 
                 newObserver.observe(tracklist, {
-                  childList: true,
-                  subtree: true,
+                  childList: true, // Watch for added/removed children
+                  subtree: true, // Watch all descendants
                 });
 
                 // Store reference for cleanup
