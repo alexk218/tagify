@@ -1008,7 +1008,7 @@
       let template = "[index] 16px [first] 3fr";
 
       // Build variable columns
-      for (let i = 1; i < totalColumns - 1; i++) {
+      for (let i = 1; i < totalColumns - 2; i++) {
         const columnIndex = i + 2; // Start from 3 since we have index(1) and first(2)
 
         if (columnIndex === tagifyColumnIndex) {
