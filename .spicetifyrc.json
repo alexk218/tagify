@@ -1,0 +1,9 @@
+{
+  "compile": {
+    "jsx": "react",
+    "typescript": true
+  },
+  "flags": {
+    "legacyJSX": true
+  }
+}

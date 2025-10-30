@@ -1,0 +1,7 @@
+{
+    "name": "Tagify",
+    "description": "Apply custom tags and star ratings to your tracks.",
+    "preview": "src/assets/preview.png",
+    "readme": "README.md",
+    "tags": ["tags", "music-management", "playlists"]
+}
