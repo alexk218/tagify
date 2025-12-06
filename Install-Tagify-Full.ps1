@@ -166,6 +166,19 @@ function Test-Prerequisites {
     }
     
     Write-Log "Spotify found at: $spotifyPath"
+
+    $compatCheck = Test-SpotifyCompatibility
+    
+    if (-not $compatCheck.CanProceed) {
+        Handle-SpotifyIncompatibility `
+            -CurrentVersion $compatCheck.SpotifyVersion `
+            -RequiredVersion $compatCheck.RecommendedVersion `
+            -IsTooNew $compatCheck.IsTooNew
+    }
+    elseif ($compatCheck.Warning) {
+        Write-Log "⚠️  $($compatCheck.Warning)" -ForegroundColor Yellow
+    }
+    
     Write-Log "All prerequisites met"
 }
 
@@ -227,6 +240,449 @@ function Test-SpicetifyState {
     return $state
 }
 #endregion Prerequisites and Validation
+
+#region Spotify Version Control
+function Get-SpotifyVersion {
+    try {
+        Write-Log "Detecting Spotify version..." -ForegroundColor DarkMagenta
+        
+        $spotifyPaths = @(
+            "$env:APPDATA\Spotify\Spotify.exe",
+            "$env:LOCALAPPDATA\Microsoft\WindowsApps\Spotify.exe" # todo: remove this - microsoft store ?
+        )
+        
+        # Method 1: Check Spotify.exe version info
+        foreach ($path in $spotifyPaths) {
+            if (Test-Path $path) {
+                $versionInfo = (Get-Item $path).VersionInfo
+                if ($versionInfo.FileVersion) {
+                    # Extract semantic version (1.2.77.0 -> 1.2.77)
+                    $version = $versionInfo.FileVersion -replace '^(\d+\.\d+\.\d+).*', '$1'
+                    Write-Log "Found Spotify at: $path (version: $version)"
+                    return $version
+                }
+            }
+        }
+        
+        # Method 2: Check prefs file (fallback)
+        $prefsPath = "$env:APPDATA\Spotify\prefs"
+        if (Test-Path $prefsPath) {
+            $prefs = Get-Content $prefsPath -Raw
+            
+            # Match: app.last-launched-version="1.2.77.358.g4339a634"
+            if ($prefs -match 'app\.last-launched-version="([\d.]+)') {
+                $fullVersion = $matches[1]
+                
+                # Extract just the semantic version (1.2.77) from 1.2.77.358.g4339a634
+                if ($fullVersion -match '^(\d+\.\d+\.\d+)') {
+                    $version = $matches[1]
+                    Write-Log "Found Spotify version: $version (full: $fullVersion)"
+                    return $version
+                }
+            }
+        }
+
+        Write-Log "Could not detect Spotify version"
+        return $null
+    }
+    catch {
+        Write-Log "Error detecting Spotify version: $_"
+        return $null
+    }
+}
+
+function Get-SystemArchitecture {
+    $arch = $env:PROCESSOR_ARCHITECTURE
+    
+    switch ($arch) {
+        "AMD64" { 
+            return @{
+                Type        = "x64"
+                DisplayName = "64-bit (x64)"
+            }
+        }
+        "ARM64" { 
+            return @{
+                Type        = "ARM64"
+                DisplayName = "ARM64"
+            }
+        }
+        default { 
+            return @{
+                Type        = "x86"
+                DisplayName = "32-bit (x86)"
+            }
+        }
+    }
+}
+
+function Get-SpicetifyCompatibilityInfo {
+    <#
+    .SYNOPSIS
+    Fetches latest compatibility info from Spicetify's GitHub releases
+    
+    .DESCRIPTION
+    Fetches live compatibility data from Spicetify's latest release.
+    Returns $null if fetch fails.
+    #>
+    
+    try {
+        Write-Log "Fetching compatibility data from Spicetify releases..." -ForegroundColor DarkMagenta
+        
+        $apiUrl = "https://api.github.com/repos/spicetify/cli/releases/latest"
+        $release = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 15
+        
+        $body = $release.body
+        $spicetifyVersion = $release.tag_name -replace 'v', ''
+        
+        # Parse compatibility section
+        # Pattern matches: "Spotify for Windows/Microsoft Store: `1.2.14` -> `1.2.77`"
+        $windowsMatch = [regex]::Match($body, 'Spotify for Windows[^:]*:\s*`([\d.]+)`\s*->\s*`([\d.]+)`')
+        $macMatch = [regex]::Match($body, 'Spotify for macOS[^:]*:\s*`([\d.]+)`\s*->\s*`([\d.]+)`')
+        $linuxMatch = [regex]::Match($body, 'Spotify for Linux[^:]*:\s*`([\d.]+)`\s*->\s*`([\d.]+)`')
+        
+        if (-not $windowsMatch.Success) {
+            Write-Log "Could not parse compatibility info from release notes" -ForegroundColor Yellow
+            return $null
+        }
+        
+        $compatibility = @{
+            LastUpdated      = Get-Date -Format "yyyy-MM-dd"
+            Source           = "Spicetify GitHub Releases"
+            SpicetifyVersion = $spicetifyVersion
+            Spotify          = @{
+                Windows = @{
+                    Min = $windowsMatch.Groups[1].Value
+                    Max = $windowsMatch.Groups[2].Value
+                }
+                macOS   = @{
+                    Min = if ($macMatch.Success) { $macMatch.Groups[1].Value } else { $null }
+                    Max = if ($macMatch.Success) { $macMatch.Groups[2].Value } else { $null }
+                }
+                Linux   = @{
+                    Min = if ($linuxMatch.Success) { $linuxMatch.Groups[1].Value } else { $null }
+                    Max = if ($linuxMatch.Success) { $linuxMatch.Groups[2].Value } else { $null }
+                }
+            }
+        }
+        
+        Write-Log "✓ Fetched compatibility for Spicetify v$spicetifyVersion" -ForegroundColor Green
+        Write-Log "  Windows: $($compatibility.Spotify.Windows.Min) -> $($compatibility.Spotify.Windows.Max)"
+        
+        return $compatibility
+    }
+    catch {
+        Write-Log "Failed to fetch compatibility data: $_" -ForegroundColor Red
+        return $null
+    }
+}
+
+function Compare-SpotifyVersion {
+    <#
+    .SYNOPSIS
+    Compares a Spotify version against a min/max range
+    
+    .PARAMETER Version
+    The version to check (e.g., "1.2.78")
+    
+    .PARAMETER MinVersion
+    Minimum supported version (e.g., "1.2.14")
+    
+    .PARAMETER MaxVersion
+    Maximum supported version (e.g., "1.2.77")
+    
+    .OUTPUTS
+    Hashtable with IsCompatible, IsTooOld, IsTooNew properties
+    #>
+    
+    param(
+        [string]$Version,
+        [string]$MinVersion,
+        [string]$MaxVersion
+    )
+    
+    try {
+        # Remove any prefixes and trim
+        $Version = $Version -replace '[^\d.]', '' -replace '\.+$', ''
+        $MinVersion = $MinVersion -replace '[^\d.]', '' -replace '\.+$', ''
+        $MaxVersion = $MaxVersion -replace '[^\d.]', '' -replace '\.+$', ''
+        
+        $versionObj = [version]$Version
+        $minObj = [version]$MinVersion
+        $maxObj = [version]$MaxVersion
+        
+        $isCompatible = ($versionObj -ge $minObj) -and ($versionObj -le $maxObj)
+        
+        return @{
+            IsCompatible = $isCompatible
+            IsTooOld     = $versionObj -lt $minObj
+            IsTooNew     = $versionObj -gt $maxObj
+        }
+    }
+    catch {
+        Write-Log "Version comparison failed: $_"
+        return @{
+            IsCompatible = $null
+            Error        = $_.Exception.Message
+        }
+    }
+}
+
+function Test-SpotifyCompatibility {
+    <#
+    .SYNOPSIS
+    Tests if current Spotify version is compatible with Spicetify
+    
+    .OUTPUTS
+    Hashtable with CanProceed, IsCompatible, and other status properties
+    #>
+    
+    Write-Log "Checking Spotify compatibility..." -ForegroundColor DarkMagenta
+    
+    # Get installed Spotify version
+    $spotifyVersion = Get-SpotifyVersion
+    
+    if (-not $spotifyVersion) {
+        Write-Log "Could not detect Spotify version - proceeding with caution" -ForegroundColor Yellow
+        return @{
+            CanProceed = $true
+            Warning    = "Spotify version could not be detected"
+        }
+    }
+    
+    Write-Log "Detected Spotify version: $spotifyVersion"
+    
+    # Get compatibility data from Spicetify releases
+    $compatData = Get-SpicetifyCompatibilityInfo
+    
+    if (-not $compatData) {
+        Write-Log "Could not fetch compatibility data - proceeding with caution" -ForegroundColor Yellow
+        return @{
+            CanProceed     = $true
+            Warning        = "Could not verify compatibility (network error or API unavailable)"
+            SpotifyVersion = $spotifyVersion
+        }
+    }
+    
+    $windowsCompat = $compatData.Spotify.Windows
+    
+    if (-not $windowsCompat.Min -or -not $windowsCompat.Max) {
+        Write-Log "Compatibility information incomplete - proceeding with caution" -ForegroundColor Yellow
+        return @{
+            CanProceed     = $true
+            Warning        = "Compatibility information incomplete"
+            SpotifyVersion = $spotifyVersion
+        }
+    }
+    
+    # Compare versions
+    $comparison = Compare-SpotifyVersion `
+        -Version $spotifyVersion `
+        -MinVersion $windowsCompat.Min `
+        -MaxVersion $windowsCompat.Max
+    
+    if ($comparison.IsCompatible -eq $true) {
+        Write-Log "✓ Spotify version is compatible" -ForegroundColor Green
+        return @{
+            CanProceed       = $true
+            IsCompatible     = $true
+            SpotifyVersion   = $spotifyVersion
+            CompatibleRange  = "$($windowsCompat.Min) - $($windowsCompat.Max)"
+            SpicetifyVersion = $compatData.SpicetifyVersion
+        }
+    }
+    
+    # Not compatible
+    $reason = if ($comparison.IsTooNew) {
+        "Your Spotify version ($spotifyVersion) is TOO NEW"
+    }
+    elseif ($comparison.IsTooOld) {
+        "Your Spotify version ($spotifyVersion) is TOO OLD"
+    }
+    else {
+        "Your Spotify version ($spotifyVersion) is NOT COMPATIBLE"
+    }
+    
+    return @{
+        CanProceed         = $false
+        IsCompatible       = $false
+        Reason             = $reason
+        SpotifyVersion     = $spotifyVersion
+        RequiredRange      = "$($windowsCompat.Min) - $($windowsCompat.Max)"
+        RecommendedVersion = $windowsCompat.Max
+        SpicetifyVersion   = $compatData.SpicetifyVersion
+        IsTooNew           = $comparison.IsTooNew
+        IsTooOld           = $comparison.IsTooOld
+    }
+}
+
+function Get-SpotifyDownloadUrl {
+    <#
+    .SYNOPSIS
+    Constructs Loadspot URL information for downloading Spotify
+    
+    .PARAMETER Version
+    Spotify version to download (e.g., "1.2.77")
+    
+    .OUTPUTS
+    Hashtable with BrowserUrl, Version, and Architecture
+    #>
+    
+    param(
+        [string]$Version
+    )
+    
+    $sysArch = Get-SystemArchitecture
+    $baseUrl = "https://loadspot.pages.dev/"
+    
+    return @{
+        BrowserUrl          = $baseUrl
+        Version             = $Version
+        Architecture        = $sysArch.Type
+        ArchitectureDisplay = $sysArch.DisplayName
+    }
+}
+
+function Handle-SpotifyIncompatibility {
+    param(
+        [string]$CurrentVersion,
+        [string]$RequiredVersion,
+        [bool]$IsTooNew
+    )
+    
+    if ($IsTooNew) {
+        $sysArch = Get-SystemArchitecture
+        $loadspotUrl = "https://loadspot.pages.dev/"
+        
+        $message = @"
+
+═══════════════════════════════════════════════════════════
+⚠️  SPOTIFY DOWNGRADE REQUIRED
+═══════════════════════════════════════════════════════════
+
+Current Spotify version: v$CurrentVersion (TOO NEW)
+Required version: v$RequiredVersion or older
+
+Spicetify doesn't support Spotify v$CurrentVersion yet.
+
+═══════════════════════════════════════════════════════════
+DOWNLOAD INSTRUCTIONS
+═══════════════════════════════════════════════════════════
+
+1. We'll open Loadspot in your browser
+
+2. On the Loadspot page, download:
+   
+   ┌────────────────────────────────────────────────────────┐
+   │  Spotify Version: $RequiredVersion                          │
+   │  Architecture: $($sysArch.DisplayName)                      │
+   └────────────────────────────────────────────────────────┘
+
+3. After downloading, UNINSTALL your current Spotify:
+   Windows Settings > Apps > Spotify > Uninstall
+
+4. Install the downloaded Spotify v$RequiredVersion
+
+5. IMPORTANT: Disable auto-updates in Spotify settings:
+   Settings > Show Advanced Settings > Automatic Updates > OFF
+
+6. Re-run this Tagify installer
+
+═══════════════════════════════════════════════════════════
+NEED HELP?
+═══════════════════════════════════════════════════════════
+
+Spicetify Discord: https://discord.gg/spicetify
+
+═══════════════════════════════════════════════════════════
+
+"@
+        
+        Write-Host $message -ForegroundColor Yellow
+        
+        # Emphasis box for version/arch
+        Write-Host ""
+        Write-Host "  ╔════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+        Write-Host "  ║  DOWNLOAD THIS VERSION:                            ║" -ForegroundColor Cyan
+        Write-Host "  ║                                                    ║" -ForegroundColor Cyan
+        Write-Host "  ║  Spotify v$RequiredVersion ($($sysArch.Type))                        ║" -ForegroundColor Cyan
+        Write-Host "  ╚════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+        Write-Host ""
+        
+        Write-Host "Press ENTER to open Loadspot download page..." -NoNewline -ForegroundColor Green
+        Read-Host
+        
+        Write-Log "Opening Loadspot..."
+        Start-Process $loadspotUrl
+        
+        # Show persistent notification
+        Show-Notification "Tagify Installer - Action Required" "Download Spotify v$RequiredVersion ($($sysArch.Type)) from Loadspot"
+        
+        Write-Host ""
+        Write-Host "✓ Loadspot opened in your browser" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "Remember to download: Spotify v$RequiredVersion ($($sysArch.Type))" -ForegroundColor Yellow
+        Write-Host "After installing, re-run this installer." -ForegroundColor Yellow
+        Write-Host ""
+        
+        Write-ErrorAndExit "Installation cancelled - please downgrade Spotify to v$RequiredVersion first"
+    }
+    else {
+        # Version too old
+        $message = @"
+
+═══════════════════════════════════════════════════════════
+⚠️  SPOTIFY UPDATE REQUIRED
+═══════════════════════════════════════════════════════════
+
+Current Spotify version: v$CurrentVersion (TOO OLD)
+Required version: v$RequiredVersion or newer
+
+Your Spotify is outdated. Please update to the latest version.
+
+═══════════════════════════════════════════════════════════
+
+"@
+        
+        Write-Host $message -ForegroundColor Yellow
+        Write-Host "Press ENTER to open Spotify download page..." -NoNewline -ForegroundColor Green
+        Read-Host
+        
+        Start-Process "https://www.spotify.com/download"
+        Write-Host "✓ Spotify download page opened" -ForegroundColor Green
+        
+        Write-ErrorAndExit "Installation cancelled - please update Spotify first"
+    }
+}
+
+# todo: maybe not a notification with timer? user must click 'x'.
+function Show-SpotifyDowngradeNotification {
+    param(
+        [string]$Version,
+        [string]$Architecture
+    )
+    
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        
+        $notification = New-Object System.Windows.Forms.NotifyIcon
+        $notification.Icon = [System.Drawing.SystemIcons]::Information
+        $notification.BalloonTipTitle = "Spotify Downgrade Required"
+        $notification.BalloonTipText = "Download Spotify v$Version ($Architecture) from Loadspot"
+        $notification.Visible = $true
+        
+        # Show for longer (10 seconds)
+        $notification.ShowBalloonTip(10000)
+        
+        Start-Sleep -Seconds 2
+        $notification.Dispose()
+    }
+    catch {
+        Write-Log "Could not show notification: $_"
+    }
+}
+#endregion Spotify Version Control
+
 
 #region Version Management
 function Get-InstalledTagifyVersion {
@@ -474,15 +930,23 @@ function Get-RequiredOperations {
 
 function Execute-Operations {
     param([array]$Operations)
+
+    $spicetifyWasUpdated = $false
     
     foreach ($operation in $Operations) {
         Write-Log "Executing: $($operation.Description)" -ForegroundColor DarkMagenta
         
         switch ($operation.Type) {
-            "InstallSpicetify" { Install-SpicetifyCore }
-            "UpdateSpicetify" { Install-SpicetifyCore }  # Same function, it handles updates
+            "InstallSpicetify" {
+                Install-SpicetifyCore 
+            }
+            "UpdateSpicetify" {
+                # We don't run 'spicetify update' - we always do a fresh install from their Releases
+                Install-SpicetifyCore
+                $spicetifyWasUpdated = $true 
+            }
             "ApplySpicetify" { 
-                Apply-SpicetifyConfiguration
+                Apply-SpicetifyConfiguration -ForceRestore $spicetifyWasUpdated
                 $appliedSpicetify = $true  # don't appply again (in Main) # todo remove this ? if we're always applying at the end
             }
             "InstallTagify" { Install-Tagify -DownloadUrl $operation.TagifyDownloadUrl }
@@ -806,21 +1270,56 @@ function Stop-SpotifyProcess {
 }
 
 function Apply-SpicetifyConfiguration {
+    param(
+        [Parameter(Mandatory = $false)]
+        [bool]$ForceRestore = $false
+    )
+    
     Write-Log "Applying Spicetify patches..." -ForegroundColor Cyan
     
     $spicetifyExe = Get-SpicetifyPath
-
-    # Try 'spicetify apply' first, fallback to 'backup apply' if this fails
+    
+    # If this is after a Spicetify update, always do full 'spicetify restore backup apply'
+    if ($ForceRestore) {
+        Write-Log "Running: spicetify restore backup apply (post-update)"
+        & $spicetifyExe restore backup apply
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-ErrorAndExit "Spicetify restore backup apply failed with exit code: $LASTEXITCODE"
+        }
+        
+        Write-Log "Spicetify restore backup apply successful"
+        return
+    }
+    
+    # Try simple apply first
     Write-Log "Running: spicetify apply"
-    & $spicetifyExe apply
+    $applyOutput = & $spicetifyExe apply 2>&1 | Out-String
     
     if ($LASTEXITCODE -eq 0) {
         Write-Log "Spicetify apply successful"
         return
     }
-
-    # Apply failed - likely need backup
-    Write-Log "Apply failed, running: spicetify backup apply"
+    
+    # Check for the specific error about outdated preprocessed data
+    # matches error code from https://github.com/spicetify/cli/blob/main/src/cmd/apply.go
+    if ($applyOutput -match 'Preprocessed\s+Spotify\s+data\s+is\s+outdated' -or 
+        $applyOutput -match 'Please run\s+"spicetify\s+restore\s+backup\s+apply"') {
+        
+        Write-Log "Preprocessed data is outdated (detected from error message)" -ForegroundColor Yellow
+        Write-Log "Running: spicetify restore backup apply"
+        & $spicetifyExe restore backup apply
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-ErrorAndExit "Spicetify restore backup apply failed with exit code: $LASTEXITCODE"
+        }
+        
+        Write-Log "Spicetify restore backup apply successful"
+        return
+    }
+    
+    # Generic fallback for other apply failures
+    Write-Log "Apply failed with different error, attempting: spicetify backup apply" -ForegroundColor Yellow
     & $spicetifyExe backup apply
     
     if ($LASTEXITCODE -ne 0) {
@@ -846,16 +1345,7 @@ function Test-FinalInstallation {
         Write-Log "Tagify verification failed"
         return $false
     }
-    
-    # Check Spicetify state
-    $spicetifyState = Test-SpicetifyState
-    if ($spicetifyState.IsPatched) {
-        Write-Log "Spicetify is properly patched"
-    }
-    else {
-        Write-Log "Spicetify may not be properly patched"
-    }
-    
+
     # Check config
     $configFile = Get-SpicetifyConfigPath
     if (Test-Path $configFile) {
