@@ -3,7 +3,7 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.1
+    1.0.20
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
@@ -542,107 +542,24 @@ function Handle-SpotifyIncompatibility {
     )
     
     if ($IsTooNew) {
-        $sysArch = Get-SystemArchitecture
-        $loadspotUrl = "https://loadspot.pages.dev/"
-        
         $message = @"
-
-═══════════════════════════════════════════════════════════
-⚠️  SPOTIFY DOWNGRADE REQUIRED
-═══════════════════════════════════════════════════════════
-
-Current Spotify version: v$CurrentVersion (TOO NEW)
-Required version: v$RequiredVersion or older
-
-Spicetify doesn't support Spotify v$CurrentVersion yet.
-
-═══════════════════════════════════════════════════════════
-DOWNLOAD INSTRUCTIONS
-═══════════════════════════════════════════════════════════
-
-1. We'll open Loadspot in your browser
-
-2. On the Loadspot page, download:
-   
-   ┌────────────────────────────────────────────────────────┐
-   │  Spotify Version: $RequiredVersion                          │
-   │  Architecture: $($sysArch.DisplayName)                      │
-   └────────────────────────────────────────────────────────┘
-
-3. After downloading, UNINSTALL your current Spotify:
-   Windows Settings > Apps > Spotify > Uninstall
-
-4. Install the downloaded Spotify v$RequiredVersion
-
-5. IMPORTANT: Disable auto-updates in Spotify settings:
-   Settings > Show Advanced Settings > Automatic Updates > OFF
-
-6. Re-run this Tagify installer
-
-═══════════════════════════════════════════════════════════
-NEED HELP?
-═══════════════════════════════════════════════════════════
-
-Spicetify Discord: https://discord.gg/spicetify
-
-═══════════════════════════════════════════════════════════
-
+Spotify version v$CurrentVersion is TOO NEW.
+Required: v$RequiredVersion or older.
+Please downgrade Spotify and re-run this installer.
 "@
         
-        Write-Host $message -ForegroundColor Yellow
-        
-        # Emphasis box for version/arch
-        Write-Host ""
-        Write-Host "  ╔════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-        Write-Host "  ║  DOWNLOAD THIS VERSION:                            ║" -ForegroundColor Cyan
-        Write-Host "  ║                                                    ║" -ForegroundColor Cyan
-        Write-Host "  ║  Spotify v$RequiredVersion ($($sysArch.Type))                        ║" -ForegroundColor Cyan
-        Write-Host "  ╚════════════════════════════════════════════════════╝" -ForegroundColor Cyan
-        Write-Host ""
-        
-        Write-Host "Press ENTER to open Loadspot download page..." -NoNewline -ForegroundColor Green
-        Read-Host
-        
-        Write-Log "Opening Loadspot..."
-        Start-Process $loadspotUrl
-        
-        # Show persistent notification
-        Show-Notification "Tagify Installer - Action Required" "Download Spotify v$RequiredVersion ($($sysArch.Type)) from Loadspot"
-        
-        Write-Host ""
-        Write-Host "✓ Loadspot opened in your browser" -ForegroundColor Green
-        Write-Host ""
-        Write-Host "Remember to download: Spotify v$RequiredVersion ($($sysArch.Type))" -ForegroundColor Yellow
-        Write-Host "After installing, re-run this installer." -ForegroundColor Yellow
-        Write-Host ""
-        
-        Write-ErrorAndExit "Installation cancelled - please downgrade Spotify to v$RequiredVersion first"
+        Write-Log $message -ForegroundColor Red
+        Write-ErrorAndExit "Spotify v$CurrentVersion is incompatible. Downgrade to v$RequiredVersion required."
     }
     else {
-        # Version too old
         $message = @"
-
-═══════════════════════════════════════════════════════════
-⚠️  SPOTIFY UPDATE REQUIRED
-═══════════════════════════════════════════════════════════
-
-Current Spotify version: v$CurrentVersion (TOO OLD)
-Required version: v$RequiredVersion or newer
-
-Your Spotify is outdated. Please update to the latest version.
-
-═══════════════════════════════════════════════════════════
-
+Spotify version v$CurrentVersion is TOO OLD.
+Required: v$RequiredVersion or newer.
+Please update Spotify and re-run this installer.
 "@
         
-        Write-Host $message -ForegroundColor Yellow
-        Write-Host "Press ENTER to open Spotify download page..." -NoNewline -ForegroundColor Green
-        Read-Host
-        
-        Start-Process "https://www.spotify.com/download"
-        Write-Host "✓ Spotify download page opened" -ForegroundColor Green
-        
-        Write-ErrorAndExit "Installation cancelled - please update Spotify first"
+        Write-Log $message -ForegroundColor Red
+        Write-ErrorAndExit "Spotify v$CurrentVersion is incompatible. Update to v$RequiredVersion required."
     }
 }
 
