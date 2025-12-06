@@ -3,7 +3,7 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.21
+    1.0.22
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
@@ -21,6 +21,10 @@ $script:USER_LOG = ""
 $script:INSTALLATION_FAILED = $false
 $spicetifyFolderPath = "$env:LOCALAPPDATA\spicetify"
 $spicetifyOldFolderPath = "$HOME\spicetify-cli"
+
+# Status code for C# host to read
+$global:TAGIFY_INSTALL_EXIT_CODE = 0
+$global:TAGIFY_INSTALL_ERROR_MESSAGE = ""
 #endregion Variables
 
 #region Logging
@@ -57,6 +61,9 @@ function Write-ErrorAndExit {
     param([string]$Message)
     
     $script:INSTALLATION_FAILED = $true
+    $global:TAGIFY_INSTALL_EXIT_CODE = 1
+    $global:TAGIFY_INSTALL_ERROR_MESSAGE = $Message
+    
     Write-Log "ERROR: $Message" -ForegroundColor Red
     Write-Log "==========================================" -ForegroundColor Red
     Write-Log "Operation failed! See error above." -ForegroundColor Red
@@ -65,7 +72,6 @@ function Write-ErrorAndExit {
     Show-Notification "Tagify Installer - Error" "Error: $Message"
     
     Finalize-Log 1
-    exit 1
 }
 
 function Show-Notification {
@@ -103,18 +109,21 @@ function Finalize-Log {
         if ($ExitCode -eq 0 -and -not $script:INSTALLATION_FAILED) {
             "" | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
             "Operation completed successfully." | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
-            exit 0  # exit with success
+            $global:TAGIFY_INSTALL_EXIT_CODE = 0
+            $global:TAGIFY_INSTALL_ERROR_MESSAGE = ""
         }
         else {
             "" | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
             "Operation FAILED. See errors above." | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
-            exit 1  # exit with error
+            $global:TAGIFY_INSTALL_EXIT_CODE = 1
+            $global:TAGIFY_INSTALL_ERROR_MESSAGE = "Installation failed. Check log for details."
         }
     }
     catch {
         Write-Log "Could not copy log to Desktop: $_"
         $script:USER_LOG = $LOG_FILE
-        exit 1  # exit with error
+        $global:TAGIFY_INSTALL_EXIT_CODE = 1
+        $global:TAGIFY_INSTALL_ERROR_MESSAGE = "Log file copy failed: $_"
     }
 }
 
