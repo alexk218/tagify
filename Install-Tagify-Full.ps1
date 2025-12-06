@@ -95,7 +95,11 @@ function Show-Notification {
 
 function Write-UserProgress {
     param([string]$Message)
-    Write-Host "PROGRESS: $Message" -ForegroundColor Cyan
+    # Send to Information stream (captured by C#)
+    Write-Information "PROGRESS: $Message" -InformationAction Continue
+    
+    # Also log to file
+    Write-Log $Message -ForegroundColor Cyan
 }
 
 function Finalize-Log {
