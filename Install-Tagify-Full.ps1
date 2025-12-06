@@ -3,7 +3,7 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.22
+    1.0.23
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
@@ -91,6 +91,11 @@ function Show-Notification {
     catch {
         Write-Log "Could not show notification: $_"
     }
+}
+
+function Write-UserProgress {
+    param([string]$Message)
+    Write-Host "PROGRESS: $Message" -ForegroundColor Cyan
 }
 
 function Finalize-Log {
@@ -532,6 +537,7 @@ function Install-SpicetifyCore {
     [CmdletBinding()]
     param()
 
+    Write-UserProgress "Downloading Spicetify..."
     Write-Log 'Installing/updating Spicetify...' -ForegroundColor DarkMagenta
     
     # Architecture detection
@@ -549,6 +555,7 @@ function Install-SpicetifyCore {
         Write-Log 'Fetching latest Spicetify version...'
         $latestRelease = Invoke-RestMethod -Uri 'https://api.github.com/repos/spicetify/cli/releases/latest'
         $targetVersion = $latestRelease.tag_name -replace 'v', ''
+        Write-UserProgress "Downloading Spicetify v$targetVersion..."
         Write-Log "Latest Spicetify version: v$targetVersion"
         
         $archivePath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "spicetify.zip")
@@ -558,6 +565,7 @@ function Install-SpicetifyCore {
         Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -UseBasicParsing
         Write-Log "Downloaded Spicetify"
         
+        Write-UserProgress "Extracting Spicetify..."
         Write-Log 'Extracting Spicetify...'
         if (Test-Path $spicetifyFolderPath) {
             Remove-Item -Path $spicetifyFolderPath -Recurse -Force
@@ -567,6 +575,7 @@ function Install-SpicetifyCore {
         Write-Log "Extracted Spicetify"
         
         # Add to PATH
+        Write-UserProgress "Configuring Spicetify..."
         Write-Log 'Adding Spicetify to PATH...'
         $user = [EnvironmentVariableTarget]::User
         $path = [Environment]::GetEnvironmentVariable('PATH', $user)
@@ -579,6 +588,7 @@ function Install-SpicetifyCore {
         Write-Log "Added to PATH"
         
         Remove-Item -Path $archivePath -Force -ErrorAction 'SilentlyContinue'
+        Write-UserProgress "Spicetify installed successfully"
         Write-Log 'Spicetify installation completed'
     }
     catch {
@@ -612,6 +622,7 @@ function Install-Spicetify {
         Write-Log "Spicetify not found, installing..."
     }
     
+    Write-UserProgress "Installing Spicetify..."
     Write-Log "Installing Spicetify..."
     Show-Notification "Tagify Installer" "Installing Spicetify..."
     
@@ -624,6 +635,7 @@ function Install-Spicetify {
     Install-SpicetifyCore
     
     # Verify installation
+    Write-UserProgress "Verifying Spicetify installation..."
     Write-Log "Verifying Spicetify installation..."
     Start-Sleep -Seconds 2
     
@@ -646,6 +658,7 @@ function Download-TagifyRelease {
     [CmdletBinding()]
     param([string]$DownloadUrl)
     
+    Write-UserProgress "Downloading Tagify..."
     Write-Log "Downloading Tagify..." -ForegroundColor DarkMagenta
     Show-Notification "Tagify Installer" "Downloading Tagify..."
     
@@ -665,6 +678,7 @@ function Download-TagifyRelease {
         $fileSize = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
         Write-Log "Downloaded tagify.zip ($fileSize MB)"
         
+        Write-UserProgress "Extracting Tagify..."
         Write-Log "Extracting archive..."
         Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
         Remove-Item $zipPath -Force
@@ -685,6 +699,7 @@ function Install-TagifyFiles {
         [string]$TempDir
     )
 
+    Write-UserProgress "Installing Tagify files..."
     Write-Log "Installing Tagify files..." -ForegroundColor DarkMagenta
     
     $customAppsDir = "$env:USERPROFILE\AppData\Roaming\spicetify\CustomApps"
@@ -743,6 +758,7 @@ function Install-TagifyFiles {
 }
 
 function Set-SpicetifyTagifyConfiguration {
+    Write-UserProgress "Configuring Tagify..."
     Write-Log "Configuring Spicetify for Tagify..." -ForegroundColor DarkMagenta
     
     try {
@@ -783,6 +799,7 @@ function Install-Tagify {
     [CmdletBinding()]
     param([string]$DownloadUrl)
     
+    Write-UserProgress "Installing Tagify..."
     Write-Log "==========================================" -ForegroundColor Magenta
     Write-Log "INSTALLING TAGIFY" -ForegroundColor Magenta
     Write-Log "==========================================" -ForegroundColor Magenta
@@ -791,12 +808,14 @@ function Install-Tagify {
     $tagifyDir = Install-TagifyFiles -TempDir $tempDir
     Set-SpicetifyTagifyConfiguration
     
+    Write-UserProgress "Tagify installed successfully"
     Write-Log "Tagify installation completed at: $tagifyDir"
 }
 #endregion Tagify Installation
 
 #region System Control
 function Stop-SpotifyProcess {
+    Write-UserProgress "Stopping Spotify..."
     Write-Log "Managing Spotify process..." -ForegroundColor DarkMagenta
     
     $spotifyProcesses = Get-Process -Name "Spotify" -ErrorAction SilentlyContinue
@@ -830,12 +849,14 @@ function Apply-SpicetifyConfiguration {
         [bool]$ForceRestore = $false
     )
     
+    Write-UserProgress "Applying Spicetify patches..."
     Write-Log "Applying Spicetify patches..." -ForegroundColor Cyan
     
     $spicetifyExe = Get-SpicetifyPath
     
     # If this is after a Spicetify update, always do full 'spicetify restore backup apply'
     if ($ForceRestore) {
+        Write-UserProgress "Updating Spicetify patches..."
         Write-Log "Running: spicetify restore backup apply (post-update)"
         & $spicetifyExe restore backup apply
         
@@ -843,6 +864,7 @@ function Apply-SpicetifyConfiguration {
             Write-ErrorAndExit "Spicetify restore backup apply failed with exit code: $LASTEXITCODE"
         }
         
+        Write-UserProgress "Spicetify patches updated"
         Write-Log "Spicetify restore backup apply successful"
         return
     }
@@ -852,6 +874,7 @@ function Apply-SpicetifyConfiguration {
     $applyOutput = & $spicetifyExe apply 2>&1 | Out-String
     
     if ($LASTEXITCODE -eq 0) {
+        Write-UserProgress "Spicetify patches applied successfully"
         Write-Log "Spicetify apply successful"
         return
     }
@@ -861,6 +884,7 @@ function Apply-SpicetifyConfiguration {
     if ($applyOutput -match 'Preprocessed\s+Spotify\s+data\s+is\s+outdated' -or 
         $applyOutput -match 'Please run\s+"spicetify\s+restore\s+backup\s+apply"') {
         
+        Write-UserProgress "Updating Spicetify patches..."
         Write-Log "Preprocessed data is outdated (detected from error message)" -ForegroundColor Yellow
         Write-Log "Running: spicetify restore backup apply"
         & $spicetifyExe restore backup apply
@@ -869,11 +893,13 @@ function Apply-SpicetifyConfiguration {
             Write-ErrorAndExit "Spicetify restore backup apply failed with exit code: $LASTEXITCODE"
         }
         
+        Write-UserProgress "Spicetify patches updated"
         Write-Log "Spicetify restore backup apply successful"
         return
     }
     
     # Generic fallback for other apply failures
+    Write-UserProgress "Repairing Spicetify configuration..."
     Write-Log "Apply failed with different error, attempting: spicetify backup apply" -ForegroundColor Yellow
     & $spicetifyExe backup apply
     
@@ -881,12 +907,14 @@ function Apply-SpicetifyConfiguration {
         Write-ErrorAndExit "Spicetify backup apply failed with exit code: $LASTEXITCODE"
     }
     
+    Write-UserProgress "Spicetify configuration repaired"
     Write-Log "Spicetify backup apply successful"
 }
 #endregion System Control
 
 #region Verification
 function Test-FinalInstallation {
+    Write-UserProgress "Verifying installation..."
     Write-Log "==========================================" -ForegroundColor Magenta
     Write-Log "VERIFYING INSTALLATION" -ForegroundColor Magenta
     Write-Log "==========================================" -ForegroundColor Magenta
@@ -913,6 +941,7 @@ function Test-FinalInstallation {
         }
     }
     
+    Write-UserProgress "Installation verified successfully"
     return $true
 }
 #endregion Verification
@@ -923,12 +952,14 @@ function Main {
     param()
 
     Initialize-Logging
+    Write-UserProgress "Starting Tagify installer..."
     Write-Log "Starting Tagify Installer..." -ForegroundColor DarkMagenta
     
     try {
+        Write-UserProgress "Checking system requirements..."
         Test-Prerequisites
         
-        # Analyze system state
+        Write-UserProgress "Analyzing installation state..."
         $systemState = Get-SystemState
         
         # Get required actions
@@ -939,19 +970,23 @@ function Main {
         }
 
         if ($requiredOperations.Count -eq 0) {
+            Write-UserProgress "System is already up to date!"
             Write-Log "System is already up to date"
             Finalize-Log 0
             return
         }
 
+        Write-UserProgress "Preparing to install components..."
         Write-Log "Planning to execute $($requiredOperations.Count) operations:" -ForegroundColor Yellow
         foreach ($op in $requiredOperations) {
             Write-Log " - $($op.Description)" -ForegroundColor Yellow
         }
 
+        Write-UserProgress "Stopping Spotify..."
         Stop-SpotifyProcess
 
         # Execute actions
+        Write-UserProgress "Installing components..."
         $executionResult = Execute-Operations -Operations $requiredOperations -SystemState $systemState
         
         # Apply Spicetify patches - only if not already applied
@@ -959,9 +994,11 @@ function Main {
         #     Apply-SpicetifyConfiguration
         # }
 
+        Write-UserProgress "Applying Spicetify configuration..."
         Apply-SpicetifyConfiguration
         
         # Final verification
+        Write-UserProgress "Verifying installation..."
         $verificationPassed = Test-FinalInstallation
         if (-not $verificationPassed) {
             Write-ErrorAndExit "Installation verification failed. Tagify may not be properly installed."
@@ -981,7 +1018,8 @@ function Main {
             "ReinstallTagify" { "Tagify reinstalled successfully! Restart Spotify." }
             default { "Installation completed! Restart Spotify to use Tagify." }
         }
-        
+
+        Write-UserProgress "Installation completed successfully!"
         Show-Notification "Tagify Installer - Success" $successMessage
         Finalize-Log 0
     }
@@ -994,6 +1032,7 @@ function Main {
         Write-Log "- Ensure Spotify is completely closed before running" -ForegroundColor Red
         Write-Log "==========================================" -ForegroundColor Red
         
+        Write-UserProgress "Installation failed"
         Finalize-Log 1
     }
     finally {
