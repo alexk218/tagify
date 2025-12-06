@@ -103,16 +103,18 @@ function Finalize-Log {
         if ($ExitCode -eq 0 -and -not $script:INSTALLATION_FAILED) {
             "" | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
             "Operation completed successfully." | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
+            exit 0  # exit with success
         }
         else {
             "" | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
             "Operation FAILED. See errors above." | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
-            exit 1
+            exit 1  # exit with error
         }
     }
     catch {
         Write-Log "Could not copy log to Desktop: $_"
         $script:USER_LOG = $LOG_FILE
+        exit 1  # exit with error
     }
 }
 
