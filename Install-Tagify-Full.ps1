@@ -3,7 +3,7 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.0
+    1.0.1
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
