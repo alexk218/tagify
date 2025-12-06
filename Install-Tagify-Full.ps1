@@ -319,61 +319,50 @@ function Get-SystemArchitecture {
 function Get-SpicetifyCompatibilityInfo {
     <#
     .SYNOPSIS
-    Fetches latest compatibility info from Spicetify's GitHub releases
+    Fetches compatibility info from repository config file
     
     .DESCRIPTION
-    Fetches live compatibility data from Spicetify's latest release.
-    Returns $null if fetch fails.
+    Fetches compatibility data from manually maintained config file.
+    Falls back to hardcoded values if fetch fails.
     #>
     
     try {
-        Write-Log "Fetching compatibility data from Spicetify releases..." -ForegroundColor DarkMagenta
+        Write-Log "Fetching compatibility data from repository..." -ForegroundColor DarkMagenta
         
-        $apiUrl = "https://api.github.com/repos/spicetify/cli/releases/latest"
-        $release = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 15
+        $configUrl = "https://raw.githubusercontent.com/alexk218/tagify/main/config/spotify-compatibility.json"
+        $config = Invoke-RestMethod -Uri $configUrl -TimeoutSec 15
         
-        $body = $release.body
-        $spicetifyVersion = $release.tag_name -replace 'v', ''
+        Write-Log "✓ Fetched compatibility config (last updated: $($config.lastUpdated))" -ForegroundColor Green
+        Write-Log "  Windows: $($config.spotify.windows.min) -> $($config.spotify.windows.max)"
         
-        # Parse compatibility section
-        # Pattern matches: "Spotify for Windows/Microsoft Store: `1.2.14` -> `1.2.77`"
-        $windowsMatch = [regex]::Match($body, 'Spotify for Windows[^:]*:\s*`([\d.]+)`\s*->\s*`([\d.]+)`')
-        $macMatch = [regex]::Match($body, 'Spotify for macOS[^:]*:\s*`([\d.]+)`\s*->\s*`([\d.]+)`')
-        $linuxMatch = [regex]::Match($body, 'Spotify for Linux[^:]*:\s*`([\d.]+)`\s*->\s*`([\d.]+)`')
-        
-        if (-not $windowsMatch.Success) {
-            Write-Log "Could not parse compatibility info from release notes" -ForegroundColor Yellow
-            return $null
-        }
-        
-        $compatibility = @{
-            LastUpdated      = Get-Date -Format "yyyy-MM-dd"
-            Source           = "Spicetify GitHub Releases"
-            SpicetifyVersion = $spicetifyVersion
+        return @{
+            LastUpdated      = $config.lastUpdated
+            Source           = "Repository Config File"
+            SpicetifyVersion = $config.spicetifyVersion
             Spotify          = @{
                 Windows = @{
-                    Min = $windowsMatch.Groups[1].Value
-                    Max = $windowsMatch.Groups[2].Value
-                }
-                macOS   = @{
-                    Min = if ($macMatch.Success) { $macMatch.Groups[1].Value } else { $null }
-                    Max = if ($macMatch.Success) { $macMatch.Groups[2].Value } else { $null }
-                }
-                Linux   = @{
-                    Min = if ($linuxMatch.Success) { $linuxMatch.Groups[1].Value } else { $null }
-                    Max = if ($linuxMatch.Success) { $linuxMatch.Groups[2].Value } else { $null }
+                    Min = $config.spotify.windows.min
+                    Max = $config.spotify.windows.max
                 }
             }
         }
-        
-        Write-Log "✓ Fetched compatibility for Spicetify v$spicetifyVersion" -ForegroundColor Green
-        Write-Log "  Windows: $($compatibility.Spotify.Windows.Min) -> $($compatibility.Spotify.Windows.Max)"
-        
-        return $compatibility
     }
     catch {
-        Write-Log "Failed to fetch compatibility data: $_" -ForegroundColor Red
-        return $null
+        Write-Log "Failed to fetch compatibility config: $_" -ForegroundColor Yellow
+        Write-Log "Using hardcoded fallback values" -ForegroundColor Yellow
+        
+        # Hardcoded fallback
+        return @{
+            LastUpdated      = "2025-01-15"
+            Source           = "Hardcoded Fallback"
+            SpicetifyVersion = "2.38.4"
+            Spotify          = @{
+                Windows = @{
+                    Min = "1.2.14"
+                    Max = "1.2.77"
+                }
+            }
+        }
     }
 }
 
