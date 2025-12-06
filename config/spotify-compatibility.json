@@ -1,0 +1,10 @@
+{
+  "lastUpdated": "2025-01-15",
+  "spicetifyVersion": "2.38.4",
+  "spotify": {
+    "windows": {
+      "min": "1.2.14",
+      "max": "1.2.77"
+    },
+  }
+}
