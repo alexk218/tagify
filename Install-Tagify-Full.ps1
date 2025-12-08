@@ -19,9 +19,14 @@ $REPO_NAME = "tagify"
 # Parse script version from comment block
 $SCRIPT_VERSION = "Unknown"
 try {
-    $scriptContent = Get-Content $PSCommandPath -Raw
-    if ($scriptContent -match '\.VERSION\s+(\d+\.\d+\.\d+)') {
-        $SCRIPT_VERSION = $matches[1]
+    # Try to read from $PSCommandPath if available
+    if ($PSCommandPath -and (Test-Path $PSCommandPath)) {
+        $scriptContent = Get-Content $PSCommandPath -Raw
+        
+        # More flexible regex that handles different line endings and whitespace
+        if ($scriptContent -match '\.VERSION[^\d]*(\d+\.\d+\.\d+)') {
+            $SCRIPT_VERSION = $matches[1]
+        }
     }
 }
 catch {
@@ -334,7 +339,7 @@ function Finalize-Log {
         "==========================================" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
         
         if ($ExitCode -eq 0 -and -not $script:INSTALLATION_FAILED) {
-            "Result: SUCCESS" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "RESULT: SUCCESS" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             "Duration: $durationText" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             "Completed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
@@ -343,7 +348,7 @@ function Finalize-Log {
             $global:TAGIFY_INSTALL_ERROR_MESSAGE = ""
         }
         else {
-            "Result: FAILED" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "RESULT: FAILED" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             "Duration: $durationText" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             "Failed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             
@@ -522,8 +527,6 @@ function Get-InstalledTagifyVersion {
     $tagifyPath = "$env:USERPROFILE\AppData\Roaming\spicetify\CustomApps\tagify"
     $packagePath = "$tagifyPath\package.json"
 
-    Write-Log "Checking for installed Tagify version..." -ForegroundColor DarkMagenta
-    
     if (Test-Path $packagePath) {
         try {
             $package = Get-Content $packagePath -Raw | ConvertFrom-Json
@@ -551,7 +554,6 @@ function Get-LatestTagifyVersion {
     param()
 
     try {
-        Write-Log "Checking for latest Tagify version..." -ForegroundColor DarkMagenta
         $apiUrl = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
         $latestRelease = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 15
         
