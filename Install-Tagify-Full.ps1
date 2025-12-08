@@ -3,11 +3,13 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.25
+    1.0.26
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
 #>
+
+$SCRIPT_VERSION = "1.0.26"
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -15,24 +17,6 @@ $ErrorActionPreference = "Stop"
 #region Variables
 $REPO_OWNER = "alexk218"
 $REPO_NAME = "tagify"
-
-# Parse script version from comment block
-$SCRIPT_VERSION = "Unknown"
-try {
-    # Try to read from $PSCommandPath if available
-    if ($PSCommandPath -and (Test-Path $PSCommandPath)) {
-        $scriptContent = Get-Content $PSCommandPath -Raw
-        
-        # More flexible regex that handles different line endings and whitespace
-        if ($scriptContent -match '\.VERSION[^\d]*(\d+\.\d+\.\d+)') {
-            $SCRIPT_VERSION = $matches[1]
-        }
-    }
-}
-catch {
-    $SCRIPT_VERSION = "Unknown"
-}
-
 $script:LOG_DIR = ""
 $script:LOG_FILE = ""
 $script:USER_LOG = ""
@@ -683,16 +667,12 @@ function Get-SystemState {
     $spicetifyState = Test-SpicetifyState
     
     $systemState = @{
-        TagifyInstalled         = $currentTagify -ne $null
-        TagifyVersion           = $currentTagify
-        LatestTagifyVersion     = $latestTagifyInfo.Version
-        TagifyUpdateAvailable   = Test-TagifyUpdateAvailable -CurrentVersion $currentTagify -LatestVersion $latestTagifyInfo.Version
-        TagifyDownloadUrl       = $latestTagifyInfo.DownloadUrl
-        SpicetifyState          = $spicetifyState
-        RecommendedAction       = ""
-        ActionDescription       = ""
-        RequiresSpicetifyRepair = $false
-        RequiresTagifyUpdate    = $false
+        TagifyInstalled       = $currentTagify -ne $null
+        TagifyVersion         = $currentTagify
+        LatestTagifyVersion   = $latestTagifyInfo.Version
+        TagifyUpdateAvailable = Test-TagifyUpdateAvailable -CurrentVersion $currentTagify -LatestVersion $latestTagifyInfo.Version
+        TagifyDownloadUrl     = $latestTagifyInfo.DownloadUrl
+        SpicetifyState        = $spicetifyState
     }
     
     Write-Log "Current State Analysis:"
@@ -700,8 +680,6 @@ function Get-SystemState {
     Write-Log "- Latest Tagify: v$($latestTagifyInfo.Version)"
     Write-Log "- Tagify Update Available: $($systemState.TagifyUpdateAvailable)" -ForegroundColor $(if ($systemState.TagifyUpdateAvailable) { 'Yellow' } else { 'Green' })
     Write-Log "- Spicetify Installed: $($spicetifyState.IsInstalled)" -ForegroundColor $(if ($spicetifyState.IsInstalled) { 'Green' } else { 'Red' })
-    # Write-Log "- Spicetify Working: $($spicetifyState.IsPatched)" -ForegroundColor $(if ($spicetifyState.IsPatched) { 'Green' } else { 'Red' })
-    # Write-Log "- Spicetify Backup Valid: $($spicetifyState.BackupVersionMatch)" -ForegroundColor $(if ($spicetifyState.BackupVersionMatch) { 'Green' } else { 'Red' })
 
     return $systemState
 }
@@ -1286,22 +1264,28 @@ function Main {
         if (-not $verificationPassed) {
             Write-ErrorAndExit "Installation verification failed. Tagify may not be properly installed."
         }
-        
-        Write-Log "==========================================" -ForegroundColor Green
-        Write-Log "OPERATION COMPLETED SUCCESSFULLY!" -ForegroundColor Green
-        Write-Log "Action: $($systemState.RecommendedAction)" -ForegroundColor Green
-        Write-Log "Tagify Version: v$($systemState.LatestTagifyVersion)" -ForegroundColor Green
-        Write-Log "==========================================" -ForegroundColor Green
-        
-        $successMessage = switch ($systemState.RecommendedAction) {
-            "FullInstall" { "Tagify installed successfully! Restart Spotify to use it." }
-            "RepairAndUpdate" { "Spicetify repaired and Tagify updated! Restart Spotify." }
-            "InstallTagify" { "Tagify installed! Restart Spotify to use it." }
-            "UpdateTagify" { "Tagify updated to v$($systemState.LatestTagifyVersion)! Restart Spotify." }
-            "ReinstallTagify" { "Tagify reinstalled successfully! Restart Spotify." }
-            default { "Installation completed! Restart Spotify to use Tagify." }
+
+        # Build completion summary from what was actually executed
+        $completedActions = if ($requiredOperations.Count -gt 0) {
+            ($requiredOperations | ForEach-Object { $_.Description }) -join ", "
+        }
+        else {
+            "No changes needed"
         }
 
+        Write-Log "==========================================" -ForegroundColor Green
+        Write-Log "OPERATION COMPLETED SUCCESSFULLY!" -ForegroundColor Green
+        Write-Log "Actions Performed: $completedActions" -ForegroundColor Green
+        Write-Log "Tagify Version: v$($systemState.LatestTagifyVersion)" -ForegroundColor Green
+        Write-Log "==========================================" -ForegroundColor Green
+
+        $successMessage = if ($requiredOperations.Count -gt 0) {
+            "Installation completed! Actions: $completedActions. Restart Spotify to see changes."
+        }
+        else {
+            "System is already up to date! Restart Spotify if changes haven't been applied."
+        }
+        
         Write-UserProgress "Installation completed successfully!"
         Show-Notification "Tagify Installer - Success" $successMessage
         Finalize-Log 0
@@ -1311,8 +1295,6 @@ function Main {
         Write-Log "==========================================" -ForegroundColor Red
         Write-Log "TROUBLESHOOTING INFO:" -ForegroundColor Red
         Write-Log "- Log file: $script:USER_LOG" -ForegroundColor Red
-        Write-Log "- Try running as administrator if issues persist" -ForegroundColor Red
-        Write-Log "- Ensure Spotify is completely closed before running" -ForegroundColor Red
         Write-Log "==========================================" -ForegroundColor Red
         
         Write-UserProgress "Installation failed"
