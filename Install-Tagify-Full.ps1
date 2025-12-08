@@ -3,7 +3,7 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.23
+    1.0.25
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
@@ -15,10 +15,25 @@ $ErrorActionPreference = "Stop"
 #region Variables
 $REPO_OWNER = "alexk218"
 $REPO_NAME = "tagify"
+
+# Parse script version from comment block
+$SCRIPT_VERSION = "Unknown"
+try {
+    $scriptContent = Get-Content $PSCommandPath -Raw
+    if ($scriptContent -match '\.VERSION\s+(\d+\.\d+\.\d+)') {
+        $SCRIPT_VERSION = $matches[1]
+    }
+}
+catch {
+    $SCRIPT_VERSION = "Unknown"
+}
+
 $script:LOG_DIR = ""
 $script:LOG_FILE = ""
 $script:USER_LOG = ""
 $script:INSTALLATION_FAILED = $false
+$script:INSTALLATION_ACTION = "Unknown"
+$script:INSTALL_START_TIME = $null
 $spicetifyFolderPath = "$env:LOCALAPPDATA\spicetify"
 $spicetifyOldFolderPath = "$HOME\spicetify-cli"
 
@@ -26,12 +41,13 @@ $spicetifyOldFolderPath = "$HOME\spicetify-cli"
 $global:TAGIFY_INSTALL_EXIT_CODE = 0
 $global:TAGIFY_INSTALL_ERROR_MESSAGE = ""
 
+# Installer version - passed from C#
 $INSTALLER_VERSION = if ($env:TAGIFY_INSTALLER_VERSION) { $env:TAGIFY_INSTALLER_VERSION } else { "Unknown" }
 #endregion Variables
 
 #region Logging
 function Initialize-Logging {
-    # Unique directory name
+    # Use centralized log directory
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $script:LOG_DIR = "$env:LOCALAPPDATA\Tagify\Logs"
     $script:LOG_FILE = "$script:LOG_DIR\install_$timestamp.log"
@@ -39,25 +55,180 @@ function Initialize-Logging {
     if (-not (Test-Path $script:LOG_DIR)) {
         New-Item -ItemType Directory -Path $script:LOG_DIR -Force | Out-Null
     }
-
-    # Write metadata header
-    "==========================================" | Out-File -FilePath $script:LOG_FILE -Encoding UTF8
-    "Tagify Installer Log" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
-    "Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
-    "Installer Version: $INSTALLER_VERSION" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
-    "Script Version: 1.0.23" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
-    "PowerShell: $($PSVersionTable.PSVersion)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
     
+    $script:INSTALL_START_TIME = Get-Date
+    
+    "==========================================" | Out-File -FilePath $script:LOG_FILE -Encoding UTF8
+    "Tagify Installer Diagnostic Log" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "==========================================" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    "APPLICATION VERSIONS:" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "  Installer Version: $INSTALLER_VERSION" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "  Script Version: $SCRIPT_VERSION" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    "SYSTEM INFORMATION:" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
     try {
         $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
         if ($os) {
-            "OS: $($os.Caption) $($os.Version)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "  OS: $($os.Caption) (Build $($os.BuildNumber))" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "  OS Version: $($os.Version)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            
+            # Calculate available disk space
+            $systemDrive = $env:SystemDrive
+            $disk = Get-PSDrive -Name $systemDrive.TrimEnd(':') -ErrorAction SilentlyContinue
+            if ($disk) {
+                $freeGB = [math]::Round($disk.Free / 1GB, 2)
+                "  Available Disk Space: $freeGB GB" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            }
         }
     }
     catch {
-        "OS: Unknown" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        "  OS: Unknown (Error: $_)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
     }
     
+    "  PowerShell Version: $($PSVersionTable.PSVersion)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "  Architecture: $env:PROCESSOR_ARCHITECTURE" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    try {
+        $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+        $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        "  Running as Administrator: $isAdmin" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    }
+    catch {
+        "  User Context: Unknown" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    }
+    "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    "SPOTIFY INFORMATION:" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    try {
+        $spotifyVersion = Get-SpotifyVersion
+        "  Spotify Version: $spotifyVersion" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        
+        $spotifyPath = "$env:APPDATA\Spotify"
+        if (Test-Path $spotifyPath) {
+            "  Spotify Path: $spotifyPath" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "  Spotify Installed: Yes" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        }
+        else {
+            "  Spotify Installed: No" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        }
+    }
+    catch {
+        "  Spotify Version: Error detecting ($_)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    }
+    "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    "SPICETIFY INFORMATION:" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    try {
+        $spicetifyExe = Get-SpicetifyPath
+        if ($spicetifyExe) {
+            $currentSpicetifyVersion = Get-SpicetifyVersion
+            "  Current Version: $currentSpicetifyVersion" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "  Executable Path: $spicetifyExe" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            
+            $configPath = Get-SpicetifyConfigPath
+            if ($configPath -and (Test-Path $configPath)) {
+                "  Config Found: Yes ($configPath)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            }
+            else {
+                "  Config Found: No" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            }
+        }
+        else {
+            "  Current Version: Not installed" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        }
+        
+        # Get latest available version
+        try {
+            $latestSpicetifyRelease = Invoke-RestMethod -Uri 'https://api.github.com/repos/spicetify/cli/releases/latest' -TimeoutSec 5
+            $latestSpicetifyVersion = $latestSpicetifyRelease.tag_name -replace 'v', ''
+            "  Latest Version: $latestSpicetifyVersion" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        }
+        catch {
+            "  Latest Version: Unable to fetch" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        }
+    }
+    catch {
+        "  Spicetify: Error detecting ($_)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    }
+    "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    "TAGIFY INFORMATION:" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    try {
+        $currentTagifyVersion = Get-InstalledTagifyVersion
+        if ($currentTagifyVersion) {
+            "  Current Version: $currentTagifyVersion" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        }
+        else {
+            "  Current Version: Not installed" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        }
+        
+        # Get latest available version
+        $latestTagifyInfo = Get-LatestTagifyVersion
+        if ($latestTagifyInfo.Success) {
+            "  Latest Version: $($latestTagifyInfo.Version)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        }
+        else {
+            "  Latest Version: Unable to fetch" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        }
+    }
+    catch {
+        "  Tagify: Error detecting ($_)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    }
+    "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    "NETWORK CONNECTIVITY:" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    try {
+        $githubTest = Test-Connection -ComputerName "api.github.com" -Count 1 -Quiet -ErrorAction SilentlyContinue
+        "  GitHub API: $(if ($githubTest) { 'Reachable' } else { 'Unreachable' })" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    }
+    catch {
+        "  GitHub API: Unknown" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    }
+    "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    "INSTALLATION HISTORY:" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    try {
+        $existingLogs = Get-ChildItem $script:LOG_DIR -Filter "install_*.log" -ErrorAction SilentlyContinue | 
+        Sort-Object CreationTime -Descending
+        
+        if ($existingLogs.Count -gt 0) {
+            "  Previous Installations: $($existingLogs.Count) log file(s) found" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            
+            # Check for recent failures
+            $recentLogs = $existingLogs | Select-Object -First 5
+            $failureCount = 0
+            foreach ($log in $recentLogs) {
+                $content = Get-Content $log.FullName -Raw -ErrorAction SilentlyContinue
+                if ($content -and $content -match "RESULT: FAILED") {
+                    $failureCount++
+                }
+            }
+            
+            if ($failureCount -gt 0) {
+                "  Recent Failures: $failureCount of last $($recentLogs.Count) attempts failed" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            }
+            else {
+                "  Recent Failures: None" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            }
+        }
+        else {
+            "  Previous Installations: None (first installation)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        }
+    }
+    catch {
+        "  Installation History: Unable to read" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    }
+    "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    "==========================================" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "INSTALLATION LOG:" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
     "==========================================" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
     "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
     
@@ -146,30 +317,56 @@ function Finalize-Log {
     param([int]$ExitCode = 0)
     
     Write-Log "Finalizing log file..." -ForegroundColor DarkMagenta
-
+    
+    # Calculate installation duration
+    if ($script:INSTALL_START_TIME) {
+        $duration = (Get-Date) - $script:INSTALL_START_TIME
+        $durationText = "{0:mm}m {0:ss}s" -f $duration
+    }
+    else {
+        $durationText = "Unknown"
+    }
+    
     try {
         "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
         "==========================================" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        "INSTALLATION SUMMARY:" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        "==========================================" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
         
         if ($ExitCode -eq 0 -and -not $script:INSTALLATION_FAILED) {
-            "RESULT: SUCCESS" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "Result: SUCCESS" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "Duration: $durationText" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "Completed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             "Operation completed successfully." | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             $global:TAGIFY_INSTALL_EXIT_CODE = 0
             $global:TAGIFY_INSTALL_ERROR_MESSAGE = ""
         }
         else {
-            "RESULT: FAILED" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "Result: FAILED" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "Duration: $durationText" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "Failed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            
+            if ($global:TAGIFY_INSTALL_ERROR_MESSAGE) {
+                "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+                "Error: $global:TAGIFY_INSTALL_ERROR_MESSAGE" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            }
+            
+            "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             "Operation FAILED. See errors above." | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             $global:TAGIFY_INSTALL_EXIT_CODE = 1
+            
             if ([string]::IsNullOrEmpty($global:TAGIFY_INSTALL_ERROR_MESSAGE)) {
                 $global:TAGIFY_INSTALL_ERROR_MESSAGE = "Installation failed. Check log for details."
             }
         }
         
         "==========================================" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
-        "Log saved to: $script:LOG_FILE" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        "Log file: $script:LOG_FILE" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        "==========================================" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
         
         Write-Log "Log file saved to: $script:LOG_FILE" -ForegroundColor Cyan
+        Write-Log "Installation duration: $durationText" -ForegroundColor Cyan
     }
     catch {
         Write-Log "Could not finalize log: $_" -ForegroundColor Red
@@ -291,6 +488,36 @@ function Test-SpicetifyState {
 #endregion Prerequisites and Validation
 
 #region Version Management
+function Get-SpotifyVersion {
+    try {
+        # Method 1: Check Spotify.exe file version
+        $spotifyExePath = "$env:APPDATA\Spotify\Spotify.exe"
+        
+        if (Test-Path $spotifyExePath) {
+            $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($spotifyExePath)
+            if ($versionInfo.FileVersion) {
+                return $versionInfo.FileVersion
+            }
+        }
+        
+        # Method 2: Check prefs file
+        $prefsPath = "$env:APPDATA\Spotify\prefs"
+        if (Test-Path $prefsPath) {
+            $prefs = Get-Content $prefsPath -Raw
+            if ($prefs -match 'app\.last-launched-version="([\d.]+)') {
+                # $matches[0] = entire match => app.last-launched-version="1.2.3.456"
+                # $matches[1] = 1st capture group => 1.2.3.456
+                return $matches[1]
+            }
+        }
+        
+        return "Unknown"
+    }
+    catch {
+        return "Error: $_"
+    }
+}
+
 function Get-InstalledTagifyVersion {
     $tagifyPath = "$env:USERPROFILE\AppData\Roaming\spicetify\CustomApps\tagify"
     $packagePath = "$tagifyPath\package.json"
@@ -1016,11 +1243,19 @@ function Main {
         }
 
         if ($requiredOperations.Count -eq 0) {
-            Write-UserProgress "System is already up to date!"
-            Write-Log "System is already up to date"
+            $script:INSTALLATION_ACTION = "None - System up to date"
+            Write-Log "Installation Action: $script:INSTALLATION_ACTION" -ForegroundColor Cyan
+            Write-UserProgress "Installation Action: $script:INSTALLATION_ACTION" -ForegroundColor Cyan
             Finalize-Log 0
             return
         }
+        else {
+            $actionDescriptions = ($requiredOperations | ForEach-Object { $_.Description }) -join ", "
+            $script:INSTALLATION_ACTION = $actionDescriptions
+            Write-Log "Installation Action: $script:INSTALLATION_ACTION" -ForegroundColor Cyan
+            Write-UserProgress "Installation Action: $script:INSTALLATION_ACTION"
+        }
+        "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
 
         Write-UserProgress "Preparing to install components..."
         Write-Log "Planning to execute $($requiredOperations.Count) operations:" -ForegroundColor Yellow
