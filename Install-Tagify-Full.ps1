@@ -25,23 +25,63 @@ $spicetifyOldFolderPath = "$HOME\spicetify-cli"
 # Status code for C# host to read
 $global:TAGIFY_INSTALL_EXIT_CODE = 0
 $global:TAGIFY_INSTALL_ERROR_MESSAGE = ""
+
+$INSTALLER_VERSION = if ($env:TAGIFY_INSTALLER_VERSION) { $env:TAGIFY_INSTALLER_VERSION } else { "Unknown" }
 #endregion Variables
 
 #region Logging
 function Initialize-Logging {
     # Unique directory name
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $script:LOG_DIR = "$env:TEMP\tagify-installer-$timestamp-$PID"
-    $script:LOG_FILE = "$LOG_DIR\install.log"
+    $script:LOG_DIR = "$env:LOCALAPPDATA\Tagify\Logs"
+    $script:LOG_FILE = "$script:LOG_DIR\install_$timestamp.log"
 
-    if (-not (Test-Path $LOG_DIR)) {
-        New-Item -ItemType Directory -Path $LOG_DIR -Force | Out-Null
+    if (-not (Test-Path $script:LOG_DIR)) {
+        New-Item -ItemType Directory -Path $script:LOG_DIR -Force | Out-Null
+    }
+
+    # Write metadata header
+    "==========================================" | Out-File -FilePath $script:LOG_FILE -Encoding UTF8
+    "Tagify Installer Log" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "Installer Version: $INSTALLER_VERSION" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "Script Version: 1.0.23" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "PowerShell: $($PSVersionTable.PSVersion)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+        if ($os) {
+            "OS: $($os.Caption) $($os.Version)" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        }
+    }
+    catch {
+        "OS: Unknown" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
     }
     
-    "==========================================" | Out-File -FilePath $LOG_FILE -Encoding UTF8
-    "Tagify Installer Log " | Out-File -FilePath $LOG_FILE -Append -Encoding UTF8
-    "Date: $(Get-Date)" | Out-File -FilePath $LOG_FILE -Append -Encoding UTF8
-    "==========================================" | Out-File -FilePath $LOG_FILE -Append -Encoding UTF8
+    "==========================================" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+    
+    Cleanup-OldLogs
+}
+
+function Cleanup-OldLogs {
+    try {
+        $maxLogs = 10
+        $logs = Get-ChildItem $script:LOG_DIR -Filter "install_*.log" -ErrorAction SilentlyContinue | 
+        Sort-Object CreationTime -Descending
+        
+        if ($logs.Count -gt $maxLogs) {
+            $logsToRemove = $logs | Select-Object -Skip $maxLogs
+            foreach ($log in $logsToRemove) {
+                Remove-Item -Path $log.FullName -Force -ErrorAction SilentlyContinue
+            }
+            Write-Log "Cleaned up $($logsToRemove.Count) old log file(s)" -ForegroundColor DarkGray
+        }
+    }
+    catch {
+        # Silently fail - don't break installation over log cleanup
+        Write-Log "Could not clean up old logs: $_" -ForegroundColor DarkGray
+    }
 }
 
 function Write-Log {
@@ -106,33 +146,35 @@ function Finalize-Log {
     param([int]$ExitCode = 0)
     
     Write-Log "Finalizing log file..." -ForegroundColor DarkMagenta
-    
-    # TODO: remove this... we don't want logs on user's desktop
-    $desktopPath = [Environment]::GetFolderPath("Desktop")
-    $script:USER_LOG = Join-Path $desktopPath "tagify-install.log"
-    
+
     try {
-        Copy-Item -Path $LOG_FILE -Destination $USER_LOG -Force
-        Write-Log "Log file saved to: $USER_LOG"
+        "" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        "==========================================" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
         
         if ($ExitCode -eq 0 -and -not $script:INSTALLATION_FAILED) {
-            "" | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
-            "Operation completed successfully." | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
+            "RESULT: SUCCESS" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "Operation completed successfully." | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             $global:TAGIFY_INSTALL_EXIT_CODE = 0
             $global:TAGIFY_INSTALL_ERROR_MESSAGE = ""
         }
         else {
-            "" | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
-            "Operation FAILED. See errors above." | Out-File -FilePath $USER_LOG -Append -Encoding UTF8
+            "RESULT: FAILED" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+            "Operation FAILED. See errors above." | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
             $global:TAGIFY_INSTALL_EXIT_CODE = 1
-            $global:TAGIFY_INSTALL_ERROR_MESSAGE = "Installation failed. Check log for details."
+            if ([string]::IsNullOrEmpty($global:TAGIFY_INSTALL_ERROR_MESSAGE)) {
+                $global:TAGIFY_INSTALL_ERROR_MESSAGE = "Installation failed. Check log for details."
+            }
         }
+        
+        "==========================================" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        "Log saved to: $script:LOG_FILE" | Out-File -FilePath $script:LOG_FILE -Append -Encoding UTF8
+        
+        Write-Log "Log file saved to: $script:LOG_FILE" -ForegroundColor Cyan
     }
     catch {
-        Write-Log "Could not copy log to Desktop: $_"
-        $script:USER_LOG = $LOG_FILE
+        Write-Log "Could not finalize log: $_" -ForegroundColor Red
         $global:TAGIFY_INSTALL_EXIT_CODE = 1
-        $global:TAGIFY_INSTALL_ERROR_MESSAGE = "Log file copy failed: $_"
+        $global:TAGIFY_INSTALL_ERROR_MESSAGE = "Log file finalization failed: $_"
     }
 }
 
