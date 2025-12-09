@@ -373,6 +373,30 @@ function Cleanup-TempFiles {
 #endregion Logging
 
 #region Prerequisites and Validation
+function Test-Paths {
+    Write-Log "=== DIAGNOSTIC TEST START ===" -ForegroundColor Cyan
+    Write-Log "Testing basic path operations..."
+    
+    try {
+        $testPath1 = "$env:LOCALAPPDATA\test"
+        Write-Log "Test path 1: $testPath1"
+        
+        $testPath2 = Join-Path $env:USERPROFILE "test"
+        Write-Log "Test path 2: $testPath2"
+        
+        $testPath3 = [System.IO.Path]::Combine($env:APPDATA, "test")
+        Write-Log "Test path 3: $testPath3"
+        
+        Write-Log "All path tests passed" -ForegroundColor Green
+    }
+    catch {
+        Write-Log "Path test FAILED: $_" -ForegroundColor Red
+        Write-Log "This indicates environment variables are not accessible in PowerShell context"
+        Write-ErrorAndExit "Environment configuration error: $_"
+    }
+    Write-Log "=== DIAGNOSTIC TEST END ===" -ForegroundColor Cyan
+}
+
 function Test-Prerequisites {
     [CmdletBinding()]
     param()
@@ -1205,6 +1229,8 @@ function Main {
     param()
 
     Initialize-Logging
+    Test-Paths
+
     Write-UserProgress "Starting Tagify installer..."
     Write-Log "Starting Tagify Installer..." -ForegroundColor DarkMagenta
     
@@ -1280,7 +1306,7 @@ function Main {
         Write-Log "==========================================" -ForegroundColor Green
 
         $successMessage = if ($requiredOperations.Count -gt 0) {
-            "Installation completed! Actions: $completedActions. Restart Spotify to see changes."
+            "Installation completed! Restart Spotify to see changes."
         }
         else {
             "System is already up to date! Restart Spotify if changes haven't been applied."
