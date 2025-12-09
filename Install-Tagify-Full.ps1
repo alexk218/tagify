@@ -3,13 +3,13 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.26
+    1.0.27
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
 #>
 
-$SCRIPT_VERSION = "1.0.26"
+$SCRIPT_VERSION = "1.0.27"
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -1120,6 +1120,121 @@ function Stop-SpotifyProcess {
     }
 }
 
+function Invoke-Spicetify {
+    <#
+    .SYNOPSIS
+        Safely invokes spicetify.exe and captures output without throwing RemoteException
+    .PARAMETER Arguments
+        Arguments to pass to spicetify.exe
+    .RETURNS
+        Hashtable with ExitCode, Output, and Error properties
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Arguments
+    )
+    
+    $spicetifyExe = Get-SpicetifyPath
+    if (-not $spicetifyExe) {
+        return @{
+            ExitCode = 1
+            Output   = ""
+            Error    = "Spicetify executable not found"
+            Success  = $false
+        }
+    }
+    
+    Write-Log "Running: spicetify $Arguments"
+    
+    try {
+        # Use Start-Process for cleaner output capture
+        $tempOutput = [System.IO.Path]::GetTempFileName()
+        $tempError = [System.IO.Path]::GetTempFileName()
+        
+        $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $processInfo.FileName = $spicetifyExe
+        $processInfo.Arguments = $Arguments
+        $processInfo.RedirectStandardOutput = $true
+        $processInfo.RedirectStandardError = $true
+        $processInfo.UseShellExecute = $false
+        $processInfo.CreateNoWindow = $true
+        $processInfo.WorkingDirectory = Split-Path $spicetifyExe -Parent
+        
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $processInfo
+        
+        # Capture output asynchronously to avoid deadlocks
+        $outputBuilder = New-Object System.Text.StringBuilder
+        $errorBuilder = New-Object System.Text.StringBuilder
+        
+        $outputEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action {
+            if ($EventArgs.Data) {
+                $Event.MessageData.AppendLine($EventArgs.Data) | Out-Null
+            }
+        } -MessageData $outputBuilder
+        
+        $errorEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action {
+            if ($EventArgs.Data) {
+                $Event.MessageData.AppendLine($EventArgs.Data) | Out-Null
+            }
+        } -MessageData $errorBuilder
+        
+        $process.Start() | Out-Null
+        $process.BeginOutputReadLine()
+        $process.BeginErrorReadLine()
+        
+        # Wait with timeout (2 minutes should be plenty for spicetify)
+        $completed = $process.WaitForExit(120000)
+        
+        # Clean up event handlers
+        Unregister-Event -SourceIdentifier $outputEvent.Name -ErrorAction SilentlyContinue
+        Unregister-Event -SourceIdentifier $errorEvent.Name -ErrorAction SilentlyContinue
+        
+        if (-not $completed) {
+            $process.Kill()
+            return @{
+                ExitCode = -1
+                Output   = $outputBuilder.ToString()
+                Error    = "Process timed out after 2 minutes"
+                Success  = $false
+            }
+        }
+        
+        $exitCode = $process.ExitCode
+        $output = $outputBuilder.ToString()
+        $errorOutput = $errorBuilder.ToString()
+        
+        # Log output for debugging
+        if ($output) {
+            Write-Log "Spicetify output: $($output.Substring(0, [Math]::Min(200, $output.Length)))..."
+        }
+        if ($errorOutput) {
+            Write-Log "Spicetify stderr: $($errorOutput.Substring(0, [Math]::Min(200, $errorOutput.Length)))..."
+        }
+        
+        return @{
+            ExitCode = $exitCode
+            Output   = $output
+            Error    = $errorOutput
+            Success  = ($exitCode -eq 0)
+        }
+    }
+    catch {
+        Write-Log "Exception running spicetify: $_" -ForegroundColor Red
+        return @{
+            ExitCode = -1
+            Output   = ""
+            Error    = $_.Exception.Message
+            Success  = $false
+        }
+    }
+    finally {
+        # Cleanup temp files
+        Remove-Item $tempOutput -Force -ErrorAction SilentlyContinue
+        Remove-Item $tempError -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Apply-SpicetifyConfiguration {
     param(
         [Parameter(Mandatory = $false)]
@@ -1129,16 +1244,23 @@ function Apply-SpicetifyConfiguration {
     Write-UserProgress "Applying Spicetify patches..."
     Write-Log "Applying Spicetify patches..." -ForegroundColor Cyan
     
-    $spicetifyExe = Get-SpicetifyPath
-    
     # If this is after a Spicetify update, always do full 'spicetify restore backup apply'
     if ($ForceRestore) {
         Write-UserProgress "Updating Spicetify patches..."
         Write-Log "Running: spicetify restore backup apply (post-update)"
-        & $spicetifyExe restore backup apply
         
-        if ($LASTEXITCODE -ne 0) {
-            Write-ErrorAndExit "Spicetify restore backup apply failed with exit code: $LASTEXITCODE"
+        $result = Invoke-Spicetify -Arguments "restore backup apply"
+        
+        if (-not $result.Success) {
+            # Check if it's a "no backup" error which we can work around
+            if ($result.Error -match "no backup" -or $result.Output -match "no backup") {
+                Write-Log "No backup found, running backup apply instead..." -ForegroundColor Yellow
+                $result = Invoke-Spicetify -Arguments "backup apply"
+            }
+            
+            if (-not $result.Success) {
+                Write-ErrorAndExit "Spicetify restore backup apply failed: $($result.Error)"
+            }
         }
         
         Write-UserProgress "Spicetify patches updated"
@@ -1147,27 +1269,29 @@ function Apply-SpicetifyConfiguration {
     }
     
     # Try simple apply first
-    Write-Log "Running: spicetify apply"
-    $applyOutput = & $spicetifyExe apply 2>&1 | Out-String
+    $result = Invoke-Spicetify -Arguments "apply"
     
-    if ($LASTEXITCODE -eq 0) {
+    if ($result.Success) {
         Write-UserProgress "Spicetify patches applied successfully"
         Write-Log "Spicetify apply successful"
         return
     }
     
+    # Combine output and error for pattern matching
+    $combinedOutput = "$($result.Output)`n$($result.Error)"
+    
     # Check for the specific error about outdated preprocessed data
-    # matches error code from https://github.com/spicetify/cli/blob/main/src/cmd/apply.go
-    if ($applyOutput -match 'Preprocessed\s+Spotify\s+data\s+is\s+outdated' -or 
-        $applyOutput -match 'Please run\s+"spicetify\s+restore\s+backup\s+apply"') {
+    if ($combinedOutput -match 'Preprocessed\s+Spotify\s+data\s+is\s+outdated' -or 
+        $combinedOutput -match 'Please run\s+"spicetify\s+restore\s+backup\s+apply"' -or
+        $combinedOutput -match 'spotify is outdated') {
         
         Write-UserProgress "Updating Spicetify patches..."
         Write-Log "Preprocessed data is outdated (detected from error message)" -ForegroundColor Yellow
-        Write-Log "Running: spicetify restore backup apply"
-        & $spicetifyExe restore backup apply
         
-        if ($LASTEXITCODE -ne 0) {
-            Write-ErrorAndExit "Spicetify restore backup apply failed with exit code: $LASTEXITCODE"
+        $result = Invoke-Spicetify -Arguments "restore backup apply"
+        
+        if (-not $result.Success) {
+            Write-ErrorAndExit "Spicetify restore backup apply failed: $($result.Error)"
         }
         
         Write-UserProgress "Spicetify patches updated"
@@ -1175,17 +1299,41 @@ function Apply-SpicetifyConfiguration {
         return
     }
     
-    # Generic fallback for other apply failures
-    Write-UserProgress "Repairing Spicetify configuration..."
-    Write-Log "Apply failed with different error, attempting: spicetify backup apply" -ForegroundColor Yellow
-    & $spicetifyExe backup apply
-    
-    if ($LASTEXITCODE -ne 0) {
-        Write-ErrorAndExit "Spicetify backup apply failed with exit code: $LASTEXITCODE"
+    # Check for backup-related errors
+    if ($combinedOutput -match 'backup' -or $combinedOutput -match 'Backup') {
+        Write-UserProgress "Repairing Spicetify configuration..."
+        Write-Log "Apply failed with backup-related error, attempting: spicetify backup apply" -ForegroundColor Yellow
+        
+        $result = Invoke-Spicetify -Arguments "backup apply"
+        
+        if (-not $result.Success) {
+            Write-ErrorAndExit "Spicetify backup apply failed: $($result.Error)"
+        }
+        
+        Write-UserProgress "Spicetify configuration repaired"
+        Write-Log "Spicetify backup apply successful"
+        return
     }
     
-    Write-UserProgress "Spicetify configuration repaired"
-    Write-Log "Spicetify backup apply successful"
+    # Generic fallback for other apply failures - try backup apply
+    Write-UserProgress "Repairing Spicetify configuration..."
+    Write-Log "Apply failed with error: $($result.Error)" -ForegroundColor Yellow
+    Write-Log "Attempting fallback: spicetify backup apply"
+    
+    $result = Invoke-Spicetify -Arguments "backup apply"
+    
+    if (-not $result.Success) {
+        # Last resort - try just 'apply' one more time after a small delay
+        Start-Sleep -Seconds 2
+        $result = Invoke-Spicetify -Arguments "apply"
+        
+        if (-not $result.Success) {
+            Write-ErrorAndExit "Spicetify apply failed after multiple attempts. Error: $($result.Error)"
+        }
+    }
+    
+    Write-UserProgress "Spicetify configuration applied"
+    Write-Log "Spicetify apply successful (after fallback)"
 }
 #endregion System Control
 
