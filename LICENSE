@@ -8,11 +8,9 @@ Parameters
 Licensor:             Alexander Kepekci
 Licensed Work:        Tagify
                       The Licensed Work is (c) 2025 Alexander Kepekci
-Additional Use Grant: You may make use of the Licensed Work for non-production
-                      purposes only, provided that you do not commercialize the
-                      Licensed Work or any derivative works.
-Change Date:          Four years from the date of release of each version
-Change License:       MIT License
+Additional Use Grant: None
+Change Date:          2049-12-21
+Change License:       GNU Affero General Public License v3.0 or later (AGPLv3)
 
 Notice
 
@@ -89,3 +87,59 @@ other recipients of the licensed work to be provided by Licensor:
 3. To specify a Change Date.
 
 4. Not to modify this License in any other way.
+
+-----------------------------------------------------------------------------
+
+Commercial Use Restrictions
+
+You may make use of the Licensed Work for non-production purposes, provided 
+that you may not use the Licensed Work for Commercial Purposes without a 
+separate commercial license.
+
+"Commercial Purposes" means:
+
+1. Use by any business entity, including but not limited to:
+   - Corporations
+   - Limited Liability Companies (LLCs)
+   - Partnerships
+   - Sole proprietorships operating as a registered business
+   - Any other legal business entity
+
+2. Integration into any commercial product, service, or software application
+
+3. Offering Tagify or any derivative work as a hosted service, SaaS product,
+   or managed service to third parties
+
+4. Redistribution as part of a commercial software package or bundle
+
+
+Individual Use (Permitted Without License):
+
+The following uses are explicitly permitted without a commercial license:
+
+- Individual DJs, musicians, and music professionals using Tagify for their 
+  personal music library management (even if earning income from music-related 
+  work)
+- Students and educators for educational purposes
+- Personal, non-commercial hobby use
+- Non-profit organizations recognized under section 501(c)(3) or equivalent
+
+Examples:
+
+The following uses REQUIRE a commercial license:
+  * A DJ company/LLC with multiple DJs using Tagify
+  * A music tech startup integrating Tagify features
+  * A wedding DJ service (registered business entity)
+  * Any business using Tagify for their operations
+
+The following uses are FREE:
+  * Individual professional DJ managing personal library
+  * Freelance musician organizing their tracks
+  * Bedroom producer with music side income
+  * Student learning music production
+  * Hobbyist building personal playlists
+
+
+For commercial licensing inquiries: alexanderkepekci@gmail.com
+
+-----------------------------------------------------------------------------
