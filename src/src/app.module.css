@@ -1,0 +1,126 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  color: var(--spice-text);
+  background-color: var(--spice-main);
+  font-family: var(--spice-font);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.titleArea {
+  margin-bottom: 4px;
+  margin-left: 8px;
+}
+
+.title {
+  font-size: 28px;
+  margin: 0;
+  font-weight: 700;
+  color: var(--spice-text);
+}
+
+.actionButton {
+  background-color: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.actionButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.actionButton:hover:not(:disabled) {
+  background-color: rgb(255 255 255 / 10%);
+}
+
+.lockButton {
+  background-color: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-size: 16px;
+}
+
+.lockButton.unlocked {
+  background-color: rgb(0 0 0 / 30%);
+  color: white;
+}
+
+.lockButton.unlocked:hover {
+  background-color: rgb(255 255 255 / 15%);
+}
+
+.lockButton.locked {
+  background-color: #5aa9e6;
+}
+
+.lockButton.locked:hover {
+  background-color: #4a95d3;
+}
+
+.switchTrackButton {
+  background-color: rgb(0 0 0 / 30%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.switchTrackButton:hover {
+  background-color: rgb(255 255 255 / 15%);
+}
+
+.buttonIcon {
+  font-size: 16px;
+}
+
+.content {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto 1fr;
+  gap: 16px;
+  height: calc(100% - 80px);
+  overflow: hidden;
+}
+
+.loadingContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 200px;
+  background-color: var(--spice-card);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.loadingText {
+  font-size: 18px;
+  color: var(--spice-text);
+  opacity: 0.8;
+}

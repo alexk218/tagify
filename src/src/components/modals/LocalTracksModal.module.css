@@ -1,0 +1,208 @@
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgb(0 0 0 / 70%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  overflow: auto;
+}
+
+.modal {
+  background: var(--spice-card);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin: auto;
+  position: relative;
+  animation: modalSlideIn 0.2s ease-out;
+}
+
+@keyframes modalSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--spice-text);
+}
+
+.closeButton {
+  background: transparent;
+  border: none;
+  color: var(--spice-text);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modalBody {
+  padding: 24px;
+  overflow-y: auto;
+  max-height: calc(90vh - 70px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.messageSection {
+  margin-bottom: 8px;
+}
+
+.message {
+  margin: 0 0 16px;
+  color: var(--spice-text);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.instructions {
+  margin-top: 16px;
+  padding: 16px;
+  background: rgb(255 255 255 / 10%);
+  border-radius: 4px;
+}
+
+.instructions h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--spice-text);
+}
+
+.instructions li {
+  margin-bottom: 8px;
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.instructions li:last-child {
+  margin-bottom: 0;
+}
+
+.tracksSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--spice-text);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.copyButton {
+  background: rgb(0 0 0 / 30%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.copyButton:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.tracksList {
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: rgb(0 0 0 / 20%);
+  border-radius: 4px;
+}
+
+.trackItem {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgb(0 0 0 / 20%);
+  border-radius: 4px;
+}
+
+.trackName {
+  font-weight: 600;
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.trackArtist {
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+.actionButtons {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.actionButton {
+  background: rgb(0 0 0 / 30%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  flex: 1;
+}
+
+.actionButton:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.closeAction {
+  background: rgb(0 0 0 / 30%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.closeAction:hover {
+  background: rgb(255 255 255 / 10%);
+}

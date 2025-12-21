@@ -1,0 +1,146 @@
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgb(0 0 0 / 70%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--spice-card);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--spice-text);
+}
+
+.closeButton {
+  background: transparent;
+  border: none;
+  color: var(--spice-text);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modalBody {
+  padding: 24px;
+  overflow-y: auto;
+  max-height: calc(90vh - 70px);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.sectionTitle {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--spice-button);
+}
+
+.input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--spice-button-disabled);
+  background: var(--spice-main);
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--spice-button-active);
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgb(0 0 0 / 20%);
+  border-radius: 16px;
+  padding: 4px 8px 4px 12px;
+  font-size: 12px;
+}
+
+.tagName {
+  color: var(--spice-text);
+}
+
+.removeTag {
+  background: transparent;
+  border: none;
+  color: var(--spice-subtext);
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.removeTag:hover {
+  color: var(--spice-text);
+}
+
+.actionButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.actionButton {
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.primaryButton {
+  background: var(--spice-button);
+  color: var(--spice-text);
+}
+
+.primaryButton:hover {
+  background: var(--spice-button-active);
+}

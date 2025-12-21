@@ -1,0 +1,236 @@
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgb(0 0 0 / 70%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  overflow: auto;
+}
+
+.modal {
+  background: var(--spice-card);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 700px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin: auto;
+  position: relative;
+  animation: modalSlideIn 0.2s ease-out;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--spice-text);
+}
+
+.modalBody {
+  padding: 24px;
+  overflow-y: auto;
+  max-height: calc(90vh - 70px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.description {
+  color: var(--spice-text);
+  font-size: 14px;
+  margin: 0;
+  text-align: center;
+  opacity: 0.9;
+}
+
+.optionsContainer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.refreshOption {
+  background: rgb(0 0 0 / 20%);
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.refreshOption:hover {
+  border-color: rgb(255 255 255 / 10%);
+  background: rgb(0 0 0 / 30%);
+}
+
+.optionHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.optionIcon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.optionTitle {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--spice-text);
+  flex-grow: 1;
+}
+
+.optionTime {
+  font-size: 12px;
+  color: var(--spice-subtext);
+  background: rgb(0 0 0 / 30%);
+  padding: 4px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.optionDescription {
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.optionDescription p {
+  margin: 0 0 8px;
+}
+
+.optionDescription ul {
+  margin: 0;
+  padding-left: 16px;
+  list-style-type: disc;
+}
+
+.optionDescription li {
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+
+.refreshButton {
+  background: rgb(0 0 0 / 30%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 6px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-top: auto;
+}
+
+.refreshButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.refreshButton:hover:not(:disabled) {
+  background: rgb(255 255 255 / 10%);
+  transform: translateY(-1px);
+}
+
+.quickButton {
+  background: rgb(30 144 255 / 20%);
+  border: 1px solid rgb(30 144 255 / 30%);
+}
+
+.quickButton:hover:not(:disabled) {
+  background: rgb(30 144 255 / 30%);
+  border-color: rgb(30 144 255 / 50%);
+}
+
+.fullButton {
+  background: rgb(255 165 0 / 20%);
+  border: 1px solid rgb(255 165 0 / 30%);
+}
+
+.fullButton:hover:not(:disabled) {
+  background: rgb(255 165 0 / 30%);
+  border-color: rgb(255 165 0 / 50%);
+}
+
+.infoBox {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: rgb(30 144 255 / 10%);
+  border: 1px solid rgb(30 144 255 / 20%);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 8px;
+}
+
+.infoIcon {
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.infoText {
+  color: var(--spice-text);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+@media (width <= 768px) {
+  .modal {
+    width: 95%;
+    max-height: 95vh;
+  }
+
+  .modalBody {
+    padding: 16px;
+  }
+
+  .optionsContainer {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .refreshOption {
+    padding: 16px;
+  }
+
+  .optionHeader {
+    gap: 8px;
+  }
+
+  .optionTitle {
+    font-size: 16px;
+  }
+
+  .optionIcon {
+    font-size: 20px;
+  }
+}
+
+@keyframes modalSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

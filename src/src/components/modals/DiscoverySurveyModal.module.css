@@ -1,0 +1,334 @@
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgb(0 0 0 / 80%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10000; /* Higher than other modals */
+  overflow: auto;
+}
+
+.modal {
+  background: var(--spice-card);
+  border-radius: 16px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin: auto;
+  position: relative;
+  animation: modalSlideIn 0.3s ease-out;
+  box-shadow: 0 20px 40px rgb(0 0 0 / 40%);
+}
+
+@keyframes modalSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-30px) scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Header Styles */
+.modalHeader {
+  padding: 24px 24px 16px;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+  background: linear-gradient(
+    135deg,
+    rgb(29 185 84 / 10%),
+    rgb(30 144 255 / 10%)
+  );
+}
+
+.titleSection {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--spice-text);
+  line-height: 1.2;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--spice-subtext);
+  font-weight: 400;
+}
+
+/* Body Styles */
+.modalBody {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.questionSection {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.questionTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--spice-text);
+}
+
+.questionSubtext {
+  margin: 0;
+  font-size: 14px;
+  color: var(--spice-subtext);
+  line-height: 1.5;
+}
+
+/* Options Grid */
+.optionsGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.optionButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: rgb(255 255 255 / 5%);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  font-size: 15px;
+  color: var(--spice-text);
+}
+
+.optionButton:hover {
+  background: rgb(255 255 255 / 8%);
+  border-color: rgb(30 144 255 / 30%);
+}
+
+.optionSelected {
+  background: rgb(30 144 255 / 15%) !important;
+  border-color: #1e90ff !important;
+}
+
+.optionText {
+  flex: 1;
+  font-weight: 500;
+}
+
+.radioIndicator {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgb(255 255 255 / 30%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.optionSelected .radioIndicator {
+  border-color: #1e90ff;
+}
+
+.radioSelected {
+  width: 10px;
+  height: 10px;
+  background: #1e90ff;
+  border-radius: 50%;
+  animation: radioPopIn 0.2s ease-out;
+}
+
+@keyframes radioPopIn {
+  from {
+    transform: scale(0);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+.optionContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inlineInputSection {
+  margin-top: 8px;
+  padding: 12px;
+  background-color: rgb(255 255 255 / 5%);
+  border-radius: 8px;
+  border-left: 3px solid var(--spice-accent, #1db954);
+}
+
+.inlineLabel {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.9em;
+  color: var(--spice-text, #fff);
+  font-weight: 500;
+}
+
+.inlineInput {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 6px;
+  background-color: rgb(0 0 0 / 30%);
+  color: var(--spice-text, #fff);
+  font-size: 0.9em;
+  transition: border-color 0.2s ease;
+}
+
+.inlineInput:focus {
+  outline: none;
+  border-color: var(--spice-accent, #1db954);
+}
+
+/* Footer Styles */
+.modalFooter {
+  padding: 16px 24px 24px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+}
+
+.footerActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.skipButton {
+  padding: 10px 20px;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 8px;
+  color: var(--spice-subtext);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.skipButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.skipButton:hover:not(:disabled) {
+  background: rgb(255 255 255 / 5%);
+  border-color: rgb(255 255 255 / 30%);
+  color: var(--spice-text);
+}
+
+.submitButton {
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #1db954, #1ed760);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+  justify-content: center;
+}
+
+.submitButton:disabled {
+  background: rgb(255 255 255 / 10%);
+  color: var(--spice-subtext);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.submitButton:hover:not(:disabled) {
+  background: linear-gradient(135deg, #1ed760, #1db954);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgb(29 185 84 / 30%);
+}
+
+/* Loading Spinner */
+.loadingSpinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgb(255 255 255 / 30%);
+  border-top: 2px solid white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Responsive Design */
+@media (width <= 768px) {
+  .modal {
+    width: 95%;
+    margin: 20px auto;
+  }
+
+  .modalHeader {
+    padding: 20px 20px 16px;
+  }
+
+  .modalBody {
+    padding: 20px;
+  }
+
+  .modalFooter {
+    padding: 16px 20px 20px;
+  }
+
+  .titleSection {
+    gap: 12px;
+  }
+
+  .modalTitle {
+    font-size: 20px;
+  }
+
+  .optionButton {
+    padding: 14px 16px;
+  }
+
+  .footerActions {
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+
+  .skipButton,
+  .submitButton {
+    width: 100%;
+    justify-content: center;
+  }
+}

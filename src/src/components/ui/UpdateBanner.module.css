@@ -1,0 +1,384 @@
+.updateBanner {
+  background: linear-gradient(135deg, #2a2a2a 0%, #3a3a3a 50%, #2d2d2d 100%);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-left: 4px solid #777;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 30%);
+  margin-bottom: 5px;
+  overflow: hidden;
+  position: relative;
+  transform: translateY(0);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: slideIn 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.updateBanner:hover {
+  box-shadow: 0 4px 16px rgb(0 0 0 / 40%);
+  border-left-color: rgb(29 185 84 / 90%);
+  transform: translateY(-1px);
+}
+
+.updateBanner.dismissing {
+  animation: slideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.bannerContent {
+  padding: 0;
+}
+
+.mainContent {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+}
+
+.iconSection {
+  flex-shrink: 0;
+}
+
+.updateIcon {
+  font-size: 24px;
+  display: block;
+  animation: gentlePulse 3s infinite;
+  filter: brightness(1.1);
+}
+
+.textSection {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  color: #f5f5f5;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.releaseDate {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.7;
+  background: rgb(255 255 255 / 8%);
+  color: rgb(255 255 255 / 80%);
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid rgb(255 255 255 / 5%);
+}
+
+.subtitle {
+  color: rgb(255 255 255 / 75%);
+  font-size: 13px;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.actionSection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.primaryButton {
+  background: rgb(29 185 84 / 15%);
+  border: 1px solid rgb(29 185 84 / 30%);
+  color: #1ed760;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
+}
+
+.primaryButton:hover {
+  background: rgb(29 185 84 / 25%);
+  border-color: rgb(29 185 84 / 50%);
+  color: #22ff6b;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgb(29 185 84 / 20%);
+}
+
+.primaryButton:active {
+  transform: translateY(0);
+}
+
+.secondaryButton {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 15%);
+  color: rgb(255 255 255 / 80%);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.secondaryButton:hover {
+  background: rgb(255 255 255 / 5%);
+  border-color: rgb(255 255 255 / 25%);
+  color: rgb(255 255 255 / 95%);
+}
+
+.expandIcon {
+  transition: transform 0.2s ease;
+}
+
+.expandIcon.expanded {
+  transform: rotate(180deg);
+}
+
+.dismissButton {
+  background: transparent;
+  border: none;
+  color: rgb(255 255 255 / 50%);
+  padding: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.dismissButton:hover {
+  background: rgb(255 255 255 / 8%);
+  color: rgb(255 255 255 / 80%);
+}
+
+.dismissalOptions {
+  padding: 12px 18px 14px;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  background: rgb(0 0 0 / 15%);
+}
+
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: rgb(255 255 255 / 70%);
+  font-size: 12px;
+  user-select: none;
+}
+
+.checkbox {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.checkboxCustom {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid rgb(255 255 255 / 30%);
+  border-radius: 3px;
+  background: transparent;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.checkboxLabel:hover .checkboxCustom {
+  border-color: rgb(255 255 255 / 50%);
+  background: rgb(255 255 255 / 5%);
+}
+
+.checkIcon {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  color: #1db954;
+}
+
+.checkbox:checked + .checkboxCustom {
+  background: rgb(29 185 84 / 20%);
+  border-color: #1db954;
+}
+
+.checkbox:checked + .checkboxCustom .checkIcon {
+  color: #1db954;
+  opacity: 1;
+}
+
+.checkboxText {
+  line-height: 1.3;
+}
+
+.expandedContent {
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  background: rgb(0 0 0 / 20%);
+  animation: expandDown 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.changelogSection {
+  padding: 16px 18px;
+}
+
+.changelogTitle {
+  color: #f0f0f0;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  margin-top: 0;
+}
+
+.changelogContent {
+  max-height: 180px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 20%) transparent;
+}
+
+.changelogContent::-webkit-scrollbar {
+  width: 5px;
+}
+
+.changelogContent::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.changelogContent::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 20%);
+  border-radius: 3px;
+}
+
+.changelogContent::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 30%);
+}
+
+.changelogLine {
+  color: rgb(255 255 255 / 80%);
+  font-size: 12px;
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.changelogLine:last-child {
+  margin-bottom: 0;
+}
+
+.changelogLine:empty {
+  margin-bottom: 3px;
+}
+
+/* Animations */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-15px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 200px;
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-15px);
+    max-height: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+
+@keyframes expandDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+
+  to {
+    opacity: 1;
+    max-height: 220px;
+  }
+}
+
+@keyframes gentlePulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
+/* Responsive design */
+@media (width <= 768px) {
+  .mainContent {
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px;
+  }
+
+  .iconSection {
+    align-self: center;
+  }
+
+  .actionSection {
+    align-self: stretch;
+    justify-content: center;
+  }
+
+  .title {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    text-align: center;
+  }
+
+  .primaryButton,
+  .secondaryButton {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+@media (width <= 480px) {
+  .actionSection {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .primaryButton,
+  .secondaryButton {
+    width: 100%;
+  }
+
+  .dismissalOptions {
+    padding: 10px 14px 12px;
+  }
+
+  .checkboxLabel {
+    font-size: 11px;
+  }
+}

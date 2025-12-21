@@ -1,0 +1,474 @@
+.container {
+  background: var(--spice-card);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: relative;
+}
+
+.headerSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px; /* Smaller gap within the header section */
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 20px;
+  margin: 0;
+  font-weight: 700;
+  color: var(--spice-text);
+}
+
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.trackCount {
+  font-size: 14px;
+  color: var(--spice-subtext);
+}
+
+.cancelButton {
+  background-color: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.cancelButton:hover {
+  background-color: rgb(255 255 255 / 10%);
+}
+
+.sectionTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--spice-text);
+}
+
+.commonTagsSection {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgb(0 0 0 / 10%);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.tagItem {
+  background: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: background-color 0.2s ease;
+}
+
+.tagItem:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.removeTagIcon {
+  margin-left: 6px;
+  font-weight: bold;
+  opacity: 0.7;
+}
+
+.noTags {
+  color: var(--spice-subtext);
+  font-style: italic;
+  margin: 0;
+  font-size: 12px;
+}
+
+.trackListContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.trackList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trackItem {
+  background: rgb(0 0 0 / 20%);
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 30px 120px auto 120px 50px; /* lock, info, tags, ratings, play */
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.2s ease;
+}
+
+.trackItem:hover {
+  background: rgb(255 255 255 / 5%);
+}
+
+.lockColumn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  grid-column: 1;
+}
+
+.trackInfo {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.trackName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--spice-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trackArtist {
+  font-size: 12px;
+  color: var(--spice-subtext);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trackTagsInline {
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  margin-left: 6px;
+}
+
+.instructions {
+  font-size: 14px;
+  color: var(--spice-subtext);
+  font-style: italic;
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* Ensure instructions paragraphs have proper spacing */
+.instructions p {
+  margin: 4px 0;
+}
+
+.trackTagsInline .tagItem {
+  font-size: 11px;
+  padding: 3px 8px;
+}
+
+.trackRatingSection {
+  grid-column: 4;
+  display: grid;
+  grid-template-columns: 20px 90px; /* for trackItem energy + rating  */
+  align-items: center;
+  min-width: 120px;
+}
+
+.trackItemEnergy {
+  grid-column: 1;
+  background: rgb(0 0 0 / 30%);
+  color: var(--spice-text);
+  padding: 4px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-block;
+  white-space: nowrap;
+  justify-self: start;
+}
+
+.trackItemRating {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  justify-self: end; /* Align to the right of its column */
+}
+
+/* Play button styles */
+.playButton {
+  grid-column: 5;
+  background: rgb(0 0 0 / 24%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  min-width: 50px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  margin-right: 12px;
+}
+
+.lockedTrack {
+  background: rgb(30 144 255 / 10%);
+  border: 1px solid rgb(30 144 255 / 30%);
+  border-left: 4px solid #1e90ff; /* Add thick left border */
+  position: relative;
+}
+
+.lockedTrack:hover {
+  background: rgb(30 144 255 / 15%);
+}
+
+.contextBar {
+  background: var(--spice-card);
+  border-bottom: 1px solid var(--spice-border);
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.contextContent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--spice-subtext);
+}
+
+.unsavedIndicator {
+  color: #ffa500;
+  font-size: 14px;
+  font-weight: 600;
+  margin-left: 8px;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.actionButtons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.saveButton {
+  background: rgb(30 144 255 / 30%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.saveButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.saveButton:hover:not(:disabled) {
+  background: rgb(30 144 255 / 50%);
+}
+
+.discardButton {
+  background-color: rgb(255 0 0 / 20%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.discardButton:hover {
+  background-color: rgb(255 0 0 / 30%);
+}
+
+.discardButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.commonTagHighlight {
+  background: #1e90ff !important;
+  color: white !important;
+}
+
+.commonTagHighlight:hover {
+  background: #1a7ee0 !important;
+}
+
+.controlsWithContextSection {
+  display: flex;
+  flex-direction: column;
+}
+
+.controlsContainer {
+  display: flex;
+  flex-direction: row;
+  gap: 16px;
+  flex: 1;
+  margin: 0 auto;
+  max-width: 800px;
+}
+
+.controlSection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.label {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--spice-text);
+  text-align: center;
+}
+
+.ratingContainer,
+.energyContainer {
+  display: grid;
+  grid-template-columns: 60px auto 60px;
+  align-items: center;
+  gap: 12px;
+  width: 320px;
+  height: 40px; /* Fixed height for both containers */
+  position: relative;
+}
+
+.stars,
+.energySlider {
+  grid-column: 2; /* Middle column - this is what the label centers on */
+  justify-self: center;
+}
+
+.stars {
+  grid-column: 2;
+  justify-self: center;
+  display: flex;
+  align-items: center; /* Center the stars vertically */
+  height: 32px; /* Match the clear button height */
+}
+
+.star {
+  background: transparent;
+  border: none;
+  color: var(--spice-button-disabled);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s ease;
+}
+
+.star:hover {
+  color: #ffd700;
+}
+
+.energySlider {
+  grid-column: 2;
+  justify-self: center;
+  width: 200px;
+  height: 4px;
+  appearance: none;
+  background: var(--spice-button-disabled);
+  border-radius: 2px;
+  outline: none;
+
+  /* Add margin to push it down slightly to match stars */
+  margin-top: 2px;
+}
+
+.energySlider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #1e90ff;
+  cursor: pointer;
+}
+
+/* Styles for when energy is not set */
+.energySliderUnset::-webkit-slider-thumb {
+  background: var(--spice-button-disabled);
+  border: 1px solid var(--spice-subtext);
+}
+
+.energyValue {
+  margin-left: 8px;
+  font-weight: 700;
+  color: #1e90ff;
+}
+
+.clearButton {
+  grid-column: 3;
+  place-self: center start;
+  width: 50px;
+  height: 28px;
+  background: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  /* Ensure button is vertically centered in its grid cell */
+}
+
+.clearButton:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.clearButton.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}

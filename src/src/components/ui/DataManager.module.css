@@ -1,0 +1,118 @@
+.controlBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background: linear-gradient(135deg, rgb(0 0 0 / 10%), rgb(0 0 0 / 5%));
+  border-radius: 12px;
+  border: 1px solid rgb(255 255 255 / 5%);
+  container-type: inline-size; /* Enable container queries */
+}
+
+/* ! PILL BUTTONS */
+.actionPills {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  background: rgb(0 0 0 / 20%);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.pillButton {
+  padding: 8px 12px;
+  font-size: 13px;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--spice-text);
+  background: transparent;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pillButton:hover {
+  transform: translateY(-1px);
+}
+
+.pillButton.exportButton:hover {
+  background: rgb(30 144 255 / 30%);
+}
+
+.pillButton.importButton:hover {
+  background: rgb(34 197 94 / 30%);
+}
+
+.pillButton.statsButton:hover {
+  background: rgb(138 43 226 / 30%);
+}
+
+.pillButton.infoButton:hover {
+  background: rgb(255 193 7 / 30%);
+}
+
+.pillButton.surveyButton {
+  border: 1px solid rgb(255 107 107 / 15%);
+  background: rgb(255 107 107 / 5%);
+}
+
+.pillButton.surveyButton:hover {
+  background: rgb(255 107 107 / 30%);
+  border-color: rgb(255 107 107 / 50%);
+}
+
+.pillButton.coffeeButton {
+  border: 1px solid rgb(191 111 59 / 15%);
+  background: rgb(191 111 59 / 5%);
+}
+
+.pillButton.coffeeButton:hover {
+  background: rgb(191 111 59 / 30%);
+  border-color: rgb(191 111 59 / 50%);
+}
+
+/* Hide support button text when container is narrow */
+@container (max-width: 600px) {
+  .buttonText {
+    display: none;
+  }
+}
+
+/* ! Right side - Backup status & settings */
+.settingsButton {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--spice-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.settingsButton:hover {
+  background: rgb(255 255 255 / 10%);
+  transform: scale(1.1);
+}
+
+.saveStatus {
+  font-size: 12px;
+  color: var(--spice-subtext);
+  opacity: 0.7;
+  font-weight: 500;
+  background: rgb(34 197 94 / 10%);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgb(34 197 94 / 20%);
+  margin-left: auto;
+  margin-right: 10px;
+}

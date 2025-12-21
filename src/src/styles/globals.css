@@ -1,0 +1,554 @@
+/* ===== MODAL COMPONENTS ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgb(0 0 0 / 70%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  overflow: auto;
+}
+
+.modal {
+  background: var(--spice-card);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin: auto;
+  position: relative;
+}
+
+.modal--wide {
+  max-width: 800px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px 12px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.modal-title {
+  margin-left: 10px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--spice-text);
+}
+
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  max-height: calc(90vh - 70px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--spice-button-disabled);
+  margin-top: auto;
+}
+
+.modal-close-button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--spice-subtext);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+}
+
+.modal-close-button:hover {
+  background: var(--spice-button-disabled);
+  color: var(--spice-text);
+  border-color: var(--spice-button-disabled);
+}
+
+/* ===== BUTTON SYSTEM ===== */
+.btn {
+  background: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 10%);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: #1e90ff;
+  color: white;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: #1a7ee0;
+}
+
+.btn--danger {
+  background: rgb(255 0 0 / 20%);
+  color: var(--spice-text);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: rgb(255 0 0 / 30%);
+}
+
+.btn--small {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* ===== FORM ELEMENTS ===== */
+.form-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.form-label {
+  font-size: 13px;
+  color: var(--spice-subtext);
+}
+
+.form-input {
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: var(--spice-main);
+  border: 1px solid var(--spice-button-disabled);
+  color: var(--spice-text);
+  font-size: 14px;
+  width: 100%;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: rgb(255 255 255 / 30%);
+}
+
+.form-select {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  background: rgb(0 0 0 / 68.3%);
+  color: var(--spice-text);
+  cursor: pointer;
+}
+
+.form-select:focus {
+  outline: none;
+  border-color: rgb(255 255 255 / 30%);
+}
+
+.form-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #1e40af;
+  cursor: pointer;
+  transition: accent-color 0.2s ease;
+}
+
+.form-checkbox:hover {
+  accent-color: #1e3a8a;
+}
+
+.form-checkbox:focus {
+  outline: 2px solid rgb(30 144 255 / 30%);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.form-checkbox {
+  animation: none;
+}
+
+.form-checkbox:checked {
+  animation: checkboxCheck 0.3s ease;
+}
+
+@keyframes checkboxCheck {
+  0% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.1);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+.form-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--spice-text);
+  cursor: pointer;
+  padding: 2px 0;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.form-checkbox-label:hover {
+  background: rgb(255 255 255 / 4%);
+  color: #fff;
+}
+
+.form-checkbox-label .checkbox-text {
+  transition: all 0.2s ease;
+}
+
+/* ===== CONTAINER & CARD SYSTEM ===== */
+.container {
+  background: var(--spice-card);
+  border-radius: 8px;
+  padding: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ===== SECTION HEADERS & NAVIGATION ===== */
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: var(--spice-text);
+}
+
+.section-subtitle {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0 0 8px;
+  color: var(--spice-text);
+}
+
+.expandable-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 20%);
+  transition: background 0.2s ease;
+}
+
+.expandable-header:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.expand-icon {
+  font-size: 10px;
+  transition: transform 0.2s ease;
+  display: inline-block;
+  width: 10px;
+  text-align: center;
+  margin-right: 8px;
+}
+
+.expand-icon--expanded {
+  transform: rotate(0deg);
+}
+
+/* ===== TAG SYSTEM ===== */
+.tag-item {
+  display: inline-flex;
+  align-items: center;
+  background: rgb(0 0 0 / 20%);
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  gap: 4px;
+}
+
+.tag-item:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.tag-remove {
+  background: transparent;
+  border: none;
+  color: var(--spice-subtext);
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+}
+
+.tag-remove:hover {
+  color: var(--spice-text);
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ===== FILTER SYSTEM ===== */
+
+/* ===== TRACK & LIST ITEMS ===== */
+
+/* ===== CLICKABLE ELEMENTS ===== */
+.clickable {
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.clickable:hover {
+  color: rgb(255 255 255 / 97.7%);
+  text-decoration: underline;
+}
+
+/* ===== LAYOUT UTILITIES ===== */
+.flex {
+  display: flex;
+}
+
+.flex-col {
+  flex-direction: column;
+}
+
+.gap-1 {
+  gap: 4px;
+}
+
+.gap-2 {
+  gap: 8px;
+}
+
+.gap-3 {
+  gap: 12px;
+}
+
+/* ===== STATUS & INDICATORS ===== */
+.loading {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--spice-subtext);
+  font-style: italic;
+}
+
+/* ===== SEARCH BOXES ===== */
+.search-box {
+  position: relative;
+  width: 200px;
+}
+
+/* ===== NOTIFICATIONS ===== */
+.notification {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: #1e90ff;
+  color: white;
+  padding: 12px 16px;
+  border-radius: 4px;
+  z-index: 10000;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 40%);
+  font-size: 14px;
+  animation: slideDown 0.3s ease-out;
+}
+
+.notification--error {
+  background: #ff4c4c;
+}
+
+.notification--success {
+  background: #1db954;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* ===== RATING SYSTEM ===== */
+
+/* ===== SLIDER SYSTEM ===== */
+.slider {
+  width: 100%;
+  max-width: 250px;
+  height: 4px;
+  appearance: none;
+  background: var(--spice-button-disabled);
+  border-radius: 2px;
+  outline: none;
+}
+
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #1e90ff;
+  cursor: pointer;
+}
+
+/* ===== ENERGY & BPM INDICATORS ===== */
+
+/* ===== ALBUM COVER SYSTEM ===== */
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* ===== PLAYLIST SYSTEM ===== */
+
+.playlist-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== DRAG AND DROP SYSTEM ===== */
+.dragging {
+  opacity: 0.5;
+  transform: scale(0.95);
+  background: rgb(30 144 255 / 20%);
+  border: 1px solid #1e90ff;
+}
+
+.drop-zone {
+  padding: 8px;
+  margin: 4px 0;
+  border: 2px dashed transparent;
+  border-radius: 4px;
+  text-align: center;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  transition: all 0.2s ease;
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drop-zone--active {
+  border-color: #1e90ff;
+  background: rgb(30 144 255 / 10%);
+  color: var(--spice-text);
+}
+
+/* ===== METADATA DISPLAY ===== */
+
+/* ===== TEXT UTILITIES ===== */
+
+/* ===== ANIMATIONS ===== */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===== RESPONSIVE UTILITIES ===== */
+
+@media (width <= 768px) {
+  .modal {
+    width: 95%;
+    max-height: 95vh;
+  }
+
+  .modal-body {
+    padding: 16px;
+  }
+
+  .modal-header {
+    padding: 12px 16px;
+  }
+
+  .container {
+    padding: 12px;
+  }
+}
