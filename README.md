@@ -7,10 +7,10 @@ Tagify is a powerful [Spicetify](https://github.com/spicetify/cli) custom app th
 
 🔗 **[tagify.fm](https://www.tagify.fm)**
 
+[![Discord](https://img.shields.io/badge/Discord-Community-5865F2?logo=discord)](https://discord.gg/C4qbPUbBKV)
 [![GitHub release](https://img.shields.io/github/release/alexk218/tagify.svg)](https://github.com/alexk218/tagify/releases)
 [![GitHub Discussions](https://img.shields.io/github/discussions/alexk218/tagify?color=blue&logo=github&label=discussions)](https://github.com/alexk218/tagify/discussions)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buymeacoffee&logoColor=000)](https://buymeacoffee.com/alexk218)
-
 
 ## See Tagify in action
 [![Demo Video](https://img.youtube.com/vi/iDsSasHFOJQ/0.jpg)](https://www.youtube.com/watch?v=iDsSasHFOJQ)
@@ -18,7 +18,7 @@ Tagify is a powerful [Spicetify](https://github.com/spicetify/cli) custom app th
 
 ## Motivation
 
-After years of failed attempts to organize my 10,000+ track collection, I built what every music lover needs: a way to tag, rate, and find music the way your brain thinks about it.
+After years of failed attempts to organize my 10,000+ track collection, I built the tool I always wished existed: a way to tag, rate, and find music the way your brain thinks about it.
 
 ---
 
@@ -51,7 +51,7 @@ Select multiple tracks and apply tags in bulk.
 
 ## Install Tagify
 
-### **Automatic Installer/Updater**
+### **Automatic Installer / Updater**
 [Tagify Installer for Windows](https://github.com/alexk218/tagify-installer/releases/latest)
 
 This installs Spicetify and Tagify. Keep this installed, as it will handle all Spicetify and Tagify updates in the future.
@@ -84,11 +84,9 @@ curl -fsSL "https://raw.githubusercontent.com/alexk218/tagify/main/install.sh" |
 
 ## Community & Support
 Join the community and influence Tagify's roadmap.
-- **Upcoming Features**: [Tagify Roadmap](https://github.com/alexk218/tagify/discussions/4)
-- **Feature Requests**: [Share your ideas](https://github.com/alexk218/tagify/discussions/categories/ideas-feature-requests)
-- **Get Help**: [Ask questions](https://github.com/alexk218/tagify/discussions/categories/q-a)
-- **Report Bugs**: [Bug reports](https://github.com/alexk218/tagify/discussions/categories/bug-report)
-- **Announcements**: [Latest updates](https://github.com/alexk218/tagify/discussions/categories/announcements)
+- 💬 **Discord**: [Chat with other users, share workflows, and get early previews](https://discord.gg/C4qbPUbBKV)
+- 💡 **Feature requests & bug reports**: [Discussions Forum](https://github.com/alexk218/tagify/discussions)
+- 🚀 **Shape Tagify's future:** [Give feedback](https://forms.gle/H4xMyNC2zVAHowPF6)
 
 ## Support me ☕
 Many coffees were consumed in the making of Tagify. 
