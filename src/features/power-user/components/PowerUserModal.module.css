@@ -1,0 +1,327 @@
+/* Replace/add these styles: */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgb(0 0 0 / 80%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  overflow: auto;
+  padding: 20px;
+  animation: overlayFadeIn 220ms ease-out;
+}
+
+.modal {
+  width: min(560px, 100%);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: linear-gradient(165deg, #0d1117 0%, #161b22 60%, #0d2818 100%);
+  border: 1px solid rgba(29, 185, 84, 0.15);
+  border-radius: 20px;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  animation: modalCelebrateIn 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.header {
+  padding: 32px 32px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+}
+
+.badgeWrap {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.badge {
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(29, 185, 84, 0.25),
+    rgba(29, 185, 84, 0.08)
+  );
+  border: 1px solid rgba(29, 185, 84, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  position: relative;
+  box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.4);
+  animation:
+    badgePop 700ms cubic-bezier(0.2, 0.9, 0.2, 1) both,
+    badgeGlow 1800ms ease-out 1;
+}
+
+.sparkleA,
+.sparkleB,
+.sparkleC {
+  position: absolute;
+  color: #fef08a;
+  opacity: 0;
+  text-shadow: 0 0 12px rgba(254, 240, 138, 0.65);
+  animation: sparkleFloat 900ms ease-out forwards;
+}
+
+.sparkleA {
+  top: 8px;
+  left: 8px;
+  font-size: 14px;
+  animation-delay: 120ms;
+}
+
+.sparkleB {
+  top: 6px;
+  right: 12px;
+  font-size: 12px;
+  animation-delay: 220ms;
+}
+
+.sparkleC {
+  bottom: 10px;
+  right: 4px;
+  font-size: 16px;
+  animation-delay: 300ms;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--spice-text);
+  letter-spacing: -0.01em;
+}
+
+.content {
+  padding: 0 32px;
+}
+
+.content p {
+  margin: 0 0 16px;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 1.65;
+  font-size: 14.5px;
+}
+
+.highlight {
+  font-size: 16px !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  margin-bottom: 20px !important;
+}
+
+.content strong {
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.ask {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.inlineLink {
+  color: #86efac;
+  font-weight: 600;
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  text-decoration-color: #4ade80;
+  transition:
+    color 0.15s ease,
+    text-decoration-color 0.15s ease;
+}
+
+.inlineLink:hover {
+  color: #bbf7d0;
+  text-decoration-color: #86efac;
+}
+
+.signature {
+  margin-top: 24px !important;
+  margin-bottom: 0 !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  font-style: italic;
+  font-size: 14px !important;
+}
+
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 28px 32px 32px;
+}
+
+.primaryButton {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 14px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #001509;
+  background: linear-gradient(135deg, #22c55e 0%, #4ade80 100%);
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.primaryButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(34, 197, 94, 0.3);
+  filter: none;
+}
+
+.secondaryButton {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 14px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #241400;
+  background: linear-gradient(135deg, #facc15 0%, #fde047 100%);
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.secondaryButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(250, 204, 21, 0.3);
+  filter: none;
+}
+
+.closeButton {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  margin-left: 0;
+}
+
+.closeButton:hover {
+  color: rgba(255, 255, 255, 0.75);
+  filter: none;
+}
+
+@media (max-width: 640px) {
+  .header {
+    padding: 24px 24px 12px;
+  }
+
+  .content {
+    padding: 0 24px;
+  }
+
+  .footer {
+    padding: 24px;
+  }
+
+  .title {
+    font-size: 20px;
+  }
+
+  .content p {
+    font-size: 14px;
+  }
+}
+
+@keyframes overlayFadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modalCelebrateIn {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+
+  70% {
+    opacity: 1;
+    transform: translateY(-3px) scale(1.01);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes badgePop {
+  0% {
+    transform: scale(0.68) rotate(-8deg);
+  }
+
+  60% {
+    transform: scale(1.12) rotate(3deg);
+  }
+
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes badgeGlow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55);
+  }
+
+  100% {
+    box-shadow: 0 0 0 24px rgba(74, 222, 128, 0);
+  }
+}
+
+@keyframes sparkleFloat {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.7);
+  }
+
+  35% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.9);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .modal,
+  .badge,
+  .sparkleA,
+  .sparkleB,
+  .sparkleC {
+    animation: none !important;
+    transition: none !important;
+  }
+}

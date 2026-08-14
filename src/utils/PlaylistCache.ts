@@ -1,4 +1,5 @@
 import { shouldExcludePlaylist } from "./PlaylistSettings";
+import { normalizeSpotifyUserIdentity } from "./SpotifyUserIdentity";
 
 interface PlaylistInfo {
   id: string;
@@ -15,6 +16,17 @@ interface PlaylistCache {
 }
 
 const PLAYLIST_CACHE_KEY = "tagify:playlistCache";
+
+function resolveCurrentUserId(userProfile: any): string {
+  return normalizeSpotifyUserIdentity(
+    userProfile?.id ||
+      userProfile?.username ||
+      userProfile?.uri ||
+      userProfile?.display_name ||
+      Spicetify.Platform.username ||
+      ""
+  );
+}
 
 export function getPlaylistCache(): PlaylistCache {
   try {
@@ -287,7 +299,7 @@ export async function incrementalRefreshPlaylistCache(): Promise<number> {
 
     // Get user profile
     const userProfile = await Spicetify.CosmosAsync.get("https://api.spotify.com/v1/me");
-    const userId = userProfile.id;
+    const userId = resolveCurrentUserId(userProfile);
 
     if (!userId) {
       throw new Error("Could not get user ID");
@@ -377,7 +389,7 @@ export async function fullRefreshPlaylistCache(): Promise<number> {
   try {
     // Get user profile
     const userProfile = await Spicetify.CosmosAsync.get("https://api.spotify.com/v1/me");
-    const userId = userProfile.id;
+    const userId = resolveCurrentUserId(userProfile);
 
     if (!userId) {
       throw new Error("Could not get user ID");

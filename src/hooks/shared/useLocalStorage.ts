@@ -13,6 +13,10 @@ export function useLocalStorage<T>(
       // If no item exists, return initialValue
       if (!item) return initialValue;
 
+      if (typeof initialValue === "string") {
+        return item as T;
+      }
+
       // Try to parse as JSON, but if it fails, return the raw string
       try {
         return JSON.parse(item);

@@ -182,10 +182,11 @@ export const welcomeModal = {
         isLarge: false,
       });
 
+      localStorage.setItem(LAST_SEEN_VERSION_KEY, packageJson.version);
+
       content
         .querySelector("#tagify-welcome-close")
         ?.addEventListener("click", () => {
-          localStorage.setItem(LAST_SEEN_VERSION_KEY, packageJson.version);
           Spicetify.PopupModal.hide();
 
           // navigate to Tagify

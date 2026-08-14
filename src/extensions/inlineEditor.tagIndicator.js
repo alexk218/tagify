@@ -1,0 +1,28 @@
+const TAGIFY_ICON_PATH =
+  "M21.41,11.58L12.41,2.58C12.04,2.21 11.53,2 11,2H4C2.9,2 2,2.9 2,4V11C2,11.53 2.21,12.04 2.59,12.42L11.59,21.42C11.96,21.79 12.47,22 13,22C13.53,22 14.04,21.79 14.41,21.42L21.41,14.42C21.79,14.04 22,13.53 22,13C22,12.47 21.79,11.96 21.41,11.58M5.5,7C4.67,7 4,6.33 4,5.5C4,4.67 4.67,4 5.5,4C6.33,4 7,4.67 7,5.5C7,6.33 6.33,7 5.5,7Z";
+const TAGIFY_CURSOR_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="${TAGIFY_ICON_PATH}" fill="#FFFFFF"/></svg>`;
+const TAGIFY_ICON_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(TAGIFY_CURSOR_SVG)}") 3 3, pointer`;
+
+export function createTagStatusIndicator(status, tagListTooltip) {
+  if (status === "none") {
+    return null;
+  }
+
+  const indicator = document.createElement("span");
+  indicator.className = "tagify-tag-status-indicator";
+  indicator.dataset.tagifyStatus = status;
+  indicator.textContent = "●";
+  indicator.title = tagListTooltip;
+  indicator.setAttribute(
+    "aria-label",
+    `Applied tags: ${tagListTooltip.replaceAll("\n", ", ")}`,
+  );
+  indicator.style.display = "inline-flex";
+  indicator.style.alignItems = "center";
+  indicator.style.color = status === "complete" ? "#1DB954" : "#FFA500";
+  indicator.style.fontSize = "12px";
+  indicator.style.lineHeight = "1";
+  indicator.style.cursor = TAGIFY_ICON_CURSOR;
+
+  return indicator;
+}

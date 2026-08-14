@@ -1,0 +1,392 @@
+.container {
+  background: var(--spice-card);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+
+  /* Remove all height constraints and overflows */
+  min-height: auto;
+  width: 100%;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
+.title {
+  font-size: 18px;
+  margin: 0;
+  font-weight: 700;
+  color: var(--spice-text);
+  margin-left: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchBox {
+  flex: 0 1 180px;
+  min-width: 96px;
+  position: relative;
+  width: 180px;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  background: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: rgb(255 255 255 / 30%);
+}
+
+.categoryList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.category {
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 4px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.categoryHeader {
+  background: rgb(0 0 0 / 20%);
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: background 0.2s ease;
+}
+
+.categoryHeader:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.categoryToggle {
+  font-size: 12px;
+  margin-right: 8px;
+  width: 12px;
+  display: inline-block;
+  text-align: center;
+  transition: transform 0.2s ease;
+}
+
+.categoryTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--spice-text);
+}
+
+.subcategoryList {
+  padding: 8px;
+  background: var(--spice-main);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.subcategory {
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 4px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.subcategoryHeader {
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  background: rgb(0 0 0 / 20%);
+  transition: background 0.2s ease;
+}
+
+.subcategoryHeader:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.subcategoryToggle {
+  font-size: 10px;
+  margin-right: 8px;
+  width: 10px;
+  display: inline-block;
+  text-align: center;
+  transition: transform 0.2s ease;
+}
+
+.subcategoryTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--spice-text);
+}
+
+.tagGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  padding: 10px;
+  background: var(--spice-main);
+  width: 100%;
+}
+
+.tagButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  background: rgb(0 0 0 / 30%);
+  color: var(--spice-text);
+  border: 1px solid rgb(255 255 255 / 5%);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.2s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tagButton:hover {
+  background: rgb(255 255 255 / 10%);
+  border-color: rgb(255 255 255 / 10%);
+}
+
+.tagButtonAccented {
+  border-color: var(--tag-accent-border);
+  background: color-mix(in srgb, rgb(0 0 0 / 22%) 68%, var(--tag-accent-tint) 32%);
+  color: var(--tag-accent-text);
+}
+
+.tagButtonAccented:hover {
+  border-color: var(--tag-accent-border);
+  background: color-mix(in srgb, rgb(255 255 255 / 10%) 56%, var(--tag-accent-tint) 44%);
+}
+
+.tagButtonLabel {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tagApplied {
+  background: #1e40af;
+  border-color: #1e40af;
+  color: white;
+  font-weight: 600;
+}
+
+.tagApplied .tagButtonLabel {
+  color: inherit;
+}
+
+.tagApplied:hover {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  opacity: 0.95;
+}
+
+.tagApplied.tagButtonAccented {
+  background: color-mix(in srgb, var(--tag-accent-dot) 64%, black 36%);
+  border-color: var(--tag-accent-border);
+  color: var(--tag-accent-text);
+  box-shadow: inset 0 0 0 1px var(--tag-accent-border);
+}
+
+.tagApplied.tagButtonAccented:hover {
+  background: color-mix(in srgb, var(--tag-accent-dot) 74%, black 26%);
+  border-color: var(--tag-accent-border);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.sortControl {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.sortSelect {
+  flex: 0 0 auto;
+  height: 32px;
+  max-width: 150px;
+  padding: 0 10px;
+  border-radius: 4px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  background: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sortSelect:focus {
+  outline: none;
+  border-color: rgb(255 255 255 / 30%);
+}
+
+.manageButton {
+  background-color: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.manageButton:hover {
+  background-color: rgb(255 255 255 / 10%);
+}
+
+.expandCollapseButton {
+  background-color: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.expandCollapseButton:hover {
+  background-color: rgb(255 255 255 / 10%);
+}
+
+.expandCollapseIcon {
+  font-size: 10px;
+}
+
+.multiTaggingBanner {
+  background-color: rgb(34 197 94 / 10%);
+  border: 1px solid rgb(34 197 94 / 30%);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.multiTaggingBanner.locked {
+  background-color: rgb(30 144 255 / 15%);
+  border: 1px solid rgb(30 144 255 / 30%);
+}
+
+.multiTaggingIcon {
+  font-size: 16px;
+  position: relative;
+  top: 2px;
+}
+
+.multiTaggingText {
+  font-size: 13px;
+  color: var(--spice-text);
+}
+
+.titleContainer {
+  display: flex;
+  align-items: center;
+}
+
+.helpTooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: rgb(30 144 255 / 20%);
+  color: #1e90ff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: help;
+  transition: all 0.2s ease;
+  margin-left: 8px;
+  margin-bottom: 16px;
+}
+
+.helpTooltip:hover {
+  background: rgb(30 144 255 / 30%);
+  transform: scale(1.1);
+}
+
+.tooltipContent {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 8px;
+  background: var(--spice-card);
+  color: var(--spice-text);
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 30%);
+  border: 1px solid rgb(255 255 255 / 10%);
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.2s ease;
+  z-index: 1000;
+  width: 280px;
+  max-width: 280px;
+}
+
+.helpTooltip:hover .tooltipContent {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-4px);
+}
+
+.tooltipContent::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 20px;
+  border: 6px solid transparent;
+  border-top-color: var(--spice-card);
+}

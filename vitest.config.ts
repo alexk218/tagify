@@ -1,5 +1,4 @@
-/// <reference types="vitest/config" />
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import path from "path";
 
 export default defineConfig({
@@ -26,6 +25,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      "@/package": path.resolve(__dirname, "./package.json"),
       "@": path.resolve(__dirname, "./src"),
     },
   },

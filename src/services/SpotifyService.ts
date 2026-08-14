@@ -87,7 +87,7 @@ export interface ContextInfo {
  */
 class SpotifyService {
   private locale: string = "en";
-  private apiCallCount = 0;
+  private getTrackGraphQLCallCount = 0;
 
   constructor() {
     this.initLocale();
@@ -103,24 +103,33 @@ class SpotifyService {
     }
   }
 
+  private async requestTrackGraphQL(
+    trackUri: string,
+    caller: string,
+  ): Promise<GraphQLTrackResponse> {
+    this.getTrackGraphQLCallCount += 1;
+    debugLog(
+      `[API #${this.getTrackGraphQLCallCount}] GraphQL.getTrack (${caller}): ${trackUri}`,
+    );
+
+    const { GraphQL, Locale } = Spicetify;
+
+    return GraphQL.Request(GraphQL.Definitions.getTrack, {
+      uri: trackUri,
+      locale: Locale?.getLocale() || this.locale,
+    });
+  }
+
   /**
    * Get track info using GraphQL
    * Replacement for CosmosAsync.get(`https://api.spotify.com/v1/tracks/${trackId}`)
    */
   async getTrack(trackUri: string): Promise<TrackInfo | null> {
-    this.apiCallCount++;
-    debugLog(`[API #${this.apiCallCount}] getTrack: ${trackUri}`)
-
     return graphqlRateLimiter.execute(`getTrack:${trackUri}`, async () => {
       try {
-        const { GraphQL, Locale } = Spicetify;
-
-        const response: GraphQLTrackResponse = await GraphQL.Request(
-          GraphQL.Definitions.getTrack,
-          {
-            uri: trackUri,
-            locale: Locale?.getLocale() || this.locale,
-          }
+        const response = await this.requestTrackGraphQL(
+          trackUri,
+          "getTrack",
         );
 
         if (response.errors) {
@@ -196,14 +205,9 @@ class SpotifyService {
       `getTrackAlbumUri:${trackUri}`,
       async () => {
         try {
-          const { GraphQL, Locale } = Spicetify;
-
-          const response: GraphQLTrackResponse = await GraphQL.Request(
-            GraphQL.Definitions.getTrack,
-            {
-              uri: trackUri,
-              locale: Locale?.getLocale() || this.locale,
-            }
+          const response = await this.requestTrackGraphQL(
+            trackUri,
+            "getTrackAlbumUri",
           );
 
           return response.data?.trackUnion?.albumOfTrack?.uri || null;
@@ -230,14 +234,9 @@ class SpotifyService {
       `getTrackArtists:${trackUri}`,
       async () => {
         try {
-          const { GraphQL, Locale } = Spicetify;
-
-          const response: GraphQLTrackResponse = await GraphQL.Request(
-            GraphQL.Definitions.getTrack,
-            {
-              uri: trackUri,
-              locale: Locale?.getLocale() || this.locale,
-            }
+          const response = await this.requestTrackGraphQL(
+            trackUri,
+            "getTrackArtists",
           );
 
           const trackUnion = response.data?.trackUnion;
@@ -285,14 +284,9 @@ class SpotifyService {
       `getAlbumCover:${trackUri}:${preferredSize}`,
       async () => {
         try {
-          const { GraphQL, Locale } = Spicetify;
-
-          const response: GraphQLTrackResponse = await GraphQL.Request(
-            GraphQL.Definitions.getTrack,
-            {
-              uri: trackUri,
-              locale: Locale?.getLocale() || this.locale,
-            }
+          const response = await this.requestTrackGraphQL(
+            trackUri,
+            "getAlbumCover",
           );
 
           const sources =
@@ -331,12 +325,10 @@ class SpotifyService {
       `getTrackMetadata:${trackUri}`,
       async () => {
         try {
-          const { GraphQL, Locale } = Spicetify;
-
-          const response = await GraphQL.Request(GraphQL.Definitions.getTrack, {
-            uri: trackUri,
-            locale: Locale?.getLocale() || this.locale,
-          });
+          const response = await this.requestTrackGraphQL(
+            trackUri,
+            "getTrackMetadata",
+          );
 
           if (response.errors) {
             console.error("SpotifyService: GraphQL errors:", response.errors);

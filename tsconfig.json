@@ -18,6 +18,7 @@
     "paths": {
       "@/*": ["*"],
       "@/components/*": ["components/*"],
+      "@/extensions/*": ["extensions/*"],
       "@/hooks/*": ["hooks/*"],
       "@/services/*": ["services/*"],
       "@/utils/*": ["utils/*"],

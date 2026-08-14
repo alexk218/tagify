@@ -1,28 +1,34 @@
 {
   "name": "tagify-secret",
-  "version": "2.2.0",
+  "version": "2.5.0",
   "private": true,
   "exports": {
-    "./components/track": "./src/components/track/index.ts",
-    "./components/tagging": "./src/components/tagging/index.ts",
-    "./components/modals": "./src/components/modals/index.ts",
     "./components/ui": "./src/components/ui/index.ts",
-    "./hooks/*": "./src/hooks/*/index.ts",
+    "./hooks/shared": "./src/hooks/shared/index.ts",
+    "./features/*": "./src/features/*/index.ts",
     "./services/*": "./src/services/*.ts",
     "./utils/*": "./src/utils/*.ts"
   },
   "scripts": {
     "build": "spicetify-creator && node scripts/build/copy-version-metadata.cjs",
-    "watch": "spicetify-creator --watch"
+    "watch": "spicetify-creator --watch",
+    "test": "npm run test:core",
+    "test:watch": "vitest src/features/tag-data/utils/__tests__ src/features/smart-playlists/utils/__tests__ src/features/track-session/utils/__tests__ src/features/multi-track-tagging/utils/__tests__ src/features/filter-state/hooks/__tests__ src/features/discovery-survey/hooks/__tests__ src/features/power-user/hooks/__tests__ src/features/update-check/hooks/__tests__",
+    "test:ui": "vitest --ui src/features/tag-data/utils/__tests__ src/features/smart-playlists/utils/__tests__ src/features/track-session/utils/__tests__ src/features/multi-track-tagging/utils/__tests__ src/features/filter-state/hooks/__tests__ src/features/discovery-survey/hooks/__tests__ src/features/power-user/hooks/__tests__ src/features/update-check/hooks/__tests__",
+    "test:all": "vitest run",
+    "test:core": "vitest run src/features/tag-data/utils/__tests__ src/features/smart-playlists/utils/__tests__ src/features/track-session/utils/__tests__ src/features/multi-track-tagging/utils/__tests__ src/features/filter-state/hooks/__tests__ src/features/discovery-survey/hooks/__tests__ src/features/power-user/hooks/__tests__ src/features/update-check/hooks/__tests__"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@fortawesome/fontawesome-svg-core": "^6.7.2",
     "@fortawesome/free-brands-svg-icons": "^6.7.2",
     "@fortawesome/free-solid-svg-icons": "^6.7.2",
     "@fortawesome/react-fontawesome": "^0.2.2",
     "lucide-react": "^0.542.0",
     "prop-types": "^15.8.1",
-    "protobufjs": "^8.0.0",
+    "protobufjs": "^8.7.2",
     "react-rating-stars-component": "^2.2.0"
   },
   "devDependencies": {

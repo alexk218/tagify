@@ -1,4 +1,4 @@
-import { TrackData, TagDataStructure } from "@/hooks/data/useTagData";
+import { TrackData, TagDataStructure } from "@/types/tagData";
 import { TrackInfoCacheManager } from "./TrackInfoCache";
 import { spotifyService } from "@/services/SpotifyService";
 import packageJson from "@/package";
@@ -56,7 +56,7 @@ const isTrackEmpty = (trackData: TrackData): boolean => {
   return (
     trackData.rating === 0 &&
     trackData.energy === 0 &&
-    trackData.tags.length === 0
+    trackData.tagIds.length === 0
   );
 };
 
@@ -450,8 +450,6 @@ export const runMigrations = async (
     } catch (error: any) {
       if (error.message?.includes("Migration paused")) {
         console.warn("Migration paused, will continue on next launch");
-        // Don't mark as complete - will retry next time
-        // But still save other state changes
       } else {
         throw error;
       }
@@ -466,10 +464,18 @@ export const runMigrations = async (
     hasChanges = true;
   }
 
-  // Update version and save state
+  // Update version and save state (ONLY ONCE - removed duplicate)
   if (hasChanges || migrationState.version !== CURRENT_VERSION) {
     migrationState.version = CURRENT_VERSION;
     saveMigrationState(migrationState);
+
+    // Save to localStorage (data migrations work on localStorage)
+    try {
+      localStorage.setItem("tagify:tagData", JSON.stringify(updatedData));
+      console.log("[runMigrations] Saved migrated data to localStorage");
+    } catch (error) {
+      console.error("Failed to save migrated data to localStorage:", error);
+    }
 
     const event = new CustomEvent("tagify:dataUpdated", {
       detail: { type: "migration" },
@@ -488,4 +494,3 @@ export const needsMigrations = (): boolean => {
     !migrationState.migrations.addTrackMetadata
   );
 };
-

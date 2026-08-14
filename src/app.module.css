@@ -9,13 +9,17 @@
 
 .header {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   border-bottom: 1px solid var(--spice-button-disabled);
+  gap: 16px;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 6px 8px 10px;
 }
 
 .titleArea {
-  margin-bottom: 4px;
-  margin-left: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .title {
@@ -25,81 +29,6 @@
   color: var(--spice-text);
 }
 
-.actionButton {
-  background-color: rgb(0 0 0 / 20%);
-  color: var(--spice-text);
-  border: none;
-  border-radius: 4px;
-  padding: 8px 16px;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.actionButton:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.actionButton:hover:not(:disabled) {
-  background-color: rgb(255 255 255 / 10%);
-}
-
-.lockButton {
-  background-color: rgb(0 0 0 / 20%);
-  color: var(--spice-text);
-  border: none;
-  border-radius: 4px;
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  font-size: 16px;
-}
-
-.lockButton.unlocked {
-  background-color: rgb(0 0 0 / 30%);
-  color: white;
-}
-
-.lockButton.unlocked:hover {
-  background-color: rgb(255 255 255 / 15%);
-}
-
-.lockButton.locked {
-  background-color: #5aa9e6;
-}
-
-.lockButton.locked:hover {
-  background-color: #4a95d3;
-}
-
-.switchTrackButton {
-  background-color: rgb(0 0 0 / 30%);
-  color: var(--spice-text);
-  border: none;
-  border-radius: 4px;
-  padding: 6px 12px;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.switchTrackButton:hover {
-  background-color: rgb(255 255 255 / 15%);
-}
-
-.buttonIcon {
-  font-size: 16px;
-}
-
 .content {
   display: grid;
   grid-template-columns: 1fr;
@@ -107,6 +36,66 @@
   gap: 16px;
   height: calc(100% - 80px);
   overflow: hidden;
+}
+
+.viewTabs {
+  display: inline-flex;
+  align-items: center;
+  background: rgb(0 0 0 / 22%);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 3px;
+}
+
+.viewTab {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  min-height: 30px;
+  min-width: 82px;
+  padding: 8px 12px;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.viewTab:hover {
+  background: rgb(255 255 255 / 8%);
+  color: var(--spice-text);
+}
+
+.viewTabActive {
+  background: rgb(255 255 255 / 12%);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 12%),
+    0 4px 12px rgb(0 0 0 / 18%);
+  color: var(--spice-text);
+}
+
+@media (max-width: 640px) {
+  .header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .viewTabs {
+    width: 100%;
+  }
+
+  .viewTab {
+    flex: 1 1 0;
+    min-width: 0;
+  }
 }
 
 .loadingContainer {
@@ -125,22 +114,50 @@
   opacity: 0.8;
 }
 
-.migrationBanner {
-  background: var(--spice-card);
-  padding: 12px 16px;
+
+.errorBanner {
+  background: rgb(185 28 28 / 18%);
+  border: 1px solid rgb(248 113 113 / 35%);
   border-radius: 4px;
-  margin-bottom: 16px;
+  color: var(--spice-text);
+  margin: 8px 16px;
+  padding: 10px 14px;
+}
+
+.errorBanner p {
+  font-size: 13px;
+  margin: 0;
+}
+
+.errorBanner p + p {
+  color: var(--spice-subtext);
+  margin-top: 3px;
+}
+
+.fallbackBanner {
+  background: rgba(255, 200, 100, 0.15);
+  border: 1px solid rgba(255, 200, 100, 0.3);
+  border-radius: 8px;
+  padding: 8px 16px;
+  margin: 8px 16px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  justify-content: space-between;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
 }
 
-.migrationBanner p {
-  margin: 0;
-  font-size: 14px;
+.fallbackBannerButton {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--spice-text);
+  cursor: pointer;
+  transition: background 0.15s;
 }
 
-.migrationBanner progress {
-  flex: 1;
-  height: 8px;
+.fallbackBannerButton:hover {
+  background: rgba(255, 255, 255, 0.2);
 }

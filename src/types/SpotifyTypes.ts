@@ -18,6 +18,7 @@ export interface SpicetifyHistoryLocation {
   state?: {
     trackUri?: string;
     trackUris?: string[];
+    playlistUri?: string;
     [key: string]: any;
   };
 }

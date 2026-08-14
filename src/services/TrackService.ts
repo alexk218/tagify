@@ -1,6 +1,3 @@
-import { TagDataStructure } from "@/hooks/data/useTagData";
-import { TrackData } from "@/components/track/TrackList";
-
 class TrackService {
   playTrack = async (uri: string): Promise<void> => {
     try {
@@ -49,10 +46,10 @@ class TrackService {
     }
 
     const spotifyTrackUris: string[] = trackUris.filter(
-      (uri) => !uri.startsWith("spotify:local:")
+      (uri) => !uri.startsWith("spotify:local:"),
     );
     const isMixedTrackCollection: boolean = trackUris.some((uri) =>
-      uri.startsWith("spotify:local:")
+      uri.startsWith("spotify:local:"),
     );
     if (isMixedTrackCollection) {
       await this.playMixedTrackCollection(trackUris, spotifyTrackUris);
@@ -65,7 +62,7 @@ class TrackService {
    * When filtered tracks are only Spotify tracks (no Local Files) - simple approach
    */
   private playSpotifyOnlyCollection = async (
-    spotifyTrackUris: string[]
+    spotifyTrackUris: string[],
   ): Promise<void> => {
     try {
       await Spicetify.Player.playUri(spotifyTrackUris[0]);
@@ -87,7 +84,7 @@ class TrackService {
    */
   private playMixedTrackCollection = async (
     allTrackUris: string[],
-    spotifyTrackUris: string[]
+    spotifyTrackUris: string[],
   ): Promise<void> => {
     try {
       // Get a dummy track URI (this will be played solely to clear the track queue)
@@ -108,7 +105,7 @@ class TrackService {
   };
 
   private clearQueueWithDummyTrack = async (
-    dummyUri: string
+    dummyUri: string,
   ): Promise<void> => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     await Spicetify.Player.playUri(dummyUri);
@@ -121,7 +118,7 @@ class TrackService {
 
   private queueAndStartPlayback = async (
     trackUris: string[],
-    dummyUri: string
+    dummyUri: string,
   ): Promise<void> => {
     const tracksToQueue = trackUris.map((uri) => ({ uri }));
     await Spicetify.addToQueue(tracksToQueue);
@@ -181,95 +178,6 @@ class TrackService {
       };
       checkPlayback();
     });
-  };
-
-  // Resolves tag IDs to display names - to be consumed by TrackList
-  getTracksWithResolvedTags = (tagData: TagDataStructure) => {
-    const trackMapWithResolvedTags: { [uri: string]: TrackData } = {};
-
-    try {
-      if (!tagData || typeof tagData !== "object") {
-        console.error("TagData is invalid", tagData);
-        return {};
-      }
-
-      if (!tagData.categories || !Array.isArray(tagData.categories)) {
-        console.error(
-          "TagData is missing valid categories array",
-          tagData.categories
-        );
-        return {};
-      }
-
-      if (!tagData.tracks || typeof tagData.tracks !== "object") {
-        console.error("TagData is missing valid tracks object", tagData.tracks);
-        return {};
-      }
-
-      // Process each track
-      Object.entries(tagData.tracks).forEach(([trackUri, trackData]) => {
-        if (!trackData) return;
-
-        if (
-          trackData.rating === 0 &&
-          trackData.energy === 0 &&
-          (!trackData.tags || trackData.tags.length === 0)
-        ) {
-          return;
-        }
-
-        // Create entry for this track
-        trackMapWithResolvedTags[trackUri] = {
-          rating: trackData.rating || 0,
-          energy: trackData.energy || 0,
-          bpm: trackData.bpm || null,
-          resolvedTagNames: [],
-          dateCreated: trackData.dateCreated,
-          dateModified: trackData.dateModified,
-          name: trackData.name,
-          artists: trackData.artists,
-        };
-
-        if (
-          !trackData.tags ||
-          !Array.isArray(trackData.tags) ||
-          trackData.tags.length === 0
-        ) {
-          return;
-        }
-
-        // Process each tag
-        trackData.tags.forEach((tagReference) => {
-          const category = tagData.categories.find(
-            (c) => c.id === tagReference.categoryId
-          );
-          if (!category) return;
-
-          const subcategory = category.subcategories.find(
-            (s) => s.id === tagReference.subcategoryId
-          );
-          if (!subcategory) return;
-
-          const resolvedTag = subcategory.tags.find(
-            (t) => t.id === tagReference.tagId
-          );
-          if (!resolvedTag) return;
-
-          // Create the unique identifier
-          const fullTagId = `${tagReference.categoryId}:${tagReference.subcategoryId}:${tagReference.tagId}`;
-
-          trackMapWithResolvedTags[trackUri].resolvedTagNames.push({
-            displayName: resolvedTag.name,
-            fullTagId: fullTagId,
-          });
-        });
-      });
-
-      return trackMapWithResolvedTags;
-    } catch (error) {
-      console.error("Error formatting track data:", error);
-      return {}; // Return empty object on error
-    }
   };
 }
 

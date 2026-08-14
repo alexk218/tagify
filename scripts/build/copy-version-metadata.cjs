@@ -24,7 +24,7 @@ if (platform() === "win32") {
   );
 }
 
-// Copy package.json
+// copy package.json to spicetify build path
 const packageJsonSource = join(__dirname, "..", "..", "package.json");
 const packageJsonDest = join(spicetifyPath, "package.json");
 

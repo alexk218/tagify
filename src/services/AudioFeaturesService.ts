@@ -1,4 +1,5 @@
 import { RateLimiter } from "@/utils/RateLimiter";
+import { normalizeCamelotKey } from "@/utils/camelotKey";
 import protobuf from "protobufjs/light";
 
 // Protobuf descriptors for Spotify's extended metadata API
@@ -97,8 +98,17 @@ export interface AudioFeatures {
   bpm: number;
   key: string;
   mode: number; // 1 = major, 2 = minor
-  camelotKey?: string;
+  camelotKey: string | null;
 }
+
+// Cache audio features results from TrackDetails -> return that to hooks instead of re-fetching
+interface AudioFeaturesCacheEntry {
+  features: AudioFeatures | null;
+  cachedAt: number;
+}
+
+const AUDIO_FEATURES_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_AUDIO_FEATURES_CACHE_ENTRIES = 1000;
 
 class AudioFeaturesService {
   private extendedMetadataRequest: protobuf.Type | null = null;
@@ -106,6 +116,7 @@ class AudioFeaturesService {
   private country: string = "US";
   private catalogue: string = "premium";
   private initialized: boolean = false;
+  private audioFeaturesCache: Map<string, AudioFeaturesCacheEntry> = new Map();
 
   private getProtobufTypes() {
     if (!this.extendedMetadataRequest) {
@@ -165,6 +176,8 @@ class AudioFeaturesService {
         })),
       })
       .finish();
+    const payloadBuffer = new ArrayBuffer(payload.byteLength);
+    new Uint8Array(payloadBuffer).set(payload);
 
     const accessToken =
       Spicetify.Platform.AuthorizationAPI.getState().token.accessToken;
@@ -173,7 +186,7 @@ class AudioFeaturesService {
       "https://spclient.wg.spotify.com/extended-metadata/v0/extended-metadata",
       {
         method: "POST",
-        body: payload,
+        body: payloadBuffer,
         headers: {
           "Content-Type": "application/protobuf",
           Authorization: `Bearer ${accessToken}`,
@@ -190,6 +203,39 @@ class AudioFeaturesService {
     return new Uint8Array(await resp.arrayBuffer());
   }
 
+  private getCachedAudioFeatures(
+    trackId: string
+  ): AudioFeatures | null | undefined {
+    const entry = this.audioFeaturesCache.get(trackId);
+    if (!entry) return undefined;
+
+    if (Date.now() - entry.cachedAt > AUDIO_FEATURES_CACHE_TTL_MS) {
+      this.audioFeaturesCache.delete(trackId);
+      return undefined;
+    }
+
+    return entry.features;
+  }
+
+  private setCachedAudioFeatures(
+    trackId: string,
+    features: AudioFeatures | null
+  ): void {
+    // Re-insert to keep insertion order as LRU-ish for eviction.
+    this.audioFeaturesCache.delete(trackId);
+    this.audioFeaturesCache.set(trackId, {
+      features,
+      cachedAt: Date.now(),
+    });
+
+    if (this.audioFeaturesCache.size > MAX_AUDIO_FEATURES_CACHE_ENTRIES) {
+      const oldestKey = this.audioFeaturesCache.keys().next().value;
+      if (oldestKey) {
+        this.audioFeaturesCache.delete(oldestKey);
+      }
+    }
+  }
+
   /**
    * Fetch audio features (BPM, key, mode) for one or more tracks
    * @param trackIds Array of Spotify track IDs (not URIs)
@@ -197,35 +243,49 @@ class AudioFeaturesService {
   async getAudioFeatures(
     trackIds: string[]
   ): Promise<(AudioFeatures | null)[]> {
-    await this.init();
+    const results: (AudioFeatures | null)[] = new Array(trackIds.length).fill(
+      null
+    );
+    const missingIndexesByTrackId = new Map<string, number[]>();
 
-    const { audioFeaturesResponse } = this.getProtobufTypes();
-    if (!audioFeaturesResponse) {
-      throw new Error("Protobuf types not initialized");
+    trackIds.forEach((trackId, index) => {
+      const cached = this.getCachedAudioFeatures(trackId);
+      if (cached !== undefined) {
+        results[index] = cached;
+        return;
+      }
+
+      const indexes = missingIndexesByTrackId.get(trackId);
+      if (indexes) {
+        indexes.push(index);
+      } else {
+        missingIndexesByTrackId.set(trackId, [index]);
+      }
+    });
+
+    const missingTrackIds = Array.from(missingIndexesByTrackId.keys());
+    if (missingTrackIds.length === 0) {
+      return results;
     }
 
-    // Create a unique key for this batch of track IDs
-    const cacheKey = `audioFeatures:${trackIds.sort().join(",")}`;
+    // Create a stable key for deduping the same batch, regardless of call order.
+    const cacheKey = `audioFeatures:${[...missingTrackIds].sort().join(",")}`;
 
-    return audioFeaturesRateLimiter.execute(cacheKey, async () => {
-      const trackUris = trackIds.map((id) => `spotify:track:${id}`);
+    const fetched = await audioFeaturesRateLimiter.execute(cacheKey, async () =>
+      this.getAudioFeaturesInternal(missingTrackIds)
+    );
 
-      // Extension kind 222 = audio features
-      const buf = await this.getExtendedMetadata(trackUris, 222);
-      const msg = audioFeaturesResponse.decode(buf) as any;
+    missingTrackIds.forEach((trackId, index) => {
+      const features = fetched[index] ?? null;
+      this.setCachedAudioFeatures(trackId, features);
 
-      return msg.response.map((resp: any) => {
-        if (!resp.attributes?.attributes) return null;
-
-        const attributes = resp.attributes.attributes;
-        return {
-          bpm: Math.round(attributes.bpm),
-          key: attributes.key?.key || "Unknown",
-          mode: attributes.key?.majorMinor || 0,
-          camelotKey: attributes.key?.camelot?.key,
-        };
+      const positions = missingIndexesByTrackId.get(trackId) || [];
+      positions.forEach((position) => {
+        results[position] = features;
       });
     });
+
+    return results;
   }
 
   /**
@@ -233,16 +293,23 @@ class AudioFeaturesService {
    * @param trackId Spotify track ID (not URI)
    */
   async getBpm(trackId: string): Promise<number | null> {
-    // Use rate limiter with track-specific key for deduplication
-    return audioFeaturesRateLimiter.execute(`getBpm:${trackId}`, async () => {
-      try {
-        const [features] = await this.getAudioFeaturesInternal([trackId]);
-        return features?.bpm ?? null;
-      } catch (error) {
-        console.error("AudioFeaturesService: Failed to get BPM", error);
-        throw error; // Re-throw for rate limiter error tracking
-      }
-    });
+    const cached = this.getCachedAudioFeatures(trackId);
+    if (cached !== undefined) {
+      return cached?.bpm ?? null;
+    }
+
+    try {
+      const features = await this.getAudioFeaturesByTrackId(trackId);
+      return features?.bpm ?? null;
+    } catch (error) {
+      console.error("AudioFeaturesService: Failed to get BPM", error);
+      throw error;
+    }
+  }
+
+  async getAudioFeaturesByTrackId(trackId: string): Promise<AudioFeatures | null> {
+    const [features] = await this.getAudioFeatures([trackId]);
+    return features ?? null;
   }
 
   /**
@@ -272,7 +339,7 @@ class AudioFeaturesService {
         bpm: Math.round(attributes.bpm),
         key: attributes.key?.key || "Unknown",
         mode: attributes.key?.majorMinor || 0,
-        camelotKey: attributes.key?.camelot?.key,
+        camelotKey: normalizeCamelotKey(attributes.key?.camelot?.key),
       };
     });
   }
@@ -290,6 +357,23 @@ class AudioFeaturesService {
     if (!trackId) return null;
 
     return this.getBpm(trackId);
+  }
+
+  /**
+   * Fetch full audio features for a single track by URI
+   * @param trackUri Spotify track URI (spotify:track:xxx)
+   */
+  async getAudioFeaturesFromUri(trackUri: string): Promise<AudioFeatures | null> {
+    if (trackUri.startsWith("spotify:local:")) {
+      return null;
+    }
+
+    const trackId = trackUri.split(":").pop();
+    if (!trackId) {
+      return null;
+    }
+
+    return this.getAudioFeaturesByTrackId(trackId);
   }
 }
 

@@ -1,0 +1,1470 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: auto;
+  background: rgb(0 0 0 / 68%);
+}
+
+.sheet {
+  position: relative;
+  width: min(1220px, 100%);
+  height: min(88vh, 920px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--spice-card) 94%, black 6%);
+  box-shadow: 0 18px 52px rgb(0 0 0 / 42%);
+}
+
+.notification {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 2;
+  max-width: min(520px, calc(100% - 32px));
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: white;
+  box-shadow: 0 10px 24px rgb(0 0 0 / 28%);
+}
+
+.notificationSuccess {
+  background: rgb(34 197 94 / 88%);
+  border-color: rgb(34 197 94 / 48%);
+}
+
+.notificationError {
+  background: rgb(209 63 87 / 88%);
+  border-color: rgb(209 63 87 / 48%);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  flex-shrink: 0;
+}
+
+.title {
+  margin: 0;
+  color: var(--spice-text);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.subtitle {
+  margin: 3px 0 0;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.viewTabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  background: color-mix(in srgb, var(--spice-card) 97%, black 3%);
+}
+
+.viewTab {
+  position: relative;
+  min-width: 76px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.viewTab::after {
+  position: absolute;
+  right: 12px;
+  bottom: -1px;
+  left: 12px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+  content: "";
+}
+
+.viewTab:hover {
+  color: var(--spice-text);
+}
+
+.viewTabActive {
+  color: var(--spice-text);
+}
+
+.viewTabActive::after {
+  background: var(--spice-accent);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.pane {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pane:first-child {
+  flex: 0 0 clamp(320px, 33vw, 392px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-right: 1px solid var(--spice-button-disabled);
+  background: color-mix(in srgb, var(--spice-main) 45%, var(--spice-card) 55%);
+}
+
+.paneHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+  flex-shrink: 0;
+}
+
+.pane:first-child .paneHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: color-mix(in srgb, var(--spice-card) 96%, black 4%);
+}
+
+.paneTitle {
+  margin: 0;
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.paneSubtitle {
+  margin: 2px 0 0;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.treePane,
+.tagListPane {
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.treePane {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.tagListPane {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.tagChipGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  align-items: start;
+  gap: 8px;
+}
+
+.inspectorPane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.infoBanner {
+  padding: 10px 16px;
+  border-bottom: 1px solid rgb(30 144 255 / 20%);
+  background: rgb(30 144 255 / 8%);
+  color: var(--spice-subtext);
+  font-size: 12px;
+  line-height: 1.45;
+  flex-shrink: 0;
+}
+
+.categoryCard {
+  overflow: hidden;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--spice-main) 84%, black 16%);
+}
+
+.categoryCardSelected {
+  border-color: color-mix(in srgb, var(--spice-accent) 40%, var(--spice-button-disabled) 60%);
+  box-shadow: inset 0 0 0 1px rgb(30 144 255 / 14%);
+}
+
+.categoryCardHeader {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.subcategoryList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px 36px;
+}
+
+.subcategoryRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 2%);
+}
+
+.subcategoryRowSelected {
+  border-color: color-mix(in srgb, var(--spice-accent) 40%, var(--spice-button-disabled) 60%);
+  background: rgb(30 144 255 / 8%);
+}
+
+.inlineAddCategoryButton,
+.inlineAddSubcategoryButton {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 10px 12px;
+  border: 1px dashed var(--spice-button-disabled);
+  background: transparent;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.inlineAddCategoryButton {
+  border-radius: 10px;
+}
+
+.inlineAddSubcategoryButton {
+  border-radius: 8px;
+}
+
+.inlineAddCategoryButton:hover,
+.inlineAddSubcategoryButton:hover {
+  background: rgb(255 255 255 / 4%);
+  border-color: color-mix(in srgb, var(--spice-accent) 32%, var(--spice-button-disabled) 68%);
+  color: var(--spice-text);
+}
+
+.inlineAddLabel {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.tagToolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 0;
+  flex-shrink: 0;
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
+.colorInput {
+  width: 42px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+}
+
+
+.colorThemeSelect {
+  max-width: 110px;
+  height: 24px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 6px;
+  background: var(--spice-main);
+  color: var(--spice-text);
+  font-size: 10px;
+}
+
+.savedAccentRenameButton,
+.savedAccentDeleteButton {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex: 0 0 auto;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.savedAccentRenameButton {
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 4%);
+  color: var(--spice-text);
+}
+
+.savedAccentRenameButton:hover {
+  background: rgb(255 255 255 / 8%);
+  border-color: rgb(255 255 255 / 16%);
+}
+
+.savedAccentDeleteButton {
+  border: 1px solid rgb(209 63 87 / 24%);
+  border-radius: 999px;
+  background: rgb(209 63 87 / 10%);
+  color: rgb(255 163 177 / 96%);
+}
+
+.savedAccentDeleteButton:hover {
+  background: rgb(209 63 87 / 16%);
+  border-color: rgb(209 63 87 / 30%);
+}
+
+.tagChip {
+  position: relative;
+  width: 100%;
+  min-height: 32px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 8px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--spice-main) 82%, black 18%);
+  color: var(--spice-text);
+  cursor: grab;
+  user-select: none;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.tagChipAccented {
+  border-color: var(--tag-accent-border);
+  background: color-mix(in srgb, var(--spice-main) 62%, var(--tag-accent-tint) 38%);
+  color: var(--tag-accent-text);
+}
+
+.tagChip:hover {
+  background: color-mix(in srgb, var(--spice-main) 72%, white 4%);
+  border-color: rgb(255 255 255 / 12%);
+}
+
+.tagChipAccented:hover {
+  border-color: var(--tag-accent-border);
+}
+
+.tagChip:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--spice-accent) 50%, var(--spice-button-disabled) 50%);
+  box-shadow: 0 0 0 2px rgb(30 144 255 / 14%);
+}
+
+.tagChipDragDisabled {
+  cursor: default;
+}
+
+.tagChipGrip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--spice-subtext);
+  flex: 0 0 auto;
+}
+
+.tagChipLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--spice-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tagChipAccented .tagChipLabel {
+  color: inherit;
+}
+
+.tagChipActions {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.tagChipActionButton {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.tagChipActionButton:hover {
+  background: rgb(255 255 255 / 8%);
+  border-color: rgb(255 255 255 / 8%);
+  color: var(--spice-text);
+}
+
+.tagChipDeleteButton {
+  color: rgb(255 126 146 / 92%);
+}
+
+.tagChipDeleteButton:hover {
+  background: rgb(209 63 87 / 14%);
+  border-color: rgb(209 63 87 / 22%);
+  color: rgb(255 163 177 / 96%);
+}
+
+.tagChipAccentButton {
+  color: var(--spice-text);
+}
+
+.tagChipAccentPreview {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.tagChipAccentPreviewFilled {
+  background: var(--tag-accent-dot);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 10%);
+}
+
+.tagChipAccentPreviewEmpty {
+  border: 1px dashed rgb(255 255 255 / 18%);
+  background: transparent;
+}
+
+.tagAccentMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 4;
+  width: 190px;
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--spice-card) 94%, black 6%);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 24%);
+}
+
+.tagAccentGroup + .tagAccentGroup {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+}
+
+.tagAccentGroupLabel {
+  margin-bottom: 6px;
+  color: var(--spice-subtext);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tagAccentSwatches {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tagAccentSwatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border: 1px solid var(--tag-accent-border);
+  border-radius: 8px;
+  background: var(--tag-accent-tint);
+  cursor: pointer;
+}
+
+.tagAccentSwatch:hover {
+  transform: translateY(-1px);
+}
+
+.tagAccentSwatchActive {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 22%);
+}
+
+.tagAccentSwatchDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--tag-accent-dot);
+}
+
+.tagAccentClearButton {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 3%);
+  color: var(--spice-subtext);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tagAccentClearButton:hover {
+  background: rgb(255 255 255 / 6%);
+  color: var(--spice-text);
+}
+
+.categorySummaryButton,
+.subcategorySummaryButton {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.categorySummaryButton {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subcategorySummaryButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rowTitle {
+  display: block;
+  color: var(--spice-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowMeta {
+  display: block;
+  min-width: 0;
+  color: var(--spice-subtext);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+
+.rowActionIconButton {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 2%);
+}
+
+.rowActionIconButton:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 5%);
+}
+
+.dragHandleButton,
+.expandButton {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 2%);
+  color: var(--spice-subtext);
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.dragHandleButton:hover:not(:disabled),
+.expandButton:hover {
+  background: rgb(255 255 255 / 6%);
+  border-color: rgb(255 255 255 / 12%);
+  color: var(--spice-text);
+}
+
+.dragHandleButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.primaryButton,
+.secondaryButton,
+.secondaryButtonSmall,
+.dangerButtonSmall {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid var(--spice-button-disabled);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+
+.primaryButton {
+  border-color: color-mix(in srgb, var(--spice-accent) 60%, black 40%);
+  background: var(--spice-accent);
+  color: white;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--spice-accent) 86%, white 14%);
+}
+
+.secondaryButton,
+.secondaryButtonSmall {
+  background: rgb(255 255 255 / 2%);
+  color: var(--spice-text);
+}
+
+.secondaryButton:hover:not(:disabled),
+.secondaryButtonSmall:hover:not(:disabled) {
+  background: rgb(255 255 255 / 6%);
+  border-color: rgb(255 255 255 / 12%);
+}
+
+.dangerButtonSmall {
+  border-color: rgb(209 63 87 / 24%);
+  background: rgb(209 63 87 / 10%);
+  color: rgb(255 163 177 / 96%);
+}
+
+.dangerButtonSmall:hover:not(:disabled) {
+  background: rgb(209 63 87 / 16%);
+  border-color: rgb(209 63 87 / 30%);
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.secondaryButtonSmall:disabled,
+.dangerButtonSmall:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.searchInput,
+.textInput {
+  min-width: 0;
+  height: 32px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--spice-main) 88%, black 12%);
+  color: var(--spice-text);
+  font-size: 13px;
+  padding: 0 10px;
+}
+
+.searchInput {
+  width: min(340px, 100%);
+}
+
+.textInput {
+  flex: 1;
+}
+
+.searchInput::placeholder,
+.textInput::placeholder {
+  color: var(--spice-subtext);
+}
+
+.searchInput:focus,
+.textInput:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--spice-accent) 50%, white 8%);
+  box-shadow: 0 0 0 2px rgb(30 144 255 / 12%);
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.breadcrumbSeparator {
+  color: var(--spice-subtext);
+}
+
+.emptyState,
+.emptyStateSmall {
+  padding: 18px 16px;
+  border: 1px dashed var(--spice-button-disabled);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 2%);
+  color: var(--spice-subtext);
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.emptyState {
+  margin: 12px 16px 16px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--spice-button-disabled);
+  background: color-mix(in srgb, var(--spice-card) 97%, black 3%);
+  flex-shrink: 0;
+}
+
+.footerMeta {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.footerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dropTargetActive {
+  border-color: color-mix(in srgb, var(--spice-accent) 48%, var(--spice-button-disabled) 52%) !important;
+  background: rgb(30 144 255 / 10%) !important;
+  box-shadow: inset 0 0 0 1px rgb(30 144 255 / 14%);
+}
+
+.sortableDragging {
+  opacity: 0.48;
+}
+
+.dragOverlayCard {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--spice-card) 96%, black 4%);
+  color: var(--spice-text);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 34%);
+}
+
+.dragOverlayType {
+  color: var(--spice-subtext);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dragOverlayLabel {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tagEndDropZone {
+  width: 100%;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px dashed var(--spice-button-disabled);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.colorLibraryBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.colorCollectionSidebar {
+  width: 220px;
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 16px 12px;
+  overflow-y: auto;
+  border-right: 1px solid var(--spice-button-disabled);
+  background: color-mix(in srgb, var(--spice-main) 45%, var(--spice-card) 55%);
+}
+
+.colorThemeSortControl {
+  display: grid;
+  gap: 5px;
+  padding: 0 4px 8px;
+  color: var(--spice-subtext);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.colorThemeSortControl select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 6px;
+  background: var(--spice-card);
+  color: var(--spice-text);
+}
+
+.colorCollectionButton,
+.addCollectionButton {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.colorCollectionButton:hover,
+.addCollectionButton:hover {
+  background: rgb(255 255 255 / 5%);
+  color: var(--spice-text);
+}
+
+.colorCollectionButtonActive {
+  border-color: color-mix(in srgb, var(--spice-accent) 28%, transparent);
+  background: rgb(30 144 255 / 10%);
+  color: var(--spice-text);
+}
+
+.addCollectionButton {
+  justify-content: flex-start;
+  margin-top: 4px;
+  border-style: dashed;
+  border-color: rgb(255 255 255 / 10%);
+}
+
+.defaultPaletteSwitch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+  color: var(--spice-text);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.defaultPaletteSwitch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.defaultPaletteSwitchTrack {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex: 0 0 auto;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 8%);
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+
+.defaultPaletteSwitchTrack::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--spice-subtext);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 35%);
+  transition: transform 0.18s ease, background-color 0.18s ease;
+}
+
+.defaultPaletteSwitch input:checked + .defaultPaletteSwitchTrack {
+  border-color: color-mix(in srgb, var(--spice-accent) 72%, white 28%);
+  background: color-mix(in srgb, var(--spice-accent) 82%, black 18%);
+}
+
+.defaultPaletteSwitch input:checked + .defaultPaletteSwitchTrack::after {
+  background: white;
+  transform: translateX(16px);
+}
+
+.defaultPaletteSwitch input:focus-visible + .defaultPaletteSwitchTrack {
+  outline: 2px solid color-mix(in srgb, var(--spice-accent) 78%, white 22%);
+  outline-offset: 2px;
+}
+
+.colorLibraryContent {
+  flex: 1;
+  min-width: 0;
+  padding: 20px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.defaultPaletteSection,
+.customColorSection {
+  max-width: 940px;
+  margin: 0 auto;
+}
+
+.customColorSection {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+}
+
+.customColorSectionStandalone {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.colorSectionHeadingRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.colorSectionTitle {
+  margin: 0;
+  color: var(--spice-text);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.colorSectionDescription {
+  margin: 3px 0 0;
+  color: var(--spice-subtext);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.colorSectionDescriptionStandalone {
+  margin-top: 0;
+}
+
+.colorSectionActions,
+.colorEditorActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.defaultPaletteGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(88px, 1fr));
+  gap: 8px;
+}
+
+.defaultColorCard {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--tag-accent-border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--spice-main) 88%, var(--tag-accent-tint) 12%);
+  color: var(--spice-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.defaultColorSwatch,
+.customColorSwatch {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--tag-accent-dot);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 14%);
+}
+
+.colorOverflowMenu {
+  position: relative;
+}
+
+.colorOverflowMenu > summary {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 2%);
+  color: var(--spice-text);
+  cursor: pointer;
+  list-style: none;
+}
+
+.colorOverflowMenu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.colorOverflowMenuPanel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 4;
+  width: 172px;
+  padding: 6px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--spice-card) 96%, black 4%);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 28%);
+}
+
+.colorOverflowMenuPanel button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--spice-text);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.colorOverflowMenuPanel button:hover {
+  background: rgb(255 255 255 / 6%);
+}
+
+.colorEditor {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--spice-accent) 30%, var(--spice-button-disabled) 70%);
+  border-radius: 10px;
+  background: rgb(30 144 255 / 6%);
+}
+
+.collectionDeleteOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 58%);
+}
+
+.collectionDeletePrompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: min(680px, 100%);
+  padding: 16px;
+  border: 1px solid rgb(209 63 87 / 30%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--spice-card) 94%, black 6%);
+  box-shadow: 0 18px 52px rgb(0 0 0 / 42%);
+}
+
+.collectionDeletePrompt h4 {
+  margin: 0;
+  color: var(--spice-text);
+  font-size: 12px;
+}
+
+.collectionDeletePrompt p {
+  max-width: 560px;
+  margin: 4px 0 0;
+  color: var(--spice-subtext);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.collectionDeleteActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.colorEditorFields {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(150px, 220px);
+  gap: 10px;
+  align-items: end;
+}
+
+.colorEditorField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--spice-subtext);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.colorEditorField .colorThemeSelect {
+  width: 100%;
+  max-width: none;
+  height: 32px;
+  font-size: 11px;
+}
+
+.colorEditorActions {
+  margin-top: 10px;
+}
+
+.customColorList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.customColorRow {
+  display: grid;
+  grid-template-columns: auto minmax(140px, 1fr) minmax(100px, 180px) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 2%);
+}
+
+.customColorRow:hover {
+  border-color: rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 4%);
+}
+
+.customColorSwatch {
+  width: 20px;
+  height: 20px;
+}
+
+.customColorIdentity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.customColorName {
+  overflow: hidden;
+  color: var(--spice-text);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customColorValue,
+.customColorCollection {
+  color: var(--spice-subtext);
+  font-size: 10px;
+}
+
+.customColorCollection {
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customColorActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.colorLibraryEmpty {
+  padding: 24px;
+  border: 1px dashed var(--spice-button-disabled);
+  border-radius: 10px;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 980px) {
+  .sheet {
+    width: min(100%, calc(100vw - 16px));
+    height: min(92vh, calc(100vh - 16px));
+  }
+
+  .body {
+    flex-direction: column;
+  }
+
+  .pane:first-child {
+    flex: 0 0 auto;
+    max-height: 44%;
+    border-right: none;
+    border-bottom: 1px solid var(--spice-button-disabled);
+  }
+
+  .defaultPaletteGrid {
+    grid-template-columns: repeat(3, minmax(88px, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .overlay {
+    padding: 8px;
+  }
+
+  .sheet {
+    width: calc(100vw - 8px);
+    height: calc(100vh - 8px);
+    border-radius: 10px;
+  }
+
+  .header,
+  .paneHeader,
+  .footer {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .viewTabs {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .headerActions {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .searchInput {
+    width: 100%;
+  }
+
+  .treePane,
+  .tagListPane {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .tagToolbar {
+    padding-left: 12px;
+    padding-right: 12px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .categoryCardHeader,
+  .subcategoryRow {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .rowActions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    padding-left: 36px;
+  }
+
+  .paneHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .footerActions {
+    justify-content: flex-end;
+  }
+
+  .tagChip {
+    width: 100%;
+  }
+
+  .colorLibraryBody {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .colorCollectionSidebar {
+    width: auto;
+    flex: 0 0 auto;
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--spice-button-disabled);
+  }
+
+  .colorCollectionButton,
+  .addCollectionButton {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .addCollectionButton {
+    margin-top: 0;
+  }
+
+  .colorLibraryContent {
+    overflow: visible;
+    padding: 16px 12px;
+  }
+
+  .colorSectionHeadingRow {
+    flex-direction: column;
+  }
+
+  .colorSectionActions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .defaultPaletteGrid {
+    grid-template-columns: repeat(2, minmax(88px, 1fr));
+  }
+
+  .colorEditorFields {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .collectionDeletePrompt,
+  .collectionDeleteActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .colorEditorField:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .customColorRow {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .customColorCollection {
+    display: none;
+  }
+}

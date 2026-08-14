@@ -1,0 +1,262 @@
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.modal {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  max-width: 480px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 24px 0;
+}
+
+.successIcon {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, #1db954, #1ed760);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: white;
+}
+
+.errorIcon {
+  font-size: 32px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--spice-text);
+  margin: 0;
+}
+
+.content {
+  padding: 20px 24px;
+}
+
+.description {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 20px;
+}
+
+.statsGrid {
+  margin-bottom: 20px;
+}
+
+.stat {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+
+.statValue {
+  display: block;
+  font-size: 24px;
+  font-weight: 700;
+  color: #1db954;
+}
+
+.statLabel {
+  display: block;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+}
+
+.backupNotice {
+  display: flex;
+  gap: 12px;
+  background: rgba(30, 215, 96, 0.1);
+  border: 1px solid rgba(30, 215, 96, 0.3);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+}
+
+.backupIcon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.backupNotice strong {
+  display: block;
+  color: var(--spice-text);
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.backupNotice p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.filename {
+  font-family: monospace;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.benefits {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.benefits h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--spice-text);
+  margin: 0 0 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.benefits ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.benefits li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.benefits li:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.benefitIcon {
+  font-size: 16px;
+}
+
+.errorBox {
+  background: rgba(255, 100, 100, 0.1);
+  border: 1px solid rgba(255, 100, 100, 0.3);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  color: #ff6b6b;
+  font-size: 13px;
+}
+
+.helpText {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px 24px;
+}
+
+.primaryButton {
+  background: linear-gradient(135deg, #1db954, #1ed760);
+  color: #000;
+  border: none;
+  border-radius: 20px;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 0.15s,
+    opacity 0.15s;
+}
+
+.primaryButton:hover {
+  transform: scale(1.02);
+  opacity: 0.9;
+}
+
+.secondaryButton {
+  background: transparent;
+  color: var(--spice-text);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 20px;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.secondaryButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.migrationsList {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.migrationsList h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--spice-text);
+  margin: 0 0 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.migrationsList ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.migrationsList li {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+  padding: 6px 0;
+  padding-left: 20px;
+  position: relative;
+}
+
+.migrationsList li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  color: #1db954;
+}
