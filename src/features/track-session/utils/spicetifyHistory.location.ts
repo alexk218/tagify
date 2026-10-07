@@ -5,6 +5,7 @@ export interface ParsedHistoryTrackSelection {
   trackUris: string[] | null;
   playlistUri: string | null;
   artistUri: string | null;
+  editSmartPlaylistId: string | null;
 }
 
 function readTrackUriFromSearch(location: SpicetifyHistoryLocation): string | null {
@@ -38,6 +39,17 @@ function readArtistUriFromSearch(
   return null;
 }
 
+function readEditSmartPlaylistIdFromSearch(
+  location: SpicetifyHistoryLocation,
+): string | null {
+  const historyParams = new URLSearchParams(location.search || "");
+  if (historyParams.has("editSmartPlaylistId")) {
+    return historyParams.get("editSmartPlaylistId");
+  }
+
+  return null;
+}
+
 function readTrackUrisFromState(
   location: SpicetifyHistoryLocation,
 ): string[] | null {
@@ -61,6 +73,7 @@ export function parseHistoryTrackSelection(
       trackUris: null,
       playlistUri: null,
       artistUri: null,
+      editSmartPlaylistId: null,
     };
   }
 
@@ -81,6 +94,11 @@ export function parseHistoryTrackSelection(
       readArtistUriFromSearch(location) ||
       (typeof location.state?.artistUri === "string"
         ? location.state.artistUri
+        : null),
+    editSmartPlaylistId:
+      readEditSmartPlaylistIdFromSearch(location) ||
+      (typeof location.state?.editSmartPlaylistId === "string"
+        ? location.state.editSmartPlaylistId
         : null),
   };
 }

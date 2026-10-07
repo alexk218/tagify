@@ -14,10 +14,35 @@ echo -e "${CYAN}Installing Tagify...${NC}"
 CUSTOM_APPS_DIR="$HOME/.config/spicetify/CustomApps"
 NAME="tagify"
 CUSTOM_APP_DIR="$CUSTOM_APPS_DIR/$NAME"
+TAGIFY_STATE_DIR="$HOME/.config/tagify"
+INSTALL_RECOVERY_KEY_FILE="$TAGIFY_STATE_DIR/install-recovery-key"
 LATEST_TAG=$(curl -s https://api.github.com/repos/alexk218/tagify/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
 ZIP_URL="https://github.com/alexk218/tagify/releases/download/$LATEST_TAG/tagify-$LATEST_TAG.zip"
 ZIP_FILE="/tmp/tagify.zip"
 TEMP_DIR="/tmp/tagify-install"
+
+install_recovery_bootstrap() {
+    mkdir -p "$TAGIFY_STATE_DIR"
+    chmod 700 "$TAGIFY_STATE_DIR"
+    if [ ! -s "$INSTALL_RECOVERY_KEY_FILE" ] || ! grep -Eq '^tgfy_install_[A-Za-z0-9_-]{43}$' "$INSTALL_RECOVERY_KEY_FILE"; then
+        local random_value
+        random_value=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
+        printf 'tgfy_install_%s\n' "$random_value" > "$INSTALL_RECOVERY_KEY_FILE"
+        chmod 600 "$INSTALL_RECOVERY_KEY_FILE"
+    fi
+
+    local recovery_key
+    recovery_key=$(tr -d '\r\n' < "$INSTALL_RECOVERY_KEY_FILE")
+    if [ ! -f "$CUSTOM_APP_DIR/extension.js" ]; then
+        echo -e "${RED}❌ Tagify extension.js is missing; automatic Community reconnection could not be installed.${NC}"
+        exit 1
+    fi
+    {
+        printf 'globalThis.__tagifyInstallRecoveryKey="%s";\n' "$recovery_key"
+        cat "$CUSTOM_APP_DIR/extension.js"
+    } > "$CUSTOM_APP_DIR/extension.js.recovery"
+    mv "$CUSTOM_APP_DIR/extension.js.recovery" "$CUSTOM_APP_DIR/extension.js"
+}
 
 # Check if Spicetify is installed
 if ! command -v spicetify &> /dev/null; then
@@ -76,6 +101,8 @@ else
     mkdir -p "$CUSTOM_APP_DIR"
     mv * "$CUSTOM_APP_DIR/"
 fi
+
+install_recovery_bootstrap
 
 # Apply Spicetify configuration
 echo -e "${CYAN}⚙️  Configuring Spicetify...${NC}"

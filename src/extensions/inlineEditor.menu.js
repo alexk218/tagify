@@ -3,6 +3,7 @@ import {
   isTagSelectorSortMode,
   sortTagSelectorCategories,
 } from "../features/tag-data/utils/tagSelector.sorting";
+import { renderStarRatingControl } from "./inlineEditor.ratingControl";
 
 const TAG_SELECTOR_SORT_MODE_KEY = "tagify:tagSelectorSortMode";
 const VIEWPORT_MARGIN = 8;
@@ -21,7 +22,52 @@ export function updateEnergyRatingRowSelection(row, selectedEnergy) {
       ? "var(--spice-main, #000)"
       : "var(--spice-text, #fff)";
     button.style.fontWeight = isSelected ? "700" : "400";
+    const energy = Number(button.dataset.tagifyEnergy);
+    const actionLabel = isSelected
+      ? `Clear energy ${energy}`
+      : `Set energy to ${energy}`;
+    button.title = actionLabel;
+    button.setAttribute("aria-label", actionLabel);
   });
+}
+
+export function createStarRatingRow({
+  currentRating = 0,
+  getActionLabel,
+  onSelect,
+}) {
+  const row = document.createElement("div");
+  let selectedRating = Number(currentRating) || 0;
+  row.className = "tagify-star-rating-row";
+  row.setAttribute("role", "group");
+  row.setAttribute("aria-label", "Star rating");
+  row.style.display = "flex";
+  row.style.alignItems = "center";
+  row.style.justifyContent = "center";
+  row.style.margin = "0 2px 8px";
+
+  const render = () => {
+    renderStarRatingControl(row, {
+      rating: selectedRating,
+      getActionLabel,
+      onRate: async (rating) => {
+        const previousRating = selectedRating;
+        try {
+          if ((await onSelect(rating, previousRating)) === false) return false;
+          selectedRating = rating;
+          render();
+        } catch {
+          // The caller reports save errors; keep the last persisted selection.
+          return false;
+        }
+      },
+    });
+    row.querySelectorAll(".tagify-rating-star").forEach((star) => {
+      star.style.fontSize = "22px";
+    });
+  };
+  render();
+  return row;
 }
 
 export function getInlineMenuPlacement({
@@ -88,6 +134,7 @@ export function positionInlineMenu(menu, x, y, viewport = window) {
 
 export function createEnergyRatingRow({ currentEnergy = 0, onSelect }) {
   const row = document.createElement("div");
+  let selectedEnergy = Number(currentEnergy) || 0;
   row.className = "tagify-energy-rating-row";
   row.setAttribute("role", "group");
   row.setAttribute("aria-label", "Energy rating");
@@ -101,21 +148,44 @@ export function createEnergyRatingRow({ currentEnergy = 0, onSelect }) {
     button.type = "button";
     button.textContent = String(energy);
     button.dataset.tagifyEnergy = String(energy);
-    button.title = `Set energy to ${energy}`;
-    button.setAttribute("aria-label", `Set energy to ${energy}`);
     button.style.minWidth = "0";
     button.style.padding = "6px 0";
     button.style.border = "0";
     button.style.borderRadius = "4px";
     button.style.cursor = "pointer";
     button.style.fontSize = "11px";
-    button.addEventListener("click", () => onSelect(energy));
+    button.addEventListener("click", async () => {
+      const nextEnergy = selectedEnergy === energy ? 0 : energy;
+      try {
+        await onSelect(nextEnergy);
+        selectedEnergy = nextEnergy;
+        updateEnergyRatingRowSelection(row, selectedEnergy);
+      } catch {
+        // The caller reports save errors; keep the last persisted selection.
+      }
+    });
     row.appendChild(button);
   }
 
-  updateEnergyRatingRowSelection(row, Number(currentEnergy));
+  updateEnergyRatingRowSelection(row, selectedEnergy);
 
   return row;
+}
+
+export function getInitialInlineMenuFocusTarget(menu, initialSection) {
+  if (initialSection === "tags") {
+    return (
+      menu.querySelector(
+        'button[data-tagify-tag-id][aria-pressed="true"], button[data-tagify-tag-id][aria-pressed="mixed"]',
+      ) || menu.querySelector("details summary")
+    );
+  }
+
+  if (initialSection === "energy") {
+    return menu.querySelector("button[data-tagify-energy]");
+  }
+
+  return null;
 }
 
 export function getSortedMenuTagCategories(categories, storage = localStorage) {

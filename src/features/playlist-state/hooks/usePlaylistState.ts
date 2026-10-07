@@ -20,7 +20,7 @@ export function usePlaylistState() {
     isPublic: boolean,
     isSmartPlaylist: boolean,
   ): Promise<string | null> => {
-    if (trackUris.length === 0) {
+    if (trackUris.length === 0 && !isSmartPlaylist) {
       Spicetify.showNotification("No tracks to add to playlist", true);
       return null;
     }
@@ -115,19 +115,25 @@ export function usePlaylistState() {
         });
         setLocalTracksForPlaylist(localTrackUris);
 
-        Spicetify.showNotification(
-          `Created ${type} "${playlistName}" with ${spotifyTrackUris.length} tracks. Local tracks need to be added manually.`,
-        );
+        if (!isSmartPlaylist) {
+          Spicetify.showNotification(
+            `Created ${type} "${playlistName}" with ${spotifyTrackUris.length} tracks. Local tracks need to be added manually.`,
+          );
+        }
 
         setShowLocalTracksModal(true);
         return playlistId;
       }
 
-      Spicetify.showNotification(
-        `Created ${type} "${playlistName}" with ${spotifyTrackUris.length} tracks.`,
-      );
+      if (!isSmartPlaylist) {
+        Spicetify.showNotification(
+          `Created ${type} "${playlistName}" with ${spotifyTrackUris.length} tracks.`,
+        );
+      }
 
-      Spicetify.Platform.History.push(`/playlist/${playlistId}`);
+      if (!isSmartPlaylist) {
+        Spicetify.Platform.History.push(`/playlist/${playlistId}`);
+      }
       return playlistId;
     } catch (error) {
       console.error("Error creating playlist:", error);

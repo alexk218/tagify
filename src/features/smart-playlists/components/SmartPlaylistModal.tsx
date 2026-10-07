@@ -2,14 +2,21 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./SmartPlaylistModal.module.css";
 import { Portal } from "@/components/ui";
 import { SmartPlaylistCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
-import { TagTaxonomy } from "@/types/tagData";
+import { TagTaxonomy, TrackData } from "@/types/tagData";
 import { formatCondensedDate, formatTimestamp } from "@/utils/formatters";
 import { normalizeCamelotKey, sortCamelotKeys } from "@/utils/camelotKey";
+import { storageService } from "@/services/storage/StorageService";
+import { collectMatchingTrackUris } from "../utils/smartPlaylist.syncUtils";
+import { hasConfirmedMembershipBaseline } from "../utils/smartPlaylist.storage";
 import { spotifyApiService } from "@/services/SpotifyApiService";
+import { usePromptHistory } from "@/features/onboarding/hooks/usePromptHistory";
+import { MOBILE_TAGGING_INTRO_KEY } from "@/features/onboarding/services/promptHistory";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faArrowUpRightFromSquare,
+  faInfo,
   faMagnifyingGlass,
+  faMobileScreenButton,
   faMusic,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
@@ -17,6 +24,17 @@ import {
   findDisplayTagName,
 } from "@/utils/tagTaxonomy";
 import { formatTagFilterFormula } from "@/utils/tagFilterGroups";
+import {
+  SmartPlaylistImportSummary,
+  SpotifyPlaylistReference,
+} from "@/features/smart-playlists/utils/smartPlaylist.import";
+import { parseSmartPlaylistShare, SMART_PLAYLIST_SHARE_MAX_BYTES, type SmartPlaylistRecipeSelection } from "@/features/smart-playlists/utils/smartPlaylist.recipes";
+import type { SmartPlaylistRecipeBundle } from "../model/smartPlaylist.types";
+import SmartPlaylistSharingDialog from "./SmartPlaylistSharingDialog";
+import {
+  clearExplicitSmartPlaylistClear,
+  markSmartPlaylistsExplicitlyCleared,
+} from "@/features/smart-playlists/utils/smartPlaylist.storage";
 
 const PLAYLIST_SORT_OPTIONS = {
   ALPHABETICAL: "alphabetical",
@@ -29,6 +47,8 @@ const SORT_ORDERS = {
   DESC: "desc",
 } as const;
 
+export const SMART_PLAYLIST_MOBILE_TAGGING_INTRO_KEY = MOBILE_TAGGING_INTRO_KEY;
+
 type PlaylistSortOption =
   (typeof PLAYLIST_SORT_OPTIONS)[keyof typeof PLAYLIST_SORT_OPTIONS];
 type SortOrder = (typeof SORT_ORDERS)[keyof typeof SORT_ORDERS];
@@ -36,24 +56,38 @@ type SortOrder = (typeof SORT_ORDERS)[keyof typeof SORT_ORDERS];
 interface SmartPlaylistModalProps {
   smartPlaylists: SmartPlaylistCriteria[];
   taxonomy: TagTaxonomy;
-  onUpdateSmartPlaylists: (updatedPlaylists: SmartPlaylistCriteria[]) => void;
+  tracks?: Record<string, TrackData>;
+  onEditPlaylist: (playlist: SmartPlaylistCriteria) => void;
+  onUpdateSmartPlaylists: (value: React.SetStateAction<SmartPlaylistCriteria[]>) => Promise<void>;
   onSyncPlaylist: (playlist: SmartPlaylistCriteria) => Promise<void>;
-  onExportSmartPlaylists: () => void;
-  onImportSmartPlaylists: (data: SmartPlaylistCriteria[]) => void;
-  onCleanupDeletedSmartPlaylists: () => Promise<void>;
+  onExportSmartPlaylists: (selected?: SmartPlaylistCriteria[]) => Promise<void> | void;
+  onImportSmartPlaylists: (
+    data: unknown,
+    selections?: SmartPlaylistRecipeSelection[],
+  ) => Promise<SmartPlaylistImportSummary>;
+  onBindRecipe?: (
+    playlist: SmartPlaylistCriteria,
+    existingPlaylist?: SpotifyPlaylistReference,
+  ) => Promise<void>;
   onClose: () => void;
 }
 
 const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
   smartPlaylists,
   taxonomy,
+  tracks,
+  onEditPlaylist,
   onUpdateSmartPlaylists,
   onSyncPlaylist,
   onExportSmartPlaylists,
   onImportSmartPlaylists,
-  onCleanupDeletedSmartPlaylists,
+  onBindRecipe,
   onClose,
 }) => {
+  const mainDialog = useRef<HTMLDivElement>(null);
+  const [sharing, setSharing] = useState<{ mode: "share" } | { mode: "import"; bundle: SmartPlaylistRecipeBundle } | { mode: "create"; setup: SmartPlaylistCriteria } | null>(null);
+  const [importError, setImportError] = useState("");
+  const [readingFile, setReadingFile] = useState(false);
   const [syncingPlaylists, setSyncingPlaylists] = useState<Set<string>>(
     new Set(),
   );
@@ -61,82 +95,57 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     Record<string, number>
   >({});
   const [isLoadingCounts, setIsLoadingCounts] = useState(false);
-
+  const [availableSpotifyPlaylists, setAvailableSpotifyPlaylists] = useState<
+    SpotifyPlaylistReference[]
+  >([]);
+  const [selectedBindings, setSelectedBindings] = useState<Record<string, string>>({});
+  const promptHistory = usePromptHistory();
+  const [manualMobileTaggingIntro, setManualMobileTaggingIntro] = useState(false);
+  const [introDismissed, setIntroDismissed] = useState(false);
+  const showMobileTaggingIntro = manualMobileTaggingIntro ||
+    (!introDismissed && promptHistory.ready && !promptHistory.mobileTaggingIntroSeen);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sortBy, setSortBy] = useState<PlaylistSortOption>(
     PLAYLIST_SORT_OPTIONS.ALPHABETICAL,
   );
   const [sortOrder, setSortOrder] = useState<SortOrder>(SORT_ORDERS.ASC);
+  const [verifiedStatuses, setVerifiedStatuses] = useState<Record<string, "synced" | "needsSync" | "unknown">>({});
+  const [reconnecting, setReconnecting] = useState<Set<string>>(new Set());
+  useEffect(() => { if (!sharing) mainDialog.current?.focus(); }, [sharing]);
   const getSyncStatus = (
     playlist: SmartPlaylistCriteria,
   ): "synced" | "needsSync" | "unknown" => {
-    const actualCount = playlistTrackCounts[playlist.playlistId];
-    const expectedCount = playlist.smartPlaylistTrackUris.length;
-
-    if (actualCount === undefined) return "unknown";
-    if (actualCount === expectedCount) return "synced";
-    return "needsSync";
+    if (!playlist.isActive || !playlist.lastSyncAt || !hasConfirmedMembershipBaseline(playlist)) return "unknown";
+    if (playlist.pendingTagChoices?.length) return "needsSync";
+    return verifiedStatuses[playlist.playlistId] ?? "unknown";
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleExportClick = () => {
-    onClose();
-    onExportSmartPlaylists();
+  const dismissMobileTaggingIntro = () => {
+    promptHistory.markSeen("mobileTaggingIntroSeen");
+    setIntroDismissed(true);
+    setManualMobileTaggingIntro(false);
   };
 
-  const handleImportClick = () => {
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
-    }
-  };
-
+  const handleExportClick = () => setSharing({ mode: "share" });
+  const handleImportClick = () => fileInputRef.current?.click();
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files && event.target.files[0];
+    const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
-
+    setImportError("");
+    if (file.size > SMART_PLAYLIST_SHARE_MAX_BYTES) {
+      setImportError("This file is too large. Ask the sender to share fewer setups at a time."); return;
+    }
+    setReadingFile(true);
     const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const content = e.target?.result as string;
-        const data = JSON.parse(content);
-
-        // Validate smart playlist data structure
-        if (
-          Array.isArray(data) &&
-          data.every(
-            (playlist) =>
-              playlist &&
-              typeof playlist === "object" &&
-              typeof playlist.playlistId === "string" &&
-              typeof playlist.playlistName === "string" &&
-              playlist.criteria &&
-              typeof playlist.criteria === "object",
-          )
-        ) {
-          onImportSmartPlaylists(data);
-          Spicetify.showNotification("Smart playlists imported successfully!");
-        } else {
-          console.error("Invalid smart playlist backup structure:", data);
-          Spicetify.showNotification(
-            "Invalid smart playlist backup file format",
-            true,
-          );
-        }
-      } catch (error) {
-        console.error("Error parsing backup file:", error);
-        Spicetify.showNotification("Error importing backup", true);
-      } finally {
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
-      }
+    reader.onload = () => {
+      try { setSharing({ mode: "import", bundle: parseSmartPlaylistShare(String(reader.result)) }); }
+      catch (error) { setImportError(error instanceof Error ? error.message : "This file couldn’t be read. Choose the original share file from Tagify."); }
+      finally { setReadingFile(false); }
     };
-
-    reader.onerror = () => {
-      Spicetify.showNotification("Error reading backup file", true);
-    };
-
+    reader.onerror = () => { setReadingFile(false); setImportError("This file couldn’t be opened. Choose it again, or ask the sender for a new copy."); };
     reader.readAsText(file);
   };
 
@@ -188,7 +197,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
 
       return comparison;
     });
-  }, [smartPlaylists, searchQuery, sortBy, sortOrder, playlistTrackCounts]);
+  }, [smartPlaylists, searchQuery, sortBy, sortOrder, playlistTrackCounts, verifiedStatuses]);
 
   useEffect(() => {
     return () => {
@@ -197,15 +206,12 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
   }, []);
 
   useEffect(() => {
-    onCleanupDeletedSmartPlaylists();
-  }, []);
-
-  useEffect(() => {
     const syncPlaylistNames = async () => {
       let hasUpdates = false;
 
       const updatedPlaylists = await Promise.all(
         smartPlaylists.map(async (playlist) => {
+          if (!playlist.playlistId) return playlist;
           try {
             const playlistUri = `spotify:playlist:${playlist.playlistId}`;
             const metadata = await (
@@ -232,27 +238,63 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
       );
 
       if (hasUpdates) {
-        onUpdateSmartPlaylists(updatedPlaylists);
+        await onUpdateSmartPlaylists((current) => current.map((playlist) => {
+          const updated = updatedPlaylists.find((candidate) =>
+            playlist.id ? candidate.id === playlist.id : candidate.playlistId === playlist.playlistId,
+          );
+          return updated && updated.playlistName !== playlist.playlistName
+            ? { ...playlist, playlistName: updated.playlistName }
+            : playlist;
+        }));
       }
     };
 
     if (smartPlaylists.length > 0) {
-      syncPlaylistNames();
+      void syncPlaylistNames().catch((error) => {
+        console.error("Could not save updated smart playlist names:", error);
+      });
     }
   }, []);
 
   useEffect(() => {
+    let active = true;
     const fetchCounts = async () => {
-      if (smartPlaylists.length === 0) return;
-
       setIsLoadingCounts(true);
-      const playlistIds = smartPlaylists.map((p) => p.playlistId);
-      const counts = await spotifyApiService.getPlaylistTrackCounts(playlistIds);
-      setPlaylistTrackCounts(counts);
-      setIsLoadingCounts(false);
+      setVerifiedStatuses({});
+      try {
+        const data = await storageService.loadAllStrict();
+        if (!active) return;
+        const results = await Promise.all(smartPlaylists.filter((p) => p.playlistId).map(async (playlist) => {
+          try {
+            const actual = await spotifyApiService.getAllTrackUrisInPlaylistStrict(playlist.playlistId);
+            const actualSet = new Set(actual);
+            // Matching local files must be added manually, so their absence isn't a sync failure.
+            const expected = new Set(collectMatchingTrackUris(data.tracks, playlist.criteria).filter((uri) => !uri.startsWith("spotify:local:") || actualSet.has(uri)));
+            const matches = actual.length === expected.size && new Set(actual).size === actual.length && actual.every((uri) => expected.has(uri));
+            return { id: playlist.playlistId, count: actual.length, status: matches ? "synced" as const : "needsSync" as const };
+          } catch { return { id: playlist.playlistId, status: "unknown" as const }; }
+        }));
+        if (active) {
+          setPlaylistTrackCounts(Object.fromEntries(results.flatMap((result) => result.count === undefined ? [] : [[result.id, result.count]])));
+          setVerifiedStatuses(Object.fromEntries(results.map((result) => [result.id, result.status])));
+        }
+      } catch { if (active) setVerifiedStatuses({}); }
+      finally { if (active) setIsLoadingCounts(false); }
     };
+    void fetchCounts();
+    const refresh = () => { void fetchCounts(); };
+    window.addEventListener("tagify:dataUpdated", refresh);
+    return () => { active = false; window.removeEventListener("tagify:dataUpdated", refresh); };
+  }, [smartPlaylists]);
 
-    fetchCounts();
+  useEffect(() => {
+    if (!smartPlaylists.length) return;
+    void spotifyApiService
+      .getAllUserPlaylistReferencesStrict()
+      .then(setAvailableSpotifyPlaylists)
+      .catch((error) =>
+        console.warn("Could not load Spotify playlists for recipe binding", error),
+      );
   }, [smartPlaylists]);
 
   const toggleSmartPlaylistActive = async (playlistId: string) => {
@@ -271,7 +313,13 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
       return p;
     });
 
-    onUpdateSmartPlaylists(updatedPlaylists);
+    try {
+      await onUpdateSmartPlaylists(updatedPlaylists);
+    } catch (error) {
+      console.error("Could not change smart playlist activation:", error);
+      Spicetify.showNotification("Tagify couldn't save this Smart Playlist change. Please try again.", true);
+      return;
+    }
 
     if (willBeActive) {
       setSyncingPlaylists((prev) => new Set(prev).add(playlistId));
@@ -287,7 +335,11 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
         const revertedPlaylists = smartPlaylists.map((p) =>
           p.playlistId === playlistId ? { ...p, isActive: false } : p,
         );
-        onUpdateSmartPlaylists(revertedPlaylists);
+        try {
+          await onUpdateSmartPlaylists(revertedPlaylists);
+        } catch (restoreError) {
+          console.error("Could not restore smart playlist activation:", restoreError);
+        }
       } finally {
         setSyncingPlaylists((prev) => {
           const newSet = new Set(prev);
@@ -317,7 +369,9 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     }
   };
 
-  const handleRemoveSmartPlaylistTracking = (playlistId: string) => {
+  const handleRemoveSmartPlaylistTracking = async (target: SmartPlaylistCriteria) => {
+    const playlistId = target.playlistId;
+    const samePlaylist = (item: SmartPlaylistCriteria) => target.id ? item.id === target.id : item === target;
     let confirmed = true;
     const isJsdomEnvironment =
       typeof navigator !== "undefined" &&
@@ -343,7 +397,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     }
 
     const playlist = smartPlaylists.find(
-      (item) => item.playlistId === playlistId,
+      samePlaylist,
     );
     if (!playlist) {
       return;
@@ -352,10 +406,18 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     // This only removes Tagify smart-playlist tracking metadata.
     // The Spotify playlist itself is intentionally left untouched.
     const updatedPlaylists = smartPlaylists.filter(
-      (item) => item.playlistId !== playlistId,
+      (item) => !samePlaylist(item),
     );
+    if (updatedPlaylists.length === 0) markSmartPlaylistsExplicitlyCleared();
 
-    onUpdateSmartPlaylists(updatedPlaylists);
+    try {
+      await onUpdateSmartPlaylists(updatedPlaylists);
+    } catch (error) {
+      if (updatedPlaylists.length === 0) clearExplicitSmartPlaylistClear();
+      console.error("Could not stop smart playlist tracking:", error);
+      Spicetify.showNotification("Tagify couldn't stop tracking this Smart Playlist. Please try again.", true);
+      return;
+    }
 
     setSyncingPlaylists((prev) => {
       const next = new Set(prev);
@@ -432,42 +494,82 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     onClose();
   };
 
+  if (sharing) return <SmartPlaylistSharingDialog mode={sharing.mode} taxonomy={taxonomy} playlists={smartPlaylists} tracks={tracks}
+    bundle={sharing.mode === "import" ? sharing.bundle : undefined} setup={sharing.mode === "create" ? sharing.setup : undefined}
+    onShare={(selected) => onExportSmartPlaylists(selected)} onImport={onImportSmartPlaylists}
+    onCreate={onBindRecipe ? async (setup) => { await onBindRecipe(setup); setSharing(null); } : undefined} onClose={() => setSharing(null)} />;
+
   return (
     <>
       <Portal>
         <div className={styles.modalOverlay} onClick={onClose}>
-          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+          <div ref={mainDialog} tabIndex={-1} className={styles.modal} role="dialog" aria-modal="true" aria-label="Smart playlists" onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div className={styles.titleBlock}>
                 <h2 className={styles.modalTitle}>
                   Smart Playlists ({smartPlaylists.length})
                 </h2>
                 <p className={styles.modalSubtitle}>
-                  Compact view of criteria and sync state.
+                  Create, organize, and share playlists that stay up to date automatically.
                 </p>
               </div>
 
               <div className={styles.headerActions}>
                 <button
+                  type="button"
+                  className={styles.headerButton}
+                  onClick={() => setManualMobileTaggingIntro(true)}
+                  title="Learn how to tag songs from your phone"
+                >
+                  <FontAwesomeIcon icon={faMobileScreenButton} size="sm" />
+                  Mobile tagging
+                </button>
+                <div className={styles.shareInfoTooltip}>
+                  <button
+                    type="button"
+                    className={styles.shareInfoButton}
+                    aria-label="About sharing smart playlists"
+                    aria-describedby="smart-playlist-share-info"
+                  >
+                    <FontAwesomeIcon icon={faInfo} size="xs" />
+                  </button>
+                  <div
+                    id="smart-playlist-share-info"
+                    className={styles.shareInfoPanel}
+                    role="tooltip"
+                  >
+                    <strong>What does Share include?</strong>
+                    <p>
+                      Share saves how your smart playlists are set up—their names,
+                      filters, and tags. It does not include the songs in your
+                      playlists or give anyone access to your Spotify account.
+                      Someone who imports it can create their own Spotify playlists
+                      using the same rules.
+                    </p>
+                  </div>
+                </div>
+
+                <button
                   className={`${styles.headerButton} ${styles.exportButton}`}
                   onClick={handleExportClick}
-                  title="Backup your smart playlists"
+                  title="Save your smart playlist setups to share with someone"
                 >
                   <FontAwesomeIcon icon={faArrowUpRightFromSquare} size="sm" />
-                  Backup
+                  Share
                 </button>
 
                 <button
                   className={`${styles.headerButton} ${styles.importButton}`}
                   onClick={handleImportClick}
-                  title="Import smart playlists"
+                  disabled={readingFile}
+                  title="Add smart playlist setups that someone shared with you"
                 >
                   <FontAwesomeIcon
                     icon={faArrowUpRightFromSquare}
                     rotation={180}
                     size="sm"
                   />
-                  Import
+                  {readingFile ? "Reading…" : "Import"}
                 </button>
 
                 <button
@@ -478,8 +580,10 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                   <FontAwesomeIcon icon={faXmark} />
                 </button>
               </div>
+
             </div>
 
+            {importError ? <p role="alert" style={{ padding: "0 24px", color: "#ffb8b8" }}>{importError}</p> : null}
             <div className={styles.controlsSection}>
               <div className={styles.searchSection}>
                 <FontAwesomeIcon
@@ -597,9 +701,13 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                         playlist.criteria.camelotMaxFilter ?? null,
                       );
                     const syncStatus = getSyncStatus(playlist);
-                    const currentTrackCount = isLoadingCounts
+                    const currentTrackCount = !playlist.playlistId
+                      ? 0
+                      : isLoadingCounts
                       ? "..."
                       : (playlistTrackCounts[playlist.playlistId] ?? 0);
+
+                    const matchingCount = tracks ? collectMatchingTrackUris(tracks, playlist.criteria).filter((uri) => uri.startsWith("spotify:track:")).length : null;
 
                     // Keep all criteria text compact while preserving exact wording.
                     const criteriaTokens: string[] = [];
@@ -610,7 +718,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
 
                     return (
                       <div
-                        key={playlist.playlistId}
+                        key={playlist.id ?? playlist.playlistId}
                         className={`${styles.playlistItem} ${
                           !playlist.isActive ? styles.inactive : ""
                         }`}
@@ -620,6 +728,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                             <h3
                               className={styles.playlistName}
                               onClick={() =>
+                                playlist.playlistId &&
                                 navigateToPlaylist(playlist.playlistId)
                               }
                             >
@@ -627,7 +736,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                             </h3>
                             {!playlist.isActive && (
                               <span className={styles.inactiveLabel}>
-                                Inactive
+                                {playlist.playlistId ? "Inactive" : playlist.source ? "Saved setup" : "Not Connected"}
                               </span>
                             )}
                           </div>
@@ -644,7 +753,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                           </div>
                         </div>
 
-                        <div className={styles.playlistStatsRow}>
+                        {playlist.playlistId ? <div className={styles.playlistStatsRow}>
                           <div className={styles.trackRowItem}>
                             <div className={styles.trackCountNumber}>
                               {currentTrackCount}
@@ -658,7 +767,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                             <div className={styles.trackCountNumber}>
                               {playlist.smartPlaylistTrackUris.length}
                             </div>
-                            <div className={styles.trackCountLabel}>Expected</div>
+                            <div className={styles.trackCountLabel}>Tracked</div>
                           </div>
 
                           <span
@@ -667,10 +776,10 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                             }`}
                           >
                             {syncStatus === "synced" && "In Sync"}
-                            {syncStatus === "needsSync" && "Needs Sync"}
+                            {syncStatus === "needsSync" && (playlist.pendingTagChoices?.length ? "Needs Tag Choices" : "Needs Sync")}
                             {syncStatus === "unknown" && "Unknown"}
                           </span>
-                        </div>
+                        </div> : <p className={styles.noCriteria}>{matchingCount !== null ? `${matchingCount} Spotify ${matchingCount === 1 ? "song matches" : "songs match"}. ` : ""}Saved setup — preview your songs before creating a playlist.</p>}
 
                         {criteriaTokens.length > 0 ? (
                           <div className={styles.criteriaSection}>
@@ -710,25 +819,79 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                           </div>
                         ) : (
                           <div className={styles.noCriteria}>
-                            <span>No filter criteria set</span>
+                            <span>No filters set</span>
                           </div>
                         )}
 
                         <div className={styles.playlistActions}>
+                          {(!playlist.playlistId || reconnecting.has(playlist.id ?? playlist.playlistId)) && onBindRecipe ? (
+                            <>
+                              <button
+                                className={`${styles.actionButton} ${styles.syncButton}`}
+                                onClick={() => setSharing({ mode: "create", setup: playlist })}
+                              >
+                                Create Spotify Playlist
+                              </button>
+                              {!playlist.source && availableSpotifyPlaylists.length > 0 ? (
+                                <>
+                                  <select
+                                    className={styles.sortSelect}
+                                    aria-label={`Spotify playlist for ${playlist.playlistName}`}
+                                    value={selectedBindings[playlist.id ?? playlist.playlistName] ?? ""}
+                                    onChange={(event) =>
+                                      setSelectedBindings((current) => ({
+                                        ...current,
+                                        [playlist.id ?? playlist.playlistName]: event.target.value,
+                                      }))
+                                    }
+                                  >
+                                    <option value="">Choose existing playlist</option>
+                                    {availableSpotifyPlaylists.map((candidate) => (
+                                      <option key={candidate.playlistId} value={candidate.playlistId}>
+                                        {candidate.playlistName}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    className={styles.actionButton}
+                                    disabled={!selectedBindings[playlist.id ?? playlist.playlistName]}
+                                    onClick={() => {
+                                      const selected = availableSpotifyPlaylists.find(
+                                        (candidate) =>
+                                          candidate.playlistId ===
+                                          selectedBindings[playlist.id ?? playlist.playlistName],
+                                      );
+                                      if (selected) void onBindRecipe(playlist, selected);
+                                    }}
+                                  >
+                                    Connect Existing
+                                  </button>
+                                </>
+                              ) : null}
+                            </>
+                          ) : null}
                           <button
+                            className={styles.actionButton}
+                            onClick={() => onEditPlaylist(playlist)}
+                            disabled={syncingPlaylists.has(playlist.playlistId)}
+                          >
+                            Edit Filters
+                          </button>
+                          {<button
                             className={`${styles.actionButton} ${styles.removeTrackingButton}`}
                             onClick={() =>
                               handleRemoveSmartPlaylistTracking(
-                                playlist.playlistId,
+                                playlist,
                               )
                             }
                             disabled={syncingPlaylists.has(playlist.playlistId)}
                             title="Remove smart-playlist tracking (does not delete the Spotify playlist)"
                           >
-                            Remove Tracking
-                          </button>
+                            {playlist.playlistId ? "Remove Tracking" : "Remove Setup"}
+                          </button>}
+                          {playlist.playlistId && !playlist.source && onBindRecipe ? <button className={styles.actionButton} onClick={() => setReconnecting((current) => new Set(current).add(playlist.id ?? playlist.playlistId))}>Change Spotify Playlist</button> : null}
 
-                          <button
+                          {playlist.playlistId ? <button
                             className={`${styles.actionButton} ${
                               styles.syncToggleButton
                             } ${!playlist.isActive ? styles.inactive : ""}`}
@@ -738,9 +901,9 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                             disabled={syncingPlaylists.has(playlist.playlistId)}
                           >
                             {playlist.isActive ? "Disable Sync" : "Enable Sync"}
-                          </button>
+                          </button> : null}
 
-                          {playlist.isActive && (
+                          {playlist.playlistId && playlist.isActive && (
                             <button
                               className={`${styles.actionButton} ${
                                 styles.syncButton
@@ -773,6 +936,72 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
           </div>
         </div>
       </Portal>
+      {showMobileTaggingIntro ? (
+        <Portal>
+          <div
+            className={styles.mobileTaggingOverlay}
+            onClick={dismissMobileTaggingIntro}
+          >
+            <section
+              className={styles.mobileTaggingIntro}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="mobile-tagging-intro-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className={styles.mobileTaggingIntroHeader}>
+                <div>
+                  <span className={styles.mobileTaggingKicker}>New in Tagify 3.0</span>
+                  <h2 id="mobile-tagging-intro-title">
+                    <FontAwesomeIcon icon={faMobileScreenButton} />
+                    Tag songs from your phone
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  className={styles.mobileTaggingCloseButton}
+                  onClick={dismissMobileTaggingIntro}
+                  aria-label="Close mobile tagging introduction"
+                >
+                  <FontAwesomeIcon icon={faXmark} />
+                </button>
+              </div>
+
+              <p className={styles.mobileTaggingLead}>
+                Tagify still runs on your computer, but Smart Playlists now work
+                as mobile tagging shortcuts.
+              </p>
+
+              <ol className={styles.mobileTaggingSteps}>
+                <li>
+                  Choose an active Smart Playlist whose rules match how you want
+                  to tag a song.
+                </li>
+                <li>
+                  In Spotify on your phone, add the song to that playlist.
+                </li>
+                <li>
+                  When Tagify is running on your computer, it applies the
+                  playlist's tags, rating, and energy, then tells you exactly
+                  what changed.
+                </li>
+              </ol>
+
+              <p className={styles.mobileTaggingNote}>
+                BPM and key stay unchanged because they belong to the recording.
+              </p>
+
+              <button
+                type="button"
+                className={styles.mobileTaggingPrimaryButton}
+                onClick={dismissMobileTaggingIntro}
+              >
+                Got it
+              </button>
+            </section>
+          </div>
+        </Portal>
+      ) : null}
       <input
         ref={fileInputRef}
         type="file"

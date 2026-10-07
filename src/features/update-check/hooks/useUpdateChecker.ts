@@ -15,7 +15,7 @@ export interface UseUpdateCheckerProps {
 export interface UseUpdateCheckerReturn {
   updateInfo: UpdateInfo | null;
   checkForUpdates: () => Promise<void>;
-  dismissUpdate: (permanently?: boolean) => void;
+  dismissUpdate: () => void;
 }
 
 export const useUpdateChecker = ({
@@ -41,7 +41,6 @@ export const useUpdateChecker = ({
       if (
         result.hasUpdate &&
         result.latestVersion &&
-        !VersionCheckerService.isDismissed(result.latestVersion) &&
         !temporarilyDismissedVersions.has(result.latestVersion)
       ) {
         setUpdateInfo(result);
@@ -53,18 +52,14 @@ export const useUpdateChecker = ({
     }
   };
 
-  const dismissUpdate = (permanently = false) => {
+  const dismissUpdate = () => {
     if (!updateInfo?.latestVersion) {
       return;
     }
 
-    if (permanently) {
-      VersionCheckerService.dismissVersion(updateInfo.latestVersion);
-    } else {
-      setTemporarilyDismissedVersions((prev) =>
-        new Set([...prev, updateInfo.latestVersion!]),
-      );
-    }
+    setTemporarilyDismissedVersions((prev) =>
+      new Set([...prev, updateInfo.latestVersion!]),
+    );
 
     setUpdateInfo(null);
   };

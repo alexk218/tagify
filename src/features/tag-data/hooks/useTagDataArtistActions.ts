@@ -80,7 +80,11 @@ export function useTagDataArtistActions({
         return { artistUri, currentData: nextData };
       }
 
-      if (!existingArtist.name || existingArtist.imageUrl === undefined) {
+      if (
+        !existingArtist.name ||
+        existingArtist.name === "Unknown Artist" ||
+        existingArtist.imageUrl === undefined
+      ) {
         const metadata = providedMetadata || (await getArtistMetadata(artistUri));
         if (metadata) {
           const nextData: TagDataStructure = {

@@ -1,5 +1,4 @@
 import {
-  Dispatch,
   MutableRefObject,
   SetStateAction,
   useCallback,
@@ -9,9 +8,13 @@ import {
 } from "react";
 import { SmartPlaylistCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
 import {
+  clearExplicitSmartPlaylistClear,
   loadSmartPlaylistsFromStorage,
+  markSmartPlaylistsExplicitlyCleared,
   saveSmartPlaylistsToStorage,
 } from "@/features/smart-playlists/utils/smartPlaylist.storage";
+
+import { registerLocalPersistenceFlusher } from "@/services/sync/SyncLocalState";
 
 const SMART_PLAYLISTS_UPDATED_EVENT = "tagify:smartPlaylistsUpdated";
 
@@ -26,6 +29,7 @@ function dispatchSmartPlaylistsUpdated(playlists: SmartPlaylistCriteria[]): void
         detail: {
           count: playlists.length,
           playlistIds: playlists.map((playlist) => playlist.playlistId),
+          playlists,
         },
       }),
     );
@@ -37,12 +41,13 @@ function dispatchSmartPlaylistsUpdated(playlists: SmartPlaylistCriteria[]): void
 export interface UseSmartPlaylistStateResult {
   smartPlaylists: SmartPlaylistCriteria[];
   smartPlaylistsRef: MutableRefObject<SmartPlaylistCriteria[]>;
-  setSmartPlaylists: Dispatch<SetStateAction<SmartPlaylistCriteria[]>>;
+  setSmartPlaylists: (value: SetStateAction<SmartPlaylistCriteria[]>) => Promise<void>;
   updateSmartPlaylistsImmediate: (
     updater: (prev: SmartPlaylistCriteria[]) => SmartPlaylistCriteria[],
-  ) => SmartPlaylistCriteria[];
-  replaceSmartPlaylists: (playlists: SmartPlaylistCriteria[]) => void;
-  resetSmartPlaylists: () => void;
+  ) => Promise<SmartPlaylistCriteria[]>;
+  replaceSmartPlaylists: (playlists: SmartPlaylistCriteria[]) => Promise<void>;
+  refreshSmartPlaylists: () => Promise<void>;
+  resetSmartPlaylists: () => Promise<void>;
 }
 
 export function useSmartPlaylistState(): UseSmartPlaylistStateResult {
@@ -50,21 +55,37 @@ export function useSmartPlaylistState(): UseSmartPlaylistStateResult {
     SmartPlaylistCriteria[]
   >([]);
   const smartPlaylistsRef = useRef<SmartPlaylistCriteria[]>([]);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => registerLocalPersistenceFlusher(() => saveQueueRef.current), []);
 
   const persistAndSyncState = useCallback((next: SmartPlaylistCriteria[]) => {
     smartPlaylistsRef.current = next;
     setSmartPlaylistsState(next);
 
-    try {
-      saveSmartPlaylistsToStorage(next);
-      dispatchSmartPlaylistsUpdated(next);
-    } catch (error) {
-      console.error("Error saving smart playlist data:", error);
-    }
+    const save = saveQueueRef.current.then(() => saveSmartPlaylistsToStorage(next));
+    saveQueueRef.current = save.catch(() => undefined);
+    return save.then(
+      () => dispatchSmartPlaylistsUpdated(next),
+      async (error) => {
+        if (smartPlaylistsRef.current === next) {
+          try {
+            const restored = await loadSmartPlaylistsFromStorage();
+            if (smartPlaylistsRef.current === next) {
+              smartPlaylistsRef.current = restored;
+              setSmartPlaylistsState(restored);
+            }
+          } catch (reloadError) {
+            console.error("Could not reload smart playlists after a failed save:", reloadError);
+          }
+        }
+        throw error;
+      },
+    );
   }, []);
 
   const updateSmartPlaylistsImmediate = useCallback(
-    (updater: (prev: SmartPlaylistCriteria[]) => SmartPlaylistCriteria[]) => {
+    async (updater: (prev: SmartPlaylistCriteria[]) => SmartPlaylistCriteria[]) => {
       const currentPlaylists = smartPlaylistsRef.current;
       const updated = updater(currentPlaylists);
 
@@ -72,61 +93,76 @@ export function useSmartPlaylistState(): UseSmartPlaylistStateResult {
         return currentPlaylists;
       }
 
-      persistAndSyncState(updated);
+      await persistAndSyncState(updated);
       return updated;
     },
     [persistAndSyncState],
   );
 
-  const setSmartPlaylists: Dispatch<SetStateAction<SmartPlaylistCriteria[]>> =
-    useCallback((value) => {
-      setSmartPlaylistsState((previous) => {
-        const next =
-          typeof value === "function"
-            ? (
-                value as (
-                  prev: SmartPlaylistCriteria[],
-                ) => SmartPlaylistCriteria[]
-              )(previous)
-            : value;
-
-        smartPlaylistsRef.current = next;
-
-        try {
-          saveSmartPlaylistsToStorage(next);
-          dispatchSmartPlaylistsUpdated(next);
-        } catch (error) {
-          console.error("Error saving smart playlist data:", error);
-        }
-
-        return next;
-      });
-    }, []);
-
-  const replaceSmartPlaylists = useCallback(
-    (playlists: SmartPlaylistCriteria[]) => {
-      persistAndSyncState(playlists);
-    },
+  const setSmartPlaylists = useCallback(
+    (value: SetStateAction<SmartPlaylistCriteria[]>) =>
+      persistAndSyncState(
+        typeof value === "function" ? value(smartPlaylistsRef.current) : value,
+      ),
     [persistAndSyncState],
   );
 
-  const resetSmartPlaylists = useCallback(() => {
-    persistAndSyncState([]);
+  const replaceSmartPlaylists = useCallback(
+    (playlists: SmartPlaylistCriteria[]) => persistAndSyncState(playlists),
+    [persistAndSyncState],
+  );
+
+  const refreshSmartPlaylists = useCallback(async () => {
+    await saveQueueRef.current;
+    const restored = await loadSmartPlaylistsFromStorage();
+    smartPlaylistsRef.current = restored;
+    setSmartPlaylistsState(restored);
+  }, []);
+
+  const resetSmartPlaylists = useCallback(async () => {
+    markSmartPlaylistsExplicitlyCleared();
+    try {
+      await persistAndSyncState([]);
+    } catch (error) {
+      clearExplicitSmartPlaylistClear();
+      throw error;
+    }
   }, [persistAndSyncState]);
 
   useEffect(() => {
-    try {
-      const validPlaylists = loadSmartPlaylistsFromStorage();
-      if (validPlaylists.length === 0) {
+    void loadSmartPlaylistsFromStorage()
+      .then((validPlaylists) => {
+        smartPlaylistsRef.current = validPlaylists;
+        setSmartPlaylistsState(validPlaylists);
+      })
+      .catch((error) => {
+        console.error("Error loading smart playlists:", error);
+      });
+  }, []);
+
+  useEffect(() => {
+    const reload = (event?: Event) => {
+      const eventPlaylists = (
+        event as CustomEvent<{ playlists?: SmartPlaylistCriteria[] }>
+      )?.detail?.playlists;
+      if (Array.isArray(eventPlaylists)) {
+        smartPlaylistsRef.current = eventPlaylists;
+        setSmartPlaylistsState(eventPlaylists);
         return;
       }
-
-      smartPlaylistsRef.current = validPlaylists;
-      setSmartPlaylistsState(validPlaylists);
-    } catch (error) {
-      console.error("Error loading smart playlists:", error);
-    }
-  }, []);
+      void refreshSmartPlaylists().catch((error) => {
+        console.error("Error loading smart playlists:", error);
+      });
+    };
+    window.addEventListener("tagify:durableStateRestored", reload);
+    window.addEventListener(SMART_PLAYLISTS_UPDATED_EVENT, reload);
+    window.addEventListener("tagify:dataUpdated", reload);
+    return () => {
+      window.removeEventListener("tagify:durableStateRestored", reload);
+      window.removeEventListener(SMART_PLAYLISTS_UPDATED_EVENT, reload);
+      window.removeEventListener("tagify:dataUpdated", reload);
+    };
+  }, [refreshSmartPlaylists]);
 
   return {
     smartPlaylists,
@@ -134,6 +170,7 @@ export function useSmartPlaylistState(): UseSmartPlaylistStateResult {
     setSmartPlaylists,
     updateSmartPlaylistsImmediate,
     replaceSmartPlaylists,
+    refreshSmartPlaylists,
     resetSmartPlaylists,
   };
 }

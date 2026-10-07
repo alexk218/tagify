@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import styles from "./TagSelector.module.css";
-import { CustomTagAccent, TagCategory } from "@/types/tagData";
+import { CustomTagAccent, Tag as TagNode, TagCategory, TagSubcategory } from "@/types/tagData";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
 import { Lightbulb, Lock, Tag } from "lucide-react";
 import {
@@ -74,6 +74,15 @@ const TagSelector: React.FC<TagSelectorProps> = ({
 
   const buildSubcategoryKey = (categoryId: string, subcategoryId: string) =>
     `${categoryId}:${subcategoryId}`;
+  const collectSubcategoryKeys = (category: TagCategory) => {
+    const keys: string[] = [];
+    const visit = (subcategory: TagSubcategory) => {
+      keys.push(buildSubcategoryKey(category.id, subcategory.id));
+      (subcategory.subcategories || []).forEach(visit);
+    };
+    category.subcategories.forEach(visit);
+    return keys;
+  };
 
   const toggleCategory = (categoryId: string) => {
     setExpandedCategoryIds((prev) =>
@@ -93,11 +102,7 @@ const TagSelector: React.FC<TagSelectorProps> = ({
 
   const expandAll = () => {
     const allCategoryIds = sortedCategories.map((category) => category.id);
-    const allSubcategoryIds = sortedCategories.flatMap((category) =>
-      category.subcategories.map((subcategory) =>
-        buildSubcategoryKey(category.id, subcategory.id),
-      ),
-    );
+    const allSubcategoryIds = sortedCategories.flatMap(collectSubcategoryKeys);
 
     setExpandedCategoryIds(allCategoryIds);
     setExpandedSubcategoryKeys(allSubcategoryIds);
@@ -136,13 +141,58 @@ const TagSelector: React.FC<TagSelectorProps> = ({
 
     setExpandedCategoryIds(visibleCategories.map((category) => category.id));
     setExpandedSubcategoryKeys(
-      visibleCategories.flatMap((category) =>
-        category.subcategories.map((subcategory) =>
-          buildSubcategoryKey(category.id, subcategory.id),
-        ),
-      ),
+      visibleCategories.flatMap(collectSubcategoryKeys),
     );
   }, [searchTerm, setExpandedCategoryIds, setExpandedSubcategoryKeys, visibleCategories]);
+
+  const renderTagGrid = (tags: TagNode[]) => (
+    <div className={styles.tagGrid}>
+      {tags.map((tag) => (
+        <button
+          key={tag.id}
+          className={`${styles.tagButton} ${
+            tag.accentId ? styles.tagButtonAccented : ""
+          } ${isTagApplied(tag.id) ? styles.tagApplied : ""}`}
+          style={buildTagAccentCssVars(tag.accentId, customAccentsById)}
+          onClick={() => onToggleTag(tag.id)}
+        >
+          <span className={styles.tagButtonLabel}>
+            {tag.name}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+
+  const renderSubcategory = (categoryId: string, subcategory: TagSubcategory) => {
+    const subcategoryKey = buildSubcategoryKey(categoryId, subcategory.id);
+    const isSubcategoryExpanded = expandedSubcategories.has(subcategoryKey);
+
+    return (
+      <div key={subcategory.id} className={styles.subcategory}>
+        <div
+          className={styles.subcategoryHeader}
+          onClick={() => toggleSubcategory(subcategoryKey)}
+        >
+          <span className={styles.subcategoryToggle}>
+            {isSubcategoryExpanded ? "▼" : "►"}
+          </span>
+          <h4 className={styles.subcategoryTitle}>
+            {subcategory.name}
+          </h4>
+        </div>
+
+        {isSubcategoryExpanded && (
+          <>
+            {subcategory.tags.length > 0 && renderTagGrid(subcategory.tags)}
+            {(subcategory.subcategories || []).map((child) =>
+              renderSubcategory(categoryId, child),
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className={styles.container} ref={containerRef}>
@@ -256,54 +306,10 @@ const TagSelector: React.FC<TagSelectorProps> = ({
 
               {isCategoryExpanded && (
                 <div className={styles.subcategoryList}>
-                  {category.subcategories.map((subcategory) => {
-                    const subcategoryKey = buildSubcategoryKey(
-                      category.id,
-                      subcategory.id,
-                    );
-                    const isSubcategoryExpanded =
-                      expandedSubcategories.has(subcategoryKey);
-
-                    return (
-                      <div key={subcategory.id} className={styles.subcategory}>
-                        <div
-                          className={styles.subcategoryHeader}
-                          onClick={() => toggleSubcategory(subcategoryKey)}
-                        >
-                          <span className={styles.subcategoryToggle}>
-                            {isSubcategoryExpanded ? "▼" : "►"}
-                          </span>
-                          <h4 className={styles.subcategoryTitle}>
-                            {subcategory.name}
-                          </h4>
-                        </div>
-
-                        {isSubcategoryExpanded && (
-                          <div className={styles.tagGrid}>
-                            {subcategory.tags.map((tag) => (
-                              <button
-                                key={tag.id}
-                                className={`${styles.tagButton} ${
-                                  tag.accentId ? styles.tagButtonAccented : ""
-                                } ${
-                                  isTagApplied(tag.id) ? styles.tagApplied : ""
-                                }`}
-                                style={buildTagAccentCssVars(
-                                  tag.accentId,
-                                  customAccentsById,
-                                )}
-                                onClick={() => onToggleTag(tag.id)}
-                              >
-                                <span className={styles.tagButtonLabel}>
-                                  {tag.name}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  {category.tags && category.tags.length > 0 && renderTagGrid(category.tags)}
+                  {category.subcategories.map((subcategory) =>
+                    renderSubcategory(category.id, subcategory),
+                  )}
                 </div>
               )}
             </div>

@@ -30,14 +30,31 @@ export function useSpicetifyHistory({
   onSelectTrack,
   onSelectPlaylist,
   onSelectArtist,
+  onEditSmartPlaylist,
 }: UseSpicetifyHistoryProps) {
   useEffect(() => {
+    let selectionRevision = 0;
     const checkForTrackUris = async () => {
+      const revision = ++selectionRevision;
       const location = Spicetify.Platform.History
         .location as SpicetifyHistoryLocation;
 
-      const { trackUri, trackUris, playlistUri, artistUri } =
+      const {
+        trackUri,
+        trackUris,
+        playlistUri,
+        artistUri,
+        editSmartPlaylistId,
+      } =
         parseHistoryTrackSelection(location);
+
+      if (editSmartPlaylistId) {
+        onEditSmartPlaylist?.(editSmartPlaylistId);
+        setIsMultiTagging(false);
+        setMultiTagTracks([]);
+        setLockedMultiTrackUri(null);
+        return;
+      }
 
       if (artistUri) {
         onSelectArtist?.(artistUri);
@@ -67,6 +84,7 @@ export function useSpicetifyHistory({
 
           const trackData = await spotifyService.getTrack(trackUri);
 
+          if (revision !== selectionRevision) return;
           if (trackData) {
             setLockedTrack(createSpotifyTrackFromTrackInfo(trackUri, trackData));
             setIsLocked(true);
@@ -105,44 +123,20 @@ export function useSpicetifyHistory({
         setMultiTagTracks(placeholderTracks);
 
         const fetchTrackData = async () => {
-          const currentTracks = [...placeholderTracks];
+          const trackDataByUri = await spotifyService.getBatchTracks(trackUris);
 
-          for (const uri of trackUris) {
-            try {
-              let updatedTrack: SpotifyTrack;
-
-              if (uri.startsWith("spotify:local:")) {
-                updatedTrack = createLocalSpotifyTrack(uri);
-              } else {
-                const trackData = await spotifyService.getTrack(uri);
-                if (!trackData) {
-                  continue;
-                }
-
-                updatedTrack = createSpotifyTrackFromTrackInfo(uri, trackData);
-              }
-
-              const trackIndex = currentTracks.findIndex(
-                (track) => track.uri === uri,
-              );
-
-              if (trackIndex !== -1) {
-                currentTracks[trackIndex] = updatedTrack;
-                setMultiTagTracks([...currentTracks]);
-              }
-            } catch (error) {
-              console.error(`Tagify: Error fetching track ${uri}:`, error);
-
-              const trackIndex = currentTracks.findIndex(
-                (track) => track.uri === uri,
-              );
-
-              if (trackIndex !== -1) {
-                currentTracks[trackIndex] = createFailedSpotifyTrack(uri);
-                setMultiTagTracks([...currentTracks]);
-              }
+          const resolvedTracks = trackUris.map((uri) => {
+            if (uri.startsWith("spotify:local:")) {
+              return createLocalSpotifyTrack(uri);
             }
-          }
+
+            const trackData = trackDataByUri[uri];
+            return trackData
+              ? createSpotifyTrackFromTrackInfo(uri, trackData)
+              : createFailedSpotifyTrack(uri);
+          });
+
+          if (revision === selectionRevision) setMultiTagTracks(resolvedTracks);
         };
 
         fetchTrackData().catch((error) => {
@@ -179,6 +173,7 @@ export function useSpicetifyHistory({
     }
 
     return () => {
+      selectionRevision += 1;
       if (unlisten) {
         unlisten();
       }

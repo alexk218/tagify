@@ -4,6 +4,7 @@ import {
   getRelativeInsertIndex,
   getSortableReorderTargetIndex,
   moveCategory,
+  moveCategoryIntoParent,
   moveSubcategory,
   moveTag,
 } from "../tagManager.taxonomy";
@@ -80,6 +81,43 @@ describe("tagManager.taxonomy", () => {
     ]);
   });
 
+  it("moves one top-level category under another as a folder", () => {
+    const taxonomy = createTaxonomy();
+    const genreCategoryId = taxonomy.categoryOrder[0];
+    const moodCategoryId = taxonomy.categoryOrder[1];
+    const moodChildren = [...(taxonomy.childrenByParentId?.[moodCategoryId] ?? [])];
+
+    const result = moveCategoryIntoParent(taxonomy, moodCategoryId, genreCategoryId, 1);
+
+    expect(result.status).toBe("applied");
+    if (result.status !== "applied") {
+      return;
+    }
+
+    expect(result.taxonomy.categoryOrder).toEqual([genreCategoryId]);
+    expect(result.taxonomy.categoriesById[moodCategoryId]).toBeUndefined();
+    expect(result.taxonomy.subcategoriesById[moodCategoryId]).toMatchObject({
+      id: moodCategoryId,
+      name: "Mood",
+      parentId: genreCategoryId,
+      categoryId: genreCategoryId,
+    });
+    expect(result.taxonomy.childrenByParentId?.[genreCategoryId]).toContain(
+      moodCategoryId,
+    );
+    expect(result.taxonomy.childrenByParentId?.[moodCategoryId]).toEqual(
+      moodChildren,
+    );
+    moodChildren.forEach((childId) => {
+      expect(result.taxonomy.subcategoriesById[childId].parentId).toBe(
+        moodCategoryId,
+      );
+      expect(result.taxonomy.subcategoriesById[childId].categoryId).toBe(
+        genreCategoryId,
+      );
+    });
+  });
+
   it("moves subcategories across categories", () => {
     const taxonomy = createTaxonomy();
     const sourceCategoryId = taxonomy.categoryOrder[0];
@@ -102,6 +140,122 @@ describe("tagManager.taxonomy", () => {
     expect(result.taxonomy.subcategoriesById[subcategoryId].categoryId).toBe(
       targetCategoryId,
     );
+  });
+
+  it("moves folders into nested folders", () => {
+    const taxonomy = createTaxonomy();
+    const categoryId = taxonomy.categoryOrder[0];
+    const [electronicId, percussionId] =
+      taxonomy.categoriesById[categoryId].subcategoryIds;
+
+    const result = moveSubcategory(taxonomy, percussionId, electronicId, 1);
+
+    expect(result.status).toBe("applied");
+    if (result.status !== "applied") {
+      return;
+    }
+
+    expect(result.taxonomy.categoriesById[categoryId].subcategoryIds).toEqual([
+      electronicId,
+    ]);
+    expect(result.taxonomy.childrenByParentId?.[categoryId]).toEqual([
+      electronicId,
+    ]);
+    expect(result.taxonomy.childrenByParentId?.[electronicId]).toContain(
+      percussionId,
+    );
+    expect(result.taxonomy.subcategoriesById[percussionId].parentId).toBe(
+      electronicId,
+    );
+    expect(result.taxonomy.subcategoriesById[percussionId].categoryId).toBe(
+      categoryId,
+    );
+  });
+
+  it("moves Source under Genres inside a Genres & Styles category", () => {
+    const taxonomy = buildTaxonomyFromCategoryTree([
+      {
+        id: "genres-styles",
+        name: "Genres & Styles",
+        subcategories: [
+          { id: "genres", name: "Genres", tags: [] },
+          { id: "source", name: "Source", tags: [] },
+        ],
+      },
+    ]);
+    const categoryId = taxonomy.categoryOrder[0];
+    const [genresId, sourceId] = taxonomy.categoriesById[categoryId].subcategoryIds;
+
+    const result = moveSubcategory(taxonomy, sourceId, genresId, 0);
+
+    expect(result.status).toBe("applied");
+    if (result.status !== "applied") {
+      return;
+    }
+
+    expect(result.taxonomy.childrenByParentId?.[categoryId]).toEqual([genresId]);
+    expect(result.taxonomy.childrenByParentId?.[genresId]).toContain(sourceId);
+    expect(result.taxonomy.subcategoriesById[sourceId].parentId).toBe(genresId);
+    expect(result.taxonomy.subcategoriesById[sourceId].categoryId).toBe(categoryId);
+  });
+
+  it("moves nested folders back to a category root", () => {
+    const taxonomy = createTaxonomy();
+    const categoryId = taxonomy.categoryOrder[0];
+    const [electronicId, percussionId] =
+      taxonomy.categoriesById[categoryId].subcategoryIds;
+    const nestedResult = moveSubcategory(taxonomy, percussionId, electronicId, 1);
+    expect(nestedResult.status).toBe("applied");
+    if (nestedResult.status !== "applied") {
+      return;
+    }
+
+    const result = moveSubcategory(
+      nestedResult.taxonomy,
+      percussionId,
+      categoryId,
+      1,
+    );
+
+    expect(result.status).toBe("applied");
+    if (result.status !== "applied") {
+      return;
+    }
+
+    expect(result.taxonomy.categoriesById[categoryId].subcategoryIds).toEqual([
+      electronicId,
+      percussionId,
+    ]);
+    expect(result.taxonomy.childrenByParentId?.[electronicId]).not.toContain(
+      percussionId,
+    );
+    expect(result.taxonomy.subcategoriesById[percussionId].parentId).toBe(
+      categoryId,
+    );
+  });
+
+  it("rejects moving a folder into one of its own descendants", () => {
+    const taxonomy = createTaxonomy();
+    const categoryId = taxonomy.categoryOrder[0];
+    const [electronicId, percussionId] =
+      taxonomy.categoriesById[categoryId].subcategoryIds;
+    const nestedResult = moveSubcategory(taxonomy, percussionId, electronicId, 1);
+    expect(nestedResult.status).toBe("applied");
+    if (nestedResult.status !== "applied") {
+      return;
+    }
+
+    const result = moveSubcategory(
+      nestedResult.taxonomy,
+      electronicId,
+      percussionId,
+      0,
+    );
+
+    expect(result).toMatchObject({
+      status: "blocked",
+      reason: "invalid-descendant",
+    });
   });
 
   it("reorders subcategories after the hovered row when dragging downward", () => {

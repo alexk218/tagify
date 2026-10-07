@@ -435,7 +435,9 @@
   color: var(--spice-text);
   cursor: pointer;
   display: inline-flex;
+  font-family: inherit;
   font-size: 12px;
+  line-height: 1.2;
   padding: 4px 8px;
 }
 

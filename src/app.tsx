@@ -1,8 +1,7 @@
-import React, { useCallback, useRef, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import styles from "./app.module.css";
 import "./styles/globals.css";
 import packageJson from "@/package";
-import { defaultTagData } from "@/constants/defaultTagData";
 import {
   DataManager,
   ExportModal,
@@ -13,7 +12,6 @@ import {
   PlaylistMetadata,
   useTagData,
 } from "@/features/tag-data";
-import { PlaylistTrackApplyMode, TagDataStructure } from "@/types/tagData";
 import {
   TrackDetails,
   TrackList,
@@ -22,6 +20,7 @@ import {
 } from "@/features/track-session";
 import { useFilterState } from "@/features/filter-state";
 import {
+  buildAlbumTrackSummaries,
   LocalTracksModal,
   PlaylistDetails,
   TaggedPlaylistsList,
@@ -31,20 +30,44 @@ import { ArtistDetails, TaggedArtistsList } from "@/features/artist-state";
 import { useFontAwesome } from "./hooks/shared/useFontAwesome";
 import { trackService } from "./services/TrackService";
 import { UpdateBanner, useUpdateChecker } from "@/features/update-check";
+import { CommunityUpdates } from "@/features/community-updates/CommunityUpdates";
 import { MultiTrackDetails, useMultiTrackTagging } from "@/features/multi-track-tagging";
 import { useSmartPlaylists } from "@/features/smart-playlists";
+import SmartPlaylistTagChoices from "@/features/smart-playlists/components/SmartPlaylistTagChoices";
+import {
+  type SmartPlaylistRecipeSelection,
+  isSmartPlaylistRecipeBundle,
+} from "@/features/smart-playlists/utils/smartPlaylist.recipes";
+import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
+import { flushLocalPersistence, getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
+import { loadSmartPlaylistsFromStorage, clearExplicitSmartPlaylistClear } from "@/features/smart-playlists/utils/smartPlaylist.storage";
 import {
   DiscoverySurveyModal,
   useDiscoverySurvey,
+  useTagifyUsage,
 } from "@/features/discovery-survey";
 import { PowerUserModal, usePowerUserModal } from "@/features/power-user";
 import { useGlobalKeyboardShortcuts } from "./hooks/shared/useGlobalKeyboardShortcuts";
-import { useMetadataBackfill } from "@/features/metadata-backfill";
+import {
+  MetadataBackfillProgress,
+  useMetadataBackfill,
+} from "@/features/metadata-backfill";
 import { graphqlRateLimiter } from "./utils/RateLimiter";
 import { audioFeaturesRateLimiter } from "./services/AudioFeaturesService";
 import { spotifyApiService } from "./services/SpotifyApiService";
 import { pruneTagFilterFormula } from "@/utils/tagFilterGroups";
 import { buildCategoryTree, buildValidTagIdSet } from "@/utils/tagTaxonomy";
+import {
+  CommunityOnboardingModal,
+  CloudSyncModal,
+  CloudRecoveryModal,
+  CommunityWorkspace,
+  isCloudRecoveryStatus,
+  shouldShowCommunityOnboarding,
+} from "@/features/community";
+import { Users } from "lucide-react";
+import { syncRuntime, type SyncStatus } from "@/services/sync/SyncRuntime";
+import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 
 const EMPTY_TRACK_DETAILS_DATA = {
   rating: 0,
@@ -89,6 +112,25 @@ function App() {
     useState<string | null | undefined>(undefined);
   const [showExport, setShowExport] = useState<boolean>(false);
   const [showMigrationModal, setShowMigrationModal] = useState(false);
+  const [showCommunityWorkspace, setShowCommunityWorkspace] = useState(false);
+  const [showCommunityOnboarding, setShowCommunityOnboarding] = useState(false);
+  const [communityOnboardingLaunchContext, setCommunityOnboardingLaunchContext] =
+    useState<"first-run" | "manual">("first-run");
+  const [showCloudRecovery, setShowCloudRecovery] = useState(false);
+  const [showCloudSync, setShowCloudSync] = useState(false);
+  const [syncConnected, setSyncConnected] = useState(
+    () => Boolean(getDesktopSyncConfiguration()),
+  );
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(
+    () => window.TagifySync?.getStatus() || syncRuntime.getStatus(),
+  );
+  const [cloudRecoveryPending, setCloudRecoveryPending] = useState(
+    () => {
+      const runtime = window.TagifySync || syncRuntime;
+      const status = runtime.getStatus();
+      return isCloudRecoveryStatus(status) || (status !== "unlinked" && Boolean(runtime.getRecoveryPreview()));
+    },
+  );
   const [activeView, setActiveView] = useState<AppView>(getStoredActiveView);
   const [activePlaylistUri, setActivePlaylistUri] = useState<string | null>(null);
   const [activePlaylistMetadata, setActivePlaylistMetadata] =
@@ -96,30 +138,28 @@ function App() {
   const [activeArtistUri, setActiveArtistUri] = useState<string | null>(null);
   const [activeArtistMetadata, setActiveArtistMetadata] =
     useState<ArtistMetadata | null>(null);
-  const [isApplyingPlaylistTagsToTracks, setIsApplyingPlaylistTagsToTracks] =
-    useState(false);
-
-  // Create ref to hold tagData for smart playlists
-  const tagDataRef = useRef<TagDataStructure>(defaultTagData);
+  const [requestedSmartPlaylistEditId, setRequestedSmartPlaylistEditId] =
+    useState<string | null>(null);
+  const [metadataBackfillProgress, setMetadataBackfillProgress] =
+    useState<MetadataBackfillProgress | null>(null);
 
   const {
     syncSmartPlaylistFull,
     syncTrackWithSmartPlaylists,
     syncMultipleTracksWithSmartPlaylists,
     createSmartPlaylist,
-    cleanupDeletedSmartPlaylists,
     smartPlaylists,
     setSmartPlaylists,
     exportSmartPlaylists,
-    importSmartPlaylists,
     resetSmartPlaylists,
-  } = useSmartPlaylists({ tagDataRef });
+  } = useSmartPlaylists();
 
   const {
     tagData,
     isLoading,
     lastSaved,
     loadTagData,
+    refreshPersistedTagData,
     applyShortcutTrackUpdate,
     applyShortcutPlaylistUpdate,
     applyShortcutArtistUpdate,
@@ -154,13 +194,9 @@ function App() {
     onSyncMultipleTracks: syncMultipleTracksWithSmartPlaylists,
   });
 
-  // Keep ref synchronized with tagData state
-  useEffect(() => {
-    tagDataRef.current = tagData;
-  }, [tagData]);
-
   useMetadataBackfill({
     enabled: !isLoading && !migrationProgress, // Only run after loading/migration complete
+    onProgress: setMetadataBackfillProgress,
     onComplete: () => {
       loadTagData(); // reload state after metadata is backfilled (re-renders TrackList)
     },
@@ -261,6 +297,10 @@ function App() {
       setActiveArtistUri(spotifyApiService.normalizeArtistUri(artistUri));
       setActiveView("artists");
     },
+    onEditSmartPlaylist: (playlistId) => {
+      setRequestedSmartPlaylistEditId(playlistId);
+      setActiveView("tracks");
+    },
   });
 
   const { updateInfo, dismissUpdate } = useUpdateChecker({
@@ -271,8 +311,6 @@ function App() {
     delayMs: 2000,
   });
 
-  const { shouldShowSurvey, completeSurvey, skipSurvey } =
-    useDiscoverySurvey(packageJson.version);
   const taggedTrackCount = useMemo(
     () => Object.keys(tagData.tracks).length,
     [tagData.tracks],
@@ -281,6 +319,10 @@ function App() {
     () => buildCategoryTree(tagData.taxonomy),
     [tagData.taxonomy],
   );
+  const albumTrackSummaries = useMemo(
+    () => buildAlbumTrackSummaries(tagData.tracks, tagData.taxonomy),
+    [tagData.taxonomy, tagData.tracks],
+  );
   const { shouldShowPowerUserModal, dismissPowerUserModal } = usePowerUserModal(
     {
       taggedTrackCount,
@@ -288,7 +330,94 @@ function App() {
     },
   );
 
+  useTagifyUsage(packageJson.version);
+  const { shouldShowSurvey, completeSurvey, skipSurvey } = useDiscoverySurvey(packageJson.version, {
+    lastUserTrackAddedEvent,
+    canShowSurvey: !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode &&
+      !shouldShowPowerUserModal && !showCommunityOnboarding && !showCloudRecovery &&
+      !cloudRecoveryPending && !showCloudSync && !showMigrationModal && !showTagManager &&
+      !showExport && !showLocalTracksModal,
+  });
+
   useFontAwesome();
+
+  const openCommunityWorkspace = useCallback(() => {
+    if (cloudRecoveryPending) {
+      setShowCloudRecovery(true);
+      return;
+    }
+    setShowCommunityWorkspace((current) => !current);
+  }, [cloudRecoveryPending]);
+
+  const selectAppView = useCallback((view: AppView) => {
+    setActiveView(view);
+    setShowCommunityWorkspace(false);
+  }, []);
+
+  const connectCommunity = useCallback(() => {
+    if (cloudRecoveryPending) {
+      setShowCloudRecovery(true);
+      return;
+    }
+    setShowCloudSync(false);
+    setCommunityOnboardingLaunchContext("manual");
+    setShowCommunityOnboarding(true);
+  }, [cloudRecoveryPending]);
+
+  const openCloudSync = useCallback(() => {
+    if (cloudRecoveryPending) {
+      setShowCloudRecovery(true);
+      return;
+    }
+    setShowCloudSync(true);
+  }, [cloudRecoveryPending]);
+
+  const disconnectCommunitySync = useCallback(async () => {
+    await (window.TagifySync || syncRuntime).unlinkLocal();
+  }, []);
+
+  useEffect(() => {
+    const handleSyncStatus = (event: Event) => {
+      const status = (event as CustomEvent<{ status?: SyncStatus }>).detail?.status || window.TagifySync?.getStatus() || syncRuntime.getStatus();
+      const recoveryPending = isCloudRecoveryStatus(status) || (status !== "unlinked" && Boolean((window.TagifySync || syncRuntime).getRecoveryPreview()));
+      setCloudRecoveryPending(recoveryPending);
+      setSyncStatus(status);
+      setSyncConnected(Boolean(getDesktopSyncConfiguration()));
+      if (recoveryPending) {
+        setShowCloudRecovery(true);
+        setShowCloudSync(false);
+        setShowCommunityWorkspace(false);
+        setShowCommunityOnboarding(false);
+      }
+    };
+    window.addEventListener("tagify:syncStatus", handleSyncStatus);
+    handleSyncStatus(new CustomEvent("tagify:syncStatus", { detail: { status: window.TagifySync?.getStatus() } }));
+    return () => window.removeEventListener("tagify:syncStatus", handleSyncStatus);
+  }, []);
+
+  useEffect(() => {
+    if (cloudRecoveryPending) {
+      setShowCommunityOnboarding(false);
+      return;
+    }
+    if (
+      isLoading ||
+      migrationProgress ||
+      orchestratorResult?.fallbackMode ||
+      shouldShowSurvey ||
+      shouldShowPowerUserModal
+    ) return;
+    const shouldShow = shouldShowCommunityOnboarding();
+    if (shouldShow) setCommunityOnboardingLaunchContext("first-run");
+    setShowCommunityOnboarding(shouldShow);
+  }, [
+    isLoading,
+    migrationProgress,
+    orchestratorResult?.fallbackMode,
+    shouldShowSurvey,
+    shouldShowPowerUserModal,
+    cloudRecoveryPending,
+  ]);
 
   // podcasts/audiobooks not allowed
   const isDisplayedTrackMusic = useMemo(() => {
@@ -318,11 +447,29 @@ function App() {
       artists:
         activeTrack.artists?.map((artist) => artist.name).join(", ") ||
         "Unknown Artist",
+      albumName: activeTrack.album?.name,
+      albumUri: activeTrack.album?.uri ?? null,
+      albumImageUrl:
+        activeTrack.album?.images?.[0]?.url ||
+        null,
     };
   }, [activeTrack]);
   const activeTrackData = activeTrackUri
     ? tagData.tracks[activeTrackUri]
     : undefined;
+  const activeTrackAlbumUri = activeTrack?.album?.uri ?? null;
+  const activeTrackAlbumProgress = useMemo(
+    () =>
+      activeTrackAlbumUri?.startsWith("spotify:album:")
+        ? {
+            albumUri: activeTrackAlbumUri,
+            taggedTrackCount:
+              albumTrackSummaries.get(activeTrackAlbumUri)?.taggedTrackCount ?? 0,
+            knownTrackCount: tagData.playlists[activeTrackAlbumUri]?.trackCount ?? null,
+          }
+        : null,
+    [activeTrackAlbumUri, albumTrackSummaries, tagData.playlists],
+  );
   const activePlaylistData = activePlaylistUri
     ? tagData.playlists[activePlaylistUri]
     : undefined;
@@ -723,113 +870,21 @@ function App() {
     [refreshArtistMetadata],
   );
 
-  const handleApplyPlaylistTagsToTracks = useCallback(
-    async (
-      playlistUri: string,
-      applyMode: PlaylistTrackApplyMode = "tags",
-    ) => {
-      const normalizedPlaylistUri = spotifyApiService.normalizePlaylistUri(playlistUri);
-      const isAlbum = normalizedPlaylistUri.startsWith("spotify:album:");
-      const entityLabel = isAlbum ? "album" : "playlist";
-      const playlistData = tagData.playlists[normalizedPlaylistUri];
-      const playlistTagIds = playlistData?.tagIds || [];
-      const playlistRating = playlistData?.rating || 0;
-      const playlistEnergy = playlistData?.energy || 0;
-      const shouldApplyAll = applyMode === "all";
-      const shouldApplyTags = playlistTagIds.length > 0;
-      const shouldApplyRating = shouldApplyAll && playlistRating > 0;
-      const shouldApplyEnergy = shouldApplyAll && playlistEnergy > 0;
+  const handleLoadPlaylistTrackUris = useCallback(async (playlistUri: string) => {
+    const normalizedPlaylistUri = spotifyApiService.normalizePlaylistUri(playlistUri);
+    if (normalizedPlaylistUri.startsWith("spotify:album:")) {
+      const albumId = spotifyApiService.extractAlbumId(normalizedPlaylistUri);
+      return albumId ? spotifyApiService.getAllTrackUrisInAlbum(albumId) : [];
+    }
 
-      if (applyMode === "tags" && !shouldApplyTags) {
-        Spicetify.showNotification(`Add tags to this ${entityLabel} first`, true);
-        return;
-      }
-
-      if (!shouldApplyTags && !shouldApplyRating && !shouldApplyEnergy) {
-        Spicetify.showNotification(
-          `Add ${entityLabel} tags, rating, or energy first`,
-          true,
-        );
-        return;
-      }
-
-      const entityId = isAlbum
-        ? spotifyApiService.extractAlbumId(normalizedPlaylistUri)
-        : spotifyApiService.extractPlaylistId(normalizedPlaylistUri);
-      if (!entityId) {
-        Spicetify.showNotification(`Could not read ${entityLabel} ID`, true);
-        return;
-      }
-
-      setIsApplyingPlaylistTagsToTracks(true);
-
-      try {
-        const trackUris = Array.from(
-          new Set(
-            isAlbum
-              ? await spotifyApiService.getAllTrackUrisInAlbum(entityId)
-              : await spotifyApiService.getAllTrackUrisInPlaylist(entityId),
-          ),
-        );
-
-        if (trackUris.length === 0) {
-          Spicetify.showNotification(`No tracks found in this ${entityLabel}`, true);
-          return;
-        }
-
-        const playlistName = playlistData?.name || `this ${entityLabel}`;
-        const appliedParts = [
-          shouldApplyTags
-            ? `${playlistTagIds.length} ${entityLabel} ${
-                playlistTagIds.length === 1 ? "tag" : "tags"
-              }`
-            : null,
-          shouldApplyRating ? `rating ${playlistRating}` : null,
-          shouldApplyEnergy ? `energy ${playlistEnergy}` : null,
-        ].filter((part): part is string => Boolean(part));
-        const replacementWarning =
-          shouldApplyRating || shouldApplyEnergy
-            ? " Existing track rating/energy values may be replaced."
-            : "";
-        const confirmed = window.confirm(
-          `Apply ${appliedParts.join(", ")} to ${trackUris.length} ${
-            trackUris.length === 1 ? "track" : "tracks"
-          } from "${playlistName}"? Existing track tags will be kept.${replacementWarning}`,
-        );
-
-        if (!confirmed) {
-          return;
-        }
-
-        await applyBatchTagUpdates(
-          trackUris.map((trackUri) => ({
-            trackUri,
-            toAdd: shouldApplyTags ? playlistTagIds : [],
-            toRemove: [],
-            ...(shouldApplyRating ? { newRating: playlistRating } : {}),
-            ...(shouldApplyEnergy ? { newEnergy: playlistEnergy } : {}),
-          })),
-        );
-
-        Spicetify.showNotification(
-          `Applied ${appliedParts.join(", ")} to ${trackUris.length} tracks`,
-        );
-      } catch (error) {
-        console.error(`Failed to apply ${entityLabel} values to tracks:`, error);
-        Spicetify.showNotification(
-          `Failed to apply ${entityLabel} values to tracks`,
-          true,
-        );
-      } finally {
-        setIsApplyingPlaylistTagsToTracks(false);
-      }
-    },
-    [applyBatchTagUpdates, tagData.playlists],
-  );
+    const playlistId = spotifyApiService.extractPlaylistId(normalizedPlaylistUri);
+    return playlistId ? spotifyApiService.getAllTrackUrisInPlaylist(playlistId) : [];
+  }, []);
 
   const handleResetTagifyState = useCallback(async () => {
     await resetTagData();
-    resetSmartPlaylists();
+    await resetSmartPlaylists();
+    await (window.TagifySync || syncRuntime).replaceCloudWithCurrentLocalState();
     setActivePlaylistUri(null);
     setActivePlaylistMetadata(null);
     setActiveArtistUri(null);
@@ -846,7 +901,7 @@ function App() {
       albumFilterState.pruneInvalidTagFilters(validTagIds);
       playlistFilterState.pruneInvalidTagFilters(validTagIds);
       artistFilterState.pruneInvalidTagFilters(validTagIds);
-      setSmartPlaylists((currentPlaylists) =>
+      void setSmartPlaylists((currentPlaylists) =>
         currentPlaylists.map((playlist) => ({
           ...playlist,
           criteria: {
@@ -867,7 +922,10 @@ function App() {
             })(),
           },
         })),
-      );
+      ).catch((error) => {
+        console.error("Could not update Smart Playlist filters after changing tags:", error);
+        Spicetify.showNotification("Tagify couldn't update your Smart Playlists after changing tags. Please try again.", true);
+      });
     },
     [
       albumFilterState,
@@ -877,6 +935,29 @@ function App() {
       replaceTaxonomy,
       setSmartPlaylists,
     ],
+  );
+
+  const handleImportSmartPlaylists = useCallback(
+    async (data: unknown, selections?: SmartPlaylistRecipeSelection[]) => {
+      if (!isSmartPlaylistRecipeBundle(data) || !selections) {
+        throw new Error("Choose a shared setup file and review its tags before adding it.");
+      }
+      const accountDatabase = getTagifyDatabaseName();
+      await flushLocalPersistence();
+      await loadSmartPlaylistsFromStorage();
+      const installed = await indexedDBStorage.installSharedSmartPlaylistSetups(data, selections, accountDatabase);
+      if (getTagifyDatabaseName() !== accountDatabase) throw new Error("Your account changed. Return to the account where you saved these setups.");
+      if (installed.importedCount > 0) clearExplicitSmartPlaylistClear();
+      try { await refreshPersistedTagData(); }
+      catch (cause) { console.error("Saved shared setups could not be shown", cause); Spicetify.showNotification("Your setups were saved, but the view couldn’t refresh. Reopen Tagify to see them.", true); }
+      window.dispatchEvent(new CustomEvent("tagify:smartPlaylistsUpdated", { detail: { playlists: installed.playlists } }));
+      return {
+        importedCount: installed.importedCount, skippedCount: installed.skippedCount,
+        relinkedCount: 0, unresolvedCount: 0, verificationUnavailable: false,
+        recipeImport: true, createdTagCount: installed.createdTagCount,
+      };
+    },
+    [refreshPersistedTagData],
   );
 
   useEffect(() => {
@@ -953,12 +1034,8 @@ function App() {
     } else if (isMultiTagging) {
       toggleTagMultiTrackDraft(tagId);
     } else if (activeTrack) {
-      toggleTagSingleTrack(activeTrack.uri, tagId, {
-        name: activeTrack.name || "Unknown Track",
-        artists:
-          activeTrack.artists?.map((a) => a.name).join(", ") ||
-          "Unknown Artist",
-      });
+      // Album details let a newly tagged track count toward its album at once.
+      toggleTagSingleTrack(activeTrack.uri, tagId, activeTrackMetadata);
     }
   };
 
@@ -1031,6 +1108,7 @@ function App() {
   const currentPlaylistEntityType = activeView === "albums" ? "album" : "playlist";
   const currentPlaylistFilterState =
     activeView === "albums" ? albumFilterState : playlistFilterState;
+  const isLibraryViewActive = !showCommunityWorkspace;
 
   return (
     <div className={styles.container}>
@@ -1041,45 +1119,55 @@ function App() {
         <div className={styles.viewTabs} role="tablist" aria-label="Tagify views">
           <button
             className={`${styles.viewTab} ${
-              activeView === "tracks" ? styles.viewTabActive : ""
+              isLibraryViewActive && activeView === "tracks" ? styles.viewTabActive : ""
             }`}
-            onClick={() => setActiveView("tracks")}
+            onClick={() => selectAppView("tracks")}
             role="tab"
-            aria-selected={activeView === "tracks"}
+            aria-selected={isLibraryViewActive && activeView === "tracks"}
           >
             Tracks
           </button>
           <button
             className={`${styles.viewTab} ${
-              activeView === "albums" ? styles.viewTabActive : ""
+              isLibraryViewActive && activeView === "albums" ? styles.viewTabActive : ""
             }`}
-            onClick={() => setActiveView("albums")}
+            onClick={() => selectAppView("albums")}
             role="tab"
-            aria-selected={activeView === "albums"}
+            aria-selected={isLibraryViewActive && activeView === "albums"}
           >
             Albums
           </button>
           <button
             className={`${styles.viewTab} ${
-              activeView === "playlists" ? styles.viewTabActive : ""
+              isLibraryViewActive && activeView === "playlists" ? styles.viewTabActive : ""
             }`}
-            onClick={() => setActiveView("playlists")}
+            onClick={() => selectAppView("playlists")}
             role="tab"
-            aria-selected={activeView === "playlists"}
+            aria-selected={isLibraryViewActive && activeView === "playlists"}
           >
             Playlists
           </button>
           <button
             className={`${styles.viewTab} ${
-              activeView === "artists" ? styles.viewTabActive : ""
+              isLibraryViewActive && activeView === "artists" ? styles.viewTabActive : ""
             }`}
-            onClick={() => setActiveView("artists")}
+            onClick={() => selectAppView("artists")}
             role="tab"
-            aria-selected={activeView === "artists"}
+            aria-selected={isLibraryViewActive && activeView === "artists"}
           >
             Artists
           </button>
         </div>
+        <button
+          className={`${styles.communityButton} ${showCommunityWorkspace ? styles.communityButtonActive : ""}`}
+          onClick={openCommunityWorkspace}
+          title="Open the Tagify Community workspace"
+          aria-label="Open the Tagify Community workspace"
+          aria-pressed={showCommunityWorkspace}
+        >
+          <Users size={15} aria-hidden="true" />
+          <span>Community</span>
+        </button>
       </div>
 
       {updateInfo?.hasUpdate && (
@@ -1105,6 +1193,45 @@ function App() {
         </div>
       )}
 
+      <CommunityUpdates enabled={
+        !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode &&
+        !shouldShowSurvey && !shouldShowPowerUserModal && !showCommunityOnboarding &&
+        !showCloudRecovery && !cloudRecoveryPending && !showCloudSync &&
+        !showMigrationModal && !showTagManager && !showExport
+      } />
+      {metadataBackfillProgress && metadataBackfillProgress.total > 0 && (
+        <div
+          className={styles.backfillBanner}
+          role="status"
+          aria-live="polite"
+        >
+          <div className={styles.backfillSummary}>
+            <span>Updating saved track details</span>
+            <span>
+              {metadataBackfillProgress.processed} / {metadataBackfillProgress.total}
+            </span>
+          </div>
+          <progress
+            className={styles.backfillProgress}
+            value={metadataBackfillProgress.processed}
+            max={metadataBackfillProgress.total}
+            aria-label="Saved track detail update progress"
+          />
+          <span className={styles.backfillHint}>
+            {metadataBackfillProgress.remaining > 0
+              ? `${metadataBackfillProgress.remaining} more saved tracks will update next time you open Tagify.`
+              : "You can keep using Tagify while saved track details update."}
+          </span>
+        </div>
+      )}
+
+      <SmartPlaylistTagChoices enabled={
+        !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode &&
+        !shouldShowSurvey && !shouldShowPowerUserModal && !showCommunityOnboarding &&
+        !showCloudRecovery && !cloudRecoveryPending && !showCloudSync &&
+        !showMigrationModal && !showTagManager && !showExport
+      } />
+
       {shouldShowSurvey && (
         <DiscoverySurveyModal
           onCompleteSurvey={completeSurvey}
@@ -1119,6 +1246,21 @@ function App() {
         />
       )}
 
+      {showCommunityOnboarding && (
+        <CommunityOnboardingModal
+          onClose={() => setShowCommunityOnboarding(false)}
+          launchContext={communityOnboardingLaunchContext}
+        />
+      )}
+
+      {showCloudRecovery && cloudRecoveryPending && (
+        <CloudRecoveryModal onClose={() => setShowCloudRecovery(false)} />
+      )}
+
+      {showCloudSync && !cloudRecoveryPending && (
+        <CloudSyncModal onClose={() => setShowCloudSync(false)} />
+      )}
+
       <DataManager
         onExportTagData={exportTagData}
         onImportTagData={importTagData}
@@ -1128,7 +1270,17 @@ function App() {
         lastSaved={lastSaved}
       />
 
-      {isLoading ? (
+      {showCommunityWorkspace ? (
+        <CommunityWorkspace
+          onConnectCommunity={connectCommunity}
+          onOpenCloudSync={openCloudSync}
+          connected={syncConnected}
+          status={syncStatus}
+          connectedAccountId={getDesktopSyncConfiguration()?.accountId || null}
+          connectedDeviceId={getDesktopSyncConfiguration()?.deviceId || null}
+          onDisconnect={disconnectCommunitySync}
+        />
+      ) : isLoading ? (
         <div className={styles.loadingContainer}>
           <p className={styles.loadingText}>
             {migrationProgress
@@ -1186,6 +1338,7 @@ function App() {
                     onToggleLock={toggleLock}
                     onSwitchToCurrentTrack={setLockedTrack}
                     onUpdateBpm={updateBpm}
+                    albumProgress={activeTrackAlbumProgress}
                   />
                 )
               )}
@@ -1229,9 +1382,12 @@ function App() {
                 smartPlaylists={smartPlaylists}
                 onSetSmartPlaylists={setSmartPlaylists}
                 onSyncPlaylist={syncSmartPlaylistFull}
-                onCleanupDeletedSmartPlaylists={cleanupDeletedSmartPlaylists}
                 onExportSmartPlaylists={exportSmartPlaylists}
-                onImportSmartPlaylists={importSmartPlaylists}
+                onImportSmartPlaylists={handleImportSmartPlaylists}
+                requestedSmartPlaylistEditId={requestedSmartPlaylistEditId}
+                onSmartPlaylistEditRequestHandled={() =>
+                  setRequestedSmartPlaylistEditId(null)
+                }
               />
             </>
           ) : isPlaylistEntityView ? (
@@ -1242,6 +1398,12 @@ function App() {
                     playlistUri={activePlaylistUri}
                     playlistData={activePlaylistData}
                     playlistMetadata={activePlaylistMetadata}
+                    albumTrackSummary={
+                      activePlaylistUri.startsWith("spotify:album:")
+                        ? albumTrackSummaries.get(activePlaylistUri)
+                        : undefined
+                    }
+                    tracks={tagData.tracks}
                     taxonomy={tagData.taxonomy}
                     activeTagFilters={currentPlaylistFilterState.activeTagFilters}
                     excludedTagFilters={
@@ -1251,12 +1413,19 @@ function App() {
                     onSetEnergy={handleSetActivePlaylistEnergy}
                     onRemoveTag={handleRemoveActivePlaylistTag}
                     onToggleTagIncludeOff={
-                      currentPlaylistFilterState.cycleTagIncludeExcludeOff
+                      currentPlaylistFilterState.toggleBasicTagFilter
                     }
                     onOpenPlaylist={handleOpenPlaylist}
                     onRefreshMetadata={handleRefreshActivePlaylistMetadata}
-                    onApplyTagsToTracks={handleApplyPlaylistTagsToTracks}
-                    isApplyingTagsToTracks={isApplyingPlaylistTagsToTracks}
+                    onLoadTrackUris={handleLoadPlaylistTrackUris}
+                    onApplyTrackUpdates={applyBatchTagUpdates}
+                    onTagTrack={(trackUri) => {
+                      void handleSelectTrackForTagging(trackUri);
+                      selectAppView("tracks");
+                    }}
+                    onSetTrackRating={(trackUri, rating, metadata) => {
+                      void setRating(trackUri, rating, metadata);
+                    }}
                   />
                   <TagSelector
                     categories={categoryTree}
@@ -1276,6 +1445,8 @@ function App() {
               )}
               <TaggedPlaylistsList
                 playlists={tagData.playlists}
+                tracks={tagData.tracks}
+                albumTrackSummaries={albumTrackSummaries}
                 entityType={currentPlaylistEntityType}
                 taxonomy={tagData.taxonomy}
                 includeTagClauses={currentPlaylistFilterState.includeTagClauses}
@@ -1290,6 +1461,7 @@ function App() {
                 onCycleTagFilter={
                   currentPlaylistFilterState.cycleTagIncludeExcludeOff
                 }
+                onToggleTagFilter={currentPlaylistFilterState.toggleBasicTagFilter}
                 onRemoveTagFilter={currentPlaylistFilterState.removeTagFilter}
                 onSetTagFilterOperator={(operator) =>
                   currentPlaylistFilterState.setIncludeClauseOperator(0, operator)
@@ -1311,9 +1483,7 @@ function App() {
                     onSetRating={handleSetActiveArtistRating}
                     onSetEnergy={handleSetActiveArtistEnergy}
                     onRemoveTag={handleRemoveActiveArtistTag}
-                    onToggleTagIncludeOff={
-                      artistFilterState.cycleTagIncludeExcludeOff
-                    }
+                    onToggleTagIncludeOff={artistFilterState.toggleBasicTagFilter}
                     onOpenArtist={handleOpenArtist}
                     onRefreshMetadata={handleRefreshActiveArtistMetadata}
                   />
@@ -1340,6 +1510,7 @@ function App() {
                 onSelectArtist={handleSelectArtistForTagging}
                 onOpenArtist={handleOpenArtist}
                 onCycleTagFilter={artistFilterState.cycleTagIncludeExcludeOff}
+                onToggleTagFilter={artistFilterState.toggleBasicTagFilter}
                 onRemoveTagFilter={artistFilterState.removeTagFilter}
                 onSetTagFilterOperator={(operator) =>
                   artistFilterState.setIncludeClauseOperator(0, operator)

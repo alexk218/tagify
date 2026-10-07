@@ -6,6 +6,9 @@ const { indexedDBStorageMock } = vi.hoisted(() => ({
     init: vi.fn(),
     saveAll: vi.fn(),
     getTrackCount: vi.fn(),
+    getPlaylistCount: vi.fn(),
+    getArtistCount: vi.fn(),
+    getAllSmartPlaylists: vi.fn(),
     getTaxonomy: vi.fn(),
   },
 }));
@@ -20,6 +23,24 @@ describe("StorageMigrationService", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.clearAllMocks();
+    indexedDBStorageMock.getPlaylistCount.mockResolvedValue(0);
+    indexedDBStorageMock.getArtistCount.mockResolvedValue(0);
+    indexedDBStorageMock.getAllSmartPlaylists.mockResolvedValue([]);
+  });
+
+  it("does not replace existing smart-playlist rules with an old browser backup", async () => {
+    window.localStorage.setItem("tagify:tagData", JSON.stringify({
+      tracks: { "spotify:track:old": { tagIds: ["old"] } },
+    }));
+    indexedDBStorageMock.init.mockResolvedValue(true);
+    indexedDBStorageMock.getTrackCount.mockResolvedValue(0);
+    indexedDBStorageMock.getAllSmartPlaylists.mockResolvedValue([{ id: "alt", isActive: true }]);
+    indexedDBStorageMock.getTaxonomy.mockResolvedValue(createEmptyTaxonomy());
+
+    const result = await storageMigrationService.migrate();
+
+    expect(result.success).toBe(true);
+    expect(indexedDBStorageMock.saveAll).not.toHaveBeenCalled();
   });
 
   it("adopts existing IndexedDB data instead of overwriting it with defaults", async () => {
@@ -67,6 +88,37 @@ describe("StorageMigrationService", () => {
     expect(result.success).toBe(false);
     expect(result.status).toBe("failed");
     expect(result.error).toContain("did not overwrite the database with defaults");
+    expect(indexedDBStorageMock.saveAll).not.toHaveBeenCalled();
+  });
+
+  it("leaves a paired wiped replica empty instead of migrating stale localStorage", async () => {
+    window.localStorage.setItem(
+      "tagify:migrations",
+      JSON.stringify({ migrations: { storageToIndexedDB: true } }),
+    );
+    window.localStorage.setItem(
+      "tagify:sync:configuration",
+      JSON.stringify({
+        accountId: "account-a",
+        libraryId: "library-a",
+        deviceId: "device-a",
+        apiBaseUrl: "https://community.example.test",
+      }),
+    );
+    window.localStorage.setItem(
+      "tagify:tagData",
+      JSON.stringify({
+        tracks: { "spotify:track:stale": { tagIds: ["legacy"] } },
+      }),
+    );
+    indexedDBStorageMock.init.mockResolvedValue(true);
+    indexedDBStorageMock.getTrackCount.mockResolvedValue(0);
+    indexedDBStorageMock.getTaxonomy.mockResolvedValue(createEmptyTaxonomy());
+
+    const result = await storageMigrationService.migrate();
+
+    expect(result.success).toBe(true);
+    expect(result.tracksMigrated).toBe(0);
     expect(indexedDBStorageMock.saveAll).not.toHaveBeenCalled();
   });
 });

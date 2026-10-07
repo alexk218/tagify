@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SpotifyTrack } from "@/types/SpotifyTypes";
 import { BatchTagUpdate, TrackTag } from "@/types/tagData";
 import {
@@ -7,6 +7,7 @@ import {
   findCommonEnergyRatingFromDraft as findCommonEnergyRatingFromDraftState,
   findCommonStarRatingFromDraft as findCommonStarRatingFromDraftState,
   findCommonTagsFromDraft as findCommonTagsFromDraftState,
+  rebaseDraftTagState,
   toggleEnergyRatingDraftState,
   toggleStarRatingDraftState,
   toggleTagForAllTracksDraft,
@@ -18,6 +19,8 @@ import {
 } from "@/features/multi-track-tagging/model/useMultiTrackTagging.types";
 
 export function useMultiTrackTagging({ tagData }: UseMultiTrackTaggingOptions) {
+  const latestTracksRef = useRef(tagData.tracks);
+  latestTracksRef.current = tagData.tracks;
   const [isMultiTagging, setIsMultiTagging] = useState(false);
   const [lockedMultiTrackUri, setLockedMultiTrackUri] = useState<string | null>(
     null,
@@ -25,6 +28,8 @@ export function useMultiTrackTagging({ tagData }: UseMultiTrackTaggingOptions) {
   const [multiTrackDraftTags, setMultiTrackDraftTags] =
     useState<DraftTagState | null>(null);
   const [multiTagTracks, setMultiTagTracks] = useState<SpotifyTrack[]>([]);
+  const draftBaselineRef = useRef<DraftTagState>({});
+  const draftSelectionKeyRef = useRef<string | null>(null);
 
   const multiTrackUriSelectionKey = useMemo(
     () => JSON.stringify(multiTagTracks.map((track) => track.uri)),
@@ -43,16 +48,28 @@ export function useMultiTrackTagging({ tagData }: UseMultiTrackTaggingOptions) {
     }
   }, [multiTrackUriSelectionKey]);
 
-  useEffect(() => {
-    if (isMultiTagging && multiTrackUris.length > 0) {
-      setMultiTrackDraftTags(createDraftTagState(multiTrackUris, tagData.tracks));
+  useLayoutEffect(() => {
+    if (!isMultiTagging || multiTrackUris.length === 0) {
+      draftSelectionKeyRef.current = null;
+      draftBaselineRef.current = {};
+      setMultiTrackDraftTags(null);
       return;
     }
 
-    if (!isMultiTagging) {
-      setMultiTrackDraftTags(null);
+    const latest = createDraftTagState(multiTrackUris, latestTracksRef.current);
+    if (draftSelectionKeyRef.current !== multiTrackUriSelectionKey) {
+      draftSelectionKeyRef.current = multiTrackUriSelectionKey;
+      draftBaselineRef.current = latest;
+      setMultiTrackDraftTags(latest);
+      return;
     }
-  }, [isMultiTagging, multiTrackUris, tagData.tracks]);
+
+    const previousBaseline = draftBaselineRef.current;
+    draftBaselineRef.current = latest;
+    setMultiTrackDraftTags((current) =>
+      current ? rebaseDraftTagState(previousBaseline, current, latest) : latest,
+    );
+  }, [isMultiTagging, multiTrackUriSelectionKey, multiTrackUris, tagData.tracks]);
 
   const findCommonTagsFromDraft = useCallback(
     (draftTags: DraftTagState): TrackTag[] => findCommonTagsFromDraftState(draftTags),

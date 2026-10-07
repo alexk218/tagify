@@ -1,0 +1,23 @@
+.track {
+  background: rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  height: 4px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.large {
+  height: 6px;
+}
+
+.fill {
+  background: rgb(255 255 255 / 72%);
+  border-radius: inherit;
+  height: 100%;
+  min-width: 0;
+  transition: width 0.24s ease;
+}
+
+.complete {
+  background: var(--spice-button, #1db954);
+}

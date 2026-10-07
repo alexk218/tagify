@@ -295,10 +295,12 @@ describe("normalizeSmartPlaylistCriteriaList", () => {
   it("migrates legacy OR criteria into a single OR clause", () => {
     const normalized = normalizeSmartPlaylistCriteriaList([
       {
+        id: "smart-playlist:playlist-1:1",
         playlistId: "playlist-1",
         playlistName: "Legacy OR",
         isActive: true,
         createdAt: 1,
+        updatedAt: 1,
         lastSyncAt: 1,
         smartPlaylistTrackUris: [],
         criteria: {
@@ -319,10 +321,12 @@ describe("normalizeSmartPlaylistCriteriaList", () => {
 
     expect(normalized).toEqual([
       {
+        id: "smart-playlist:playlist-1:1",
         playlistId: "playlist-1",
         playlistName: "Legacy OR",
         isActive: true,
         createdAt: 1,
+        updatedAt: 1,
         lastSyncAt: 1,
         smartPlaylistTrackUris: [],
         criteria: {

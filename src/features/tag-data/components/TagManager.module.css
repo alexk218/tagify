@@ -257,7 +257,7 @@
 
 .subcategoryRow {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   padding: 8px 10px;
@@ -291,6 +291,8 @@
 
 .inlineAddSubcategoryButton {
   border-radius: 8px;
+  padding-top: 7px;
+  padding-bottom: 7px;
 }
 
 .inlineAddCategoryButton:hover,
@@ -593,6 +595,9 @@
   color: inherit;
   cursor: pointer;
   text-align: left;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .categorySummaryButton {
@@ -667,6 +672,17 @@
   transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
+.dragHandleButton {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.dragHandleButton:active {
+  cursor: grabbing;
+}
+
 .dragHandleButton:hover:not(:disabled),
 .expandButton:hover {
   background: rgb(255 255 255 / 6%);
@@ -677,6 +693,11 @@
 .dragHandleButton:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.expandButton:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .primaryButton,
@@ -758,6 +779,47 @@
   flex: 1;
 }
 
+.compactSelect {
+  min-width: 132px;
+  height: 32px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--spice-main) 88%, black 12%);
+  color: var(--spice-text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 10px;
+}
+
+.communitySortDirectionButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 7px;
+  background: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.communitySortDirectionButton:hover {
+  background: rgb(255 255 255 / 10%);
+  border-color: color-mix(in srgb, var(--spice-accent) 36%, white 8%);
+}
+
+.communitySortDirectionButton:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--spice-accent) 50%, white 8%);
+  box-shadow: 0 0 0 2px rgb(30 144 255 / 12%);
+}
+
 .searchInput::placeholder,
 .textInput::placeholder {
   color: var(--spice-subtext);
@@ -799,6 +861,150 @@
   margin: 12px 16px 16px;
 }
 
+.communityBody {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.35fr) minmax(0, 1fr);
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.communitySidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border-right: 1px solid var(--spice-button-disabled);
+  overflow: auto;
+}
+
+.communityInspector {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.destinationCard {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.communityDestinationTree {
+  display: grid;
+  gap: 8px;
+}
+
+.communityDestinationCategory {
+  display: grid;
+  gap: 6px;
+}
+
+.communityDestinationSubfolders {
+  display: grid;
+  gap: 6px;
+  padding-left: 12px;
+  border-left: 1px solid color-mix(in srgb, var(--spice-button-disabled) 82%, transparent);
+}
+
+.communityDestinationButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--spice-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.communityDestinationButton:hover {
+  border-color: var(--spice-button-disabled);
+  background: rgb(255 255 255 / 4%);
+}
+
+.communityDestinationButton small {
+  color: var(--spice-subtext);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.communityDestinationButtonActive {
+  border-color: color-mix(in srgb, var(--spice-accent) 46%, var(--spice-button-disabled) 54%);
+  background: rgb(30 144 255 / 10%);
+}
+
+.communityDestinationSubfolderButton {
+  min-height: 30px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.communityFilterControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 14px;
+  border-bottom: 1px solid var(--spice-button-disabled);
+}
+
+.communityTagList {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+}
+
+.communityTagRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 3%);
+  cursor: pointer;
+}
+
+.communityTagRow:hover,
+.communityTagRow:focus-visible {
+  border-color: color-mix(in srgb, var(--spice-button) 55%, white 10%);
+  background: rgb(255 255 255 / 6%);
+  outline: none;
+}
+
+.communityTagCopy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.communityTagCopy strong {
+  overflow: hidden;
+  color: var(--spice-text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.communityTagCopy span {
+  color: var(--spice-subtext);
+  font-size: 11px;
+}
+
 .footer {
   display: flex;
   align-items: center;
@@ -818,6 +1024,45 @@
 .footerActions {
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+.renameOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 65%);
+}
+
+.renameDialog {
+  display: grid;
+  gap: 14px;
+  width: min(400px, 100%);
+  padding: 20px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 10px;
+  background: var(--spice-card);
+  color: var(--spice-text);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 40%);
+}
+
+.renameDialog label {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.renameDialog input {
+  width: 100%;
+  min-width: 0;
+}
+
+.renameActions {
+  display: flex;
+  justify-content: flex-end;
   gap: 8px;
 }
 

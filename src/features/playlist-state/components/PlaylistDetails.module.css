@@ -4,8 +4,7 @@
   border-radius: 8px;
   box-shadow: 0 12px 26px rgb(0 0 0 / 18%);
   display: grid;
-  gap: 14px;
-  margin-bottom: 16px;
+  gap: 12px;
   padding: 16px;
 }
 
@@ -58,6 +57,7 @@
 }
 
 .titleBlock {
+  align-self: center;
   min-width: 0;
 }
 
@@ -74,7 +74,7 @@
   font-size: 22px;
   font-weight: 800;
   line-height: 1.2;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   overflow-wrap: anywhere;
 }
 
@@ -94,121 +94,66 @@
   color: var(--spice-subtext);
   display: flex;
   flex-wrap: wrap;
-  font-size: 12px;
-  gap: 8px;
+  font-size: 13px;
   line-height: 1.4;
   margin: 0;
+}
+
+.meta > span + span::before {
+  content: "•";
+  margin: 0 6px;
+  opacity: 0.7;
 }
 
 .description {
   color: var(--spice-subtext);
   font-size: 13px;
   line-height: 1.45;
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   max-width: 72ch;
   overflow-wrap: anywhere;
 }
 
 .actions {
-  align-items: stretch;
+  align-items: center;
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
-  justify-content: flex-end;
 }
 
-.button {
+.iconButton {
   align-items: center;
-  border-radius: 6px;
+  background: rgb(0 0 0 / 24%);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 7px;
+  color: var(--spice-subtext);
   cursor: pointer;
   display: inline-flex;
-  font-size: 12px;
-  font-weight: 700;
-  gap: 6px;
+  height: 30px;
   justify-content: center;
-  min-height: 34px;
-  padding: 7px 11px;
   transition:
     background-color 0.16s ease,
-    border-color 0.16s ease,
-    opacity 0.16s ease;
-  white-space: nowrap;
+    color 0.16s ease;
+  width: 30px;
 }
 
-.button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.button svg {
-  flex: 0 0 auto;
-}
-
-.secondaryButton,
-.applyButton {
-  background: rgb(0 0 0 / 24%);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+.iconButton:hover,
+.iconButton:focus-visible {
+  background: rgb(255 255 255 / 10%);
   color: var(--spice-text);
 }
 
-.secondaryButton:hover:not(:disabled),
-.applyButton:hover:not(:disabled) {
-  background: rgb(255 255 255 / 10%);
-  border-color: rgba(255, 255, 255, 0.28);
-}
-
-.applyButton {
-  border-color: rgba(30, 215, 96, 0.32);
-}
-
-.applyControl {
-  position: relative;
-}
-
-.applyMenu {
-  background: var(--spice-card);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 6px;
-  box-shadow: 0 10px 24px rgb(0 0 0 / 30%);
-  display: grid;
-  gap: 4px;
-  min-width: 190px;
-  padding: 6px;
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 5;
-}
-
-.applyMenuItem {
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-  color: var(--spice-text);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 8px 10px;
-  text-align: left;
-}
-
-.applyMenuItem:hover:not(:disabled) {
-  background: rgb(255 255 255 / 10%);
-}
-
-.applyMenuItem:disabled {
-  color: var(--spice-subtext);
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.controlsPanel {
+.ownValues {
   background: rgb(0 0 0 / 16%);
   border-radius: 8px;
   display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.controlsRow {
+  display: grid;
   gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 12px;
 }
 
 .controlSection {
@@ -216,11 +161,25 @@
 }
 
 .label {
+  align-items: baseline;
   color: var(--spice-text);
-  display: block;
+  display: flex;
   font-size: 14px;
   font-weight: 600;
+  gap: 8px;
   margin-bottom: 6px;
+}
+
+.ratingValue {
+  color: #ffd700;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.energyValue {
+  color: #1e90ff;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 
 .ratingContainer,
@@ -259,13 +218,6 @@
   border: 1px solid var(--spice-subtext);
 }
 
-.energyValue {
-  color: #1e90ff;
-  display: inline-block;
-  font-weight: 700;
-  margin-left: 8px;
-}
-
 .clearButton {
   background: rgb(0 0 0 / 20%);
   border: none;
@@ -280,15 +232,26 @@
   background: rgb(255 255 255 / 10%);
 }
 
-.tagsSection {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding-top: 14px;
+.tagsRow {
+  align-items: center;
+  border-top: 1px solid rgb(255 255 255 / 6%);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.rowLabel {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  margin-right: 2px;
 }
 
 .tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .tag {
@@ -298,6 +261,7 @@
   border-radius: 999px;
   color: var(--spice-text);
   display: inline-flex;
+  font-size: 12px;
   max-width: 100%;
   overflow: hidden;
 }
@@ -338,7 +302,7 @@
   line-height: 1.2;
   max-width: 100%;
   overflow-wrap: anywhere;
-  padding: 5px 8px 5px 10px;
+  padding: 4px 7px 4px 10px;
   text-align: left;
 }
 
@@ -362,42 +326,53 @@
 
 .noTags {
   color: var(--spice-subtext);
-  font-size: 13px;
-  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.applyButton {
+  align-items: center;
+  background: rgb(0 0 0 / 24%);
+  border: 1px solid rgb(30 215 96 / 32%);
+  border-radius: 6px;
+  color: var(--spice-text);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  margin-left: auto;
+  min-height: 30px;
+  padding: 5px 11px;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease;
+  white-space: nowrap;
+}
+
+.applyButton:hover,
+.applyButton:focus-visible {
+  background: rgb(255 255 255 / 10%);
+  border-color: rgb(30 215 96 / 55%);
+}
+
+.applyButton svg {
+  flex: 0 0 auto;
 }
 
 @media (max-width: 860px) {
   .header {
-    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-columns: 72px minmax(0, 1fr) auto;
   }
 
   .cover {
     height: 72px;
     width: 72px;
   }
-
-  .actions {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-  }
 }
 
 @media (max-width: 700px) {
-  .controlsPanel {
+  .controlsRow {
     grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 520px) {
-  .actions,
-  .applyControl,
-  .button {
-    width: 100%;
-  }
-
-  .applyMenu {
-    left: 0;
-    right: auto;
-    width: 100%;
   }
 }

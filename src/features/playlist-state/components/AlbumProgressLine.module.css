@@ -1,0 +1,26 @@
+.line {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin: -2px 0 8px;
+  min-width: 0;
+}
+
+.bar {
+  display: inline-flex;
+  flex: 0 0 96px;
+}
+
+.text {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.complete {
+  color: var(--spice-button, #1db954);
+  font-weight: 600;
+}

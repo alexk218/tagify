@@ -31,7 +31,8 @@
 
 .content {
   display: grid;
-  grid-template-columns: 1fr;
+  /* Let panels shrink with Spotify's main view instead of being clipped. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto 1fr;
   gap: 16px;
   height: calc(100% - 80px);
@@ -81,6 +82,34 @@
   color: var(--spice-text);
 }
 
+.communityButton {
+  align-items: center;
+  background: rgb(155 140 255 / 10%);
+  border: 1px solid rgb(155 140 255 / 26%);
+  border-radius: 8px;
+  color: var(--spice-text);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.communityButton:hover {
+  background: rgb(155 140 255 / 18%);
+  border-color: rgb(155 140 255 / 48%);
+}
+
+.communityButtonActive {
+  background: rgb(155 140 255 / 24%);
+  border-color: rgb(155 140 255 / 56%);
+  box-shadow: 0 0 0 2px rgb(155 140 255 / 10%);
+}
+
 @media (max-width: 640px) {
   .header {
     align-items: stretch;
@@ -95,6 +124,11 @@
   .viewTab {
     flex: 1 1 0;
     min-width: 0;
+  }
+
+  .communityButton {
+    justify-content: center;
+    width: 100%;
   }
 }
 
@@ -160,4 +194,33 @@
 
 .fallbackBannerButton:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+.backfillBanner {
+  background: rgb(30 64 175 / 18%);
+  border: 1px solid rgb(96 165 250 / 35%);
+  border-radius: 8px;
+  color: var(--spice-text);
+  display: grid;
+  gap: 6px;
+  margin: 8px 16px;
+  padding: 10px 14px;
+}
+
+.backfillSummary {
+  display: flex;
+  font-size: 13px;
+  font-weight: 700;
+  justify-content: space-between;
+}
+
+.backfillProgress {
+  accent-color: var(--spice-button);
+  height: 7px;
+  width: 100%;
+}
+
+.backfillHint {
+  color: var(--spice-subtext);
+  font-size: 11px;
 }

@@ -84,7 +84,7 @@ describe("tagData.trackMutations", () => {
 
     expect(updated.name).toBe("Existing Name");
     expect(updated.artists).toBe("Existing Artist");
-    expect(updated.dateModified).toBe(999);
+    expect(updated.dateModified).toBe(2);
   });
 
   it("creates initial track data and updates rating timestamps", () => {

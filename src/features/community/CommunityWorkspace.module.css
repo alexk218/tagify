@@ -1,0 +1,215 @@
+.workspace {
+  display: grid;
+  min-height: min(560px, calc(100vh - 190px));
+  padding: 28px;
+  place-items: center;
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 20px;
+  width: min(100%, 620px);
+  padding: 44px;
+  border: 1px solid color-mix(in srgb, var(--spice-button-disabled) 82%, transparent);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top, rgb(30 215 96 / 10%), transparent 48%),
+    color-mix(in srgb, var(--spice-card) 96%, black 4%);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 24%);
+  text-align: center;
+}
+
+.icon {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  border: 1px solid rgb(30 215 96 / 22%);
+  border-radius: 50%;
+  background: rgb(30 215 96 / 12%);
+  color: var(--spice-button);
+  place-items: center;
+}
+
+.copy {
+  display: grid;
+  gap: 10px;
+  max-width: 520px;
+}
+
+.eyebrow {
+  color: var(--spice-button);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.copy h2,
+.copy p {
+  margin: 0;
+}
+
+.copy h2 {
+  color: var(--spice-text);
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.05;
+}
+
+.copy h2 span {
+  display: block;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primaryAction {
+  background: var(--spice-button);
+  color: var(--spice-text);
+}
+
+.primaryAction:hover {
+  filter: brightness(1.08);
+}
+
+.secondaryAction {
+  border-color: var(--spice-button-disabled) !important;
+  background: rgb(255 255 255 / 5%);
+  color: var(--spice-text);
+}
+
+.secondaryAction:hover {
+  border-color: color-mix(in srgb, var(--spice-text) 35%, transparent) !important;
+  background: rgb(255 255 255 / 9%);
+}
+
+.connectionPanel {
+  width: min(100%, 460px);
+  padding-top: 16px;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+}
+
+.connectionStatus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.connectedDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--spice-button);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--spice-button) 60%, transparent);
+}
+
+.reconnectStatus {
+  color: #f1b36f;
+}
+
+.reconnectDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f1b36f;
+  box-shadow: 0 0 10px rgb(241 179 111 / 55%);
+}
+
+.connectionStatus button,
+.disconnectActions button {
+  border: 0;
+  background: transparent;
+  color: var(--spice-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.connectionStatus button {
+  padding: 2px 4px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.disconnectConfirmation {
+  display: grid;
+  gap: 12px;
+}
+
+.disconnectConfirmation > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.disconnectConfirmation strong {
+  color: var(--spice-text);
+  font-size: 13px;
+}
+
+.disconnectConfirmation span {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.disconnectActions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.disconnectActions button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 999px;
+}
+
+.disconnectActions button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.disconnectActions .disconnectConfirmButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-color: rgb(255 92 92 / 42%);
+  color: #ff8a8a;
+}
+
+.disconnectError {
+  margin: 10px 0 0;
+  color: #ff8a8a;
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .workspace {
+    padding: 16px;
+  }
+
+  .card {
+    padding: 32px 20px;
+  }
+}

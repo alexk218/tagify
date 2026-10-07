@@ -3,6 +3,10 @@ import { TrackInfoCacheManager } from "./TrackInfoCache";
 import { spotifyService } from "@/services/SpotifyService";
 import packageJson from "@/package";
 import { audioFeaturesService } from "@/services/AudioFeaturesService";
+import {
+  captureTrackDateModified,
+  enforceMigrationDateModifiedPolicy,
+} from "./migrationDateModified";
 
 const MIGRATION_KEY = "tagify:migrations";
 const MIGRATION_PROGRESS_KEY = "tagify:migrationProgress";
@@ -424,6 +428,13 @@ export const runMigrations = async (
   const migrationState = getMigrationState();
   let hasChanges = false;
   let updatedData = currentData;
+  const trackDateModifiedBeforeMigrations = captureTrackDateModified(currentData);
+  const preserveLastUpdated = (data: TagDataStructure, migrationName: string) =>
+    enforceMigrationDateModifiedPolicy(
+      data,
+      trackDateModifiedBeforeMigrations,
+      migrationName,
+    );
 
   console.log(
     `Checking migrations. Current: ${migrationState.version}, Target: ${CURRENT_VERSION}`
@@ -431,7 +442,10 @@ export const runMigrations = async (
 
   // Migration 1: cleanup empty tracks
   if (!migrationState.migrations.cleanupEmptyTracks) {
-    updatedData = cleanupEmptyTracksMigration(updatedData);
+    updatedData = preserveLastUpdated(
+      cleanupEmptyTracksMigration(updatedData),
+      "cleanupEmptyTracks",
+    );
     migrationState.migrations.cleanupEmptyTracks = true;
     hasChanges = true;
     setTagData(updatedData);
@@ -442,9 +456,18 @@ export const runMigrations = async (
     try {
       updatedData = await addTrackMetadataMigration(
         updatedData,
-        setTagData,
+        (next) => {
+          if (typeof next === "function") {
+            setTagData((previous) =>
+              preserveLastUpdated(next(previous), "addTrackMetadata"),
+            );
+          } else {
+            setTagData(preserveLastUpdated(next, "addTrackMetadata"));
+          }
+        },
         (processed, total) => onProgress?.("addTrackMetadata", processed, total)
       );
+      updatedData = preserveLastUpdated(updatedData, "addTrackMetadata");
       migrationState.migrations.addTrackMetadata = true;
       hasChanges = true;
     } catch (error: any) {
@@ -466,6 +489,7 @@ export const runMigrations = async (
 
   // Update version and save state (ONLY ONCE - removed duplicate)
   if (hasChanges || migrationState.version !== CURRENT_VERSION) {
+    updatedData = preserveLastUpdated(updatedData, "migration pipeline");
     migrationState.version = CURRENT_VERSION;
     saveMigrationState(migrationState);
 

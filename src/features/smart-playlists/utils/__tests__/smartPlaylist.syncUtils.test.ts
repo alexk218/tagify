@@ -1,14 +1,85 @@
 import { describe, expect, it } from "vitest";
 import {
-  calculatePlaylistTrackDelta,
+  applySmartPlaylistCriteriaToTrack,
   collectMatchingTrackUris,
   findDuplicateTrackUris,
-  withUpdatedPlaylistTrackUris,
 } from "@/features/smart-playlists/utils/smartPlaylist.syncUtils";
-import { SmartPlaylistCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
 import { TagDataStructure } from "@/types/tagData";
 
 describe("smartPlaylist.syncUtils", () => {
+  it("applies mutable criteria while preserving factual audio metadata", () => {
+    const original = {
+      rating: 1,
+      energy: 9,
+      bpm: 91,
+      camelotKey: "4A",
+      tagIds: ["unrelated", "excluded"],
+      dateCreated: 10,
+      dateModified: 20,
+    };
+
+    const updated = applySmartPlaylistCriteriaToTrack(
+      original,
+      {
+        includeTagClauses: [
+          {
+            tagIds: ["house", "vocal"],
+            excludedTagIds: ["excluded"],
+            operator: "OR",
+          },
+        ],
+        clauseConnectors: [],
+        ratingFilters: [3, 5],
+        energyMinFilter: 4,
+        energyMaxFilter: 7,
+        bpmMinFilter: 120,
+        bpmMaxFilter: 130,
+        camelotKeyFilters: ["8B"],
+      },
+      100,
+    );
+
+    expect(updated).toEqual({
+      ...original,
+      rating: 3,
+      energy: 7,
+      tagIds: ["unrelated", "excluded"],
+      dateModified: 100,
+    });
+  });
+
+  it("preserves allowed scalar values and breaks equidistant rating ties lower", () => {
+    const allowed = applySmartPlaylistCriteriaToTrack(
+      { rating: 5, energy: 5, bpm: null, tagIds: [] },
+      {
+        includeTagClauses: [],
+        clauseConnectors: [],
+        ratingFilters: [3, 5],
+        energyMinFilter: 3,
+        energyMaxFilter: 7,
+        bpmMinFilter: null,
+        bpmMaxFilter: null,
+      },
+      100,
+    );
+    expect(allowed.rating).toBe(5);
+    expect(allowed.energy).toBe(5);
+
+    const tied = applySmartPlaylistCriteriaToTrack(
+      { rating: 4, energy: 0, bpm: null, tagIds: [] },
+      {
+        includeTagClauses: [],
+        clauseConnectors: [],
+        ratingFilters: [3, 5],
+        energyMinFilter: null,
+        energyMaxFilter: null,
+        bpmMinFilter: null,
+        bpmMaxFilter: null,
+      },
+      100,
+    );
+    expect(tied.rating).toBe(3);
+  });
   it("finds duplicate URIs and occurrences", () => {
     const { occurrences, duplicateUris } = findDuplicateTrackUris([
       "spotify:track:1",
@@ -61,49 +132,4 @@ describe("smartPlaylist.syncUtils", () => {
     expect(matches).toEqual(["spotify:track:house"]);
   });
 
-  it("calculates add/remove track deltas", () => {
-    const { tracksToAdd, tracksToRemove } = calculatePlaylistTrackDelta(
-      ["spotify:track:1", "spotify:track:2"],
-      ["spotify:track:2", "spotify:track:3"],
-    );
-
-    expect(tracksToAdd).toEqual(["spotify:track:3"]);
-    expect(tracksToRemove).toEqual(["spotify:track:1"]);
-  });
-
-  it("updates playlist URIs and lastSyncAt immutably", () => {
-    const playlist: SmartPlaylistCriteria = {
-      playlistId: "a",
-      playlistName: "A",
-      isActive: true,
-      createdAt: 1,
-      lastSyncAt: 1,
-      smartPlaylistTrackUris: ["spotify:track:1"],
-      criteria: {
-        includeTagClauses: [],
-        clauseConnectors: [],
-        ratingFilters: [],
-        energyMinFilter: null,
-        energyMaxFilter: null,
-        bpmMinFilter: null,
-        bpmMaxFilter: null,
-      },
-    };
-
-    const otherPlaylist: SmartPlaylistCriteria = {
-      ...playlist,
-      playlistId: "b",
-      playlistName: "B",
-    };
-
-    const updated = withUpdatedPlaylistTrackUris(
-      [playlist, otherPlaylist],
-      "a",
-      ["spotify:track:9"],
-    );
-
-    expect(updated[0].smartPlaylistTrackUris).toEqual(["spotify:track:9"]);
-    expect(updated[0].lastSyncAt).toBeGreaterThanOrEqual(1);
-    expect(updated[1].smartPlaylistTrackUris).toEqual(["spotify:track:1"]);
-  });
 });

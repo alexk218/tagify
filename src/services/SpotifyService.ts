@@ -1,5 +1,6 @@
 import { debugLog } from "@/utils/debug";
 import { graphqlRateLimiter } from "@/utils/RateLimiter";
+import { requestSpicetifyGraphQL } from "@/services/spicetifyGraphQL";
 
 interface GraphQLTrackAlbum {
   uri: string;
@@ -56,6 +57,7 @@ export interface TrackInfo {
   artists: string;
   albumName: string;
   albumUri: string | null;
+  albumImageUrl: string | null;
   artistsData: Array<{ name: string; uri: string }>;
   duration_ms: number;
   release_date: string;
@@ -114,10 +116,13 @@ class SpotifyService {
 
     const { GraphQL, Locale } = Spicetify;
 
-    return GraphQL.Request(GraphQL.Definitions.getTrack, {
-      uri: trackUri,
-      locale: Locale?.getLocale() || this.locale,
-    });
+    return requestSpicetifyGraphQL<GraphQLTrackResponse>(
+      GraphQL.Definitions.getTrack,
+      {
+        uri: trackUri,
+        locale: Locale?.getLocale() || this.locale,
+      },
+    );
   }
 
   /**
@@ -151,41 +156,34 @@ class SpotifyService {
   }
 
   /**
-   * Get multiple tracks using GraphQL (batch operation)
-   * Replacement for CosmosAsync.get(`https://api.spotify.com/v1/tracks?ids=...`)
-   *
-   * Note: GraphQL doesn't have a native batch endpoint like the REST API,
-   * so we process tracks in parallel with controlled concurrency
+   * Get multiple tracks through Spotify's internal GraphQL API. GraphQL has no
+   * arbitrary multi-track query, so keep concurrency deliberately low and pace
+   * each group. The caller also applies a per-session backfill budget.
    */
   async getBatchTracks(
     trackUris: string[],
-    concurrency: number = 5
+    concurrency: number = 2,
   ): Promise<BatchTrackResult> {
     const results: BatchTrackResult = {};
-
-    // Filter out local files
     const spotifyUris = trackUris.filter(
       (uri) => !uri.startsWith("spotify:local:")
     );
 
-    // Process in batches with controlled concurrency
-    for (let i = 0; i < spotifyUris.length; i += concurrency) {
-      const batch = spotifyUris.slice(i, i + concurrency);
-
+    for (let index = 0; index < spotifyUris.length; index += concurrency) {
+      const batchUris = spotifyUris.slice(index, index + concurrency);
       const batchResults = await Promise.allSettled(
-        batch.map((uri) => this.getTrack(uri))
+        batchUris.map((uri) => this.getTrack(uri)),
       );
 
-      batchResults.forEach((result, index) => {
-        const uri = batch[index];
+      batchResults.forEach((result, resultIndex) => {
+        const uri = batchUris[resultIndex];
         if (result.status === "fulfilled" && result.value) {
           results[uri] = result.value;
         }
       });
 
-      // Small delay between batches to avoid overwhelming the API
-      if (i + concurrency < spotifyUris.length) {
-        await this.delay(50);
+      if (index + concurrency < spotifyUris.length) {
+        await this.delay(250);
       }
     }
 
@@ -259,11 +257,19 @@ class SpotifyService {
   async getPlaylistName(playlistUri: string): Promise<string | null> {
     try {
       const { GraphQL, Locale } = Spicetify;
+      const definition = GraphQL.Definitions.getPlaylist;
 
-      const response = await GraphQL.Request(GraphQL.Definitions.getPlaylist, {
-        uri: playlistUri,
-        locale: Locale?.getLocale() || this.locale,
-      });
+      if (!definition) {
+        return null;
+      }
+
+      const response = await requestSpicetifyGraphQL<any>(
+        definition,
+        {
+          uri: playlistUri,
+          locale: Locale?.getLocale() || this.locale,
+        },
+      );
 
       return response.data?.playlistV2?.name || null;
     } catch (error) {
@@ -446,6 +452,10 @@ class SpotifyService {
       artists: artists.map((a) => a.name).join(", "),
       albumName: trackUnion.albumOfTrack?.name || "Unknown Album",
       albumUri: trackUnion.albumOfTrack?.uri || null,
+      albumImageUrl:
+        trackUnion.albumOfTrack?.coverArt?.sources?.find(
+          (source) => source.height === 300,
+        )?.url || trackUnion.albumOfTrack?.coverArt?.sources?.[0]?.url || null,
       artistsData: artists,
       duration_ms: trackUnion.duration?.totalMilliseconds || 0,
       release_date: trackUnion.albumOfTrack?.date?.isoString || "",

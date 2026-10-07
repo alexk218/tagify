@@ -4,6 +4,10 @@ import type {
   PresetTagAccentId,
   TagAccentId,
 } from "@/types/tagData";
+import {
+  TAGIFY_PRESET_ACCENTS,
+  isTagifyPresetAccentId,
+} from "@/shared/tagAccentPresets";
 
 export interface TagAccentTokens {
   dot: string;
@@ -34,37 +38,37 @@ export const TAG_ACCENT_OPTIONS = TAG_ACCENT_PRESET_OPTIONS;
 
 const TAG_ACCENT_TOKENS: Record<PresetTagAccentId, TagAccentTokens> = {
   blue: {
-    dot: "#5b8cff",
+    dot: TAGIFY_PRESET_ACCENTS.blue,
     border: "rgb(91 140 255 / 42%)",
     tint: "rgb(91 140 255 / 12%)",
     text: "#dce7ff",
   },
   teal: {
-    dot: "#2dd4bf",
+    dot: TAGIFY_PRESET_ACCENTS.teal,
     border: "rgb(45 212 191 / 42%)",
     tint: "rgb(45 212 191 / 12%)",
     text: "#d7fffa",
   },
   green: {
-    dot: "#4ade80",
+    dot: TAGIFY_PRESET_ACCENTS.green,
     border: "rgb(74 222 128 / 42%)",
     tint: "rgb(74 222 128 / 12%)",
     text: "#e2ffe9",
   },
   amber: {
-    dot: "#f59e0b",
+    dot: TAGIFY_PRESET_ACCENTS.amber,
     border: "rgb(245 158 11 / 42%)",
     tint: "rgb(245 158 11 / 12%)",
     text: "#fff0cf",
   },
   rose: {
-    dot: "#fb7185",
+    dot: TAGIFY_PRESET_ACCENTS.rose,
     border: "rgb(251 113 133 / 42%)",
     tint: "rgb(251 113 133 / 12%)",
     text: "#ffe0e5",
   },
   slate: {
-    dot: "#94a3b8",
+    dot: TAGIFY_PRESET_ACCENTS.slate,
     border: "rgb(148 163 184 / 42%)",
     tint: "rgb(148 163 184 / 12%)",
     text: "#edf2f8",
@@ -134,7 +138,7 @@ export function buildCustomTagAccentId(): `custom:${string}` {
 }
 
 export function isPresetTagAccentId(value: unknown): value is PresetTagAccentId {
-  return TAG_ACCENT_PRESET_OPTIONS.some((option) => option.value === value);
+  return isTagifyPresetAccentId(value);
 }
 
 export function isCustomTagAccentId(value: unknown): value is `custom:${string}` {
@@ -158,6 +162,16 @@ export function normalizeTagAccentId(
   return isTagAccentId(value, customAccentsById) ? value : null;
 }
 
+/** Shortens a name without splitting an emoji or other multi-unit character. */
+export function truncateName(value: string, maxLength: number): string {
+  let result = "";
+  for (const character of value) {
+    if (result.length + character.length > maxLength) break;
+    result += character;
+  }
+  return result;
+}
+
 function normalizeCustomAccentName(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -168,7 +182,7 @@ function normalizeCustomAccentName(value: unknown): string | null {
     return null;
   }
 
-  return trimmed.slice(0, 32);
+  return truncateName(trimmed, 32);
 }
 
 export function normalizeCustomTagAccent(

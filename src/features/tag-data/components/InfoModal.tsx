@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Portal } from "@/components/ui";
+import communityPerspectivesScreenshot from "@/assets/communityPerspectivesScreenshot";
 import styles from "./InfoModal.module.css";
 import packageJson from "@/package";
 
@@ -34,6 +35,10 @@ import {
   faCoffee,
   faKeyboard,
   faCompactDisc,
+  faMobileScreenButton,
+  faFolderTree,
+  faSliders,
+  faShareNodes,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -47,7 +52,7 @@ interface InfoModalProps {
   initialSection?: string;
 }
 
-const LATEST_WHATS_NEW_VERSION = "2.5.0";
+const LATEST_WHATS_NEW_VERSION = "3.0.0";
 const WHATS_NEW_SEEN_VERSION_KEY = "tagify:info-modal:whats-new-seen-version";
 
 const hasSeenLatestWhatsNew = () => {
@@ -67,6 +72,22 @@ const InfoModal: React.FC<InfoModalProps> = ({
 }) => {
   const [activeSection, setActiveSection] = useState(initialSection);
   const [hasSeenWhatsNew, setHasSeenWhatsNew] = useState(hasSeenLatestWhatsNew);
+  const [isCommunityPreviewOpen, setIsCommunityPreviewOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isCommunityPreviewOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsCommunityPreviewOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isCommunityPreviewOpen]);
 
   const sections = [
     { id: "whats-new", title: "What's New", icon: faBullhorn },
@@ -211,83 +232,247 @@ const InfoModal: React.FC<InfoModalProps> = ({
 
               {activeSection === "whats-new" && (
                 <div className={styles.section}>
-                  {/* TAGIFY 2.5.0 */}
+                  {/* TAGIFY 3.0.0 */}
                   <div className={styles.whatsNewHeader}>
                     <h3 className={styles.sectionTitle}>
                       <a
-                        href={getReleaseUrl("2.5.0")}
+                        href={getReleaseUrl("3.0.0")}
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        What's New in Tagify 2.5.0
+                        What's New in Tagify 3.0.0
                       </a>
                     </h3>
                   </div>
 
-                  <div className={styles.featureGroup}>
-                    <div className={styles.featureHeader}>
-                      <span className={styles.featureIcon}>
-                        <FontAwesomeIcon icon={faStar} />
-                      </span>
-                      <h4 className={styles.featureTitle}>
-                        Inline Ratings &amp; Tags
-                      </h4>
-                    </div>
-                    <p className={styles.featureDescription}>
-                      Rate, tag, and bulk edit tracks directly from Spotify's
-                      track lists.
-                    </p>
-                    <figure className={styles.featureScreenshot}>
-                      <img
-                        src="https://raw.githubusercontent.com/alexk218/tagify/main/src/assets/INLINE_RATINGS_AND_TAGS.png"
-                        alt="Tagify inline ratings with the energy and tag menu open in Spotify"
-                        loading="lazy"
-                      />
-                    </figure>
-                  </div>
-
-                  <div className={styles.featureGroup}>
-                    <div className={styles.featureHeader}>
-                      <span className={styles.featureIcon}>
-                        <FontAwesomeIcon icon={faWandMagicSparkles} />
-                      </span>
-                      <h4 className={styles.featureTitle}>Color Collections</h4>
-                    </div>
-                    <p className={styles.featureDescription}>
-                      Organize saved colors into collections, then reorder,
-                      import, or export them.
-                    </p>
-                  </div>
-
-                  <div className={styles.featureGroup}>
-                    <div className={styles.featureHeader}>
-                      <span className={styles.featureIcon}>
-                        <FontAwesomeIcon icon={faFilter} />
-                      </span>
-                      <h4 className={styles.featureTitle}>
-                        Filters &amp; Albums
-                      </h4>
-                    </div>
-                    <p className={styles.featureDescription}>
-                      Use the same filters across Tagify, with a new Albums view
-                      for managing whole albums.
-                    </p>
-                  </div>
-
-                  <div className={styles.featureGroup}>
+                  <div
+                    className={`${styles.featureGroup} ${styles.primaryFeatureGroup}`}
+                  >
                     <div className={styles.featureHeader}>
                       <span className={styles.featureIcon}>
                         <FontAwesomeIcon icon={faComments} />
                       </span>
+                      <h4 className={styles.featureTitle}>Tagify Community</h4>
+                      <span className={styles.primaryFeatureBadge}>
+                        The big update
+                      </span>
+                    </div>
+                    <div className={styles.primaryFeatureContent}>
+                      <div className={styles.primaryFeatureCopy}>
+                        <p className={styles.featureDescription}>
+                          Keep your music organization safe, discover useful
+                          ideas from other listeners, and share as much or as
+                          little as you want.
+                        </p>
+                        <ul className={styles.primaryFeatureList}>
+                          <li>
+                            <FontAwesomeIcon
+                              className={styles.primaryFeatureCheck}
+                              icon={faCheckCircle}
+                              aria-hidden="true"
+                            />
+                            See Community perspectives on tracks you already
+                            tagged and compare your organization with tags
+                            shared by other listeners.
+                          </li>
+                          <li>
+                            <FontAwesomeIcon
+                              className={styles.primaryFeatureCheck}
+                              icon={faCheckCircle}
+                              aria-hidden="true"
+                            />
+                            Open Manage Tags and choose Community to browse and
+                            import tags other people have applied to their
+                            tracks.
+                          </li>
+                          <li>
+                            <FontAwesomeIcon
+                              className={styles.primaryFeatureCheck}
+                              icon={faCheckCircle}
+                              aria-hidden="true"
+                            />
+                            If Spotify ever clears your Tagify data, restore
+                            your tags, ratings, Smart Playlists, and settings
+                            from your Community cloud backup—so your
+                            organization stays protected and you never have to
+                            start over.
+                          </li>
+                          <li>
+                            <FontAwesomeIcon
+                              className={styles.primaryFeatureCheck}
+                              icon={faCheckCircle}
+                              aria-hidden="true"
+                            />
+                            Share your tags and explore public profiles while
+                            choosing what stays private.
+                          </li>
+                        </ul>
+                        <a
+                          className={styles.primaryFeatureLink}
+                          href="https://community.tagify.fm"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Visit Tagify Community
+                          <FontAwesomeIcon icon={faArrowUpRightFromSquare} />
+                        </a>
+                      </div>
+                      <figure className={styles.communityPerspectivesPreview}>
+                        <button
+                          type="button"
+                          className={styles.communityPerspectivesPreviewButton}
+                          aria-label="View the Community perspectives example at full size"
+                          onClick={() => setIsCommunityPreviewOpen(true)}
+                        >
+                          <img
+                            src={communityPerspectivesScreenshot}
+                            alt="Community perspectives showing another listener's public tags on a tagged track"
+                            loading="lazy"
+                          />
+                          <span className={styles.communityPerspectivesZoomHint}>
+                            Click to enlarge
+                          </span>
+                        </button>
+                        <figcaption>
+                          Click the preview for a closer look.
+                        </figcaption>
+                      </figure>
+                    </div>
+                  </div>
+
+                  <div className={styles.featureGroup}>
+                    <div className={styles.featureHeader}>
+                      <span className={styles.featureIcon}>
+                        <FontAwesomeIcon icon={faMobileScreenButton} />
+                      </span>
                       <h4 className={styles.featureTitle}>
-                        Community Requests
+                        Tag Songs from Your Phone
                       </h4>
                     </div>
                     <p className={styles.featureDescription}>
-                      Submit ideas and bugs in Discord, follow their progress,
-                      and test the changes.
+                      Add a song to an active Smart Playlist from Spotify on
+                      your phone. When Tagify is running on your computer, it
+                      applies that playlist's tags, rating, and energy, then
+                      tells you exactly what changed.
                     </p>
                   </div>
+
+                  <ul className={styles.compactUpdates}>
+                    {[
+                      {
+                        title: "Album Averages",
+                        description: "See an album's average track rating and energy.",
+                        icon: faCompactDisc,
+                      },
+                      {
+                        title: "Nested Folders",
+                        description: "Organize your tags into folders and subfolders.",
+                        icon: faFolderTree,
+                      },
+                      {
+                        title: "Spotify Display Choices",
+                        description:
+                          "Choose stars, energy, tags, or a combined view for Spotify's track lists and playbar.",
+                        icon: faSliders,
+                      },
+                      {
+                        title: "Smart Playlist Sharing",
+                        description:
+                          "Share your Smart Playlist rules so others can create their own playlists.",
+                        icon: faShareNodes,
+                      },
+                    ].map(({ title, description, icon }) => (
+                      <li key={title} className={styles.compactUpdate}>
+                        <FontAwesomeIcon
+                          icon={icon}
+                          className={styles.compactUpdateIcon}
+                          aria-hidden="true"
+                        />
+                        <div className={styles.compactUpdateCopy}>
+                          <h4 className={styles.compactUpdateTitle}>{title}</h4>
+                          <p className={styles.compactUpdateDescription}>
+                            {description}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <details className={styles.releaseAccordion}>
+                    <summary className={styles.releaseSummary}>
+                      <span>What's New in Tagify 2.5.0</span>
+                      <a
+                        href={getReleaseUrl("2.5.0")}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={styles.releaseSummaryLink}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        View release
+                        <FontAwesomeIcon
+                          icon={faArrowUpRightFromSquare}
+                          className={styles.externalLinkIcon}
+                        />
+                      </a>
+                    </summary>
+
+                    <div className={styles.featureGroup}>
+                      <div className={styles.featureHeader}>
+                        <span className={styles.featureIcon}>
+                          <FontAwesomeIcon icon={faStar} />
+                        </span>
+                        <h4 className={styles.featureTitle}>
+                          Inline Ratings &amp; Tags
+                        </h4>
+                      </div>
+                      <p className={styles.featureDescription}>
+                        Rate, tag, and bulk edit tracks directly from Spotify's
+                        track lists.
+                      </p>
+                    </div>
+                    <div className={styles.featureGroup}>
+                      <div className={styles.featureHeader}>
+                        <span className={styles.featureIcon}>
+                          <FontAwesomeIcon icon={faWandMagicSparkles} />
+                        </span>
+                        <h4 className={styles.featureTitle}>
+                          Color Collections
+                        </h4>
+                      </div>
+                      <p className={styles.featureDescription}>
+                        Organize saved colors into collections, then reorder,
+                        import, or export them.
+                      </p>
+                    </div>
+                    <div className={styles.featureGroup}>
+                      <div className={styles.featureHeader}>
+                        <span className={styles.featureIcon}>
+                          <FontAwesomeIcon icon={faFilter} />
+                        </span>
+                        <h4 className={styles.featureTitle}>
+                          Filters &amp; Albums
+                        </h4>
+                      </div>
+                      <p className={styles.featureDescription}>
+                        Use the same filters across Tagify, with an Albums view
+                        for managing whole albums.
+                      </p>
+                    </div>
+                    <div className={styles.featureGroup}>
+                      <div className={styles.featureHeader}>
+                        <span className={styles.featureIcon}>
+                          <FontAwesomeIcon icon={faComments} />
+                        </span>
+                        <h4 className={styles.featureTitle}>
+                          Community Requests
+                        </h4>
+                      </div>
+                      <p className={styles.featureDescription}>
+                        Submit ideas and bugs in Discord, follow their progress,
+                        and test the changes.
+                      </p>
+                    </div>
+                  </details>
 
                   <details className={styles.releaseAccordion}>
                     <summary className={styles.releaseSummary}>
@@ -307,70 +492,74 @@ const InfoModal: React.FC<InfoModalProps> = ({
                       </a>
                     </summary>
 
-                  {/* TAGIFY 2.4.0 */}
+                    {/* TAGIFY 2.4.0 */}
 
-                  {/* Album and Artist Tagging */}
-                  <div className={styles.featureGroup}>
-                    <div className={styles.featureHeader}>
-                      <span className={styles.featureIcon}>
-                        <FontAwesomeIcon icon={faMusic} />
-                      </span>
-                      <h4 className={styles.featureTitle}>
-                        Tag Albums and Artists
-                      </h4>
+                    {/* Album and Artist Tagging */}
+                    <div className={styles.featureGroup}>
+                      <div className={styles.featureHeader}>
+                        <span className={styles.featureIcon}>
+                          <FontAwesomeIcon icon={faMusic} />
+                        </span>
+                        <h4 className={styles.featureTitle}>
+                          Tag Albums and Artists
+                        </h4>
+                      </div>
+                      <p className={styles.featureDescription}>
+                        You can finally tag <strong>albums</strong> and{" "}
+                        <strong>artists</strong>!
+                      </p>
                     </div>
-                    <p className={styles.featureDescription}>
-                      You can finally tag <strong>albums</strong> and{" "}
-                      <strong>artists</strong>!
-                    </p>
-                  </div>
 
-                  {/* Complex Filtering */}
-                  <div className={styles.featureGroup}>
-                    <div className={styles.featureHeader}>
-                      <span className={styles.featureIcon}>
-                        <FontAwesomeIcon icon={faFilter} />
-                      </span>
-                      <h4 className={styles.featureTitle}>Complex Filtering</h4>
+                    {/* Complex Filtering */}
+                    <div className={styles.featureGroup}>
+                      <div className={styles.featureHeader}>
+                        <span className={styles.featureIcon}>
+                          <FontAwesomeIcon icon={faFilter} />
+                        </span>
+                        <h4 className={styles.featureTitle}>
+                          Complex Filtering
+                        </h4>
+                      </div>
+                      <p className={styles.featureDescription}>
+                        Mix AND/OR in a single formula (e.g., Tag1 && (Tag2 ||
+                        Tag3)) for more powerful and flexible filtering of your
+                        tracks and playlists.
+                      </p>
                     </div>
-                    <p className={styles.featureDescription}>
-                      Mix AND/OR in a single formula (e.g., Tag1 && (Tag2 ||
-                      Tag3)) for more powerful and flexible filtering of your
-                      tracks and playlists.
-                    </p>
-                  </div>
 
-                  {/* Improved Tag Management */}
-                  <div className={styles.featureGroup}>
-                    <div className={styles.featureHeader}>
-                      <span className={styles.featureIcon}>
-                        <FontAwesomeIcon icon={faTag} />
-                      </span>
-                      <h4 className={styles.featureTitle}>
-                        Improved Tag Management
-                      </h4>
+                    {/* Improved Tag Management */}
+                    <div className={styles.featureGroup}>
+                      <div className={styles.featureHeader}>
+                        <span className={styles.featureIcon}>
+                          <FontAwesomeIcon icon={faTag} />
+                        </span>
+                        <h4 className={styles.featureTitle}>
+                          Improved Tag Management
+                        </h4>
+                      </div>
+                      <p className={styles.featureDescription}>
+                        Managing your tag system is now much more flexible. You
+                        can add <strong>accent colors</strong> to tags, and move
+                        tags across categories and subcategories.
+                      </p>
                     </div>
-                    <p className={styles.featureDescription}>
-                      Managing your tag system is now much more flexible. You
-                      can add <strong>accent colors</strong> to tags, and move
-                      tags across categories and subcategories.
-                    </p>
-                  </div>
 
-                  {/* Automatic Backups */}
-                  <div className={styles.featureGroup}>
-                    <div className={styles.featureHeader}>
-                      <span className={styles.featureIcon}>
-                        <FontAwesomeIcon icon={faDownload} />
-                      </span>
-                      <h4 className={styles.featureTitle}>Automatic Backups</h4>
+                    {/* Automatic Backups */}
+                    <div className={styles.featureGroup}>
+                      <div className={styles.featureHeader}>
+                        <span className={styles.featureIcon}>
+                          <FontAwesomeIcon icon={faDownload} />
+                        </span>
+                        <h4 className={styles.featureTitle}>
+                          Automatic Backups
+                        </h4>
+                      </div>
+                      <p className={styles.featureDescription}>
+                        Tagify can now automatically create periodic backups of
+                        your tag data, helping protect your music organization
+                        if Spotify or Spicetify clears local app storage.
+                      </p>
                     </div>
-                    <p className={styles.featureDescription}>
-                      Tagify can now automatically create periodic backups of
-                      your tag data, helping protect your music organization if
-                      Spotify or Spicetify clears local app storage.
-                    </p>
-                  </div>
                   </details>
 
                   <details className={styles.releaseAccordion}>
@@ -1555,7 +1744,39 @@ const InfoModal: React.FC<InfoModalProps> = ({
               </button>
             </div>
           </div>
+
         </div>
+
+        {isCommunityPreviewOpen && (
+          <div
+            className={styles.screenshotLightbox}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Community perspectives example"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsCommunityPreviewOpen(false);
+            }}
+          >
+            <div
+              className={styles.screenshotLightboxContent}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                className={styles.screenshotLightboxClose}
+                aria-label="Close enlarged screenshot"
+                onClick={() => setIsCommunityPreviewOpen(false)}
+              >
+                <FontAwesomeIcon icon={faTimes} />
+              </button>
+              <img
+                src={communityPerspectivesScreenshot}
+                alt="Enlarged Community perspectives example showing another listener's public tags"
+              />
+            </div>
+          </div>
+        )}
       </div>
     </Portal>
   );

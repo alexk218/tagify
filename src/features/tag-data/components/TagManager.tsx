@@ -29,20 +29,23 @@ import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
 import {
   Tag,
   TagCategory,
+  TagSubcategory,
   TagAccentId,
   TagTaxonomy,
+  TaxonomyFolder,
   ArtistData,
   PlaylistData,
   TrackData,
 } from "@/types/tagData";
 import type { SmartPlaylistCriteria } from "@/features/smart-playlists";
 import { countTagFilterFormulaReferences } from "@/utils/tagFilterGroups";
-import { buildCategoryTree, createEntityId } from "@/utils/tagTaxonomy";
+import { buildCategoryTree, collectTagIdsForParent, createEntityId } from "@/utils/tagTaxonomy";
 import {
   cloneTaxonomy,
   getRelativeInsertIndex,
   getSortableReorderTargetIndex,
   moveCategory,
+  moveCategoryIntoParent,
   moveSubcategory,
   moveTag,
   type RelativeDropPlacement,
@@ -56,6 +59,7 @@ import {
   getTagAccentTokens,
   isCustomTagAccentId,
   TAG_ACCENT_PRESET_OPTIONS,
+  truncateName,
   type TagAccentOption,
 } from "@/features/tag-data/utils/tagAccent";
 import {
@@ -67,6 +71,10 @@ import {
   getOrderedColorThemes,
   type ColorLibrarySortMode,
 } from "@/features/tag-data/utils/tagColorThemes";
+import {
+  importCommunityTagPackage,
+  type CommunityTagImportPackage,
+} from "@/features/tag-data/utils/communityTagImport";
 
 type DragState =
   | {
@@ -88,6 +96,24 @@ type DragState =
       label: string;
     };
 
+type NativeTaxonomyDragState =
+  | {
+      type: "category";
+      categoryId: string;
+    }
+  | {
+      type: "subcategory";
+      categoryId: string;
+      parentId: string;
+      subcategoryId: string;
+    }
+  | {
+      type: "tag";
+      categoryId: string;
+      parentId: string;
+      tagId: string;
+    };
+
 type CategoryDragData = {
   type: "category";
   categoryId: string;
@@ -97,6 +123,7 @@ type CategoryDragData = {
 type SubcategoryDragData = {
   type: "subcategory";
   categoryId: string;
+  parentId: string;
   subcategoryId: string;
   label: string;
 };
@@ -131,20 +158,42 @@ interface SortableCategoryCardProps {
   onSelectCategory: (categoryId: string) => void;
   onRenameCategory: (categoryId: string) => void;
   onDeleteCategory: (categoryId: string) => void;
+  onNativeDragStart: (event: React.DragEvent, categoryId: string) => void;
+  onNativeDragOver: (event: React.DragEvent) => void;
+  onNativeDrop: (event: React.DragEvent, categoryId: string) => void;
+  onNativeDragEnd: () => void;
   children: React.ReactNode;
 }
 
 interface SortableSubcategoryRowProps {
   categoryId: string;
+  parentId: string;
   subcategoryId: string;
   name: string;
   tagCount: number;
+  childFolderCount: number;
+  isExpanded: boolean;
   isSelected: boolean;
   isDragDisabled: boolean;
   isTagDropActive: boolean;
+  onToggleExpanded: (subcategoryId: string) => void;
   onSelectSubcategory: (categoryId: string, subcategoryId: string) => void;
   onRenameSubcategory: (categoryId: string, subcategoryId: string) => void;
   onDeleteSubcategory: (categoryId: string, subcategoryId: string) => void;
+  onNativeDragStart: (
+    event: React.DragEvent,
+    categoryId: string,
+    parentId: string,
+    subcategoryId: string,
+  ) => void;
+  onNativeDragOver: (event: React.DragEvent) => void;
+  onNativeDrop: (
+    event: React.DragEvent,
+    categoryId: string,
+    parentId: string,
+    subcategoryId: string,
+  ) => void;
+  onNativeDragEnd: () => void;
 }
 
 interface SortableTagRowProps {
@@ -152,6 +201,7 @@ interface SortableTagRowProps {
   subcategoryId: string;
   tag: Tag;
   isDragDisabled: boolean;
+  isDropActive: boolean;
   isAccentPickerOpen: boolean;
   customAccentsById: TagTaxonomy["customAccentsById"];
   accentGroups: TagAccentGroup[];
@@ -159,6 +209,20 @@ interface SortableTagRowProps {
   onDeleteTag: (subcategoryId: string, tagId: string) => void;
   onToggleAccentPicker: (tagId: string) => void;
   onSetTagAccent: (tagId: string, accentId: TagAccentId | null) => void;
+  onNativeDragStart: (
+    event: React.DragEvent,
+    categoryId: string,
+    parentId: string,
+    tagId: string,
+  ) => void;
+  onNativeDragOver: (event: React.DragEvent) => void;
+  onNativeDrop: (
+    event: React.DragEvent,
+    categoryId: string,
+    parentId: string,
+    tagId: string,
+  ) => void;
+  onNativeDragEnd: () => void;
 }
 
 interface TagAccentGroup {
@@ -169,6 +233,9 @@ interface TagAccentGroup {
 interface TagEndDropZoneProps {
   subcategoryId: string;
   isVisible: boolean;
+  isDropActive: boolean;
+  onNativeDragOver: (event: React.DragEvent) => void;
+  onNativeDrop: (event: React.DragEvent, parentId: string) => void;
 }
 
 interface TagManagerProps {
@@ -188,6 +255,9 @@ interface TagManagerProps {
 }
 
 const MAX_NAME_LENGTH = 30;
+// Community backups can't store these characters in names.
+const UNSUPPORTED_NAME_CHARACTERS = /[<>]/;
+const UNSUPPORTED_NAME_MESSAGE = "Names can't include < or >.";
 const HOVER_EXPAND_DELAY_MS = 400;
 const UNGROUPED_COLOR_FILTER = "__ungrouped__";
 const SHOW_DEFAULT_PALETTE_STORAGE_KEY = "tagify:showDefaultColorPalette";
@@ -201,7 +271,32 @@ const COLOR_LIBRARY_SORT_DESCRIPTIONS: Record<ColorLibrarySortMode, string> = {
   updated: "by last update",
 };
 
-type TagManagerView = "tags" | "colors";
+type TagManagerView = "tags" | "community" | "colors";
+
+interface CommunityCatalogTag {
+  key: string;
+  name: string;
+  songCount: number;
+  contributorCount?: number;
+  assignmentCount?: number;
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+}
+
+interface CommunityCatalogResponse {
+  tags?: CommunityCatalogTag[];
+}
+
+type CommunityCatalogSortMode =
+  | "popular"
+  | "contributors"
+  | "alphabetical"
+  | "recent";
+type CommunityCatalogSortDirection = "descending" | "ascending";
+
+const COMMUNITY_TAGS_FETCH_TIMEOUT_MS = 10000;
+const COMMUNITY_TAGS_API_BASE = "https://community.tagify.fm";
+const COMMUNITY_TAGS_CATALOG_ENDPOINT = `${COMMUNITY_TAGS_API_BASE}/api/v1/tags`;
 
 const buildCategoryDndId = (categoryId: string) => `category:${categoryId}`;
 const buildSubcategoryDndId = (subcategoryId: string) => `subcategory:${subcategoryId}`;
@@ -221,6 +316,48 @@ function downloadColors(taxonomy: TagTaxonomy, themeId?: string): void {
 
 function normalizeName(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function loadCommunityCatalogTags(): Promise<CommunityCatalogTag[]> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("GET", COMMUNITY_TAGS_CATALOG_ENDPOINT, true);
+    request.responseType = "json";
+    request.timeout = COMMUNITY_TAGS_FETCH_TIMEOUT_MS;
+    request.setRequestHeader("Accept", "application/json");
+
+    request.onload = () => {
+      if (request.status < 200 || request.status >= 300) {
+        reject(new Error(`Community tags request failed with ${request.status}.`));
+        return;
+      }
+
+      const response =
+        typeof request.response === "object" && request.response !== null
+          ? (request.response as CommunityCatalogResponse)
+          : (JSON.parse(String(request.responseText || "{}")) as CommunityCatalogResponse);
+      resolve(Array.isArray(response.tags) ? response.tags : []);
+    };
+    request.onerror = () => reject(new Error("Community tags request failed."));
+    request.ontimeout = () => reject(new Error("Community tags request timed out."));
+    request.send();
+  });
+}
+
+function formatCommunityTagStats(tag: CommunityCatalogTag): string {
+  const contributorCount = tag.contributorCount ?? 0;
+  const userLabel = contributorCount === 1 ? "user" : "users";
+  const trackLabel = tag.songCount === 1 ? "track" : "tracks";
+
+  return `${tag.songCount} public ${trackLabel} · ${contributorCount} ${userLabel}`;
+}
+
+function buildCommunityTagSearchUrl(tag: CommunityCatalogTag): string {
+  return `${COMMUNITY_TAGS_API_BASE}/search?tag=${encodeURIComponent(`label:${encodeURIComponent(tag.name)}`)}`;
+}
+
+function openCommunityTagSearch(tag: CommunityCatalogTag): void {
+  window.open(buildCommunityTagSearchUrl(tag), "_blank", "noopener,noreferrer");
 }
 
 function countTrackReferences(
@@ -320,6 +457,7 @@ function readDndData(value: unknown): SupportedDndData | null {
   if (
     candidate.type === "subcategory" &&
     "categoryId" in candidate &&
+    "parentId" in candidate &&
     "subcategoryId" in candidate
   ) {
     return candidate;
@@ -362,11 +500,24 @@ function getDropPlacement(
   pointerCoordinates: { x: number; y: number } | null,
   rect: { top: number; height: number } | undefined,
 ): RelativeDropPlacement {
-  if (!pointerCoordinates || !rect) {
+  if (
+    !pointerCoordinates ||
+    typeof pointerCoordinates.y !== "number" ||
+    Number.isNaN(pointerCoordinates.y) ||
+    !rect ||
+    rect.height <= 0
+  ) {
     return "before";
   }
 
-  return pointerCoordinates.y >= rect.top + rect.height / 2 ? "after" : "before";
+  const relativeY = pointerCoordinates.y - rect.top;
+  if (relativeY < rect.height * 0.3) {
+    return "before";
+  }
+  if (relativeY > rect.height * 0.7) {
+    return "after";
+  }
+  return "inside";
 }
 
 function promptForName(
@@ -383,8 +534,15 @@ function promptForName(
 }
 
 function getCategoryTagCount(category: TagCategory): number {
-  return category.subcategories.reduce(
-    (count, subcategory) => count + subcategory.tags.length,
+  return (category.tags?.length || 0) + category.subcategories.reduce(
+    (count, subcategory) => count + getSubcategoryTagCount(subcategory),
+    0,
+  );
+}
+
+function getSubcategoryTagCount(subcategory: TagSubcategory): number {
+  return subcategory.tags.length + (subcategory.subcategories || []).reduce(
+    (count, child) => count + getSubcategoryTagCount(child),
     0,
   );
 }
@@ -404,45 +562,45 @@ function filterCategoryTree(
       return [category];
     }
 
-    const matchingSubcategories = category.subcategories.filter((subcategory) => {
+    const matchingTags = (category.tags || []).filter((tag) =>
+      normalizeName(tag.name).includes(normalizedQuery),
+    );
+    const matchingSubcategories = category.subcategories.flatMap((subcategory) => {
       if (normalizeName(subcategory.name).includes(normalizedQuery)) {
-        return true;
+        return [subcategory];
       }
 
-      return subcategory.tags.some((tag) =>
+      const matchingChildTags = subcategory.tags.filter((tag) =>
         normalizeName(tag.name).includes(normalizedQuery),
       );
+      const matchingChildren = (subcategory.subcategories || []).filter((child) =>
+        normalizeName(child.name).includes(normalizedQuery)
+        || child.tags.some((tag) => normalizeName(tag.name).includes(normalizedQuery)),
+      );
+      if (!matchingChildTags.length && !matchingChildren.length) return [];
+      return [{ ...subcategory, tags: matchingChildTags, subcategories: matchingChildren }];
     });
 
-    if (matchingSubcategories.length === 0) {
+    if (matchingTags.length === 0 && matchingSubcategories.length === 0) {
       return [];
     }
 
     return [
       {
         ...category,
+        tags: matchingTags,
         subcategories: matchingSubcategories,
       },
     ];
   });
 }
 
-function buildCategoryMoveErrorMessage(reason: TaxonomyMoveReason): string {
-  switch (reason) {
-    case "missing-source":
-    case "missing-target":
-      return "That move could not be completed because the destination is no longer available.";
-    case "same-position":
-      return "";
-    default:
-      return "That category move could not be completed.";
-  }
-}
-
 function buildSubcategoryMoveErrorMessage(reason: TaxonomyMoveReason): string {
   switch (reason) {
     case "duplicate-subcategory-name":
-      return "That category already contains a subcategory with the same name.";
+      return "That folder already contains an item with the same name.";
+    case "invalid-descendant":
+      return "A folder cannot be moved inside itself or one of its nested folders.";
     case "missing-source":
     case "missing-target":
       return "That subcategory move could not be completed because the destination is no longer available.";
@@ -478,6 +636,10 @@ function SortableCategoryCard({
   onSelectCategory,
   onRenameCategory,
   onDeleteCategory,
+  onNativeDragStart,
+  onNativeDragOver,
+  onNativeDrop,
+  onNativeDragEnd,
   children,
 }: SortableCategoryCardProps) {
   const sortable = useSortable({
@@ -499,6 +661,11 @@ function SortableCategoryCard({
     <div
       ref={sortable.setNodeRef}
       style={style}
+      draggable={!isDragDisabled}
+      onDragStart={(event) => onNativeDragStart(event, category.id)}
+      onDragOver={onNativeDragOver}
+      onDrop={(event) => onNativeDrop(event, category.id)}
+      onDragEnd={onNativeDragEnd}
       className={`${styles.categoryCard} ${
         isSelected ? styles.categoryCardSelected : ""
       } ${sortable.isDragging ? styles.sortableDragging : ""} ${
@@ -516,10 +683,14 @@ function SortableCategoryCard({
         </button>
 
         <button
+          ref={sortable.setActivatorNodeRef}
           type="button"
           className={styles.dragHandleButton}
           aria-label={`Drag category ${category.name}`}
           disabled={isDragDisabled}
+          draggable={!isDragDisabled}
+          onDragStart={(event) => onNativeDragStart(event, category.id)}
+          onDragEnd={onNativeDragEnd}
           {...(isDragDisabled ? {} : sortable.attributes)}
           {...(isDragDisabled ? {} : sortable.listeners)}
           onClick={(event) => event.stopPropagation()}
@@ -574,15 +745,23 @@ function SortableCategoryCard({
 
 function SortableSubcategoryRow({
   categoryId,
+  parentId,
   subcategoryId,
   name,
   tagCount,
+  childFolderCount,
+  isExpanded,
   isSelected,
   isDragDisabled,
   isTagDropActive,
+  onToggleExpanded,
   onSelectSubcategory,
   onRenameSubcategory,
   onDeleteSubcategory,
+  onNativeDragStart,
+  onNativeDragOver,
+  onNativeDrop,
+  onNativeDragEnd,
 }: SortableSubcategoryRowProps) {
   const sortable = useSortable({
     id: buildSubcategoryDndId(subcategoryId),
@@ -590,6 +769,7 @@ function SortableSubcategoryRow({
     data: {
       type: "subcategory",
       categoryId,
+      parentId,
       subcategoryId,
       label: name,
     } as SubcategoryDragData,
@@ -604,6 +784,15 @@ function SortableSubcategoryRow({
     <div
       ref={sortable.setNodeRef}
       style={style}
+      draggable={!isDragDisabled}
+      onDragStart={(event) =>
+        onNativeDragStart(event, categoryId, parentId, subcategoryId)
+      }
+      onDragOver={onNativeDragOver}
+      onDrop={(event) =>
+        onNativeDrop(event, categoryId, parentId, subcategoryId)
+      }
+      onDragEnd={onNativeDragEnd}
       className={`${styles.subcategoryRow} ${
         isSelected ? styles.subcategoryRowSelected : ""
       } ${sortable.isDragging ? styles.sortableDragging : ""} ${
@@ -612,9 +801,28 @@ function SortableSubcategoryRow({
     >
       <button
         type="button"
-        className={styles.dragHandleButton}
-        aria-label={`Drag subcategory ${name}`}
+        className={styles.expandButton}
+        aria-label={isExpanded ? `Collapse ${name}` : `Expand ${name}`}
+        disabled={childFolderCount === 0}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggleExpanded(subcategoryId);
+        }}
+      >
+        {childFolderCount > 0 ? (isExpanded ? "▾" : "▸") : ""}
+      </button>
+
+        <button
+          ref={sortable.setActivatorNodeRef}
+          type="button"
+          className={styles.dragHandleButton}
+          aria-label={`Drag subcategory ${name}`}
         disabled={isDragDisabled}
+        draggable={!isDragDisabled}
+        onDragStart={(event) =>
+          onNativeDragStart(event, categoryId, parentId, subcategoryId)
+        }
+        onDragEnd={onNativeDragEnd}
         {...(isDragDisabled ? {} : sortable.attributes)}
         {...(isDragDisabled ? {} : sortable.listeners)}
         onClick={(event) => event.stopPropagation()}
@@ -667,6 +875,7 @@ function SortableTagRow({
   subcategoryId,
   tag,
   isDragDisabled,
+  isDropActive,
   isAccentPickerOpen,
   customAccentsById,
   accentGroups,
@@ -674,6 +883,10 @@ function SortableTagRow({
   onDeleteTag,
   onToggleAccentPicker,
   onSetTagAccent,
+  onNativeDragStart,
+  onNativeDragOver,
+  onNativeDrop,
+  onNativeDragEnd,
 }: SortableTagRowProps) {
   const sortable = useSortable({
     id: buildTagDndId(tag.id),
@@ -710,7 +923,18 @@ function SortableTagRow({
         sortable.isDragging ? styles.sortableDragging : ""
       } ${
         isDragDisabled ? styles.tagChipDragDisabled : ""
+      } ${
+        isDropActive ? styles.dropTargetActive : ""
       }`}
+      draggable={!isDragDisabled}
+      onDragStart={(event) =>
+        onNativeDragStart(event, categoryId, subcategoryId, tag.id)
+      }
+      onDragOver={onNativeDragOver}
+      onDrop={(event) =>
+        onNativeDrop(event, categoryId, subcategoryId, tag.id)
+      }
+      onDragEnd={onNativeDragEnd}
       data-accented={accentId ? "true" : "false"}
       data-accent-picker-open={isAccentPickerOpen ? "true" : "false"}
       data-tag-accent-menu-root="true"
@@ -818,7 +1042,13 @@ function SortableTagRow({
   );
 }
 
-function TagEndDropZone({ subcategoryId, isVisible }: TagEndDropZoneProps) {
+function TagEndDropZone({
+  subcategoryId,
+  isVisible,
+  isDropActive,
+  onNativeDragOver,
+  onNativeDrop,
+}: TagEndDropZoneProps) {
   const droppable = useDroppable({
     id: buildTagEndDndId(subcategoryId),
     data: {
@@ -835,10 +1065,53 @@ function TagEndDropZone({ subcategoryId, isVisible }: TagEndDropZoneProps) {
     <div
       ref={droppable.setNodeRef}
       className={`${styles.tagEndDropZone} ${
-        droppable.isOver ? styles.dropTargetActive : ""
+        droppable.isOver || isDropActive ? styles.dropTargetActive : ""
       }`}
+      onDragOver={onNativeDragOver}
+      onDrop={(event) => onNativeDrop(event, subcategoryId)}
     >
       Drop here to place at the end
+    </div>
+  );
+}
+
+function CommunityDestinationFolder({
+  categoryId,
+  subcategory,
+  selectedSubcategoryId,
+  onSelectSubcategory,
+}: {
+  categoryId: string;
+  subcategory: TagSubcategory;
+  selectedSubcategoryId: string | null;
+  onSelectSubcategory: (categoryId: string, subcategoryId: string) => void;
+}) {
+  const isSelected = selectedSubcategoryId === subcategory.id;
+
+  return (
+    <div className={styles.communityDestinationCategory}>
+      <button
+        type="button"
+        className={`${styles.communityDestinationButton} ${styles.communityDestinationSubfolderButton} ${isSelected ? styles.communityDestinationButtonActive : ""}`}
+        onClick={() => onSelectSubcategory(categoryId, subcategory.id)}
+        aria-pressed={isSelected}
+      >
+        <span>{subcategory.name}</span>
+        <small>{getSubcategoryTagCount(subcategory)} tags</small>
+      </button>
+      {subcategory.subcategories && subcategory.subcategories.length > 0 ? (
+        <div className={styles.communityDestinationSubfolders}>
+          {subcategory.subcategories.map((child) => (
+            <CommunityDestinationFolder
+              key={child.id}
+              categoryId={categoryId}
+              subcategory={child}
+              selectedSubcategoryId={selectedSubcategoryId}
+              onSelectSubcategory={onSelectSubcategory}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -870,11 +1143,29 @@ const TagManager: React.FC<TagManagerProps> = ({
   const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<string | null>(
     () => initialSelectedSubcategoryId ?? null,
   );
+  const [categoryOnlySelectionId, setCategoryOnlySelectionId] = useState<string | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<string[]>(
     () => initialExpandedCategoryIds ?? [],
   );
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [newTagName, setNewTagName] = useState<string>("");
+  const [renameTarget, setRenameTarget] = useState<
+    | { kind: "category"; id: string; name: string }
+    | { kind: "folder"; id: string; parentId: string; name: string }
+    | { kind: "tag"; id: string; parentId: string; name: string }
+    | null
+  >(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [communitySearchQuery, setCommunitySearchQuery] = useState<string>("");
+  const [communitySortMode, setCommunitySortMode] =
+    useState<CommunityCatalogSortMode>("contributors");
+  const [communitySortDirection, setCommunitySortDirection] =
+    useState<CommunityCatalogSortDirection>("descending");
+  const [communityMinTrackCount, setCommunityMinTrackCount] = useState(1);
+  const [communityTags, setCommunityTags] = useState<CommunityCatalogTag[]>([]);
+  const [isLoadingCommunityTags, setIsLoadingCommunityTags] = useState(false);
+  const [communityTagsError, setCommunityTagsError] = useState<string | null>(null);
+  const [importingCommunityTagKey, setImportingCommunityTagKey] = useState<string | null>(null);
   const [newCustomAccentName, setNewCustomAccentName] = useState<string>("");
   const [newCustomAccentColor, setNewCustomAccentColor] =
     useState<string>("#7c9cff");
@@ -900,11 +1191,14 @@ const TagManager: React.FC<TagManagerProps> = ({
   const colorImportRef = useRef<HTMLInputElement | null>(null);
   const [openAccentPickerTagId, setOpenAccentPickerTagId] = useState<string | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [nativeTaxonomyDragState, setNativeTaxonomyDragState] =
+    useState<NativeTaxonomyDragState | null>(null);
   const [hoveredCategoryId, setHoveredCategoryId] = useState<string | null>(null);
   const [hoveredSubcategoryId, setHoveredSubcategoryId] = useState<string | null>(null);
 
   const hoverExpandTimerRef = useRef<number | null>(null);
   const hoverExpandCategoryIdRef = useRef<string | null>(null);
+  const communityTagsRequestRef = useRef<Promise<CommunityCatalogTag[]> | null>(null);
   const treePaneRef = useRef<HTMLDivElement | null>(null);
   const dragPlacementRef = useRef<RelativeDropPlacement>("before");
 
@@ -929,6 +1223,23 @@ const TagManager: React.FC<TagManagerProps> = ({
     [localCategories, searchQuery],
   );
 
+  const expandableTaxonomyIds = useMemo(() => {
+    const ids: string[] = [];
+    const appendFolderIds = (subcategories: TagSubcategory[]) => {
+      subcategories.forEach((subcategory) => {
+        ids.push(subcategory.id);
+        appendFolderIds(subcategory.subcategories || []);
+      });
+    };
+
+    localCategories.forEach((category) => {
+      ids.push(category.id);
+      appendFolderIds(category.subcategories);
+    });
+
+    return ids;
+  }, [localCategories]);
+
   const selectedCategory = selectedCategoryId
     ? localTaxonomy.categoriesById[selectedCategoryId]
     : null;
@@ -936,17 +1247,37 @@ const TagManager: React.FC<TagManagerProps> = ({
     ? localTaxonomy.subcategoriesById[selectedSubcategoryId]
     : null;
 
-  const selectedCategoryForInspector =
-    selectedSubcategory?.categoryId
-      ? localTaxonomy.categoriesById[selectedSubcategory.categoryId]
-      : selectedCategory;
+  const selectedFolderPath = useMemo(() => {
+    const folders: TaxonomyFolder[] = [];
+    const seen = new Set<string>();
+    let folder = selectedSubcategory;
+    while (folder && !seen.has(folder.id)) {
+      seen.add(folder.id);
+      folders.unshift(folder);
+      folder = localTaxonomy.subcategoriesById[folder.parentId || ""];
+    }
+    return folders;
+  }, [localTaxonomy.subcategoriesById, selectedSubcategory]);
+  const pathRootId = selectedFolderPath[0]?.parentId;
+  const selectedRootId = pathRootId && localTaxonomy.categoriesById[pathRootId]
+    ? pathRootId
+    : selectedSubcategory?.categoryId;
+  const selectedCategoryForInspector = selectedSubcategory
+    ? localTaxonomy.categoriesById[selectedRootId || ""]
+    : selectedCategory;
+  const selectedTagParentId = selectedSubcategory?.id ?? selectedCategory?.id ?? null;
+  const selectedTagParentName = selectedSubcategory?.name ?? selectedCategory?.name ?? null;
+  const selectedTagParentIsCategory = Boolean(selectedTagParentId && localTaxonomy.categoriesById[selectedTagParentId]);
 
   const selectedTags = useMemo(() => {
-    if (!selectedSubcategory) {
+    if (!selectedTagParentId) {
       return [];
     }
 
-    return selectedSubcategory.tagIds
+    const tagIds = (localTaxonomy.childrenByParentId?.[selectedTagParentId] || [])
+      .filter((childId) => Boolean(localTaxonomy.tagsById[childId]));
+    const fallbackTagIds = selectedSubcategory?.tagIds || [];
+    return (tagIds.length ? tagIds : fallbackTagIds)
       .map((tagId) => localTaxonomy.tagsById[tagId])
       .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag))
       .map((tag) => ({
@@ -954,7 +1285,7 @@ const TagManager: React.FC<TagManagerProps> = ({
         name: tag.name,
         accentId: tag.accentId ?? null,
       }));
-  }, [localTaxonomy.tagsById, selectedSubcategory]);
+  }, [localTaxonomy.childrenByParentId, localTaxonomy.tagsById, selectedSubcategory?.tagIds, selectedTagParentId]);
   const accentOptions = useMemo(
     () => getTagAccentOptions(localTaxonomy.customAccentsById),
     [localTaxonomy.customAccentsById],
@@ -1017,6 +1348,48 @@ const TagManager: React.FC<TagManagerProps> = ({
     }
     return allCustomAccents;
   }, [allCustomAccents, colorLibrarySortMode, localTaxonomy, selectedColorTheme, selectedColorThemeId]);
+
+  const visibleCommunityTags = useMemo(() => {
+    const normalizedQuery = normalizeName(communitySearchQuery);
+    const tags = communityTags.filter((tag) => {
+      return (
+        normalizeName(tag.name).includes(normalizedQuery) &&
+        tag.songCount >= communityMinTrackCount
+      );
+    });
+
+    return [...tags].sort((left, right) => {
+      const nameComparison = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+      let comparison: number;
+      if (communitySortMode === "alphabetical") {
+        comparison = nameComparison;
+      } else if (communitySortMode === "contributors") {
+        comparison =
+          (right.contributorCount ?? 0) - (left.contributorCount ?? 0) ||
+          right.songCount - left.songCount ||
+          nameComparison;
+      } else if (communitySortMode === "recent") {
+        comparison =
+          Date.parse(right.lastSeenAt ?? "") - Date.parse(left.lastSeenAt ?? "") ||
+          nameComparison;
+      } else {
+        comparison =
+          right.songCount - left.songCount ||
+          nameComparison;
+      }
+      return communitySortDirection === "ascending" ? comparison * -1 : comparison;
+    });
+  }, [
+    communityMinTrackCount,
+    communitySearchQuery,
+    communitySortDirection,
+    communitySortMode,
+    communityTags,
+  ]);
+
+  const communityDestinationPath = selectedCategoryForInspector
+    ? `${selectedCategoryForInspector.name}${selectedSubcategory ? ` / ${selectedSubcategory.name}` : ""}`
+    : "No category selected";
 
   const canMoveColorToTheme = (colorId: `custom:${string}`, targetThemeId: string) => {
     const sourceColor = localTaxonomy.customAccentsById[colorId];
@@ -1084,9 +1457,9 @@ const TagManager: React.FC<TagManagerProps> = ({
 
   const interactionLocked = searchQuery.trim().length > 0;
   const areAllCategoriesExpanded =
-    localTaxonomy.categoryOrder.length > 0 &&
-    localTaxonomy.categoryOrder.every((categoryId) =>
-      expandedCategories.includes(categoryId),
+    expandableTaxonomyIds.length > 0 &&
+    expandableTaxonomyIds.every((nodeId) =>
+      expandedCategories.includes(nodeId),
     );
 
   const clearHoverExpandTimer = useCallback(() => {
@@ -1154,11 +1527,26 @@ const TagManager: React.FC<TagManagerProps> = ({
   }, [onSelectedSubcategoryIdChange, selectedSubcategoryId]);
 
   useEffect(() => {
+    if (
+      selectedCategoryId &&
+      categoryOnlySelectionId === selectedCategoryId &&
+      localTaxonomy.categoriesById[selectedCategoryId]
+    ) {
+      if (selectedSubcategoryId !== null) {
+        setSelectedSubcategoryId(null);
+      }
+      return;
+    }
+
     if (selectedSubcategoryId && localTaxonomy.subcategoriesById[selectedSubcategoryId]) {
       const nextCategoryId =
         localTaxonomy.subcategoriesById[selectedSubcategoryId].categoryId;
+      if (!nextCategoryId) {
+        return;
+      }
 
       setSelectedCategoryId(nextCategoryId);
+      setCategoryOnlySelectionId(null);
       if (initialExpandedCategoryIds === undefined) {
         setExpandedCategories((currentExpanded) =>
           currentExpanded.includes(nextCategoryId)
@@ -1171,6 +1559,7 @@ const TagManager: React.FC<TagManagerProps> = ({
 
     if (
       selectedCategoryId &&
+      categoryOnlySelectionId !== selectedCategoryId &&
       localTaxonomy.categoriesById[selectedCategoryId] &&
       localTaxonomy.categoriesById[selectedCategoryId].subcategoryIds.length > 0
     ) {
@@ -1187,15 +1576,42 @@ const TagManager: React.FC<TagManagerProps> = ({
 
     setSelectedCategoryId(firstCategoryId);
     setSelectedSubcategoryId(firstSubcategoryId);
+    setCategoryOnlySelectionId(null);
     if (initialExpandedCategoryIds === undefined) {
       setExpandedCategories(firstCategoryId ? [firstCategoryId] : []);
     }
   }, [
     initialExpandedCategoryIds,
+    categoryOnlySelectionId,
     localTaxonomy,
     selectedCategoryId,
     selectedSubcategoryId,
   ]);
+
+  useEffect(() => {
+    if (activeView !== "community" || communityTags.length > 0) {
+      return;
+    }
+
+    setIsLoadingCommunityTags(true);
+    setCommunityTagsError(null);
+
+    const tagsRequest = communityTagsRequestRef.current ?? loadCommunityCatalogTags();
+    communityTagsRequestRef.current = tagsRequest;
+
+    tagsRequest
+      .then((tags) => {
+        setCommunityTags(tags);
+      })
+      .catch((error) => {
+        console.error("Failed to load community tags", error);
+        setCommunityTagsError("Community tags could not be loaded. Check your Spotify console for the request error.");
+        communityTagsRequestRef.current = null;
+      })
+      .finally(() => {
+        setIsLoadingCommunityTags(false);
+      });
+  }, [activeView, communityTags.length]);
 
   const isCategoryNameUnique = useCallback(
     (name: string, excludeCategoryId?: string) => {
@@ -1214,13 +1630,13 @@ const TagManager: React.FC<TagManagerProps> = ({
   const isSubcategoryNameUnique = useCallback(
     (categoryId: string, name: string, excludeSubcategoryId?: string) => {
       const normalizedName = normalizeName(name);
-      const category = localTaxonomy.categoriesById[categoryId];
+      const childIds = localTaxonomy.childrenByParentId?.[categoryId] || localTaxonomy.categoriesById[categoryId]?.subcategoryIds || [];
 
-      return !(category?.subcategoryIds || [])
-        .filter((subcategoryId) => subcategoryId !== excludeSubcategoryId)
+      return !childIds
+        .filter((childId) => childId !== excludeSubcategoryId)
         .some(
-          (subcategoryId) =>
-            normalizeName(localTaxonomy.subcategoriesById[subcategoryId]?.name || "") ===
+          (childId) =>
+            normalizeName(localTaxonomy.subcategoriesById[childId]?.name || localTaxonomy.tagsById[childId]?.name || "") ===
             normalizedName,
         );
     },
@@ -1228,11 +1644,13 @@ const TagManager: React.FC<TagManagerProps> = ({
   );
 
   const isTagNameUnique = useCallback(
-    (subcategoryId: string, name: string, excludeTagId?: string) => {
+    (parentId: string, name: string, excludeTagId?: string) => {
       const normalizedName = normalizeName(name);
-      const subcategory = localTaxonomy.subcategoriesById[subcategoryId];
+      const childIds = localTaxonomy.childrenByParentId?.[parentId]
+        || localTaxonomy.subcategoriesById[parentId]?.tagIds
+        || [];
 
-      return !(subcategory?.tagIds || [])
+      return !childIds
         .filter((tagId) => tagId !== excludeTagId)
         .some(
           (tagId) =>
@@ -1249,23 +1667,21 @@ const TagManager: React.FC<TagManagerProps> = ({
     }
 
     setSelectedCategoryId(categoryId);
+    setCategoryOnlySelectionId(categoryId);
     setExpandedCategories((currentExpanded) =>
       currentExpanded.includes(categoryId)
         ? currentExpanded
         : [...currentExpanded, categoryId],
     );
 
-    if (category.subcategoryIds.length > 0) {
-      setSelectedSubcategoryId(category.subcategoryIds[0]);
-    } else {
-      setSelectedSubcategoryId(null);
-    }
+    setSelectedSubcategoryId(null);
   }, [localTaxonomy]);
 
   const selectSubcategory = useCallback(
     (categoryId: string, subcategoryId: string) => {
       setSelectedCategoryId(categoryId);
       setSelectedSubcategoryId(subcategoryId);
+      setCategoryOnlySelectionId(null);
       setExpandedCategories((currentExpanded) =>
         currentExpanded.includes(categoryId)
           ? currentExpanded
@@ -1275,11 +1691,11 @@ const TagManager: React.FC<TagManagerProps> = ({
     [],
   );
 
-  const toggleCategoryExpanded = useCallback((categoryId: string) => {
+  const toggleTaxonomyNodeExpanded = useCallback((nodeId: string) => {
     setExpandedCategories((currentExpanded) =>
-      currentExpanded.includes(categoryId)
-        ? currentExpanded.filter((id) => id !== categoryId)
-        : [...currentExpanded, categoryId],
+      currentExpanded.includes(nodeId)
+        ? currentExpanded.filter((id) => id !== nodeId)
+        : [...currentExpanded, nodeId],
     );
   }, []);
 
@@ -1295,6 +1711,11 @@ const TagManager: React.FC<TagManagerProps> = ({
       return;
     }
 
+    if (UNSUPPORTED_NAME_CHARACTERS.test(name)) {
+      showModalNotification(UNSUPPORTED_NAME_MESSAGE, true);
+      return;
+    }
+
     if (!isCategoryNameUnique(name)) {
       showModalNotification(`Category "${name}" already exists.`, true);
       return;
@@ -1307,7 +1728,10 @@ const TagManager: React.FC<TagManagerProps> = ({
       id: categoryId,
       name,
       subcategoryIds: [],
+      childIds: [],
     };
+    nextTaxonomy.childrenByParentId ||= {};
+    nextTaxonomy.childrenByParentId[categoryId] = [];
 
     commitTaxonomyUpdate(nextTaxonomy);
     setSelectedCategoryId(categoryId);
@@ -1315,13 +1739,14 @@ const TagManager: React.FC<TagManagerProps> = ({
     setExpandedCategories((currentExpanded) => [...currentExpanded, categoryId]);
   };
 
-  const handleAddSubcategory = (categoryId: string) => {
-    const category = localTaxonomy.categoriesById[categoryId];
-    if (!category) {
+  const handleAddSubcategory = (parentId: string, categoryId = parentId) => {
+    const parentCategory = localTaxonomy.categoriesById[parentId];
+    const parentFolder = localTaxonomy.subcategoriesById[parentId];
+    if (!parentCategory && !parentFolder) {
       return;
     }
 
-    const name = promptForName("Enter new subcategory name:");
+    const name = promptForName("Enter new folder name:");
     if (!name) {
       return;
     }
@@ -1331,28 +1756,53 @@ const TagManager: React.FC<TagManagerProps> = ({
       return;
     }
 
-    if (!isSubcategoryNameUnique(categoryId, name)) {
-      showModalNotification(`Subcategory "${name}" already exists in this category.`, true);
+    if (UNSUPPORTED_NAME_CHARACTERS.test(name)) {
+      showModalNotification(UNSUPPORTED_NAME_MESSAGE, true);
+      return;
+    }
+
+    if (!isSubcategoryNameUnique(parentId, name)) {
+      showModalNotification(`Folder "${name}" already exists here.`, true);
       return;
     }
 
     const subcategoryId = createEntityId("sub");
     const nextTaxonomy = cloneTaxonomy(localTaxonomy);
-    nextTaxonomy.categoriesById[categoryId].subcategoryIds.push(subcategoryId);
+    nextTaxonomy.childrenByParentId ||= {};
+    if (nextTaxonomy.categoriesById[parentId]) {
+      nextTaxonomy.categoriesById[parentId].subcategoryIds.push(subcategoryId);
+      nextTaxonomy.categoriesById[parentId].childIds = [...(nextTaxonomy.categoriesById[parentId].childIds || []), subcategoryId];
+    }
+    if (nextTaxonomy.subcategoriesById[parentId]) {
+      nextTaxonomy.subcategoriesById[parentId].childIds = [...(nextTaxonomy.subcategoriesById[parentId].childIds || []), subcategoryId];
+    }
+    nextTaxonomy.childrenByParentId[parentId] = [...(nextTaxonomy.childrenByParentId[parentId] || []), subcategoryId];
     nextTaxonomy.subcategoriesById[subcategoryId] = {
       id: subcategoryId,
       name,
+      parentId,
       categoryId,
       tagIds: [],
+      childIds: [],
     };
+    nextTaxonomy.foldersById ||= {};
+    nextTaxonomy.foldersById[subcategoryId] = nextTaxonomy.subcategoriesById[subcategoryId];
+    nextTaxonomy.childrenByParentId[subcategoryId] = [];
 
     commitTaxonomyUpdate(nextTaxonomy);
+    setExpandedCategories((currentExpanded) =>
+      [categoryId, parentId].reduce(
+        (nextExpanded, nodeId) =>
+          nextExpanded.includes(nodeId) ? nextExpanded : [...nextExpanded, nodeId],
+        currentExpanded,
+      ),
+    );
     selectSubcategory(categoryId, subcategoryId);
   };
 
   const handleAddTag = () => {
-    if (!selectedSubcategoryId || !selectedCategoryForInspector) {
-      showModalNotification("Select a subcategory before adding a tag.", true);
+    if (!selectedTagParentId || !selectedCategoryForInspector) {
+      showModalNotification("Select a category or folder before adding a tag.", true);
       return;
     }
 
@@ -1366,18 +1816,32 @@ const TagManager: React.FC<TagManagerProps> = ({
       return;
     }
 
-    if (!isTagNameUnique(selectedSubcategoryId, name)) {
-      showModalNotification(`Tag "${name}" already exists in this subcategory.`, true);
+    if (UNSUPPORTED_NAME_CHARACTERS.test(name)) {
+      showModalNotification(UNSUPPORTED_NAME_MESSAGE, true);
+      return;
+    }
+
+    if (!isTagNameUnique(selectedTagParentId, name)) {
+      showModalNotification(`Tag "${name}" already exists in this folder.`, true);
       return;
     }
 
     const tagId = createEntityId("tag");
     const nextTaxonomy = cloneTaxonomy(localTaxonomy);
-    nextTaxonomy.subcategoriesById[selectedSubcategoryId].tagIds.push(tagId);
+    nextTaxonomy.childrenByParentId ||= {};
+    nextTaxonomy.childrenByParentId[selectedTagParentId] = [...(nextTaxonomy.childrenByParentId[selectedTagParentId] || []), tagId];
+    if (nextTaxonomy.subcategoriesById[selectedTagParentId]) {
+      nextTaxonomy.subcategoriesById[selectedTagParentId].tagIds.push(tagId);
+      nextTaxonomy.subcategoriesById[selectedTagParentId].childIds = [...(nextTaxonomy.subcategoriesById[selectedTagParentId].childIds || []), tagId];
+    }
+    if (nextTaxonomy.categoriesById[selectedTagParentId]) {
+      nextTaxonomy.categoriesById[selectedTagParentId].childIds = [...(nextTaxonomy.categoriesById[selectedTagParentId].childIds || []), tagId];
+    }
     nextTaxonomy.tagsById[tagId] = {
       id: tagId,
       name,
-      subcategoryId: selectedSubcategoryId,
+      parentId: selectedTagParentId,
+      subcategoryId: selectedTagParentId,
       accentId: null,
     };
 
@@ -1385,87 +1849,135 @@ const TagManager: React.FC<TagManagerProps> = ({
     setNewTagName("");
   };
 
-  const renameEntity = (
-    label: "category" | "subcategory" | "tag",
-    currentName: string,
-  ) => promptForName(`Rename ${label}:`, currentName);
+  const handleImportCommunityTag = async (tag: CommunityCatalogTag) => {
+    const targetCategoryId = selectedCategoryForInspector?.id ?? localTaxonomy.categoryOrder[0];
+    if (!targetCategoryId) {
+      showModalNotification("Create a category before importing community tags.", true);
+      return;
+    }
+
+    const targetParentId = selectedSubcategory?.id ?? targetCategoryId;
+    const targetChildIds = localTaxonomy.childrenByParentId?.[targetParentId] ?? [];
+    const hasLocalDuplicate = targetChildIds.some(
+      (tagId) => normalizeName(localTaxonomy.tagsById[tagId]?.name ?? "") === normalizeName(tag.name),
+    );
+    if (
+      hasLocalDuplicate &&
+      !window.confirm(`"${tag.name}" already exists in the selected destination. Use the existing tag instead of importing another copy?`)
+    ) {
+      showModalNotification(`Import cancelled. "${tag.name}" was not added.`);
+      return;
+    }
+
+    setImportingCommunityTagKey(tag.key);
+    try {
+      const importPackage: CommunityTagImportPackage = {
+        version: 1,
+        kind: "tagify-community-tag",
+        source: "tagify-community",
+        publicTagKey: tag.key,
+        name: tag.name,
+        normalizedName: tag.key,
+        suggestedPaths: [],
+        usage: {
+          songCount: tag.songCount,
+          contributorCount: tag.contributorCount,
+          assignmentCount: tag.assignmentCount,
+          firstSeenAt: tag.firstSeenAt,
+          lastSeenAt: tag.lastSeenAt,
+        },
+        publicUrl: `${COMMUNITY_TAGS_API_BASE}/tags`,
+      };
+      const result = importCommunityTagPackage(localTaxonomy, importPackage, {
+        targetCategoryId,
+        targetSubcategoryId: selectedSubcategory?.id ?? null,
+        duplicateMode: "use-existing",
+      });
+
+      if (result.status === "blocked") {
+        showModalNotification("That community tag could not be imported.", true);
+        return;
+      }
+
+      commitTaxonomyUpdate(result.taxonomy);
+      setSelectedCategoryId(result.categoryId);
+      if (localTaxonomy.categoriesById[result.subcategoryId]) {
+        setCategoryOnlySelectionId(result.categoryId);
+        setSelectedSubcategoryId(null);
+      } else {
+        setCategoryOnlySelectionId(null);
+        setSelectedSubcategoryId(result.subcategoryId);
+      }
+      setExpandedCategories((currentExpanded) =>
+        currentExpanded.includes(result.categoryId)
+          ? currentExpanded
+          : [...currentExpanded, result.categoryId],
+      );
+      showModalNotification(
+        result.status === "existing"
+          ? `"${tag.name}" already exists in the selected destination.`
+          : `Imported "${tag.name}" from the community catalog.`,
+      );
+    } catch {
+      showModalNotification("That community tag could not be imported.", true);
+    } finally {
+      setImportingCommunityTagKey(null);
+    }
+  };
 
   const handleRenameCategory = (categoryId: string) => {
     const category = localTaxonomy.categoriesById[categoryId];
-    if (!category) {
-      return;
-    }
-
-    const nextName = renameEntity("category", category.name);
-    if (!nextName || nextName === category.name) {
-      return;
-    }
-
-    if (nextName.length > MAX_NAME_LENGTH) {
-      showModalNotification(`Name must be less than ${MAX_NAME_LENGTH} characters.`, true);
-      return;
-    }
-
-    if (!isCategoryNameUnique(nextName, categoryId)) {
-      showModalNotification(`Category "${nextName}" already exists.`, true);
-      return;
-    }
-
-    const nextTaxonomy = cloneTaxonomy(localTaxonomy);
-    nextTaxonomy.categoriesById[categoryId].name = nextName;
-    commitTaxonomyUpdate(nextTaxonomy);
+    if (!category) return;
+    setRenameValue(category.name);
+    setRenameTarget({ kind: "category", id: categoryId, name: category.name });
   };
 
   const handleRenameSubcategory = (categoryId: string, subcategoryId: string) => {
     const subcategory = localTaxonomy.subcategoriesById[subcategoryId];
-    if (!subcategory) {
-      return;
-    }
-
-    const nextName = renameEntity("subcategory", subcategory.name);
-    if (!nextName || nextName === subcategory.name) {
-      return;
-    }
-
-    if (nextName.length > MAX_NAME_LENGTH) {
-      showModalNotification(`Name must be less than ${MAX_NAME_LENGTH} characters.`, true);
-      return;
-    }
-
-    if (!isSubcategoryNameUnique(categoryId, nextName, subcategoryId)) {
-      showModalNotification(`Subcategory "${nextName}" already exists in this category.`, true);
-      return;
-    }
-
-    const nextTaxonomy = cloneTaxonomy(localTaxonomy);
-    nextTaxonomy.subcategoriesById[subcategoryId].name = nextName;
-    commitTaxonomyUpdate(nextTaxonomy);
+    if (!subcategory) return;
+    setRenameValue(subcategory.name);
+    setRenameTarget({ kind: "folder", id: subcategoryId, parentId: subcategory.parentId || categoryId, name: subcategory.name });
   };
 
   const handleRenameTag = (subcategoryId: string, tagId: string) => {
     const tag = localTaxonomy.tagsById[tagId];
-    if (!tag) {
+    if (!tag) return;
+    setRenameValue(tag.name);
+    setRenameTarget({ kind: "tag", id: tagId, parentId: subcategoryId, name: tag.name });
+  };
+
+  const confirmRename = () => {
+    if (!renameTarget) return;
+    const nextName = renameValue.trim();
+    if (!nextName) return;
+    if (nextName === renameTarget.name) {
+      setRenameTarget(null);
       return;
     }
-
-    const nextName = renameEntity("tag", tag.name);
-    if (!nextName || nextName === tag.name) {
-      return;
-    }
-
     if (nextName.length > MAX_NAME_LENGTH) {
       showModalNotification(`Name must be less than ${MAX_NAME_LENGTH} characters.`, true);
       return;
     }
 
-    if (!isTagNameUnique(subcategoryId, nextName, tagId)) {
-      showModalNotification(`Tag "${nextName}" already exists in this subcategory.`, true);
+    if (UNSUPPORTED_NAME_CHARACTERS.test(nextName)) {
+      showModalNotification(UNSUPPORTED_NAME_MESSAGE, true);
       return;
     }
-
+    const isUnique = renameTarget.kind === "category"
+      ? isCategoryNameUnique(nextName, renameTarget.id)
+      : renameTarget.kind === "folder"
+        ? isSubcategoryNameUnique(renameTarget.parentId, nextName, renameTarget.id)
+        : isTagNameUnique(renameTarget.parentId, nextName, renameTarget.id);
+    if (!isUnique) {
+      showModalNotification(`That ${renameTarget.kind} name is already in use here.`, true);
+      return;
+    }
     const nextTaxonomy = cloneTaxonomy(localTaxonomy);
-    nextTaxonomy.tagsById[tagId].name = nextName;
+    if (renameTarget.kind === "category") nextTaxonomy.categoriesById[renameTarget.id].name = nextName;
+    else if (renameTarget.kind === "folder") nextTaxonomy.subcategoriesById[renameTarget.id].name = nextName;
+    else nextTaxonomy.tagsById[renameTarget.id].name = nextName;
     commitTaxonomyUpdate(nextTaxonomy);
+    setRenameTarget(null);
   };
 
   const handleRemoveCategory = (categoryId: string) => {
@@ -1474,9 +1986,7 @@ const TagManager: React.FC<TagManagerProps> = ({
       return;
     }
 
-    const affectedTagIds = category.subcategoryIds.flatMap(
-      (subcategoryId) => localTaxonomy.subcategoriesById[subcategoryId]?.tagIds || [],
-    );
+    const affectedTagIds = collectTagIdsForParent(localTaxonomy, categoryId);
     const trackReferenceCount = countTrackReferences(tracks, affectedTagIds);
     const playlistReferenceCount = countEntityReferences(playlists, affectedTagIds);
     const artistReferenceCount = countEntityReferences(artists, affectedTagIds);
@@ -1491,7 +2001,7 @@ const TagManager: React.FC<TagManagerProps> = ({
     );
     const confirmed = window.confirm(
       `Delete category "${category.name}"?\n\n` +
-        `This removes ${category.subcategoryIds.length} subcategories, ${affectedTagIds.length} tags, and ${formatDeletionReferenceSummary(trackReferenceCount, playlistReferenceCount, artistReferenceCount, filterReferenceCount, smartPlaylistReferenceCount)}.`,
+        `This removes ${category.subcategoryIds.length} folders, ${affectedTagIds.length} tags, and ${formatDeletionReferenceSummary(trackReferenceCount, playlistReferenceCount, artistReferenceCount, filterReferenceCount, smartPlaylistReferenceCount)}.`,
     );
 
     if (!confirmed) {
@@ -1503,13 +2013,19 @@ const TagManager: React.FC<TagManagerProps> = ({
       (existingCategoryId) => existingCategoryId !== categoryId,
     );
 
-    category.subcategoryIds.forEach((subcategoryId) => {
-      const tagIds = nextTaxonomy.subcategoriesById[subcategoryId]?.tagIds || [];
-      tagIds.forEach((tagId) => {
-        delete nextTaxonomy.tagsById[tagId];
+    const deleteChildren = (parentId: string) => {
+      (nextTaxonomy.childrenByParentId?.[parentId] || []).forEach((childId) => {
+        if (nextTaxonomy.tagsById[childId]) {
+          delete nextTaxonomy.tagsById[childId];
+          return;
+        }
+        deleteChildren(childId);
+        delete nextTaxonomy.subcategoriesById[childId];
+        delete nextTaxonomy.foldersById?.[childId];
       });
-      delete nextTaxonomy.subcategoriesById[subcategoryId];
-    });
+      delete nextTaxonomy.childrenByParentId?.[parentId];
+    };
+    deleteChildren(categoryId);
 
     delete nextTaxonomy.categoriesById[categoryId];
     commitTaxonomyUpdate(nextTaxonomy);
@@ -1521,7 +2037,7 @@ const TagManager: React.FC<TagManagerProps> = ({
       return;
     }
 
-    const affectedTagIds = [...subcategory.tagIds];
+    const affectedTagIds = collectTagIdsForParent(localTaxonomy, subcategoryId);
     const trackReferenceCount = countTrackReferences(tracks, affectedTagIds);
     const playlistReferenceCount = countEntityReferences(playlists, affectedTagIds);
     const artistReferenceCount = countEntityReferences(artists, affectedTagIds);
@@ -1535,7 +2051,7 @@ const TagManager: React.FC<TagManagerProps> = ({
       affectedTagIds,
     );
     const confirmed = window.confirm(
-      `Delete subcategory "${subcategory.name}"?\n\n` +
+      `Delete folder "${subcategory.name}"?\n\n` +
         `This removes ${affectedTagIds.length} tags and ${formatDeletionReferenceSummary(trackReferenceCount, playlistReferenceCount, artistReferenceCount, filterReferenceCount, smartPlaylistReferenceCount)}.`,
     );
 
@@ -1548,12 +2064,27 @@ const TagManager: React.FC<TagManagerProps> = ({
       nextTaxonomy.categoriesById[categoryId].subcategoryIds.filter(
         (candidateId) => candidateId !== subcategoryId,
       );
+    nextTaxonomy.categoriesById[categoryId].childIds =
+      (nextTaxonomy.categoriesById[categoryId].childIds || []).filter((candidateId) => candidateId !== subcategoryId);
+    nextTaxonomy.childrenByParentId![categoryId] =
+      (nextTaxonomy.childrenByParentId![categoryId] || []).filter((candidateId) => candidateId !== subcategoryId);
 
-    affectedTagIds.forEach((tagId) => {
-      delete nextTaxonomy.tagsById[tagId];
-    });
+    const deleteChildren = (parentId: string) => {
+      (nextTaxonomy.childrenByParentId?.[parentId] || []).forEach((childId) => {
+        if (nextTaxonomy.tagsById[childId]) {
+          delete nextTaxonomy.tagsById[childId];
+          return;
+        }
+        deleteChildren(childId);
+        delete nextTaxonomy.subcategoriesById[childId];
+        delete nextTaxonomy.foldersById?.[childId];
+      });
+      delete nextTaxonomy.childrenByParentId?.[parentId];
+    };
+    deleteChildren(subcategoryId);
 
     delete nextTaxonomy.subcategoriesById[subcategoryId];
+    delete nextTaxonomy.foldersById?.[subcategoryId];
     commitTaxonomyUpdate(nextTaxonomy);
   };
 
@@ -1584,10 +2115,20 @@ const TagManager: React.FC<TagManagerProps> = ({
     }
 
     const nextTaxonomy = cloneTaxonomy(localTaxonomy);
-    nextTaxonomy.subcategoriesById[subcategoryId].tagIds =
-      nextTaxonomy.subcategoriesById[subcategoryId].tagIds.filter(
-        (candidateId) => candidateId !== tagId,
-      );
+    if (nextTaxonomy.subcategoriesById[subcategoryId]) {
+      nextTaxonomy.subcategoriesById[subcategoryId].tagIds =
+        nextTaxonomy.subcategoriesById[subcategoryId].tagIds.filter(
+          (candidateId) => candidateId !== tagId,
+        );
+      nextTaxonomy.subcategoriesById[subcategoryId].childIds =
+        (nextTaxonomy.subcategoriesById[subcategoryId].childIds || []).filter((candidateId) => candidateId !== tagId);
+    }
+    if (nextTaxonomy.categoriesById[subcategoryId]) {
+      nextTaxonomy.categoriesById[subcategoryId].childIds =
+        (nextTaxonomy.categoriesById[subcategoryId].childIds || []).filter((candidateId) => candidateId !== tagId);
+    }
+    nextTaxonomy.childrenByParentId![subcategoryId] =
+      (nextTaxonomy.childrenByParentId![subcategoryId] || []).filter((candidateId) => candidateId !== tagId);
     delete nextTaxonomy.tagsById[tagId];
     commitTaxonomyUpdate(nextTaxonomy);
   };
@@ -1615,10 +2156,69 @@ const TagManager: React.FC<TagManagerProps> = ({
     commitTaxonomyUpdate(nextTaxonomy);
   };
 
+  const renderSubcategoryTree = (
+    categoryId: string,
+    subcategory: TagSubcategory,
+    parentId: string,
+  ): React.ReactNode => {
+    const childFolders = subcategory.subcategories || [];
+    const isExpanded = interactionLocked || expandedCategories.includes(subcategory.id);
+
+    return (
+    <React.Fragment key={subcategory.id}>
+      <SortableSubcategoryRow
+        categoryId={categoryId}
+        parentId={parentId}
+        subcategoryId={subcategory.id}
+        name={subcategory.name}
+        tagCount={getSubcategoryTagCount(subcategory)}
+        childFolderCount={childFolders.length}
+        isExpanded={isExpanded}
+        isSelected={selectedSubcategoryId === subcategory.id}
+        isDragDisabled={interactionLocked}
+        isTagDropActive={hoveredSubcategoryId === subcategory.id}
+        onToggleExpanded={toggleTaxonomyNodeExpanded}
+        onSelectSubcategory={selectSubcategory}
+        onRenameSubcategory={handleRenameSubcategory}
+        onDeleteSubcategory={handleRemoveSubcategory}
+        onNativeDragStart={handleNativeSubcategoryDragStart}
+        onNativeDragOver={handleNativeTaxonomyDragOver}
+        onNativeDrop={handleNativeSubcategoryDrop}
+        onNativeDragEnd={clearNativeTaxonomyDrag}
+      />
+      {isExpanded && childFolders.length > 0 ? (
+        <div className={styles.subcategoryList}>
+          <SortableContext
+            items={childFolders.map((child) =>
+              buildSubcategoryDndId(child.id),
+            )}
+            strategy={verticalListSortingStrategy}
+          >
+            {childFolders.map((child) =>
+              renderSubcategoryTree(categoryId, child, subcategory.id),
+            )}
+          </SortableContext>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        className={styles.inlineAddSubcategoryButton}
+        onClick={() => handleAddSubcategory(subcategory.id, categoryId)}
+      >
+        <span className={styles.inlineAddLabel}>+ Add Subfolder</span>
+      </button>
+    </React.Fragment>
+    );
+  };
+
   const handleAddCustomAccent = () => {
-    const normalizedName = newCustomAccentName.trim();
+    const normalizedName = truncateName(newCustomAccentName.trim(), 32);
     if (!normalizedName) {
       showModalNotification("Give the saved color a name first.", true);
+      return;
+    }
+    if (UNSUPPORTED_NAME_CHARACTERS.test(normalizedName)) {
+      showModalNotification(UNSUPPORTED_NAME_MESSAGE, true);
       return;
     }
 
@@ -1644,7 +2244,7 @@ const TagManager: React.FC<TagManagerProps> = ({
     const now = Date.now();
     nextTaxonomy.customAccentsById[accentId] = {
       id: accentId,
-      name: normalizedName.slice(0, 32),
+      name: normalizedName,
       color: newCustomAccentColor.toLowerCase(),
       themeId: newCustomAccentThemeId || null,
       createdAt: now,
@@ -1673,9 +2273,13 @@ const TagManager: React.FC<TagManagerProps> = ({
 
   const handleSaveCustomAccent = () => {
     if (!editingCustomAccentId) return;
-    const normalizedName = editingCustomAccentName.trim().slice(0, 32);
+    const normalizedName = truncateName(editingCustomAccentName.trim(), 32);
     if (!normalizedName) {
       showModalNotification("Give the saved color a name first.", true);
+      return;
+    }
+    if (UNSUPPORTED_NAME_CHARACTERS.test(normalizedName)) {
+      showModalNotification(UNSUPPORTED_NAME_MESSAGE, true);
       return;
     }
 
@@ -1770,6 +2374,10 @@ const TagManager: React.FC<TagManagerProps> = ({
   const handleAddColorTheme = () => {
     const name = promptForName("Name the new collection", "");
     if (!name) return;
+    if (UNSUPPORTED_NAME_CHARACTERS.test(name)) {
+      showModalNotification(UNSUPPORTED_NAME_MESSAGE, true);
+      return;
+    }
     if (normalizeName(name) === "default") {
       showModalNotification('"Default" is reserved for Tagify’s built-in palette.', true);
       return;
@@ -1781,7 +2389,7 @@ const TagManager: React.FC<TagManagerProps> = ({
     const id = `theme:${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     const nextTaxonomy = cloneTaxonomy(localTaxonomy);
     const now = Date.now();
-    nextTaxonomy.colorThemesById[id] = { id, name: name.slice(0, 32), colorIds: [], createdAt: now, updatedAt: now };
+    nextTaxonomy.colorThemesById[id] = { id, name: truncateName(name, 32), colorIds: [], createdAt: now, updatedAt: now };
     nextTaxonomy.colorThemeOrder = [...(nextTaxonomy.colorThemeOrder ?? []), id];
     commitTaxonomyUpdate(nextTaxonomy);
     setSelectedColorThemeId(id);
@@ -1835,6 +2443,10 @@ const TagManager: React.FC<TagManagerProps> = ({
     if (!theme) return;
     const name = promptForName("Rename collection", theme.name);
     if (!name || normalizeName(name) === normalizeName(theme.name)) return;
+    if (UNSUPPORTED_NAME_CHARACTERS.test(name)) {
+      showModalNotification(UNSUPPORTED_NAME_MESSAGE, true);
+      return;
+    }
     if (normalizeName(name) === "default") {
       showModalNotification('"Default" is reserved for Tagify’s built-in palette.', true);
       return;
@@ -1844,7 +2456,7 @@ const TagManager: React.FC<TagManagerProps> = ({
       return;
     }
     const nextTaxonomy = cloneTaxonomy(localTaxonomy);
-    nextTaxonomy.colorThemesById[themeId].name = name.slice(0, 32);
+    nextTaxonomy.colorThemesById[themeId].name = truncateName(name, 32);
     nextTaxonomy.colorThemesById[themeId].updatedAt = Date.now();
     commitTaxonomyUpdate(nextTaxonomy);
   };
@@ -1899,6 +2511,384 @@ const TagManager: React.FC<TagManagerProps> = ({
 
     onClose();
   };
+
+  const getTaxonomyParentChildIds = useCallback(
+    (parentId: string) => [
+      ...(localTaxonomy.childrenByParentId?.[parentId] ??
+        localTaxonomy.subcategoriesById[parentId]?.childIds ??
+        localTaxonomy.categoriesById[parentId]?.childIds ??
+        localTaxonomy.categoriesById[parentId]?.subcategoryIds ??
+        []),
+    ],
+    [localTaxonomy],
+  );
+
+  const handleNativeCategoryDragStart = useCallback(
+    (event: React.DragEvent, categoryId: string) => {
+      if (interactionLocked) {
+        event.preventDefault();
+        return;
+      }
+
+      event.stopPropagation();
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", buildCategoryDndId(categoryId));
+      setNativeTaxonomyDragState({ type: "category", categoryId });
+      setOpenAccentPickerTagId(null);
+    },
+    [interactionLocked],
+  );
+
+  const handleNativeSubcategoryDragStart = useCallback(
+    (
+      event: React.DragEvent,
+      categoryId: string,
+      parentId: string,
+      subcategoryId: string,
+    ) => {
+      if (interactionLocked) {
+        event.preventDefault();
+        return;
+      }
+
+      event.stopPropagation();
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", buildSubcategoryDndId(subcategoryId));
+      setNativeTaxonomyDragState({
+        type: "subcategory",
+        categoryId,
+        parentId,
+        subcategoryId,
+      });
+      setOpenAccentPickerTagId(null);
+    },
+    [interactionLocked],
+  );
+
+  const handleNativeTagDragStart = useCallback(
+    (
+      event: React.DragEvent,
+      categoryId: string,
+      parentId: string,
+      tagId: string,
+    ) => {
+      if (interactionLocked) {
+        event.preventDefault();
+        return;
+      }
+
+      event.stopPropagation();
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", buildTagDndId(tagId));
+      setNativeTaxonomyDragState({
+        type: "tag",
+        categoryId,
+        parentId,
+        tagId,
+      });
+      setOpenAccentPickerTagId(null);
+    },
+    [interactionLocked],
+  );
+
+  const handleNativeTaxonomyDragOver = useCallback(
+    (event: React.DragEvent) => {
+      if (!nativeTaxonomyDragState || interactionLocked) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+    },
+    [interactionLocked, nativeTaxonomyDragState],
+  );
+
+  const clearNativeTaxonomyDrag = useCallback(() => {
+    setNativeTaxonomyDragState(null);
+  }, []);
+
+  const handleNativeCategoryDrop = useCallback(
+    (event: React.DragEvent, targetCategoryId: string) => {
+      if (!nativeTaxonomyDragState || interactionLocked) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (nativeTaxonomyDragState.type === "category") {
+        const placement = getDropPlacement(
+          { x: event.clientX, y: event.clientY },
+          event.currentTarget.getBoundingClientRect(),
+        );
+        const result =
+          placement === "inside"
+            ? moveCategoryIntoParent(
+                localTaxonomy,
+                nativeTaxonomyDragState.categoryId,
+                targetCategoryId,
+                getTaxonomyParentChildIds(targetCategoryId).length,
+              )
+            : moveCategory(
+                localTaxonomy,
+                localTaxonomy.categoryOrder.indexOf(nativeTaxonomyDragState.categoryId),
+                getRelativeInsertIndex(
+                  localTaxonomy.categoryOrder,
+                  targetCategoryId,
+                  placement,
+                ) ?? localTaxonomy.categoryOrder.length,
+              );
+        const didMove = applyMoveResult(
+          result,
+          buildSubcategoryMoveErrorMessage(getMoveReason(result)),
+        );
+        if (didMove) {
+          if (placement === "inside") {
+            selectSubcategory(targetCategoryId, nativeTaxonomyDragState.categoryId);
+          } else {
+            selectCategory(nativeTaxonomyDragState.categoryId);
+          }
+        }
+        clearNativeTaxonomyDrag();
+        return;
+      }
+
+      if (nativeTaxonomyDragState.type === "tag") {
+        const targetIndex = getTaxonomyParentChildIds(targetCategoryId).length;
+        const result = moveTag(
+          localTaxonomy,
+          nativeTaxonomyDragState.tagId,
+          targetCategoryId,
+          targetIndex,
+        );
+        const didMove = applyMoveResult(
+          result,
+          buildTagMoveErrorMessage(getMoveReason(result)),
+        );
+        if (didMove) {
+          selectCategory(targetCategoryId);
+        }
+        clearNativeTaxonomyDrag();
+        return;
+      }
+
+      const targetIndex = getTaxonomyParentChildIds(targetCategoryId).length;
+      const result = moveSubcategory(
+        localTaxonomy,
+        nativeTaxonomyDragState.subcategoryId,
+        targetCategoryId,
+        targetIndex,
+      );
+      const didMove = applyMoveResult(
+        result,
+        buildSubcategoryMoveErrorMessage(getMoveReason(result)),
+      );
+      if (didMove) {
+        selectSubcategory(targetCategoryId, nativeTaxonomyDragState.subcategoryId);
+      }
+      clearNativeTaxonomyDrag();
+    },
+    [
+      applyMoveResult,
+      clearNativeTaxonomyDrag,
+      getTaxonomyParentChildIds,
+      interactionLocked,
+      localTaxonomy,
+      nativeTaxonomyDragState,
+      selectCategory,
+      selectSubcategory,
+    ],
+  );
+
+  const handleNativeSubcategoryDrop = useCallback(
+    (
+      event: React.DragEvent,
+      categoryId: string,
+      parentId: string,
+      subcategoryId: string,
+    ) => {
+      if (!nativeTaxonomyDragState || interactionLocked) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (nativeTaxonomyDragState.type === "tag") {
+        const targetIndex = getTaxonomyParentChildIds(subcategoryId).length;
+        const result = moveTag(
+          localTaxonomy,
+          nativeTaxonomyDragState.tagId,
+          subcategoryId,
+          targetIndex,
+        );
+        const didMove = applyMoveResult(
+          result,
+          buildTagMoveErrorMessage(getMoveReason(result)),
+        );
+        if (didMove) {
+          selectSubcategory(categoryId, subcategoryId);
+        }
+        clearNativeTaxonomyDrag();
+        return;
+      }
+
+      if (nativeTaxonomyDragState.type !== "subcategory") {
+        clearNativeTaxonomyDrag();
+        return;
+      }
+
+      const placement = getDropPlacement(
+        { x: event.clientX, y: event.clientY },
+        event.currentTarget.getBoundingClientRect(),
+      );
+      const shouldNestInsideTarget =
+        placement === "inside" &&
+        nativeTaxonomyDragState.subcategoryId !== subcategoryId;
+      const targetParentId = shouldNestInsideTarget ? subcategoryId : parentId;
+      const targetChildIds = getTaxonomyParentChildIds(targetParentId);
+      const targetIndex = shouldNestInsideTarget
+        ? targetChildIds.length
+        : nativeTaxonomyDragState.parentId === parentId
+          ? getSortableReorderTargetIndex(
+              targetChildIds,
+              nativeTaxonomyDragState.subcategoryId,
+              subcategoryId,
+            )
+          : getRelativeInsertIndex(targetChildIds, subcategoryId, dragPlacementRef.current);
+      const result = moveSubcategory(
+        localTaxonomy,
+        nativeTaxonomyDragState.subcategoryId,
+        targetParentId,
+        targetIndex === null || targetIndex < 0 ? 0 : targetIndex,
+      );
+      const didMove = applyMoveResult(
+        result,
+        buildSubcategoryMoveErrorMessage(getMoveReason(result)),
+      );
+      if (didMove) {
+        selectSubcategory(categoryId, nativeTaxonomyDragState.subcategoryId);
+      }
+      clearNativeTaxonomyDrag();
+    },
+    [
+      applyMoveResult,
+      clearNativeTaxonomyDrag,
+      getTaxonomyParentChildIds,
+      interactionLocked,
+      localTaxonomy,
+      nativeTaxonomyDragState,
+      selectCategory,
+      selectSubcategory,
+    ],
+  );
+
+  const handleNativeTagDrop = useCallback(
+    (
+      event: React.DragEvent,
+      categoryId: string,
+      parentId: string,
+      targetTagId: string,
+    ) => {
+      if (
+        !nativeTaxonomyDragState ||
+        nativeTaxonomyDragState.type !== "tag" ||
+        interactionLocked
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const placement = getDropPlacement(
+        { x: event.clientX, y: event.clientY },
+        event.currentTarget.getBoundingClientRect(),
+      );
+      const targetChildIds = getTaxonomyParentChildIds(parentId);
+      const targetIndex = getRelativeInsertIndex(
+        targetChildIds,
+        targetTagId,
+        placement === "inside" ? "after" : placement,
+      );
+      const result = moveTag(
+        localTaxonomy,
+        nativeTaxonomyDragState.tagId,
+        parentId,
+        targetIndex === null || targetIndex < 0 ? targetChildIds.length : targetIndex,
+      );
+      const didMove = applyMoveResult(
+        result,
+        buildTagMoveErrorMessage(getMoveReason(result)),
+      );
+      if (didMove) {
+        if (localTaxonomy.categoriesById[parentId]) {
+          selectCategory(parentId);
+        } else {
+          selectSubcategory(categoryId, parentId);
+        }
+      }
+      clearNativeTaxonomyDrag();
+    },
+    [
+      applyMoveResult,
+      clearNativeTaxonomyDrag,
+      getTaxonomyParentChildIds,
+      interactionLocked,
+      localTaxonomy,
+      nativeTaxonomyDragState,
+      selectCategory,
+      selectSubcategory,
+    ],
+  );
+
+  const handleNativeTagEndDrop = useCallback(
+    (event: React.DragEvent, parentId: string) => {
+      if (
+        !nativeTaxonomyDragState ||
+        nativeTaxonomyDragState.type !== "tag" ||
+        interactionLocked
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const targetIndex = getTaxonomyParentChildIds(parentId).length;
+      const result = moveTag(
+        localTaxonomy,
+        nativeTaxonomyDragState.tagId,
+        parentId,
+        targetIndex,
+      );
+      const didMove = applyMoveResult(
+        result,
+        buildTagMoveErrorMessage(getMoveReason(result)),
+      );
+      if (didMove) {
+        if (localTaxonomy.categoriesById[parentId]) {
+          selectCategory(parentId);
+        } else {
+          const targetCategoryId =
+            localTaxonomy.subcategoriesById[parentId]?.categoryId;
+          if (targetCategoryId) {
+            selectSubcategory(targetCategoryId, parentId);
+          }
+        }
+      }
+      clearNativeTaxonomyDrag();
+    },
+    [
+      applyMoveResult,
+      clearNativeTaxonomyDrag,
+      getTaxonomyParentChildIds,
+      interactionLocked,
+      localTaxonomy,
+      nativeTaxonomyDragState,
+      selectCategory,
+      selectSubcategory,
+    ],
+  );
 
   const collisionDetection = useCallback<CollisionDetection>(
     (args) => {
@@ -2027,33 +3017,65 @@ const TagManager: React.FC<TagManagerProps> = ({
     }
 
     if (activeData.type === "category" && overData.type === "category") {
-      const sourceIndex = localTaxonomy.categoryOrder.indexOf(activeData.categoryId);
-      const targetIndex =
-        getSortableReorderTargetIndex(
-          localTaxonomy.categoryOrder,
-          activeData.categoryId,
-          overData.categoryId,
-        ) ?? localTaxonomy.categoryOrder.indexOf(overData.categoryId);
-      const result = moveCategory(localTaxonomy, sourceIndex, targetIndex);
+      const result =
+        dragPlacementRef.current === "inside"
+          ? moveCategoryIntoParent(
+              localTaxonomy,
+              activeData.categoryId,
+              overData.categoryId,
+              getTaxonomyParentChildIds(overData.categoryId).length,
+            )
+          : moveCategory(
+              localTaxonomy,
+              localTaxonomy.categoryOrder.indexOf(activeData.categoryId),
+              getRelativeInsertIndex(
+                localTaxonomy.categoryOrder,
+                overData.categoryId,
+                dragPlacementRef.current,
+              ) ?? localTaxonomy.categoryOrder.length,
+            );
 
-      applyMoveResult(result, buildCategoryMoveErrorMessage(getMoveReason(result)));
+      const didMove = applyMoveResult(
+        result,
+        buildSubcategoryMoveErrorMessage(getMoveReason(result)),
+      );
+      if (didMove) {
+        if (dragPlacementRef.current === "inside") {
+          selectSubcategory(overData.categoryId, activeData.categoryId);
+        } else {
+          selectCategory(activeData.categoryId);
+        }
+      }
       return;
     }
 
     if (activeData.type === "subcategory") {
+      const getParentChildIds = (parentId: string) => [
+        ...(localTaxonomy.childrenByParentId?.[parentId] ??
+          localTaxonomy.subcategoriesById[parentId]?.childIds ??
+          localTaxonomy.categoriesById[parentId]?.childIds ??
+          localTaxonomy.categoriesById[parentId]?.subcategoryIds ??
+          []),
+      ];
+
       if (overData.type === "subcategory") {
-        const targetCategoryId = overData.categoryId;
-        const targetSubcategoryIds =
-          localTaxonomy.categoriesById[targetCategoryId]?.subcategoryIds ?? [];
-        const targetIndex =
-          activeData.categoryId === targetCategoryId
+        const shouldNestInsideTarget =
+          dragPlacementRef.current === "inside" &&
+          activeData.subcategoryId !== overData.subcategoryId;
+        const targetParentId = shouldNestInsideTarget
+          ? overData.subcategoryId
+          : overData.parentId;
+        const targetChildIds = getParentChildIds(targetParentId);
+        const targetIndex = shouldNestInsideTarget
+          ? targetChildIds.length
+          : activeData.parentId === targetParentId
             ? getSortableReorderTargetIndex(
-                targetSubcategoryIds,
+                targetChildIds,
                 activeData.subcategoryId,
                 overData.subcategoryId,
               )
             : getRelativeInsertIndex(
-                targetSubcategoryIds,
+                targetChildIds,
                 overData.subcategoryId,
                 dragPlacementRef.current,
               );
@@ -2063,7 +3085,7 @@ const TagManager: React.FC<TagManagerProps> = ({
         const result = moveSubcategory(
           localTaxonomy,
           activeData.subcategoryId,
-          targetCategoryId,
+          targetParentId,
           normalizedTargetIndex,
         );
 
@@ -2073,13 +3095,13 @@ const TagManager: React.FC<TagManagerProps> = ({
         );
 
         if (didMove) {
-          selectSubcategory(targetCategoryId, activeData.subcategoryId);
+          selectSubcategory(overData.categoryId, activeData.subcategoryId);
         }
       }
 
       if (overData.type === "category") {
         const targetIndex =
-          localTaxonomy.categoriesById[overData.categoryId]?.subcategoryIds.length ?? 0;
+          getParentChildIds(overData.categoryId).length;
 
         const result = moveSubcategory(
           localTaxonomy,
@@ -2106,7 +3128,7 @@ const TagManager: React.FC<TagManagerProps> = ({
         const targetSubcategoryId = overData.subcategoryId;
         const targetIndex =
           getSortableReorderTargetIndex(
-            localTaxonomy.subcategoriesById[targetSubcategoryId]?.tagIds ?? [],
+            getTaxonomyParentChildIds(targetSubcategoryId),
             activeData.tagId,
             overData.tagId,
           ) ?? -1;
@@ -2135,7 +3157,7 @@ const TagManager: React.FC<TagManagerProps> = ({
       if (overData.type === "tag-end") {
         const targetSubcategoryId = overData.subcategoryId;
         const targetIndex =
-          localTaxonomy.subcategoriesById[targetSubcategoryId]?.tagIds.length ?? 0;
+          getTaxonomyParentChildIds(targetSubcategoryId).length;
 
         const result = moveTag(
           localTaxonomy,
@@ -2161,7 +3183,7 @@ const TagManager: React.FC<TagManagerProps> = ({
       if (overData.type === "subcategory") {
         const targetSubcategoryId = overData.subcategoryId;
         const targetIndex =
-          localTaxonomy.subcategoriesById[targetSubcategoryId]?.tagIds.length ?? 0;
+          getTaxonomyParentChildIds(targetSubcategoryId).length;
 
         const result = moveTag(
           localTaxonomy,
@@ -2177,6 +3199,30 @@ const TagManager: React.FC<TagManagerProps> = ({
 
         if (didMove) {
           selectSubcategory(overData.categoryId, targetSubcategoryId);
+        }
+      }
+
+      if (overData.type === "category") {
+        const targetCategoryId = overData.categoryId;
+        const targetIndex =
+          localTaxonomy.childrenByParentId?.[targetCategoryId]?.length
+          ?? localTaxonomy.categoriesById[targetCategoryId]?.childIds?.length
+          ?? 0;
+
+        const result = moveTag(
+          localTaxonomy,
+          activeData.tagId,
+          targetCategoryId,
+          targetIndex,
+        );
+
+        const didMove = applyMoveResult(
+          result,
+          buildTagMoveErrorMessage(getMoveReason(result)),
+        );
+
+        if (didMove) {
+          selectCategory(targetCategoryId);
         }
       }
     }
@@ -2234,8 +3280,10 @@ const TagManager: React.FC<TagManagerProps> = ({
               <h2 className={styles.title}>Tag Manager</h2>
               <p className={styles.subtitle}>
                 {activeView === "tags"
-                  ? "Reorder categories, move subcategories, and drag tags across the taxonomy."
-                  : "Manage the reusable colors available throughout Tagify."}
+                  ? "Reorder categories, move folders, and organize your tags."
+                  : activeView === "community"
+                    ? "Browse Community tags and add them to your own library."
+                    : "Manage the reusable colors available throughout Tagify."}
               </p>
             </div>
 
@@ -2245,7 +3293,7 @@ const TagManager: React.FC<TagManagerProps> = ({
                   type="text"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Search categories, subcategories, and tags…"
+                  placeholder="Search categories, folders, and tags…"
                   className={styles.searchInput}
                 />
               ) : null}
@@ -2254,6 +3302,7 @@ const TagManager: React.FC<TagManagerProps> = ({
 
           <div className={styles.viewTabs} role="tablist" aria-label="Tag Manager sections">
             <button type="button" role="tab" aria-selected={activeView === "tags"} className={`${styles.viewTab} ${activeView === "tags" ? styles.viewTabActive : ""}`} onClick={() => setActiveView("tags")}>Tags</button>
+            <button type="button" role="tab" aria-selected={activeView === "community"} className={`${styles.viewTab} ${activeView === "community" ? styles.viewTabActive : ""}`} onClick={() => setActiveView("community")}>Community</button>
             <button type="button" role="tab" aria-selected={activeView === "colors"} className={`${styles.viewTab} ${activeView === "colors" ? styles.viewTabActive : ""}`} onClick={() => setActiveView("colors")}>Colors</button>
           </div>
 
@@ -2278,14 +3327,14 @@ const TagManager: React.FC<TagManagerProps> = ({
                 <div className={styles.paneHeader}>
                   <div>
                     <h3 className={styles.paneTitle}>Taxonomy</h3>
-                    <p className={styles.paneSubtitle}>Categories/subcategories</p>
+                    <p className={styles.paneSubtitle}>Categories and folders</p>
                   </div>
                   <button
                     type="button"
                     className={styles.secondaryButton}
                     onClick={() =>
                       setExpandedCategories(
-                        areAllCategoriesExpanded ? [] : localTaxonomy.categoryOrder,
+                        areAllCategoriesExpanded ? [] : expandableTaxonomyIds,
                       )
                     }
                     disabled={interactionLocked}
@@ -2301,7 +3350,7 @@ const TagManager: React.FC<TagManagerProps> = ({
                   >
                     {filteredCategories.length === 0 ? (
                       <div className={styles.emptyStateSmall}>
-                        No taxonomy rows match this search.
+                        No categories, folders, or tags match this search.
                       </div>
                     ) : (
                       filteredCategories.map((category) => {
@@ -2325,10 +3374,14 @@ const TagManager: React.FC<TagManagerProps> = ({
                                 dragState?.type === "tag")
                             }
                             tagCount={getCategoryTagCount(category)}
-                            onToggleExpanded={toggleCategoryExpanded}
+                            onToggleExpanded={toggleTaxonomyNodeExpanded}
                             onSelectCategory={selectCategory}
                             onRenameCategory={handleRenameCategory}
                             onDeleteCategory={handleRemoveCategory}
+                            onNativeDragStart={handleNativeCategoryDragStart}
+                            onNativeDragOver={handleNativeTaxonomyDragOver}
+                            onNativeDrop={handleNativeCategoryDrop}
+                            onNativeDragEnd={clearNativeTaxonomyDrag}
                           >
                             <SortableContext
                               items={category.subcategories.map((subcategory) =>
@@ -2338,24 +3391,12 @@ const TagManager: React.FC<TagManagerProps> = ({
                             >
                               {category.subcategories.length === 0 ? (
                                 <div className={styles.emptyStateSmall}>
-                                  No subcategories yet.
+                                  No folders yet.
                                 </div>
                               ) : (
-                                category.subcategories.map((subcategory) => (
-                                  <SortableSubcategoryRow
-                                    key={subcategory.id}
-                                    categoryId={category.id}
-                                    subcategoryId={subcategory.id}
-                                    name={subcategory.name}
-                                    tagCount={subcategory.tags.length}
-                                    isSelected={selectedSubcategoryId === subcategory.id}
-                                    isDragDisabled={interactionLocked}
-                                    isTagDropActive={hoveredSubcategoryId === subcategory.id}
-                                    onSelectSubcategory={selectSubcategory}
-                                    onRenameSubcategory={handleRenameSubcategory}
-                                    onDeleteSubcategory={handleRemoveSubcategory}
-                                  />
-                                ))
+                                category.subcategories.map((subcategory) =>
+                                  renderSubcategoryTree(category.id, subcategory, category.id),
+                                )
                               )}
                             </SortableContext>
                             <button
@@ -2363,7 +3404,7 @@ const TagManager: React.FC<TagManagerProps> = ({
                               className={styles.inlineAddSubcategoryButton}
                               onClick={() => handleAddSubcategory(category.id)}
                             >
-                              <span className={styles.inlineAddLabel}>+ Add Subcategory</span>
+                              <span className={styles.inlineAddLabel}>+ Add Folder</span>
                             </button>
                           </SortableCategoryCard>
                         );
@@ -2382,35 +3423,39 @@ const TagManager: React.FC<TagManagerProps> = ({
 
               <div className={styles.pane}>
                 <div className={styles.paneHeader}>
-                  {selectedCategoryForInspector && selectedSubcategory ? (
+                  {selectedCategoryForInspector && selectedTagParentId ? (
                     <div>
                       <div className={styles.breadcrumb} aria-label="Selected path">
                         {selectedCategoryForInspector.name}
-                        <span className={styles.breadcrumbSeparator}>/</span>
-                        <span>{selectedSubcategory.name}</span>
+                        {selectedFolderPath.map((folder) => (
+                          <React.Fragment key={folder.id}>
+                            <span className={styles.breadcrumbSeparator}>/</span>
+                            <span>{folder.name}</span>
+                          </React.Fragment>
+                        ))}
                       </div>
                       <p className={styles.paneSubtitle}>
-                        Drag tags here to reorder them, or drop them onto a subcategory in the tree to move them.
+                        Drag tags here to reorder them, or drop them onto a folder in the tree to move them.
                       </p>
                     </div>
                   ) : (
                     <div>
                       <h3 className={styles.paneTitle}>Tags</h3>
                       <p className={styles.paneSubtitle}>
-                        Select a subcategory to manage its tags.
+                        Select a category or folder to manage its tags.
                       </p>
                     </div>
                   )}
                 </div>
 
-                {selectedCategoryForInspector && selectedSubcategory ? (
+                {selectedCategoryForInspector && selectedTagParentId ? (
                   <div className={styles.inspectorPane}>
                     <div className={styles.tagToolbar}>
                       <input
                         type="text"
                         value={newTagName}
                         onChange={(event) => setNewTagName(event.target.value)}
-                        placeholder={`Add tag to ${selectedSubcategory.name}…`}
+                        placeholder={`Add tag to ${selectedTagParentName}…`}
                         className={styles.textInput}
                         onKeyDown={(event) => {
                           if (event.key === "Enter") {
@@ -2430,7 +3475,9 @@ const TagManager: React.FC<TagManagerProps> = ({
                       >
                         {selectedTags.length === 0 ? (
                           <div className={styles.emptyState}>
-                            This subcategory does not have any tags yet.
+                            {selectedTagParentIsCategory
+                              ? "This category does not have any tags yet."
+                              : "This folder has no tags directly in it. Select a subfolder to see its tags."}
                           </div>
                         ) : (
                           <div className={styles.tagChipGrid}>
@@ -2438,9 +3485,13 @@ const TagManager: React.FC<TagManagerProps> = ({
                               <SortableTagRow
                                 key={tag.id}
                                 categoryId={selectedCategoryForInspector.id}
-                                subcategoryId={selectedSubcategory.id}
+                                subcategoryId={selectedTagParentId}
                                 tag={tag}
                                 isDragDisabled={interactionLocked}
+                                isDropActive={
+                                  nativeTaxonomyDragState?.type === "tag" &&
+                                  nativeTaxonomyDragState.tagId !== tag.id
+                                }
                                 isAccentPickerOpen={openAccentPickerTagId === tag.id}
                                 customAccentsById={localTaxonomy.customAccentsById}
                                 accentGroups={accentGroups}
@@ -2448,11 +3499,18 @@ const TagManager: React.FC<TagManagerProps> = ({
                                 onDeleteTag={handleRemoveTag}
                                 onToggleAccentPicker={handleToggleAccentPicker}
                                 onSetTagAccent={handleSetTagAccent}
+                                onNativeDragStart={handleNativeTagDragStart}
+                                onNativeDragOver={handleNativeTaxonomyDragOver}
+                                onNativeDrop={handleNativeTagDrop}
+                                onNativeDragEnd={clearNativeTaxonomyDrag}
                               />
                             ))}
                             <TagEndDropZone
-                              subcategoryId={selectedSubcategory.id}
+                              subcategoryId={selectedTagParentId}
                               isVisible={!interactionLocked}
+                              isDropActive={nativeTaxonomyDragState?.type === "tag"}
+                              onNativeDragOver={handleNativeTaxonomyDragOver}
+                              onNativeDrop={handleNativeTagEndDrop}
                             />
                           </div>
                         )}
@@ -2461,7 +3519,7 @@ const TagManager: React.FC<TagManagerProps> = ({
                   </div>
                 ) : (
                   <div className={styles.emptyState}>
-                    Select a category or subcategory to start organizing tags.
+                    Select a category or folder to start organizing tags.
                   </div>
                 )}
               </div>
@@ -2476,6 +3534,182 @@ const TagManager: React.FC<TagManagerProps> = ({
               ) : null}
             </DragOverlay>
             </DndContext>
+          ) : activeView === "community" ? (
+            <div className={styles.communityBody}>
+              <aside className={styles.communitySidebar} aria-label="Community tag import destination">
+                <div className={styles.destinationCard}>
+                  <h3 className={styles.paneTitle}>Import Destination</h3>
+                  <p className={styles.paneSubtitle}>
+                    Imported tags land in the selected category or folder.
+                  </p>
+                  <div className={styles.breadcrumb} aria-label="Community import destination">
+                    {communityDestinationPath}
+                  </div>
+                </div>
+
+                <div className={styles.communityDestinationTree}>
+                  {localCategories.map((category) => {
+                    const isSelected =
+                      selectedCategoryId === category.id && selectedSubcategoryId === null;
+
+                    return (
+                      <div key={category.id} className={styles.communityDestinationCategory}>
+                        <button
+                          type="button"
+                          className={`${styles.communityDestinationButton} ${isSelected ? styles.communityDestinationButtonActive : ""}`}
+                          onClick={() => selectCategory(category.id)}
+                        >
+                          <span>{category.name}</span>
+                          <small>{getCategoryTagCount(category)} tags</small>
+                        </button>
+                        {category.subcategories.length > 0 ? (
+                          <div className={styles.communityDestinationSubfolders}>
+                            {category.subcategories.map((subcategory) => (
+                              <CommunityDestinationFolder
+                                key={subcategory.id}
+                                categoryId={category.id}
+                                subcategory={subcategory}
+                                selectedSubcategoryId={selectedSubcategoryId}
+                                onSelectSubcategory={selectSubcategory}
+                              />
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </aside>
+
+              <main className={styles.communityInspector}>
+                <div className={styles.paneHeader}>
+                  <div>
+                    <h3 className={styles.paneTitle}>Community Tag Catalog</h3>
+                    <p className={styles.paneSubtitle}>
+                      Public tags from community-tagged tracks, normalized by tag name.
+                    </p>
+                  </div>
+                </div>
+
+                <div className={styles.communityFilterControls}>
+                  <input
+                    type="text"
+                    value={communitySearchQuery}
+                    onChange={(event) => setCommunitySearchQuery(event.target.value)}
+                    placeholder="Search community tags..."
+                    className={styles.searchInput}
+                  />
+                  <select
+                    className={styles.compactSelect}
+                    value={communitySortMode}
+                    onChange={(event) =>
+                      setCommunitySortMode(event.target.value as CommunityCatalogSortMode)
+                    }
+                    aria-label="Sort community tags"
+                  >
+                    <option value="contributors">Most users</option>
+                    <option value="popular">Most tracks</option>
+                    <option value="alphabetical">Alphabetical</option>
+                    <option value="recent">Recent</option>
+                  </select>
+                  <button
+                    type="button"
+                    className={styles.communitySortDirectionButton}
+                    onClick={() =>
+                      setCommunitySortDirection((currentDirection) =>
+                        currentDirection === "ascending" ? "descending" : "ascending",
+                      )
+                    }
+                    title={`Sort ${communitySortDirection === "ascending" ? "descending" : "ascending"}`}
+                    aria-label={`Sort community tags ${communitySortDirection === "ascending" ? "descending" : "ascending"}`}
+                  >
+                    {communitySortDirection === "ascending" ? "↑" : "↓"}
+                  </button>
+                  <select
+                    className={styles.compactSelect}
+                    value={communityMinTrackCount}
+                    onChange={(event) => setCommunityMinTrackCount(Number(event.target.value))}
+                    aria-label="Minimum community track count"
+                  >
+                    {[1, 5, 10, 25, 50].map((count) => (
+                      <option key={count} value={count}>
+                        {count}+ tracks
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {isLoadingCommunityTags ? (
+                  <div className={styles.emptyState}>Loading community tags...</div>
+                ) : communityTagsError ? (
+                  <div className={styles.emptyState}>
+                    <p>{communityTagsError}</p>
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      onClick={() => {
+                        communityTagsRequestRef.current = null;
+                        setCommunityTagsError(null);
+                        setCommunityTags([]);
+                        setIsLoadingCommunityTags(true);
+                        const tagsRequest = loadCommunityCatalogTags();
+                        communityTagsRequestRef.current = tagsRequest;
+                        tagsRequest
+                          .then((tags) => {
+                            setCommunityTags(tags);
+                          })
+                          .catch((error) => {
+                            console.error("Failed to load community tags", error);
+                            setCommunityTagsError("Community tags could not be loaded. Check your Spotify console for the request error.");
+                            communityTagsRequestRef.current = null;
+                          })
+                          .finally(() => {
+                            setIsLoadingCommunityTags(false);
+                          });
+                      }}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : visibleCommunityTags.length === 0 ? (
+                  <div className={styles.emptyState}>No community tags match this search.</div>
+                ) : (
+                  <div className={styles.communityTagList}>
+                    {visibleCommunityTags.map((tag) => (
+                      <article
+                        key={tag.key}
+                        className={styles.communityTagRow}
+                        role="link"
+                        tabIndex={0}
+                        aria-label={`Open Community songs tagged ${tag.name}`}
+                        onClick={() => openCommunityTagSearch(tag)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          openCommunityTagSearch(tag);
+                        }}
+                      >
+                        <div className={styles.communityTagCopy}>
+                          <strong>{tag.name}</strong>
+                          <span>{formatCommunityTagStats(tag)}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className={styles.secondaryButtonSmall}
+                          disabled={importingCommunityTagKey === tag.key}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleImportCommunityTag(tag);
+                          }}
+                        >
+                          {importingCommunityTagKey === tag.key ? "Importing..." : "Import"}
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </main>
+            </div>
           ) : (
             <div className={styles.colorLibraryBody}>
               <aside className={styles.colorCollectionSidebar} aria-label="Color collections">
@@ -2659,6 +3893,40 @@ const TagManager: React.FC<TagManagerProps> = ({
               </button>
             </div>
           </div>
+          {renameTarget ? (
+            <div className={styles.renameOverlay} onClick={() => setRenameTarget(null)}>
+              <form
+                className={styles.renameDialog}
+                role="dialog"
+                aria-modal="true"
+                aria-label={`Rename ${renameTarget.kind}`}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === "Escape") setRenameTarget(null);
+                }}
+                onKeyUp={(event) => event.stopPropagation()}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  confirmRename();
+                }}
+              >
+                <label htmlFor="tag-manager-rename-input">Rename {renameTarget.kind}</label>
+                <input
+                  id="tag-manager-rename-input"
+                  autoFocus
+                  className={styles.textInput}
+                  value={renameValue}
+                  maxLength={MAX_NAME_LENGTH}
+                  onChange={(event) => setRenameValue(event.target.value)}
+                />
+                <div className={styles.renameActions}>
+                  <button type="button" className={styles.secondaryButton} onClick={() => setRenameTarget(null)}>Cancel</button>
+                  <button type="submit" className={styles.primaryButton} disabled={!renameValue.trim()}>Save name</button>
+                </div>
+              </form>
+            </div>
+          ) : null}
         </div>
       </div>
     </Portal>

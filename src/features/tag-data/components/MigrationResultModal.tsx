@@ -44,40 +44,29 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
                 <span className={styles.errorIcon}>⚠️</span>
                 <h2 className={styles.title}>
                   {result.success
-                    ? "Storage Upgrade Incomplete"
-                    : "Migration Issue"}
+                    ? "Library update not finished"
+                    : "Couldn't finish updating your library"}
                 </h2>
               </div>
 
               <div className={styles.content}>
                 <p className={styles.description}>
                   {result.success
-                    ? "Tagify is working, but couldn't upgrade to the new storage system. You can continue using Tagify normally, but the ~10,000 track limit will still apply."
-                    : "There was a problem during the migration. Don't worry — your data should still be intact."}
+                    ? "You can keep using Tagify. Your library is still saved the same way for now, so very large libraries may need more space."
+                    : "Tagify couldn't finish opening your library. Your saved data has not been intentionally removed."}
                 </p>
 
-                {(result.error || result.fallbackReason) && (
-                  <div className={styles.errorBox}>
-                    <strong>Reason:</strong>{" "}
-                    {result.fallbackReason || result.error}
-                  </div>
-                )}
-
                 <div className={styles.fallbackInfo}>
-                  <h3>What this means</h3>
+                  <h3>What you can do</h3>
                   <ul>
-                    <li>Your data is safe and Tagify will continue working</li>
-                    <li>
-                      You're using localStorage (limited to ~10,000 tracks)
-                    </li>
-                    <li>You can retry the upgrade anytime from Settings</li>
+                    <li>Download a Tagify backup before making more changes</li>
+                    <li>Check that this device has enough free space</li>
+                    <li>Try again from Settings, or contact support if it keeps happening</li>
                   </ul>
                 </div>
 
                 <p className={styles.helpText}>
-                  Common fixes: Clear browser cache, ensure sufficient storage
-                  space, or try a different browser. If issues persist, export a
-                  backup from Settings.
+                  Do not clear Spotify&apos;s saved data while this is unresolved.
                 </p>
               </div>
 
@@ -88,11 +77,49 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
                     onClick={handleRetry}
                     disabled={isRetrying}
                   >
-                    {isRetrying ? "Retrying..." : "Retry Upgrade"}
+                    {isRetrying ? "Trying again..." : "Try again"}
                   </button>
                 )}
                 <button className={styles.primaryButton} onClick={onClose}>
-                  Continue Anyway
+                  Close
+                </button>
+              </div>
+            </>
+          ) : result.restoredOlderCopy ? (
+            <>
+              <div className={styles.header}>
+                <span className={styles.errorIcon}>⚠️</span>
+                <h2 className={styles.title}>Tagify restored an older copy of your library</h2>
+              </div>
+
+              <div className={styles.content}>
+                <p className={styles.description}>
+                  Your saved library on this device was cleared, usually by a Spotify update. Tagify
+                  restored the older copy it kept on this device and saved it to your Downloads folder.
+                </p>
+
+                <div className={styles.statsGrid}>
+                  <div className={styles.stat}>
+                    <span className={styles.statValue}>
+                      {result.trackCount.toLocaleString()}
+                    </span>
+                    <span className={styles.statLabel}>Tracks</span>
+                  </div>
+                </div>
+
+                <div className={styles.fallbackInfo}>
+                  <h3>Get your latest changes back</h3>
+                  <ul>
+                    <li>Look in your Downloads folder for the newest file named tagify-auto-backup or tagify-backup</li>
+                    <li>Choose Import in Tagify and select that file</li>
+                    <li>If you use Cloud Sync, reconnect it to restore your library from Community</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className={styles.footer}>
+                <button className={styles.primaryButton} onClick={onClose}>
+                  Got it
                 </button>
               </div>
             </>
@@ -102,16 +129,16 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
                 <span className={styles.successIcon}>✓</span>
                 <h2 className={styles.title}>
                   {didStorageMigration
-                    ? "Storage Upgrade Complete"
-                    : "Migration Complete"}
+                    ? "Your library is ready"
+                    : "Your library is up to date"}
                 </h2>
               </div>
 
               <div className={styles.content}>
                 <p className={styles.description}>
                   {didStorageMigration
-                    ? "Tagify has upgraded to a new storage system that supports virtually unlimited tracks. Your existing data has been safely migrated."
-                    : "Your tag data has been updated to the latest format."}
+                    ? "Tagify can now make room for larger libraries. Your existing tags and ratings are still here."
+                    : "Your tags and ratings are ready to use."}
                 </p>
 
                 <div className={styles.statsGrid}>
@@ -142,7 +169,7 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
                         <li>
                           <span className={styles.benefitIcon}>🚀</span>
                           <span>
-                            No more song limit - tag your entire library
+                            More room for songs in your library
                           </span>
                         </li>
                         <li>
@@ -151,7 +178,7 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
                         </li>
                         <li>
                           <span className={styles.benefitIcon}>💾</span>
-                          <span>More reliable data persistence</span>
+                          <span>More reliable saving</span>
                         </li>
                       </ul>
                     </div>
@@ -166,6 +193,8 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
                         <li key={migration}>
                           {migration === "cleanupEmptyTracks" &&
                             "Cleaned up empty track entries"}
+                          {migration === "cleanupInlineEditorEmptyTracks" &&
+                            "Removed stale tracks with no ratings, energy, or tags"}
                           {migration === "addTrackMetadata" &&
                             "Added track metadata (names, artists, BPM)"}
                           {migration === "removeTrackInfoCache" &&

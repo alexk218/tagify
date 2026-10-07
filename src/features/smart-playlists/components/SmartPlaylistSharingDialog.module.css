@@ -1,0 +1,234 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 76%);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(740px, 100%);
+  max-height: calc(100dvh - 40px);
+  color: var(--spice-text, #fff);
+  background: var(--spice-card, #202020);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 16px;
+  box-shadow: 0 24px 70px rgb(0 0 0 / 55%);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.header,
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+.header {
+  border-bottom: 1px solid rgb(255 255 255 / 9%);
+}
+
+.header h2 {
+  margin: 4px 0 0;
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.eyebrow {
+  color: #a998f5;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.body {
+  overflow: auto;
+  scrollbar-color: #555 #202020;
+  scrollbar-width: thin;
+  padding: 4px 24px 20px;
+}
+
+.body p {
+  margin: 12px 0;
+}
+
+.notice {
+  padding: 12px 14px;
+  background: rgb(144 118 239 / 11%);
+  border-left: 3px solid #a998f5;
+  border-radius: 6px;
+}
+
+.card,
+.shareCard {
+  margin-top: 14px;
+  padding: 16px;
+  background: rgb(0 0 0 / 15%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 10px;
+}
+
+.shareCard,
+.selection {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.selection strong,
+.shareCard strong {
+  overflow-wrap: anywhere;
+}
+
+.dialog input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  margin-top: 3px;
+  accent-color: #b6a5ff;
+}
+
+.rules,
+.path,
+.hint {
+  display: block;
+  color: var(--spice-subtext, #b3b3b3);
+  overflow-wrap: anywhere;
+}
+
+.rules {
+  margin-top: 5px;
+}
+
+.fields {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.fields label,
+.search {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.path {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.dialog input:not([type="checkbox"]),
+.dialog select {
+  width: 100%;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  color: #fff;
+  background: #292929;
+  border: 1px solid #555;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.dialog select {
+  text-overflow: ellipsis;
+}
+
+.dialog button {
+  min-height: 38px;
+  padding: 8px 14px;
+  color: #fff;
+  background: #303030;
+  border: 1px solid #555;
+  border-radius: 7px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.dialog button:hover:not(:disabled) {
+  background: #414141;
+}
+
+.dialog button.primary {
+  color: #17131f;
+  background: #b6a5ff;
+  border-color: #b6a5ff;
+}
+
+.dialog button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.dialog :focus-visible {
+  outline: 2px solid #b6a5ff;
+  outline-offset: 3px;
+}
+
+.warning {
+  display: block;
+  color: #e9c27a;
+  font-size: 13px;
+}
+
+.error {
+  color: #ffb8b8;
+}
+
+.matches {
+  padding: 12px;
+  background: rgb(255 255 255 / 4%);
+  border-radius: 7px;
+}
+
+.matches ul {
+  padding-left: 20px;
+}
+
+.matches summary {
+  margin-top: 8px;
+  cursor: pointer;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.footer {
+  justify-content: flex-end;
+  border-top: 1px solid rgb(255 255 255 / 9%);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+@media (width <= 540px) {
+  .overlay { padding: 10px; }
+  .dialog { max-height: calc(100dvh - 20px); }
+  .header,
+  .footer { padding: 16px; }
+  .body { padding: 0 16px 16px; }
+  .header h2 { font-size: 19px; }
+  .footer { flex-wrap: wrap; }
+}

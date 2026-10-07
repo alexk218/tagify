@@ -10,7 +10,6 @@ export class VersionCheckerService {
   private currentVersion: string;
   private repoOwner: string;
   private repoName: string;
-  private static readonly DISMISSED_VERSIONS_KEY = "tagify:dismissedVersions";
 
   constructor(currentVersion: string, repoOwner: string, repoName: string) {
     this.currentVersion = currentVersion;
@@ -192,58 +191,5 @@ export class VersionCheckerService {
 
     // No recognized pattern, treat as unknown type
     return { type: preRelease, number: null };
-  }
-
-  /**
-   * Static method to dismiss a version permanently
-   */
-  static dismissVersion(version: string): void {
-    try {
-      const dismissed = this.getDismissedVersions();
-      dismissed.add(version);
-      localStorage.setItem(this.DISMISSED_VERSIONS_KEY, JSON.stringify(Array.from(dismissed)));
-    } catch (error) {
-      console.error("Error dismissing version:", error);
-    }
-  }
-
-  /**
-   * Static method to check if a version is dismissed
-   */
-  static isDismissed(version: string): boolean {
-    try {
-      const dismissed = this.getDismissedVersions();
-      return dismissed.has(version);
-    } catch (error) {
-      console.error("Error checking dismissed versions:", error);
-      return false;
-    }
-  }
-
-  /**
-   * Get set of dismissed versions from localStorage
-   */
-  private static getDismissedVersions(): Set<string> {
-    try {
-      const stored = localStorage.getItem(this.DISMISSED_VERSIONS_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        return new Set(Array.isArray(parsed) ? parsed : []);
-      }
-    } catch (error) {
-      console.error("Error loading dismissed versions:", error);
-    }
-    return new Set();
-  }
-
-  /**
-   * Clear all dismissed versions (useful for testing or user preference)
-   */
-  static clearDismissedVersions(): void {
-    try {
-      localStorage.removeItem(this.DISMISSED_VERSIONS_KEY);
-    } catch (error) {
-      console.error("Error clearing dismissed versions:", error);
-    }
   }
 }

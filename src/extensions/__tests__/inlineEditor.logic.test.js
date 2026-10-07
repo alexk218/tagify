@@ -4,6 +4,7 @@ import {
   createUpdatedTrack,
   getRatingUpdateForSelection,
   getTagIndicatorStatus,
+  isTrackAnnotationEmpty,
   toggleTagId,
   toggleTagIdForSelection,
 } from "../inlineEditor.logic";
@@ -32,6 +33,30 @@ describe("inline editor state", () => {
       energy: 0,
       tagIds: [],
     });
+  });
+
+  it("treats factual metadata as empty after the last user annotation is cleared", () => {
+    expect(
+      isTrackAnnotationEmpty({
+        rating: 0,
+        energy: 0,
+        bpm: 124,
+        camelotKey: "8A",
+        name: "Track",
+        artists: "Artist",
+        tagIds: [],
+      }),
+    ).toBe(true);
+
+    expect(
+      isTrackAnnotationEmpty({ rating: 0, energy: 0, tagIds: ["tag-1"] }),
+    ).toBe(false);
+    expect(
+      isTrackAnnotationEmpty({ rating: 4, energy: 0, tagIds: [] }),
+    ).toBe(false);
+    expect(
+      isTrackAnnotationEmpty({ rating: 0, energy: 7, tagIds: [] }),
+    ).toBe(false);
   });
 
   it("toggles tags and keeps recent tags unique in session order", () => {

@@ -92,9 +92,12 @@ export function renderStarRatingControl(
         updateStarFills(control, rating),
       );
       button.addEventListener("blur", () => updateStarFills(control, rating));
-      button.addEventListener("click", (event) => {
+      button.addEventListener("click", async (event) => {
         event.stopPropagation();
-        onRate(value === rating ? 0 : value);
+        updateStarFills(control, rating);
+        if ((await onRate(value === rating ? 0 : value)) === false) {
+          updateStarFills(control, rating);
+        }
       });
       actions.appendChild(button);
     });

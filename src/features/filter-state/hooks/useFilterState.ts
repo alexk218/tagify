@@ -27,8 +27,37 @@ export const TAG_FILTER_LANES = {
 } as const;
 
 export type FilterStateScope = "tracks" | "albums" | "playlists" | "artists";
+export type BasicFilterStateScope = Exclude<FilterStateScope, "tracks">;
 export type TagFilterLane =
   (typeof TAG_FILTER_LANES)[keyof typeof TAG_FILTER_LANES];
+
+const BASIC_TAG_FILTER_OPERATOR_STORAGE_KEYS: Record<BasicFilterStateScope, string> = {
+  albums: "tagify:albumListTagFilterOperator",
+  playlists: "tagify:playlistListTagFilterOperator",
+  artists: "tagify:artistListTagFilterOperator",
+};
+
+/** Where an album, playlist, or artist list remembers Match Any or Match All. */
+export function getBasicTagFilterOperatorStorageKey(scope: BasicFilterStateScope): string {
+  return BASIC_TAG_FILTER_OPERATOR_STORAGE_KEYS[scope];
+}
+
+function readBasicTagFilterOperator(scope: FilterStateScope): TagFilterOperator {
+  if (scope === "tracks") {
+    return TAG_FILTER_OPERATORS.OR;
+  }
+
+  try {
+    const storedOperator = localStorage
+      .getItem(getBasicTagFilterOperatorStorageKey(scope))
+      ?.replace(/"/g, "");
+    return storedOperator === TAG_FILTER_OPERATORS.AND
+      ? TAG_FILTER_OPERATORS.AND
+      : TAG_FILTER_OPERATORS.OR;
+  } catch {
+    return TAG_FILTER_OPERATORS.OR;
+  }
+}
 
 function getNextSelectedClauseIndex(
   currentIndex: number | null,
@@ -130,6 +159,12 @@ export function useFilterState(scope: FilterStateScope = "tracks") {
       console.error("Error saving filter state:", error);
     }
   }, [scope, storageKey, tagFilterFormula]);
+
+  useEffect(() => {
+    const reload = () => setTagFilterFormula(readStoredFilterFormula(storageKey, scope));
+    window.addEventListener("tagify:durableStateRestored", reload);
+    return () => window.removeEventListener("tagify:durableStateRestored", reload);
+  }, [scope, storageKey]);
 
   useEffect(() => {
     setSelectedClauseIndex((previousIndex) =>
@@ -272,6 +307,36 @@ export function useFilterState(scope: FilterStateScope = "tracks") {
     moveTagToClauseLane(tagId, TAG_FILTER_LANES.INCLUDE);
   };
 
+  /**
+   * Tags shown on album, playlist, and artist cards switch a filter on and
+   * off. Excluding a tag stays a deliberate choice in the Filters panel, so a
+   * second click on an excluded tag also just turns its filter off.
+   */
+  const toggleBasicTagFilter = (tagId: string, operator?: TagFilterOperator) => {
+    setTagFilterFormula((prev) => {
+      if (findTagFilterLocation(prev, tagId)) {
+        return withoutTagInFilterFormula(prev, tagId);
+      }
+
+      const clauseOperator = operator ?? readBasicTagFilterOperator(scope);
+      if (prev.clauses.length === 0) {
+        return addTagFilterClause(prev, {
+          tagIds: [tagId],
+          excludedTagIds: [],
+          operator: clauseOperator,
+        });
+      }
+
+      return withTagInFilterClause(prev, tagId, 0, {
+        clauseOperator: prev.clauses[0]?.operator ?? clauseOperator,
+        connector: TAG_FILTER_OPERATORS.AND,
+        lane: TAG_FILTER_LANES.INCLUDE,
+      });
+    });
+    setSelectedClauseIndex(0);
+    setSelectedClauseLane(TAG_FILTER_LANES.INCLUDE);
+  };
+
   const cycleTagIncludeExcludeOff = (
     tagId: string,
     operator: TagFilterOperator = TAG_FILTER_OPERATORS.OR,
@@ -405,6 +470,7 @@ export function useFilterState(scope: FilterStateScope = "tracks") {
     removeTagFilter,
     toggleTagInSelectedClauseLane,
     toggleTagIncludeOff,
+    toggleBasicTagFilter,
     cycleTagIncludeExcludeOff,
     moveTagToClauseLane,
     moveTagToClauseOppositeLane,

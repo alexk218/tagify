@@ -46,7 +46,7 @@ export function createSpotifyTrackFromTrackInfo(
     uri,
     name: trackInfo.name,
     artists: trackInfo.artistsData.map((artist) => ({ name: artist.name })),
-    album: { name: trackInfo.albumName },
+    album: { name: trackInfo.albumName, uri: trackInfo.albumUri, images: trackInfo.albumImageUrl ? [{ url: trackInfo.albumImageUrl }] : [] },
     duration_ms: trackInfo.duration_ms,
   };
 }

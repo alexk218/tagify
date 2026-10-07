@@ -115,4 +115,98 @@ describe("applyBatchTagUpdatesToData", () => {
     expect(nextData.tracks["spotify:track:to-delete"]).toBeUndefined();
     expect(finalTrackDataMap["spotify:track:to-delete"]).toBeNull();
   });
+
+  it("leaves tracks the update would not change untouched", () => {
+    const existing = {
+      rating: 4,
+      energy: 6,
+      bpm: 120,
+      tagIds: [HOUSE_TAG],
+      dateCreated: 10,
+      dateModified: 20,
+    };
+    const currentData: TagDataStructure = {
+      schemaVersion: TAG_DATA_SCHEMA_VERSION,
+      taxonomy: createEmptyTaxonomy(),
+      tracks: { "spotify:track:unchanged": existing },
+      playlists: {},
+      artists: {},
+    };
+
+    const { nextData, finalTrackDataMap } = applyBatchTagUpdatesToData(
+      currentData,
+      [
+        {
+          trackUri: "spotify:track:unchanged",
+          toAdd: [HOUSE_TAG],
+          toRemove: [TECHNO_TAG],
+          newRating: 4,
+          newEnergy: 6,
+        },
+        { trackUri: "spotify:track:missing", toAdd: [], toRemove: [] },
+      ],
+      999,
+    );
+
+    expect(nextData.tracks["spotify:track:unchanged"]).toBe(existing);
+    expect(nextData.tracks["spotify:track:missing"]).toBeUndefined();
+    expect(finalTrackDataMap).toEqual({});
+  });
+
+  it("fills in missing album details without mixing up albums", () => {
+    const currentData: TagDataStructure = {
+      schemaVersion: TAG_DATA_SCHEMA_VERSION,
+      taxonomy: createEmptyTaxonomy(),
+      tracks: {
+        "spotify:track:other-album": {
+          rating: 3,
+          energy: 0,
+          bpm: null,
+          tagIds: [],
+          albumUri: "spotify:album:original",
+          dateCreated: 10,
+          dateModified: 20,
+        },
+        "spotify:track:same-album": {
+          rating: 3,
+          energy: 0,
+          bpm: null,
+          tagIds: [],
+          albumUri: "spotify:album:glass",
+          albumName: "Glass Horizons (Deluxe)",
+          dateCreated: 10,
+          dateModified: 20,
+        },
+      },
+      playlists: {},
+      artists: {},
+    };
+    const albumDetails = {
+      albumUri: "spotify:album:glass",
+      albumName: "Glass Horizons",
+      albumImageUrl: "https://example.com/cover.jpg",
+    };
+
+    const { nextData } = applyBatchTagUpdatesToData(
+      currentData,
+      ["other-album", "same-album", "new"].map((id) => ({
+        trackUri: `spotify:track:${id}`,
+        toAdd: [HOUSE_TAG],
+        toRemove: [],
+        albumDetails,
+      })),
+      500,
+    );
+
+    expect(nextData.tracks["spotify:track:other-album"]).toMatchObject({
+      albumUri: "spotify:album:original",
+      dateModified: 500,
+    });
+    expect(nextData.tracks["spotify:track:other-album"].albumImageUrl).toBeUndefined();
+    expect(nextData.tracks["spotify:track:same-album"]).toMatchObject({
+      albumName: "Glass Horizons (Deluxe)",
+      albumImageUrl: "https://example.com/cover.jpg",
+    });
+    expect(nextData.tracks["spotify:track:new"]).toMatchObject(albumDetails);
+  });
 });

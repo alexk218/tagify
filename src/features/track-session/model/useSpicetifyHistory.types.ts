@@ -10,4 +10,5 @@ export interface UseSpicetifyHistoryProps {
   onSelectTrack?: () => void;
   onSelectPlaylist?: (playlistUri: string) => void;
   onSelectArtist?: (artistUri: string) => void;
+  onEditSmartPlaylist?: (playlistId: string) => void;
 }

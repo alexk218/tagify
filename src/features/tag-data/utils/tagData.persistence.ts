@@ -11,8 +11,10 @@ export async function persistTagDataDiff(
   dataToSave: TagDataStructure,
 ): Promise<boolean> {
   if (!previouslyPersisted) {
-    // Safety net for unexpected startup ordering: fall back to full save once.
-    return indexedDBStorage.saveAll(dataToSave);
+    // An early UI save must never replace the whole database. Smart Playlist
+    // rules can have changed independently of this React snapshot.
+    console.error("Tagify: Library changes arrived before the saved library was loaded");
+    return false;
   }
 
   let saved = true;

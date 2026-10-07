@@ -1,26 +1,91 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { spotifyService } from "@/services/SpotifyService";
+import { spotifyApiService } from "@/services/SpotifyApiService";
 import { audioFeaturesService } from "@/services/AudioFeaturesService";
 import { storageService } from "@/services/storage";
-import { TrackData } from "@/types/tagData";
+import { ArtistData, PlaylistData, TrackData } from "@/types/tagData";
 import { normalizeCamelotKey } from "@/utils/camelotKey";
+import { withPlaylistMetadata } from "@/features/tag-data";
+import { withArtistMetadata } from "@/features/tag-data";
+
+export interface MetadataBackfillProgress {
+  processed: number;
+  total: number;
+  updated: number;
+  remaining: number;
+}
+
+export interface RunMetadataBackfillOptions {
+  batchDelayMs?: number;
+  maxTracksPerRun?: number;
+  onProgress?: (progress: MetadataBackfillProgress) => void;
+}
 
 export interface UseMetadataBackfillOptions {
   enabled?: boolean;
   onComplete?: () => void;
+  onProgress?: (progress: MetadataBackfillProgress | null) => void;
 }
 
 const MAX_BACKFILL_ATTEMPTS = 3;
+const AUDIO_FEATURES_BACKFILL_REVISION = "spotify-client-audio-analysis-v1";
+let sessionBackfillPromise: Promise<number> | null = null;
+
+function needsCurrentAudioFeaturesRetry(track: TrackData): boolean {
+  return (
+    (track.bpm === null || normalizeCamelotKey(track.camelotKey) === null) &&
+    track.audioFeaturesBackfillRevision !== AUDIO_FEATURES_BACKFILL_REVISION
+  );
+}
+
+function isMissingEntityName(
+  name: string | undefined,
+  placeholder: string,
+): boolean {
+  return !name || name.trim().toLowerCase() === placeholder.toLowerCase();
+}
 
 /**
- * One-time backfill of missing track metadata (name, artists, bpm, key).
+ * One-time backfill of missing track, playlist, album, and artist metadata.
  * Runs once on mount, reads/writes directly to IndexedDB via storageService.
  */
 export function useMetadataBackfill({
   enabled = true,
   onComplete,
+  onProgress,
 }: UseMetadataBackfillOptions = {}) {
   const hasRun = useRef(false);
+  const isRunning = useRef(false);
+  const rerunRequested = useRef(false);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const onProgressRef = useRef(onProgress);
+  onProgressRef.current = onProgress;
+
+  const run = useCallback(async (refresh = false) => {
+    if (isRunning.current) {
+      rerunRequested.current = true;
+      return;
+    }
+
+    isRunning.current = true;
+    try {
+      let forceRefresh = refresh;
+      do {
+        rerunRequested.current = false;
+        const updatedCount = forceRefresh
+          ? await runMetadataBackfill({ onProgress: (progress) => onProgressRef.current?.(progress) })
+          : await runMetadataBackfillOnce({ onProgress: (progress) => onProgressRef.current?.(progress) });
+        if (updatedCount > 0) onCompleteRef.current?.();
+        forceRefresh = rerunRequested.current;
+      } while (rerunRequested.current);
+    } catch (error) {
+      console.error("[MetadataBackfill] Backfill failed:", error);
+    } finally {
+      isRunning.current = false;
+      onProgressRef.current?.(null);
+    }
+  }, []);
 
   useEffect(() => {
     if (!enabled || hasRun.current) {
@@ -28,20 +93,29 @@ export function useMetadataBackfill({
     }
 
     hasRun.current = true;
+    void run();
+  }, [enabled, run]);
 
-    void runMetadataBackfill()
-      .then((updatedCount) => {
-        if (updatedCount > 0) {
-          onComplete?.();
-        }
-      })
-      .catch((error) => {
-        console.error("[MetadataBackfill] Backfill failed:", error);
-      });
-  }, [enabled, onComplete]);
+  useEffect(() => {
+    if (!enabled) return;
+    const handleRemoteData = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; origin?: string }>).detail;
+      if (detail?.type === "sync" && detail.origin === "remote") void run(true);
+    };
+    window.addEventListener("tagify:dataUpdated", handleRemoteData);
+    return () => window.removeEventListener("tagify:dataUpdated", handleRemoteData);
+  }, [enabled, run]);
 }
 
-export async function runMetadataBackfill(): Promise<number> {
+export function runMetadataBackfillOnce(options: RunMetadataBackfillOptions = {}): Promise<number> {
+  if (!sessionBackfillPromise) {
+    sessionBackfillPromise = runMetadataBackfill(options);
+  }
+
+  return sessionBackfillPromise;
+}
+
+export async function runMetadataBackfill({ batchDelayMs = 1000, maxTracksPerRun = 50, onProgress }: RunMetadataBackfillOptions = {}): Promise<number> {
   if (!storageService.isReady()) {
     await storageService.initialize();
   }
@@ -51,16 +125,9 @@ export async function runMetadataBackfill(): Promise<number> {
     return 0;
   }
 
-  const tracksToBackfill = Object.entries(tagData.tracks).filter(
+  const eligibleTracks = Object.entries(tagData.tracks).filter(
     ([uri, track]) => {
       if (uri.startsWith("spotify:local:")) {
-        return false;
-      }
-
-      if (
-        track.backfillAttempts &&
-        track.backfillAttempts >= MAX_BACKFILL_ATTEMPTS
-      ) {
         return false;
       }
 
@@ -71,12 +138,32 @@ export async function runMetadataBackfill(): Promise<number> {
       const needsMetadata = !track.name || !track.artists;
       const needsAudioFeatures =
         track.bpm === null || normalizeCamelotKey(track.camelotKey) === null;
+      const shouldRetryAudioFeatures = needsCurrentAudioFeaturesRetry(track);
 
-      return hasTagData && (needsMetadata || needsAudioFeatures);
+      const generalAllowed = (track.backfillAttempts || 0) < MAX_BACKFILL_ATTEMPTS || shouldRetryAudioFeatures;
+      const needsAlbum = !track.albumUri || !track.albumName || !track.albumImageUrl;
+      const albumAllowed = (track.albumBackfillAttempts || 0) < MAX_BACKFILL_ATTEMPTS;
+      return hasTagData && ((generalAllowed && (needsMetadata || needsAudioFeatures)) || (albumAllowed && needsAlbum));
     },
   );
+  const tracksToBackfill = eligibleTracks.slice(0, Math.max(0, maxTracksPerRun));
+  const remaining = Math.max(0, eligibleTracks.length - tracksToBackfill.length);
+  const playlistsToBackfill = Object.entries(tagData.playlists).filter(
+    ([uri, playlist]) =>
+      isMissingEntityName(
+        playlist.name,
+        uri.startsWith("spotify:album:") ? "Unknown Album" : "Unknown Playlist",
+      ),
+  );
+  const artistsToBackfill = Object.entries(tagData.artists).filter(([, artist]) =>
+    isMissingEntityName(artist.name, "Unknown Artist"),
+  );
 
-  if (tracksToBackfill.length === 0) {
+  if (
+    tracksToBackfill.length === 0 &&
+    playlistsToBackfill.length === 0 &&
+    artistsToBackfill.length === 0
+  ) {
     return 0;
   }
 
@@ -100,7 +187,7 @@ export async function runMetadataBackfill(): Promise<number> {
   );
 
   console.log(
-    `[MetadataBackfill] Backfilling ${tracksToBackfill.length} tracks (metadata-only: ${reasonCounts.metadataOnly}, audio-only: ${reasonCounts.audioOnly}, both: ${reasonCounts.both})`,
+    `[MetadataBackfill] Backfilling ${tracksToBackfill.length} tracks, ${playlistsToBackfill.length} playlists/albums, and ${artistsToBackfill.length} artists (track metadata-only: ${reasonCounts.metadataOnly}, audio-only: ${reasonCounts.audioOnly}, both: ${reasonCounts.both})`,
   );
 
   const BATCH_SIZE = 10;
@@ -116,7 +203,7 @@ export async function runMetadataBackfill(): Promise<number> {
           let updated = false;
           const currentTrack = tagData.tracks[uri];
 
-          if (!currentTrack.name || !currentTrack.artists) {
+          if ((!currentTrack.name || !currentTrack.artists || !currentTrack.albumUri || !currentTrack.albumName || !currentTrack.albumImageUrl) && (currentTrack.albumBackfillAttempts || 0) < MAX_BACKFILL_ATTEMPTS) {
             const info = await spotifyService.getTrack(uri);
 
             if (info?.name && info.name.trim() !== "" && !currentTrack.name) {
@@ -130,6 +217,21 @@ export async function runMetadataBackfill(): Promise<number> {
               !currentTrack.artists
             ) {
               currentTrack.artists = info.artists;
+              updated = true;
+            }
+            if (info) {
+              for (const key of ["albumUri", "albumName", "albumImageUrl"] as const) {
+                if (!currentTrack[key] && info[key]) {
+                  currentTrack[key] = info[key];
+                  updated = true;
+                }
+              }
+            }
+            if (!currentTrack.albumUri || !currentTrack.albumName || !currentTrack.albumImageUrl) {
+              currentTrack.albumBackfillAttempts = (currentTrack.albumBackfillAttempts || 0) + 1;
+              updated = true;
+            } else if (currentTrack.albumBackfillAttempts) {
+              delete currentTrack.albumBackfillAttempts;
               updated = true;
             }
           }
@@ -160,6 +262,14 @@ export async function runMetadataBackfill(): Promise<number> {
             currentTrack.bpm === null ||
             normalizeCamelotKey(currentTrack.camelotKey) === null;
 
+          if (stillNeedsAudioFeatures) {
+            currentTrack.audioFeaturesBackfillRevision =
+              AUDIO_FEATURES_BACKFILL_REVISION;
+          } else if (currentTrack.audioFeaturesBackfillRevision) {
+            delete currentTrack.audioFeaturesBackfillRevision;
+            updated = true;
+          }
+
           if (stillNeedsMetadata || stillNeedsAudioFeatures) {
             const currentAttempts = currentTrack.backfillAttempts || 0;
             currentTrack.backfillAttempts = currentAttempts + 1;
@@ -167,8 +277,12 @@ export async function runMetadataBackfill(): Promise<number> {
             console.warn(
               `[MetadataBackfill] Incomplete for ${uri} (metadataMissing=${stillNeedsMetadata}, audioFeaturesMissing=${stillNeedsAudioFeatures}) (attempt ${currentTrack.backfillAttempts}/${MAX_BACKFILL_ATTEMPTS})`,
             );
-          } else if (currentTrack.backfillAttempts) {
+          } else if (
+            currentTrack.backfillAttempts ||
+            currentTrack.audioFeaturesBackfillRevision
+          ) {
             delete currentTrack.backfillAttempts;
+            delete currentTrack.audioFeaturesBackfillRevision;
             updated = true;
           }
 
@@ -193,8 +307,68 @@ export async function runMetadataBackfill(): Promise<number> {
     if (updatedTracks.size > 0) {
       await storageService.saveTracks(updatedTracks);
     }
+    onProgress?.({ processed: Math.min(index + BATCH_SIZE, tracksToBackfill.length), total: tracksToBackfill.length, updated: updatedCount, remaining });
+    if (batchDelayMs > 0 && index + BATCH_SIZE < tracksToBackfill.length) {
+      await new Promise((resolve) => setTimeout(resolve, batchDelayMs));
+    }
   }
 
-  console.log(`[MetadataBackfill] Complete. Updated ${updatedCount} tracks`);
+  for (let index = 0; index < playlistsToBackfill.length; index += BATCH_SIZE) {
+    const batch = playlistsToBackfill.slice(index, index + BATCH_SIZE);
+    const updatedPlaylists = new Map<string, PlaylistData>();
+
+    await Promise.all(
+      batch.map(async ([uri, playlist]) => {
+        try {
+          const metadata = await spotifyApiService.getPlaylistMetadata(uri);
+          if (!metadata) {
+            return;
+          }
+
+          updatedPlaylists.set(
+            uri,
+            withPlaylistMetadata(playlist, metadata, Date.now()),
+          );
+          updatedCount += 1;
+        } catch (error) {
+          console.warn(
+            `[MetadataBackfill] Failed playlist/album lookup for ${uri}:`,
+            error,
+          );
+        }
+      }),
+    );
+
+    if (updatedPlaylists.size > 0) {
+      await storageService.savePlaylists(updatedPlaylists);
+    }
+  }
+
+  for (let index = 0; index < artistsToBackfill.length; index += BATCH_SIZE) {
+    const batch = artistsToBackfill.slice(index, index + BATCH_SIZE);
+    const updatedArtists = new Map<string, ArtistData>();
+
+    await Promise.all(
+      batch.map(async ([uri, artist]) => {
+        try {
+          const metadata = await spotifyApiService.getArtistMetadata(uri);
+          if (!metadata) {
+            return;
+          }
+
+          updatedArtists.set(uri, withArtistMetadata(artist, metadata, Date.now()));
+          updatedCount += 1;
+        } catch (error) {
+          console.warn(`[MetadataBackfill] Failed artist lookup for ${uri}:`, error);
+        }
+      }),
+    );
+
+    if (updatedArtists.size > 0) {
+      await storageService.saveArtists(updatedArtists);
+    }
+  }
+
+  console.log(`[MetadataBackfill] Complete. Updated ${updatedCount} entities`);
   return updatedCount;
 }

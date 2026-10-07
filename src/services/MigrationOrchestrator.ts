@@ -10,6 +10,13 @@ import {
   normalizeSmartPlaylistCriteriaList,
   normalizeTagDataStructure,
 } from "@/features/tag-data/utils/tagData.schema";
+import { isTrackEmpty } from "@/features/tag-data/utils/tagData.helpers";
+import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
+import { restoreDesktopSyncConfiguration } from "@/services/sync/SyncInstallRecovery";
+import {
+  captureTrackDateModified,
+  enforceMigrationDateModifiedPolicy,
+} from "@/utils/migrationDateModified";
 
 const TAG_DATA_KEY = "tagify:tagData";
 const MIGRATIONS_KEY = "tagify:migrations";
@@ -28,6 +35,7 @@ interface MigrationState {
   version: string;
   migrations: {
     cleanupEmptyTracks?: boolean;
+    cleanupInlineEditorEmptyTracks?: boolean;
     addTrackMetadata?: boolean;
     removeTrackInfoCache?: boolean;
     storageToIndexedDB?: boolean;
@@ -51,6 +59,8 @@ export interface OrchestratorResult {
   error?: string;
   fallbackMode?: boolean;
   fallbackReason?: string;
+  /** The saved library was missing and an older copy kept on this device was restored. */
+  restoredOlderCopy?: boolean;
 }
 
 /**
@@ -180,8 +190,13 @@ class MigrationOrchestrator {
     this.isRunning = true;
     const migrationsRun: string[] = [];
     let isFreshInstall = false;
+    let restoredOlderCopy = false;
 
     try {
+      // Spotify updates can replace the WebView storage before Spicetify is
+      // reapplied. Recover the approved device session before selecting an
+      // account-scoped database or deciding that this is a fresh install.
+      await restoreDesktopSyncConfiguration();
       const state = this.getMigrationState();
       const currentVersion = packageJson.version;
 
@@ -203,10 +218,17 @@ class MigrationOrchestrator {
 
       // Check if we've already migrated to IndexedDB
       const indexedDBReady = await indexedDBStorage.init();
-      const indexedDBHasData =
-        indexedDBReady && (await this.hasIndexedDBData());
+      const indexedDBStatus = indexedDBReady
+        ? await this.getIndexedDBDataStatus()
+        : { hasData: false, hasUserContent: false };
+      const indexedDBHasData = indexedDBStatus.hasData;
       const localStorageData = this.getLocalStorageData();
       const localStorageHasData = this.hasTagDataContent(localStorageData);
+      const missingPairedReplica = Boolean(
+        state.migrations.storageToIndexedDB &&
+          getDesktopSyncConfiguration() &&
+          !indexedDBHasData,
+      );
       isFreshInstall = !localStorageHasData && !indexedDBHasData;
 
       console.log(
@@ -219,7 +241,8 @@ class MigrationOrchestrator {
       if (
         state.migrations.storageToIndexedDB &&
         !localStorageHasData &&
-        !indexedDBHasData
+        !indexedDBHasData &&
+        !missingPairedReplica
       ) {
         isFreshInstall = false;
         throw new Error(
@@ -227,17 +250,41 @@ class MigrationOrchestrator {
         );
       }
 
-      if (state.migrations.storageToIndexedDB && indexedDBHasData) {
+      if (missingPairedReplica) {
+        // The retained pre-migration localStorage value is intentionally stale.
+        // Reviving it would hide replica loss and could merge obsolete records
+        // into the canonical cloud library before the user confirms recovery.
+        console.warn(
+          "[Orchestrator] Paired IndexedDB replica is missing; waiting for confirmed cloud recovery",
+        );
+        data = defaultTagData;
+        dataSource = "default";
+        isFreshInstall = false;
+      } else if (
+        indexedDBHasData &&
+        (state.migrations.storageToIndexedDB || indexedDBStatus.hasUserContent)
+      ) {
         // Already migrated to IndexedDB - load from there
         console.log("[Orchestrator] Loading from IndexedDB (already migrated)");
         const idbData = await indexedDBStorage.loadAll();
-        data = idbData || defaultTagData;
+        if (!idbData) throw new Error("Tagify could not read the saved library");
+        data = idbData;
         dataSource = "indexedDB";
+        // A missing localStorage migration flag is not permission to overwrite
+        // an existing IndexedDB library with an older localStorage copy.
+        if (!state.migrations.storageToIndexedDB) {
+          state.migrations.storageToIndexedDB = true;
+          this.saveMigrationState(state);
+        }
       } else if (localStorageData && localStorageHasData) {
         // Have localStorage data - use it (will migrate to IndexedDB later)
         console.log("[Orchestrator] Loading from localStorage");
         data = localStorageData;
         dataSource = "localStorage";
+        // The saved library was cleared after it moved to IndexedDB. The copy
+        // kept from before that move is the newest one on this device; save it
+        // again so what the user sees is what is stored, and say so.
+        restoredOlderCopy = Boolean(state.migrations.storageToIndexedDB);
       } else if (indexedDBHasData) {
         // Only IndexedDB has data (edge case)
         console.log("[Orchestrator] Loading from IndexedDB (no localStorage)");
@@ -252,6 +299,7 @@ class MigrationOrchestrator {
       }
 
       data = normalizeTagDataStructure(data);
+      const trackDateModifiedBeforeMigrations = captureTrackDateModified(data);
       this.migrateLocalTagReferences();
 
       const initialTrackCount = Object.keys(data.tracks).length;
@@ -262,7 +310,7 @@ class MigrationOrchestrator {
       // ===== PHASE 2: Run data structure migrations =====
       onProgress?.({
         phase: "data-migrations",
-        message: "Checking data migrations...",
+        message: "Checking your library...",
         current: 10,
         total: 100,
       });
@@ -270,10 +318,46 @@ class MigrationOrchestrator {
       // Migration: cleanupEmptyTracks
       if (!state.migrations.cleanupEmptyTracks) {
         console.log("[Orchestrator] Running cleanupEmptyTracks migration");
-        data = this.cleanupEmptyTracks(data);
+        data = enforceMigrationDateModifiedPolicy(
+          this.cleanupEmptyTracks(data),
+          trackDateModifiedBeforeMigrations,
+          "cleanupEmptyTracks",
+        );
         state.migrations.cleanupEmptyTracks = true;
         migrationsRun.push("cleanupEmptyTracks");
         this.saveToLocalStorage(data);
+        this.saveMigrationState(state);
+      }
+
+      // Older inline controls could persist tracks after their final annotation
+      // was cleared. Re-run empty-track cleanup once for affected installations.
+      if (!state.migrations.cleanupInlineEditorEmptyTracks) {
+        const emptyTrackUris = Object.entries(data.tracks)
+          .filter(([, trackData]) => isTrackEmpty(trackData))
+          .map(([trackUri]) => trackUri);
+
+        if (emptyTrackUris.length > 0) {
+          data = enforceMigrationDateModifiedPolicy(
+            this.cleanupEmptyTracks(data),
+            trackDateModifiedBeforeMigrations,
+            "cleanupInlineEditorEmptyTracks",
+          );
+
+          if (dataSource === "indexedDB") {
+            const deleted = await indexedDBStorage.saveTrackChanges(
+              new Map(emptyTrackUris.map((trackUri) => [trackUri, null])),
+            );
+            if (!deleted) {
+              throw new Error("Failed to remove stale empty tracks from IndexedDB");
+            }
+          } else {
+            this.saveToLocalStorage(data);
+          }
+
+          migrationsRun.push("cleanupInlineEditorEmptyTracks");
+        }
+
+        state.migrations.cleanupInlineEditorEmptyTracks = true;
         this.saveMigrationState(state);
       }
 
@@ -282,7 +366,7 @@ class MigrationOrchestrator {
         console.log("[Orchestrator] Running addTrackMetadata migration");
         onProgress?.({
           phase: "data-migrations",
-          message: "Migrating track metadata...",
+          message: "Updating your song details...",
           current: 20,
           total: 100,
         });
@@ -291,11 +375,16 @@ class MigrationOrchestrator {
           const progress = 20 + Math.floor((processed / total) * 40);
           onProgress?.({
             phase: "data-migrations",
-            message: `Migrating track metadata: ${processed}/${total}`,
+            message: `Updating song details: ${processed}/${total}`,
             current: progress,
             total: 100,
           });
         });
+        data = enforceMigrationDateModifiedPolicy(
+          data,
+          trackDateModifiedBeforeMigrations,
+          "addTrackMetadata",
+        );
 
         state.migrations.addTrackMetadata = true;
         migrationsRun.push("addTrackMetadata");
@@ -312,12 +401,19 @@ class MigrationOrchestrator {
         this.saveMigrationState(state);
       }
 
+      // This final barrier also protects future migrations added above.
+      data = enforceMigrationDateModifiedPolicy(
+        data,
+        trackDateModifiedBeforeMigrations,
+        "migration pipeline",
+      );
+
       // ===== PHASE 3: Migrate storage to IndexedDB =====
-      if (!state.migrations.storageToIndexedDB) {
+      if (!state.migrations.storageToIndexedDB || restoredOlderCopy) {
         console.log("[Orchestrator] Running storage migration to IndexedDB");
         onProgress?.({
           phase: "storage-migration",
-          message: "Migrating to new storage...",
+          message: "Keeping your library ready...",
           current: 70,
           total: 100,
         });
@@ -341,7 +437,7 @@ class MigrationOrchestrator {
           // Save all data to IndexedDB
           onProgress?.({
             phase: "storage-migration",
-            message: "Saving to IndexedDB...",
+            message: "Saving your library...",
             current: 80,
             total: 100,
           });
@@ -361,7 +457,7 @@ class MigrationOrchestrator {
           }
 
           state.migrations.storageToIndexedDB = true;
-          migrationsRun.push("storageToIndexedDB");
+          migrationsRun.push(restoredOlderCopy ? "restoredOlderCopy" : "storageToIndexedDB");
           this.saveMigrationState(state);
           this.clearFallbackMode(); // Clear any previous fallback state
 
@@ -391,7 +487,7 @@ class MigrationOrchestrator {
           // The app will work, just without IndexedDB benefits
           onProgress?.({
             phase: "storage-migration",
-            message: "Using fallback storage...",
+            message: "Opening your saved library...",
             current: 90,
             total: 100,
           });
@@ -404,7 +500,7 @@ class MigrationOrchestrator {
 
       onProgress?.({
         phase: "complete",
-        message: "Migration complete!",
+        message: "Your library is ready!",
         current: 100,
         total: 100,
       });
@@ -429,6 +525,7 @@ class MigrationOrchestrator {
         trackCount: finalTrackCount,
         fallbackMode: fallbackState?.active || false,
         fallbackReason: fallbackState?.reason,
+        restoredOlderCopy: restoredOlderCopy && migrationsRun.includes("restoredOlderCopy"),
       };
     } catch (error) {
       const errorMessage =
@@ -452,20 +549,26 @@ class MigrationOrchestrator {
     }
   }
 
-  private async hasIndexedDBData(): Promise<boolean> {
-    const [trackCount, playlistCount, artistCount, taxonomy] = await Promise.all([
+  private async getIndexedDBDataStatus(): Promise<{ hasData: boolean; hasUserContent: boolean }> {
+    const [trackCount, playlistCount, artistCount, smartPlaylists, taxonomy] = await Promise.all([
       indexedDBStorage.getTrackCount(),
       indexedDBStorage.getPlaylistCount(),
       indexedDBStorage.getArtistCount(),
+      indexedDBStorage.getAllSmartPlaylists(),
       indexedDBStorage.getTaxonomy(),
     ]);
 
-    return (
+    const hasUserContent =
       trackCount > 0 ||
       playlistCount > 0 ||
       artistCount > 0 ||
-      taxonomy.categoryOrder.length > 0
-    );
+      smartPlaylists.length > 0 ||
+      (taxonomy.categoryOrder.length > 0 &&
+        JSON.stringify(taxonomy) !== JSON.stringify(defaultTagData.taxonomy));
+    return {
+      hasData: hasUserContent || taxonomy.categoryOrder.length > 0,
+      hasUserContent,
+    };
   }
 
   private hasTagDataContent(data: TagDataStructure | null): boolean {
@@ -488,12 +591,7 @@ class MigrationOrchestrator {
     let removedCount = 0;
 
     Object.entries(data.tracks).forEach(([uri, trackData]) => {
-      const isEmpty =
-        trackData.rating === 0 &&
-        trackData.energy === 0 &&
-        trackData.tagIds.length === 0;
-
-      if (isEmpty) {
+      if (isTrackEmpty(trackData)) {
         removedCount++;
       } else {
         cleanedTracks[uri] = trackData;
@@ -658,6 +756,7 @@ class MigrationOrchestrator {
     const state = this.getMigrationState();
     return (
       !state.migrations.cleanupEmptyTracks ||
+      !state.migrations.cleanupInlineEditorEmptyTracks ||
       !state.migrations.addTrackMetadata ||
       !state.migrations.removeTrackInfoCache ||
       !state.migrations.storageToIndexedDB

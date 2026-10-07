@@ -10,11 +10,15 @@ export interface UseTagDataOptions {
 
 export interface UserTrackAddedEvent {
   eventId: number;
+  trackUris?: string[];
 }
 
 export interface TrackMetadata {
   name: string;
   artists: string;
+  albumName?: string;
+  albumUri?: string | null;
+  albumImageUrl?: string | null;
 }
 
 export interface PlaylistMetadata {

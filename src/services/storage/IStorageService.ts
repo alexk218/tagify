@@ -5,6 +5,7 @@ import {
   TagTaxonomy,
   TrackData,
 } from "@/types/tagData";
+import type { SmartPlaylistCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
 
 /**
  * Abstract storage interface for tag data persistence.
@@ -32,6 +33,10 @@ export interface IStorageService {
    * Save all tag data (full replacement)
    */
   saveAll(data: TagDataStructure): Promise<boolean>;
+
+  getAllSmartPlaylists(): Promise<SmartPlaylistCriteria[]>;
+
+  saveSmartPlaylists(playlists: SmartPlaylistCriteria[]): Promise<boolean>;
 
   /**
    * Get the taxonomy document only
@@ -67,6 +72,12 @@ export interface IStorageService {
    * Save multiple tracks in a single transaction
    */
   saveTracks(tracks: Map<string, TrackData>): Promise<boolean>;
+
+  /**
+   * Save and delete multiple tracks in a single transaction.
+   * A null value deletes the corresponding track.
+   */
+  saveTrackChanges(changes: Map<string, TrackData | null>): Promise<boolean>;
 
   /**
    * Get a single playlist by URI
@@ -144,6 +155,7 @@ export interface StorageMetadata {
   trackCount: number;
   playlistCount: number;
   artistCount: number;
+  smartPlaylistCount: number;
   categoryCount: number;
   lastModified: number | null;
   estimatedSizeBytes: number | null;

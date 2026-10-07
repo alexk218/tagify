@@ -1,4 +1,4 @@
-import { Tag, TagCategory } from "@/types/tagData";
+import { Tag, TagCategory, TagSubcategory } from "@/types/tagData";
 
 export type TagSelectorSortMode =
   | "custom"
@@ -78,6 +78,40 @@ function matchesSearchTerm(value: string, normalizedSearchTerm: string): boolean
   return value.toLowerCase().includes(normalizedSearchTerm);
 }
 
+function cloneSubcategory(subcategory: TagSubcategory): TagSubcategory {
+  return {
+    ...subcategory,
+    tags: [...subcategory.tags],
+    subcategories: (subcategory.subcategories || []).map(cloneSubcategory),
+  };
+}
+
+function filterSubcategory(
+  subcategory: TagSubcategory,
+  normalizedSearchTerm: string,
+): TagSubcategory | null {
+  if (matchesSearchTerm(subcategory.name, normalizedSearchTerm)) {
+    return cloneSubcategory(subcategory);
+  }
+
+  const matchingTags = subcategory.tags.filter((tag) =>
+    matchesSearchTerm(tag.name, normalizedSearchTerm),
+  );
+  const matchingSubcategories = (subcategory.subcategories || [])
+    .map((child) => filterSubcategory(child, normalizedSearchTerm))
+    .filter((child): child is TagSubcategory => Boolean(child));
+
+  if (matchingTags.length === 0 && matchingSubcategories.length === 0) {
+    return null;
+  }
+
+  return {
+    ...subcategory,
+    tags: matchingTags,
+    subcategories: matchingSubcategories,
+  };
+}
+
 export function filterTagSelectorCategories(
   categories: TagCategory[],
   searchTerm: string,
@@ -92,51 +126,44 @@ export function filterTagSelectorCategories(
       return [
         {
           ...category,
-          subcategories: category.subcategories.map((subcategory) => ({
-            ...subcategory,
-            tags: [...subcategory.tags],
-          })),
+          tags: [...(category.tags || [])],
+          subcategories: category.subcategories.map(cloneSubcategory),
         },
       ];
     }
 
-    const matchingSubcategories = category.subcategories.flatMap((subcategory) => {
-      if (matchesSearchTerm(subcategory.name, normalizedSearchTerm)) {
-        return [
-          {
-            ...subcategory,
-            tags: [...subcategory.tags],
-          },
-        ];
-      }
+    const matchingTags = (category.tags || []).filter((tag) =>
+      matchesSearchTerm(tag.name, normalizedSearchTerm),
+    );
+    const matchingSubcategories = category.subcategories
+      .map((subcategory) => filterSubcategory(subcategory, normalizedSearchTerm))
+      .filter((subcategory): subcategory is TagSubcategory => Boolean(subcategory));
 
-      const matchingTags = subcategory.tags.filter((tag) =>
-        matchesSearchTerm(tag.name, normalizedSearchTerm),
-      );
-
-      if (matchingTags.length === 0) {
-        return [];
-      }
-
-      return [
-        {
-          ...subcategory,
-          tags: matchingTags,
-        },
-      ];
-    });
-
-    if (matchingSubcategories.length === 0) {
+    if (matchingTags.length === 0 && matchingSubcategories.length === 0) {
       return [];
     }
 
     return [
       {
         ...category,
+        tags: matchingTags,
         subcategories: matchingSubcategories,
       },
     ];
   });
+}
+
+function sortSubcategory(
+  subcategory: TagSubcategory,
+  mode: Exclude<TagSelectorSortMode, "custom">,
+): TagSubcategory {
+  return {
+    ...subcategory,
+    tags: sortTags(subcategory.tags, mode),
+    subcategories: (subcategory.subcategories || []).map((child) =>
+      sortSubcategory(child, mode),
+    ),
+  };
 }
 
 export function sortTagSelectorCategories(
@@ -149,9 +176,9 @@ export function sortTagSelectorCategories(
 
   return categories.map((category) => ({
     ...category,
-    subcategories: category.subcategories.map((subcategory) => ({
-      ...subcategory,
-      tags: sortTags(subcategory.tags, mode),
-    })),
+    tags: category.tags ? sortTags(category.tags, mode) : undefined,
+    subcategories: category.subcategories.map((subcategory) =>
+      sortSubcategory(subcategory, mode),
+    ),
   }));
 }

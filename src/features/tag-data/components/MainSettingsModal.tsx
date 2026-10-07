@@ -13,6 +13,8 @@ import {
   isAutoFileBackupFrequency,
   TAG_DATA_AUTO_FILE_BACKUP_FREQUENCY_KEY,
 } from "../utils/tagData.backup";
+import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
+import { syncRuntime } from "@/services/sync/SyncRuntime";
 
 interface MainSettingsModalProps {
   onClose: () => void;
@@ -25,6 +27,37 @@ interface MainSettingsModalProps {
   onResetTagifyData?: () => Promise<void>;
 }
 
+type DisplayMode = "combined" | "stars" | "energy" | "tags" | "disabled";
+
+interface ExtensionSettings {
+  enableTracklistEnhancer: boolean;
+  enablePlaybarEnhancer: boolean;
+  tracklistDisplayMode: DisplayMode;
+  playbarDisplayMode: DisplayMode;
+}
+
+const DEFAULT_EXTENSION_SETTINGS: ExtensionSettings = {
+  enableTracklistEnhancer: true,
+  enablePlaybarEnhancer: true,
+  tracklistDisplayMode: "combined",
+  playbarDisplayMode: "combined",
+};
+
+const isDisplayMode = (value: unknown): value is DisplayMode =>
+  value === "combined" ||
+  value === "stars" ||
+  value === "energy" ||
+  value === "tags" ||
+  value === "disabled";
+
+const resolveDisplayMode = (
+  value: unknown,
+  legacyEnabled: boolean | undefined,
+): DisplayMode => {
+  if (isDisplayMode(value)) return value;
+  return legacyEnabled === false ? "disabled" : "combined";
+};
+
 const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
   onClose,
   showSupportButtons,
@@ -35,13 +68,27 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
   onRetryMigration,
   onResetTagifyData,
 }) => {
-  const [extensionSettings, setExtensionSettings] = useLocalStorage<{
-    enableTracklistEnhancer: boolean;
-    enablePlaybarEnhancer: boolean;
-  }>("tagify:extensionSettings", {
-    enableTracklistEnhancer: true,
-    enablePlaybarEnhancer: true,
-  });
+  const [storedExtensionSettings, setExtensionSettings] =
+    useLocalStorage<ExtensionSettings>(
+      "tagify:extensionSettings",
+      DEFAULT_EXTENSION_SETTINGS,
+    );
+  const tracklistDisplayMode = resolveDisplayMode(
+    storedExtensionSettings.tracklistDisplayMode,
+    storedExtensionSettings.enableTracklistEnhancer,
+  );
+  const playbarDisplayMode = resolveDisplayMode(
+    storedExtensionSettings.playbarDisplayMode,
+    storedExtensionSettings.enablePlaybarEnhancer,
+  );
+  const extensionSettings: ExtensionSettings = {
+    ...DEFAULT_EXTENSION_SETTINGS,
+    ...storedExtensionSettings,
+    enableTracklistEnhancer: tracklistDisplayMode !== "disabled",
+    enablePlaybarEnhancer: playbarDisplayMode !== "disabled",
+    tracklistDisplayMode,
+    playbarDisplayMode,
+  };
   const [keyboardShortcutSettings, setKeyboardShortcutSettings] =
     useLocalStorage<{
       enabled: boolean;
@@ -83,12 +130,11 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
   const handleResetTagifyData = async () => {
     if (!onResetTagifyData || isResettingData) return;
 
-    const confirmed = window.confirm(
-      "Reset Tagify data to defaults? This removes all tagged tracks, tagged playlists, tagged artists, and smart playlists.",
-    );
-    if (!confirmed) {
-      return;
-    }
+    if (getDesktopSyncConfiguration()) {
+      const confirmation = window.prompt("This replaces both the local and current cloud Tagify library. Community creates a historical recovery point first, then every linked device must fetch the reset snapshot. Type RESET TAGIFY to continue.");
+      if (confirmation !== "RESET TAGIFY") return;
+      (window.TagifySync || syncRuntime).armCloudReplacement();
+    } else if (!window.confirm("Reset Tagify data to defaults? This removes all tagged tracks, tagged playlists, tagged artists, and smart playlists.")) return;
 
     setIsResettingData(true);
     try {
@@ -103,8 +149,16 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
     }
   };
 
-  const updateExtensionSettings = (key: string, value: boolean) => {
-    const newSettings = { ...extensionSettings, [key]: value };
+  const updateDisplayMode = (
+    modeKey: "tracklistDisplayMode" | "playbarDisplayMode",
+    enabledKey: "enableTracklistEnhancer" | "enablePlaybarEnhancer",
+    value: DisplayMode,
+  ) => {
+    const newSettings = {
+      ...extensionSettings,
+      [modeKey]: value,
+      [enabledKey]: value !== "disabled",
+    };
     setExtensionSettings(newSettings);
 
     // Dispatch event to extension
@@ -241,50 +295,68 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
                 </label>
               </div>
 
-              <div className={styles.toggleItem}>
+              <div className={`${styles.toggleItem} ${styles.displayModeItem}`}>
                 <div className={styles.toggleInfo}>
-                  <label className={styles.toggleLabel}>
-                    Tracklist Enhancer
+                  <label
+                    className={styles.toggleLabel}
+                    htmlFor="tagify-tracklist-display-mode"
+                  >
+                    Tagify Column Display
                   </label>
                   <span className={styles.toggleDescription}>
-                    Show 'Tagify' column in your playlists
+                    Choose what appears in the Tagify playlist column.
                   </span>
                 </div>
-                <label className={styles.toggleSwitch}>
-                  <input
-                    type="checkbox"
-                    checked={extensionSettings.enableTracklistEnhancer}
-                    onChange={(e) =>
-                      updateExtensionSettings(
-                        "enableTracklistEnhancer",
-                        e.target.checked,
-                      )
-                    }
-                  />
-                  <span className={styles.slider}></span>
-                </label>
+                <select
+                  id="tagify-tracklist-display-mode"
+                  className={styles.settingsSelect}
+                  value={extensionSettings.tracklistDisplayMode}
+                  onChange={(event) =>
+                    updateDisplayMode(
+                      "tracklistDisplayMode",
+                      "enableTracklistEnhancer",
+                      event.target.value as DisplayMode,
+                    )
+                  }
+                >
+                  <option value="combined">Combined (default)</option>
+                  <option value="stars">Star rating</option>
+                  <option value="energy">Energy score</option>
+                  <option value="tags">Assigned tags</option>
+                  <option value="disabled">Disabled</option>
+                </select>
               </div>
 
-              <div className={styles.toggleItem}>
+              <div className={`${styles.toggleItem} ${styles.displayModeItem}`}>
                 <div className={styles.toggleInfo}>
-                  <label className={styles.toggleLabel}>Playbar Enhancer</label>
+                  <label
+                    className={styles.toggleLabel}
+                    htmlFor="tagify-playbar-display-mode"
+                  >
+                    Playbar Display
+                  </label>
                   <span className={styles.toggleDescription}>
-                    Show tag info in Now Playing bar
+                    Choose what appears beside the currently playing track.
                   </span>
                 </div>
-                <label className={styles.toggleSwitch}>
-                  <input
-                    type="checkbox"
-                    checked={extensionSettings.enablePlaybarEnhancer}
-                    onChange={(e) =>
-                      updateExtensionSettings(
-                        "enablePlaybarEnhancer",
-                        e.target.checked,
-                      )
-                    }
-                  />
-                  <span className={styles.slider}></span>
-                </label>
+                <select
+                  id="tagify-playbar-display-mode"
+                  className={styles.settingsSelect}
+                  value={extensionSettings.playbarDisplayMode}
+                  onChange={(event) =>
+                    updateDisplayMode(
+                      "playbarDisplayMode",
+                      "enablePlaybarEnhancer",
+                      event.target.value as DisplayMode,
+                    )
+                  }
+                >
+                  <option value="combined">Combined (default)</option>
+                  <option value="stars">Star rating</option>
+                  <option value="energy">Energy score</option>
+                  <option value="tags">Assigned tags</option>
+                  <option value="disabled">Disabled</option>
+                </select>
               </div>
 
               <div className={styles.toggleItem}>

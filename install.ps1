@@ -12,11 +12,43 @@ $homeDir = $env:USERPROFILE
 $customAppsDir = "$homeDir\AppData\Roaming\spicetify\CustomApps"
 $appName = "tagify"
 $customAppDir = Join-Path $customAppsDir $appName
+$tagifyStateDir = "$env:LOCALAPPDATA\Tagify"
+$installRecoveryKeyFile = Join-Path $tagifyStateDir "install-recovery-key"
 $tempDir = "$env:TEMP\tagify-install"
 $zipFile = "$tempDir\tagify.zip"
 
 $repoOwner = "alexk218"
 $repoName = "tagify"
+
+function Install-CommunityRecoveryBootstrap {
+    if (!(Test-Path -Path $tagifyStateDir)) {
+        New-Item -ItemType Directory -Path $tagifyStateDir -Force | Out-Null
+    }
+
+    $recoveryKey = $null
+    if (Test-Path -Path $installRecoveryKeyFile) {
+        $candidate = (Get-Content -Path $installRecoveryKeyFile -Raw).Trim()
+        if ($candidate -match '^tgfy_install_[A-Za-z0-9_-]{43}$') {
+            $recoveryKey = $candidate
+        }
+    }
+    if (-not $recoveryKey) {
+        $bytes = New-Object byte[] 32
+        $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $generator.GetBytes($bytes) } finally { $generator.Dispose() }
+        $encoded = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+        $recoveryKey = "tgfy_install_$encoded"
+        [IO.File]::WriteAllText($installRecoveryKeyFile, "$recoveryKey`n", (New-Object Text.UTF8Encoding($false)))
+    }
+
+    $extensionPath = Join-Path $customAppDir "extension.js"
+    if (!(Test-Path -Path $extensionPath)) {
+        throw "Tagify extension.js is missing; automatic Community reconnection could not be installed."
+    }
+    $source = [IO.File]::ReadAllText($extensionPath)
+    $bootstrap = "globalThis.__tagifyInstallRecoveryKey=`"$recoveryKey`";`n"
+    [IO.File]::WriteAllText($extensionPath, $bootstrap + $source, (New-Object Text.UTF8Encoding($false)))
+}
 
 Write-Info "Starting Tagify installation..."
 
@@ -101,6 +133,7 @@ try {
     }
 
     Move-Item -Path $sourceDir -Destination $customAppDir -Force
+    Install-CommunityRecoveryBootstrap
     Write-Success "Files extracted successfully"
 }
 catch {

@@ -65,6 +65,27 @@
   margin-top: -2px;
 }
 
+.countToggle,
+.emptyStateAction {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-color: rgb(255 255 255 / 25%);
+  text-underline-offset: 2px;
+}
+
+.countToggle:hover,
+.countToggle:focus-visible,
+.emptyStateAction:hover,
+.emptyStateAction:focus-visible {
+  color: var(--spice-text);
+  text-decoration-color: currentcolor;
+}
+
 .searchInput,
 .select {
   background: rgb(0 0 0 / 20%);
@@ -263,6 +284,12 @@
   width: 100%;
 }
 
+.filterHint {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  margin: -8px 0 0;
+}
+
 .tagFilterGrid {
   display: flex;
   flex-wrap: wrap;
@@ -327,6 +354,7 @@
 }
 
 .list {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -334,15 +362,20 @@
 }
 
 .playlistItem {
+  align-items: start;
   background: rgb(0 0 0 / 20%);
   border: none;
   border-radius: 4px;
   cursor: pointer;
   display: grid;
   gap: 12px;
-  grid-template-columns: 64px minmax(0, 1fr);
-  padding: 12px;
+  grid-template-columns: 56px minmax(0, 1fr);
+  padding: 10px 12px;
   transition: background 0.2s ease;
+}
+
+.albumItem {
+  grid-template-columns: 56px minmax(0, 1fr) 156px;
 }
 
 .playlistItem:hover {
@@ -355,9 +388,9 @@
 
 .cover {
   background: var(--spice-button-disabled);
-  height: 64px;
+  height: 56px;
   object-fit: cover;
-  width: 64px;
+  width: 56px;
 }
 
 .albumCover {
@@ -383,6 +416,8 @@
 }
 
 .playlistText {
+  display: grid;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -391,11 +426,11 @@
   border: 0;
   color: var(--spice-text);
   cursor: pointer;
-  display: inline;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
+  justify-self: start;
   line-height: 1.25;
-  margin: 0 0 4px;
+  max-width: 100%;
   overflow-wrap: anywhere;
   padding: 0;
   text-align: left;
@@ -414,19 +449,13 @@
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 4px 10px;
+  min-height: 18px;
 }
 
-.entityBadge {
-  background: rgb(255 255 255 / 10%);
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 999px;
+.ownerName {
   color: var(--spice-text);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  padding: 4px 7px;
+  opacity: 0.8;
 }
 
 .playlistRating {
@@ -447,10 +476,78 @@
   white-space: nowrap;
 }
 
+.updated {
+  font-variant-numeric: tabular-nums;
+}
+
 .tags {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.commonTags {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.commonTagsLabel {
+  color: var(--spice-subtext);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.commonTag {
+  background: transparent;
+  border: 1px dashed rgb(255 255 255 / 26%);
+  border-radius: 12px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  opacity: 0.88;
+  padding: 3px 8px;
+}
+
+.commonTag:hover {
+  background: rgb(255 255 255 / 8%);
+  opacity: 1;
+}
+
+.trackStats {
+  align-self: center;
+  display: grid;
+  gap: 5px;
+  justify-items: end;
+  min-width: 0;
+}
+
+.progressText {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.progressComplete {
+  color: var(--spice-button, #1db954);
+  font-weight: 700;
+}
+
+.trackAverage {
+  align-items: center;
+  color: var(--spice-subtext);
+  display: inline-flex;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  gap: 4px;
+}
+
+.trackAverage svg {
+  color: #ffd700;
 }
 
 .tag {
@@ -460,7 +557,9 @@
   color: var(--spice-text);
   cursor: pointer;
   display: inline-flex;
+  font-family: inherit;
   font-size: 12px;
+  line-height: 1.2;
   padding: 4px 8px;
 }
 
@@ -523,14 +622,28 @@
   .searchBox {
     max-width: none;
   }
+}
 
-  .playlistItem {
-    grid-template-columns: 52px minmax(0, 1fr);
+.filterControlsRightGrid > label {
+  white-space: nowrap;
+}
+
+/* Rows follow the space Spotify gives the list, not the window size. */
+@container (max-width: 520px) {
+  .playlistItem,
+  .albumItem {
+    grid-template-columns: 48px minmax(0, 1fr);
   }
 
   .cover {
-    height: 52px;
-    width: 52px;
+    height: 48px;
+    width: 48px;
   }
 
+  .trackStats {
+    grid-column: 2;
+    justify-items: start;
+    max-width: 220px;
+    width: 100%;
+  }
 }

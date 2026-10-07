@@ -208,7 +208,7 @@ const DataManager: React.FC<DataManagerProps> = ({
 
       {lastSaved && (
         <div className={styles.saveStatus}>
-          ✓ Last backup: {lastSaved.toLocaleString()}
+          ✓ Last saved: {lastSaved.toLocaleString()}
         </div>
       )}
       <button

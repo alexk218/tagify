@@ -61,9 +61,15 @@ export function organizeTrackTagsByCategory(
       return;
     }
 
-    groupedTags[resolvedTag.category.id].subcategories[
-      resolvedTag.subcategory.id
-    ].tags.push({
+    const groupId = resolvedTag.subcategory?.id ?? resolvedTag.category.id;
+    if (!groupedTags[resolvedTag.category.id].subcategories[groupId]) {
+      groupedTags[resolvedTag.category.id].subcategories[groupId] = {
+        subcategoryName: resolvedTag.subcategory?.name ?? "Tags",
+        subcategoryOrder: resolvedTag.subcategoryOrder,
+        tags: [],
+      };
+    }
+    groupedTags[resolvedTag.category.id].subcategories[groupId].tags.push({
       id: resolvedTag.tag.id,
       name: resolvedTag.tag.name,
       order: resolvedTag.tagOrder,

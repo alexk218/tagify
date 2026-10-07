@@ -428,7 +428,6 @@ class KeyboardShortcutService {
       if (!latestTrack.camelotKey && camelotKey !== null) {
         latestTrack.camelotKey = camelotKey;
       }
-      latestTrack.dateModified = Date.now();
 
       const finalTrackData = { ...latestTrack };
       const saved = await this.persistTrackChange(trackUri, finalTrackData);

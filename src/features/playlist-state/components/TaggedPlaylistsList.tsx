@@ -1,8 +1,15 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import ReactStars from "react-rating-stars-component";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faStar, faStarHalf } from "@fortawesome/free-solid-svg-icons";
-import { PlaylistData, TagAccentId, TagTaxonomy } from "@/types/tagData";
+import { Star } from "lucide-react";
+import {
+  AlbumTrackSummary,
+  PlaylistData,
+  TagAccentId,
+  TagTaxonomy,
+  TrackData,
+} from "@/types/tagData";
 import {
   buildResolvedTagLookup,
   compareResolvedTagsByTaxonomyOrder,
@@ -13,22 +20,59 @@ import {
   TagFilterClause,
   TagFilterOperator,
 } from "@/utils/tagFilterGroups";
-import { formatTimestamp } from "@/utils/formatters";
+import { formatCondensedDate, formatTimestamp } from "@/utils/formatters";
 import { buildTagAccentCssVars } from "@/features/tag-data";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
-import { BasicTagFilterBar } from "@/features/filter-state";
+import {
+  BasicTagFilterBar,
+  getBasicTagFilterOperatorStorageKey,
+} from "@/features/filter-state";
+import {
+  buildAlbumTrackSummaries,
+  formatTrackAverage,
+  getAlbumProgress,
+} from "../utils/albumTrackSummary";
+import {
+  useAlbumTrackTotalLookups,
+  useKnownAlbumTrackTotals,
+} from "../hooks/useAlbumTrackTotals";
+import AlbumProgressBar from "./AlbumProgressBar";
 import styles from "./TaggedPlaylistsList.module.css";
 
-type SortBy = "dateModified" | "name" | "trackCount" | "rating" | "energy";
+type SortBy =
+  | "dateModified"
+  | "name"
+  | "trackCount"
+  | "rating"
+  | "trackAverage"
+  | "progress"
+  | "energy";
 type SortOrder = "asc" | "desc";
 type PlaylistEntityType = "album" | "playlist";
 
-function getPlaylistEntityLabel(uri: string): "Album" | "Playlist" {
-  return uri.startsWith("spotify:album:") ? "Album" : "Playlist";
-}
+const SORT_OPTIONS: Record<PlaylistEntityType, Array<{ value: SortBy; label: string }>> = {
+  album: [
+    { value: "dateModified", label: "Last updated" },
+    { value: "name", label: "Name" },
+    { value: "rating", label: "Album rating" },
+    { value: "trackAverage", label: "Average track rating" },
+    { value: "progress", label: "Progress" },
+    { value: "energy", label: "Album energy" },
+  ],
+  playlist: [
+    { value: "dateModified", label: "Last updated" },
+    { value: "name", label: "Name" },
+    { value: "rating", label: "Rating" },
+    { value: "energy", label: "Energy" },
+    { value: "trackCount", label: "Track count" },
+  ],
+};
+const MAX_ROW_COMMON_TAGS = 4;
 
 interface TaggedPlaylistsListProps {
   playlists: Record<string, PlaylistData>;
+  tracks: Record<string, TrackData>;
+  albumTrackSummaries?: Map<string, AlbumTrackSummary>;
   entityType: PlaylistEntityType;
   taxonomy: TagTaxonomy;
   includeTagClauses: TagFilterClause[];
@@ -38,14 +82,29 @@ interface TaggedPlaylistsListProps {
   activePlaylistUri: string | null;
   onSelectPlaylist: (playlistUri: string) => void;
   onOpenPlaylist: (playlistUri: string) => void;
+  /** Filters panel: include, then exclude, then off. */
   onCycleTagFilter: (tagId: string, operator: TagFilterOperator) => void;
+  /** Tags on a row: on, then off. */
+  onToggleTagFilter: (tagId: string, operator: TagFilterOperator) => void;
   onRemoveTagFilter: (tagId: string) => void;
   onSetTagFilterOperator: (operator: TagFilterOperator) => void;
   onClearTagFilters: () => void;
 }
 
+const NO_SUMMARIES = new Map<string, AlbumTrackSummary>();
+
+function isTrackTotal(value: number | null | undefined): value is number {
+  return typeof value === "number" && value > 0;
+}
+
+function pluralizeTracks(count: number): string {
+  return `${count} ${count === 1 ? "track" : "tracks"}`;
+}
+
 const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
   playlists,
+  tracks,
+  albumTrackSummaries,
   entityType,
   taxonomy,
   includeTagClauses,
@@ -56,16 +115,17 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
   onSelectPlaylist,
   onOpenPlaylist,
   onCycleTagFilter,
+  onToggleTagFilter,
   onRemoveTagFilter,
   onSetTagFilterOperator,
   onClearTagFilters,
 }) => {
-  const entityLabel = entityType === "album" ? "Album" : "Playlist";
+  const isAlbumList = entityType === "album";
+  const entityLabel = isAlbumList ? "Album" : "Playlist";
   const entityLabelLower = entityLabel.toLowerCase();
-  const entityLabelPlural = entityType === "album" ? "Albums" : "Playlists";
+  const entityLabelPlural = isAlbumList ? "Albums" : "Playlists";
   const entityLabelPluralLower = entityLabelPlural.toLowerCase();
-  const entityStoragePrefix =
-    entityType === "album" ? "tagify:albumList" : "tagify:playlistList";
+  const entityStoragePrefix = isAlbumList ? "tagify:albumList" : "tagify:playlistList";
   const [searchTerm, setSearchTerm] = useLocalStorage(
     `${entityStoragePrefix}SearchTerm`,
     "",
@@ -74,13 +134,17 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
     `${entityStoragePrefix}TagSearchTerm`,
     "",
   );
-  const [sortBy, setSortBy] = useLocalStorage<SortBy>(
+  const [storedSortBy, setSortBy] = useLocalStorage<SortBy>(
     `${entityStoragePrefix}SortBy`,
     "dateModified",
   );
   const [sortOrder, setSortOrder] = useLocalStorage<SortOrder>(
     `${entityStoragePrefix}SortOrder`,
     "desc",
+  );
+  const [showSingleTrackAlbums, setShowSingleTrackAlbums] = useLocalStorage(
+    "tagify:albumListShowSingleTrackAlbums",
+    false,
   );
   const [showFilterOptions, setShowFilterOptions] = useLocalStorage(
     `${entityStoragePrefix}ShowFilterOptions`,
@@ -100,9 +164,14 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
   );
   const [tagFilterOperator, setTagFilterOperator] =
     useLocalStorage<TagFilterOperator>(
-      `${entityStoragePrefix}TagFilterOperator`,
+      getBasicTagFilterOperatorStorageKey(isAlbumList ? "albums" : "playlists"),
       TAG_FILTER_OPERATORS.OR,
     );
+  const sortOptions = SORT_OPTIONS[entityType];
+  // Sort choices saved by older versions may no longer exist for this list.
+  const sortBy = sortOptions.some((option) => option.value === storedSortBy)
+    ? storedSortBy
+    : "dateModified";
   const basicTagClause = includeTagClauses[0];
 
   useEffect(() => {
@@ -141,18 +210,101 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
       onSetTagFilterOperator(operator);
     }
   };
+  const resolvedAlbumTrackSummaries = useMemo(
+    () =>
+      isAlbumList
+        ? albumTrackSummaries || buildAlbumTrackSummaries(tracks, taxonomy)
+        : NO_SUMMARIES,
+    [albumTrackSummaries, isAlbumList, taxonomy, tracks],
+  );
+  const allPlaylistEntries = useMemo(() => {
+    const entries = Object.entries(playlists).filter(
+      ([playlistUri, playlist]) =>
+        playlistUri.startsWith(isAlbumList ? "spotify:album:" : "spotify:playlist:") &&
+        (playlist.tagIds.length > 0 ||
+          playlist.rating > 0 ||
+          playlist.energy > 0 ||
+          resolvedAlbumTrackSummaries.has(playlistUri)),
+    );
+    if (!isAlbumList) {
+      return entries;
+    }
+
+    const annotatedAlbums = new Set(entries.map(([albumUri]) => albumUri));
+    const entriesWithCovers = entries.map(([albumUri, album]): [string, PlaylistData] => {
+      const summaryImageUrl = resolvedAlbumTrackSummaries.get(albumUri)?.imageUrl;
+      return !album.imageUrl && summaryImageUrl
+        ? [albumUri, { ...album, imageUrl: summaryImageUrl }]
+        : [albumUri, album];
+    });
+    // Albums are also listed when only some of their tracks are tagged.
+    const albumsFromTracks = Array.from(resolvedAlbumTrackSummaries)
+      .filter(([albumUri]) => !annotatedAlbums.has(albumUri))
+      .map(([albumUri, summary]): [string, PlaylistData] => [
+        albumUri,
+        {
+          name: summary.albumName || "Unknown Album",
+          ownerName: summary.artistName,
+          imageUrl: summary.imageUrl,
+          rating: 0,
+          energy: 0,
+          tagIds: [],
+        },
+      ]);
+
+    return [...entriesWithCovers, ...albumsFromTracks];
+  }, [isAlbumList, playlists, resolvedAlbumTrackSummaries]);
+  // An album you haven't rated or tagged yourself, with just one rated or
+  // tagged track, says nothing about the album; that track lives in Tracks.
+  const singleTrackAlbumUris = useMemo(
+    () =>
+      new Set(
+        isAlbumList
+          ? allPlaylistEntries
+              .filter(
+                ([albumUri, album]) =>
+                  album.tagIds.length === 0 &&
+                  album.rating <= 0 &&
+                  album.energy <= 0 &&
+                  (resolvedAlbumTrackSummaries.get(albumUri)?.taggedTrackCount ?? 0) <= 1,
+              )
+              .map(([albumUri]) => albumUri)
+          : [],
+      ),
+    [allPlaylistEntries, isAlbumList, resolvedAlbumTrackSummaries],
+  );
+  const hiddenSingleTrackAlbumCount = showSingleTrackAlbums ? 0 : singleTrackAlbumUris.size;
   const playlistEntries = useMemo(
     () =>
-      Object.entries(playlists).filter(
-        ([playlistUri, playlist]) =>
-          (entityType === "album"
-            ? playlistUri.startsWith("spotify:album:")
-            : playlistUri.startsWith("spotify:playlist:")) &&
-          (playlist.tagIds.length > 0 ||
-            playlist.rating > 0 ||
-            playlist.energy > 0),
+      showSingleTrackAlbums
+        ? allPlaylistEntries
+        : allPlaylistEntries.filter(([albumUri]) => !singleTrackAlbumUris.has(albumUri)),
+    [allPlaylistEntries, showSingleTrackAlbums, singleTrackAlbumUris],
+  );
+  const getLastUpdated = useCallback(
+    (playlistUri: string, playlist: PlaylistData): number =>
+      Math.max(
+        playlist.dateModified || 0,
+        resolvedAlbumTrackSummaries.get(playlistUri)?.lastTaggedAt || 0,
       ),
-    [entityType, playlists],
+    [resolvedAlbumTrackSummaries],
+  );
+  const effectiveTagIdsByUri = useMemo(
+    () =>
+      new Map(
+        playlistEntries.map(([playlistUri, playlist]) => [
+          playlistUri,
+          Array.from(
+            new Set([
+              ...playlist.tagIds,
+              ...(resolvedAlbumTrackSummaries
+                .get(playlistUri)
+                ?.commonTags.map((tag) => tag.tagId) || []),
+            ]),
+          ),
+        ]),
+      ),
+    [playlistEntries, resolvedAlbumTrackSummaries],
   );
   const allRatings = useMemo(
     () =>
@@ -183,8 +335,8 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
       }
     >();
 
-    playlistEntries.forEach(([, playlist]) => {
-      playlist.tagIds.forEach((tagId) => {
+    playlistEntries.forEach(([playlistUri]) => {
+      (effectiveTagIdsByUri.get(playlistUri) || []).forEach((tagId) => {
         if (filters.has(tagId)) {
           return;
         }
@@ -208,7 +360,7 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
           tag.name.toLowerCase().includes(normalizedTagSearch) ||
           tag.displayPath.toLowerCase().includes(normalizedTagSearch),
       );
-  }, [playlistEntries, resolvedLookup, tagSearchTerm]);
+  }, [effectiveTagIdsByUri, playlistEntries, resolvedLookup, tagSearchTerm]);
 
   const filteredPlaylists = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -216,7 +368,7 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
     return playlistEntries.filter(([playlistUri, playlist]) => {
       const matchesTags =
         includeTagClauses.length === 0 ||
-        evaluateTagFilterFormula(playlist.tagIds, {
+        evaluateTagFilterFormula(effectiveTagIdsByUri.get(playlistUri) || [], {
           clauses: includeTagClauses,
           connectors: clauseConnectors,
         });
@@ -240,17 +392,29 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
     clauseConnectors,
     energyMaxFilter,
     energyMinFilter,
+    effectiveTagIdsByUri,
     includeTagClauses,
     playlistEntries,
     ratingFilters,
     searchTerm,
   ]);
 
+  const albumTrackTotals = useKnownAlbumTrackTotals();
+  const getTrackTotal = useCallback(
+    (playlistUri: string, playlist: PlaylistData): number | null =>
+      isTrackTotal(playlist.trackCount)
+        ? playlist.trackCount
+        : isAlbumList
+          ? (albumTrackTotals[playlistUri] ?? null)
+          : null,
+    [albumTrackTotals, isAlbumList],
+  );
+
   const sortedPlaylists = useMemo(
     () =>
       [...filteredPlaylists].sort((left, right) => {
-        const [, leftData] = left;
-        const [, rightData] = right;
+        const [leftUri, leftData] = left;
+        const [rightUri, rightData] = right;
         let comparison = 0;
 
         if (sortBy === "name") {
@@ -259,16 +423,51 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
           comparison = (leftData.trackCount || 0) - (rightData.trackCount || 0);
         } else if (sortBy === "rating") {
           comparison = (leftData.rating || 0) - (rightData.rating || 0);
+        } else if (sortBy === "trackAverage") {
+          comparison =
+            (resolvedAlbumTrackSummaries.get(leftUri)?.ratingAverage ?? -1) -
+            (resolvedAlbumTrackSummaries.get(rightUri)?.ratingAverage ?? -1);
+        } else if (sortBy === "progress") {
+          const leftProgress = getAlbumProgress(
+            resolvedAlbumTrackSummaries.get(leftUri)?.taggedTrackCount || 0,
+            getTrackTotal(leftUri, leftData),
+          );
+          const rightProgress = getAlbumProgress(
+            resolvedAlbumTrackSummaries.get(rightUri)?.taggedTrackCount || 0,
+            getTrackTotal(rightUri, rightData),
+          );
+          comparison =
+            (leftProgress.ratio ?? -1) - (rightProgress.ratio ?? -1) ||
+            leftProgress.taggedTrackCount - rightProgress.taggedTrackCount;
         } else if (sortBy === "energy") {
           comparison = (leftData.energy || 0) - (rightData.energy || 0);
         } else {
-          comparison = (leftData.dateModified || 0) - (rightData.dateModified || 0);
+          comparison =
+            getLastUpdated(leftUri, leftData) - getLastUpdated(rightUri, rightData);
         }
 
         return sortOrder === "desc" ? -comparison : comparison;
       }),
-    [filteredPlaylists, sortBy, sortOrder],
+    [
+      filteredPlaylists,
+      getLastUpdated,
+      getTrackTotal,
+      resolvedAlbumTrackSummaries,
+      sortBy,
+      sortOrder,
+    ],
   );
+  // Ask for missing album lengths in the order the albums are shown.
+  const albumUrisToLookUp = useMemo(
+    () =>
+      isAlbumList
+        ? sortedPlaylists
+            .filter(([, playlist]) => !isTrackTotal(playlist.trackCount))
+            .map(([albumUri]) => albumUri)
+        : [],
+    [isAlbumList, sortedPlaylists],
+  );
+  useAlbumTrackTotalLookups(albumUrisToLookUp);
 
   const activeTagFilterCount = activeTagFilters.length + excludedTagFilters.length;
   const activeFilterCount =
@@ -313,6 +512,17 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
     onClearTagFilters();
   };
 
+  const getTagFilterTitle = (tagName: string, tagId: string) =>
+    activeTagFilters.includes(tagId)
+      ? `Exclude "${tagName}" from ${entityLabelLower} results`
+      : excludedTagFilters.includes(tagId)
+        ? `Remove "${tagName}" from ${entityLabelLower} filters`
+        : `Filter ${entityLabelPluralLower} by "${tagName}"`;
+  const getRowTagTitle = (tagName: string, tagId: string) =>
+    activeTagFilters.includes(tagId) || excludedTagFilters.includes(tagId)
+      ? `Remove "${tagName}" from ${entityLabelLower} filters`
+      : `Filter ${entityLabelPluralLower} by "${tagName}"`;
+
   return (
     <section className={styles.container}>
       <div className={styles.filterControlsGrid}>
@@ -321,9 +531,24 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
             <div className={styles.titleSection}>
               <h2 className={styles.title}>Tagged {entityLabelPlural}</h2>
               <span className={styles.count}>
-                {hasActiveFilters
-                  ? `${sortedPlaylists.length}/${playlistEntries.length} ${entityLabelPluralLower}`
-                  : `${playlistEntries.length} ${entityLabelPluralLower}`}
+                {hasActiveFilters ? `${sortedPlaylists.length}/` : ""}
+                {playlistEntries.length}{" "}
+                {playlistEntries.length === 1 ? entityLabelLower : entityLabelPluralLower}
+                {singleTrackAlbumUris.size > 0 ? (
+                  <>
+                    <span aria-hidden="true"> · </span>
+                    <button
+                      type="button"
+                      className={styles.countToggle}
+                      onClick={() => setShowSingleTrackAlbums((current) => !current)}
+                      title="Albums you haven't rated or tagged yourself, where just one track is rated or tagged"
+                    >
+                      {showSingleTrackAlbums
+                        ? `Hide ${singleTrackAlbumUris.size} with one rated or tagged track`
+                        : `Show ${singleTrackAlbumUris.size} more with one rated or tagged track`}
+                    </button>
+                  </>
+                ) : null}
               </span>
             </div>
           </div>
@@ -365,11 +590,11 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
             onChange={(event) => setSortBy(event.target.value as SortBy)}
             aria-label={`Sort ${entityLabelPluralLower} by`}
           >
-            <option value="dateModified">Last updated</option>
-            <option value="name">Name</option>
-            <option value="rating">Rating</option>
-            <option value="energy">Energy</option>
-            <option value="trackCount">Track count</option>
+            {sortOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
           <button
             className={styles.sortButton}
@@ -386,7 +611,7 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
           <div className={styles.filterOptionsTopRow}>
             {allRatings.size > 0 ? (
               <div className={`${styles.filterSection} ${styles.filterPrimarySection}`}>
-                <h3 className={styles.filterSectionTitle}>Rating</h3>
+                <h3 className={styles.filterSectionTitle}>{entityLabel} rating</h3>
                 <div className={styles.ratingFilters}>
                   {Array.from(allRatings)
                     .sort((a, b) => b - a)
@@ -432,7 +657,7 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
           <div className={styles.filterSectionsRow}>
             {allEnergyLevels.size > 0 ? (
               <div className={styles.filterSection}>
-                <h3 className={styles.filterSectionTitle}>Energy Level</h3>
+                <h3 className={styles.filterSectionTitle}>{entityLabel} energy</h3>
                 <div className={styles.rangeFilter}>
                   <div className="form-field">
                     <label className="form-label">From:</label>
@@ -485,6 +710,11 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
               placeholder="Search tags..."
             />
           </div>
+          {isAlbumList ? (
+            <p className={styles.filterHint}>
+              Matches album tags and tags common on your tracks from each album.
+            </p>
+          ) : null}
 
           <BasicTagFilterBar
             appliedTags={appliedTagFilters}
@@ -520,13 +750,7 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
                           ? `Remove "${tag.name}" filter`
                           : `Include "${tag.name}"`
                     }
-                    title={
-                      isActive
-                        ? `Exclude "${tag.name}" from ${entityLabelLower} results`
-                        : isExcluded
-                          ? `Remove "${tag.name}" from ${entityLabelLower} filters`
-                          : `Filter ${entityLabelPluralLower} by "${tag.name}"`
-                    }
+                    title={getTagFilterTitle(tag.name, tagId)}
                   >
                     {tag.name}
                   </button>
@@ -545,24 +769,59 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
         {sortedPlaylists.length === 0 ? (
           <p className={styles.emptyState}>
             {playlistEntries.length === 0
-              ? `No tagged or rated ${entityLabelPluralLower} yet.`
+              ? isAlbumList
+                ? "No albums yet. Rate or tag an album, or two of its tracks, to see it here."
+                : "No tagged or rated playlists yet."
               : `No ${entityLabelPluralLower} match your filters.`}
+            {hiddenSingleTrackAlbumCount > 0 ? (
+              <>
+                {" "}
+                Albums with just one rated or tagged track are hidden.{" "}
+                <button
+                  type="button"
+                  className={styles.emptyStateAction}
+                  onClick={() => setShowSingleTrackAlbums(true)}
+                >
+                  Show them
+                </button>
+              </>
+            ) : null}
           </p>
         ) : (
           sortedPlaylists.map(([playlistUri, playlist]) => {
-            const entityLabel = getPlaylistEntityLabel(playlistUri);
-            const entityLabelLower = entityLabel.toLowerCase();
             const resolvedTags = playlist.tagIds
               .map((tagId) => resolvedLookup.get(tagId))
               .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag))
               .sort(compareResolvedTagsByTaxonomyOrder);
+            const albumTrackSummary = resolvedAlbumTrackSummaries.get(playlistUri);
+            const trackTotal = getTrackTotal(playlistUri, playlist);
+            const progress = getAlbumProgress(
+              albumTrackSummary?.taggedTrackCount || 0,
+              trackTotal,
+            );
+            const commonTrackTags = (albumTrackSummary?.commonTags || [])
+              .filter((tag) => !playlist.tagIds.includes(tag.tagId))
+              .flatMap((tag) => {
+                const resolved = resolvedLookup.get(tag.tagId);
+                return resolved ? [{ ...tag, resolved }] : [];
+              })
+              .slice(0, MAX_ROW_COMMON_TAGS);
+            const lastUpdated = getLastUpdated(playlistUri, playlist);
+            // While an album's length is still unknown, say what was counted
+            // rather than "4 tracks", which reads like the album's length.
+            const progressText =
+              progress.totalTrackCount !== null
+                ? `${progress.taggedTrackCount}/${pluralizeTracks(progress.totalTrackCount)}`
+                : progress.taggedTrackCount > 0
+                  ? `${progress.taggedTrackCount} rated or tagged`
+                  : null;
 
             return (
               <div
                 key={playlistUri}
                 className={`${styles.playlistItem} ${
-                  activePlaylistUri === playlistUri ? styles.playlistItemActive : ""
-                }`}
+                  isAlbumList ? styles.albumItem : ""
+                } ${activePlaylistUri === playlistUri ? styles.playlistItemActive : ""}`}
                 onClick={() => onSelectPlaylist(playlistUri)}
               >
                 {playlist.imageUrl ? (
@@ -570,17 +829,13 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
                     src={playlist.imageUrl}
                     alt={`${playlist.name || entityLabel} cover`}
                     className={`${styles.cover} ${
-                      entityLabel === "Album"
-                        ? styles.albumCover
-                        : styles.playlistCover
+                      isAlbumList ? styles.albumCover : styles.playlistCover
                     }`}
                   />
                 ) : (
                   <div
                     className={`${styles.cover} ${styles.coverPlaceholder} ${
-                      entityLabel === "Album"
-                        ? styles.albumCover
-                        : styles.playlistCover
+                      isAlbumList ? styles.albumCover : styles.playlistCover
                     }`}
                   >
                     ♪
@@ -600,20 +855,26 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
                     {playlist.name || `Unknown ${entityLabel}`}
                   </button>
                   <div className={styles.playlistMeta}>
-                    <span className={styles.entityBadge}>{entityLabel}</span>
-                    {playlist.ownerName ? <span>{playlist.ownerName}</span> : null}
-                    {playlist.trackCount !== null &&
+                    {playlist.ownerName ? (
+                      <span className={styles.ownerName}>{playlist.ownerName}</span>
+                    ) : null}
+                    {!isAlbumList &&
+                    playlist.trackCount !== null &&
                     playlist.trackCount !== undefined ? (
-                      <span>{playlist.trackCount} tracks</span>
+                      <span>{pluralizeTracks(playlist.trackCount)}</span>
                     ) : null}
                     {playlist.rating > 0 ? (
-                      <span className={styles.playlistRating} title="Rating">
+                      <span
+                        className={styles.playlistRating}
+                        title={`${entityLabel} rating: ${playlist.rating}`}
+                        aria-label={`${entityLabel} rating: ${playlist.rating} stars`}
+                      >
                         <ReactStars
                           key={`${playlistUri}-rating-${playlist.rating}`}
                           count={5}
                           value={playlist.rating}
                           edit={false}
-                          size={16}
+                          size={15}
                           isHalf={true}
                           emptyIcon={<FontAwesomeIcon icon={faStar} />}
                           halfIcon={<FontAwesomeIcon icon={faStarHalf} />}
@@ -624,44 +885,119 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
                       </span>
                     ) : null}
                     {playlist.energy > 0 ? (
-                      <span className={styles.playlistEnergy} title="Energy">
+                      <span
+                        className={styles.playlistEnergy}
+                        title={`${entityLabel} energy: ${playlist.energy}`}
+                      >
                         {playlist.energy}
                       </span>
                     ) : null}
-                    {playlist.dateModified ? (
-                      <span>Updated {formatTimestamp(playlist.dateModified)}</span>
+                    {lastUpdated > 0 ? (
+                      <span
+                        className={styles.updated}
+                        title={`Last updated ${formatTimestamp(lastUpdated)}`}
+                      >
+                        Updated {formatCondensedDate(lastUpdated)}
+                      </span>
                     ) : null}
                   </div>
-                  <div className={styles.tags}>
-                    {resolvedTags.map((tag) => (
-                      <span
-                        key={tag.id}
-                        className={`${styles.tag} ${
-                          tag.tag.accentId ? styles.tagAccented : ""
-                        } ${activeTagFilters.includes(tag.id) ? styles.tagActive : ""} ${
-                          excludedTagFilters.includes(tag.id) ? styles.tagExcluded : ""
-                        }`}
-                        style={buildTagAccentCssVars(
-                          tag.tag.accentId ?? null,
-                          customAccentsById,
-                        )}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onCycleTagFilter(tag.id, tagFilterOperator);
-                        }}
-                        title={
-                          activeTagFilters.includes(tag.id)
-                            ? `Exclude "${tag.name}" from ${entityLabelLower} results`
-                            : excludedTagFilters.includes(tag.id)
-                              ? `Remove "${tag.name}" from ${entityLabelLower} filters`
-                              : `Filter ${entityLabelLower}s by "${tag.name}"`
-                        }
-                      >
-                        {tag.name}
-                      </span>
-                    ))}
-                  </div>
+                  {resolvedTags.length > 0 || commonTrackTags.length > 0 ? (
+                    <div className={styles.tags}>
+                      {resolvedTags.map((tag) => (
+                        <button
+                          type="button"
+                          key={tag.id}
+                          className={`${styles.tag} ${
+                            tag.tag.accentId ? styles.tagAccented : ""
+                          } ${activeTagFilters.includes(tag.id) ? styles.tagActive : ""} ${
+                            excludedTagFilters.includes(tag.id) ? styles.tagExcluded : ""
+                          }`}
+                          style={buildTagAccentCssVars(
+                            tag.tag.accentId ?? null,
+                            customAccentsById,
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onToggleTagFilter(tag.id, tagFilterOperator);
+                          }}
+                          aria-label={getRowTagTitle(tag.name, tag.id)}
+                          title={getRowTagTitle(tag.name, tag.id)}
+                        >
+                          {tag.name}
+                        </button>
+                      ))}
+                      {commonTrackTags.length > 0 ? (
+                        <span
+                          className={styles.commonTags}
+                          aria-label="Common tags on your tracks"
+                        >
+                          {resolvedTags.length > 0 ? (
+                            <span className={styles.commonTagsLabel}>From tracks</span>
+                          ) : null}
+                          {commonTrackTags.map(({ tagId, trackCount, resolved }) => (
+                            <button
+                              type="button"
+                              key={tagId}
+                              className={`${styles.commonTag} ${
+                                activeTagFilters.includes(tagId) ? styles.tagActive : ""
+                              } ${excludedTagFilters.includes(tagId) ? styles.tagExcluded : ""}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onToggleTagFilter(tagId, tagFilterOperator);
+                              }}
+                              aria-label={getRowTagTitle(resolved.name, tagId)}
+                              title={`${resolved.name} is on ${trackCount} of the ${pluralizeTracks(
+                                albumTrackSummary?.taggedTrackCount || 0,
+                              )} you've rated or tagged from this album. ${getRowTagTitle(
+                                resolved.name,
+                                tagId,
+                              )}.`}
+                            >
+                              {resolved.name}
+                            </button>
+                          ))}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
+
+                {isAlbumList ? (
+                  <div
+                    className={styles.trackStats}
+                    title={`${
+                      progress.totalTrackCount === null
+                        ? pluralizeTracks(progress.taggedTrackCount)
+                        : `${progress.taggedTrackCount} of ${pluralizeTracks(progress.totalTrackCount)}`
+                    } rated or tagged`}
+                  >
+                    {progressText ? (
+                      <span
+                        className={`${styles.progressText} ${
+                          progress.isComplete ? styles.progressComplete : ""
+                        }`}
+                      >
+                        {progressText}
+                      </span>
+                    ) : null}
+                    <AlbumProgressBar
+                      progress={progress}
+                      label={`${playlist.name || "Album"} progress`}
+                    />
+                    {albumTrackSummary?.ratingAverage !== null &&
+                    albumTrackSummary?.ratingAverage !== undefined ? (
+                      <span
+                        className={styles.trackAverage}
+                        title={`Average rating of ${pluralizeTracks(
+                          albumTrackSummary.ratedTrackCount,
+                        )} you've rated`}
+                      >
+                        <Star size={11} fill="currentColor" aria-hidden="true" />
+                        {formatTrackAverage(albumTrackSummary.ratingAverage)} avg
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             );
           })

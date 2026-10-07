@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { defaultTagData } from "@/constants/defaultTagData";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
+import { storageService } from "@/services/storage/StorageService";
+import { flushLocalPersistence } from "@/services/sync/SyncLocalState";
+import { restoreLocalDurableAppState } from "@/services/sync/DurableAppState";
+import { spotifyApiService } from "@/services/SpotifyApiService";
+import { prepareSmartPlaylistImport, clearConfirmedMembershipBaselines } from "@/features/smart-playlists";
 import {
   OrchestratorProgress,
   OrchestratorResult,
@@ -12,7 +17,17 @@ import {
   TrackData,
 } from "@/types/tagData";
 import { buildExportData } from "../utils/tagData.export";
-import { downloadTagDataBackup, validateTagDataBackup } from "../utils/tagData.backup";
+import {
+  backupIncludesSmartPlaylists,
+  downloadSafetyTagDataBackup,
+  downloadTagDataBackup,
+  extractAppStateFromBackup,
+  extractCommunityStateFromBackup,
+  extractTagDataFromBackup,
+  hasCommunityBackupState,
+  validateTagDataBackup,
+} from "../utils/tagData.backup";
+import { readCompleteBackupContents } from "../utils/tagData.backupContents";
 import { areTrackDataEqual } from "../utils/tagData.helpers";
 import { dispatchTagDataUpdatedEvent } from "../utils/tagData.events";
 import { normalizeTagDataStructure } from "../utils/tagData.schema";
@@ -55,11 +70,15 @@ export function useTagData(options: UseTagDataOptions = {}) {
     useState<OrchestratorProgress | null>(null);
   const initRef = useRef(false);
 
-  const emitUserTrackAddedEvent = useCallback(() => {
+  const emitUserTrackAddedEvent = useCallback((trackUris: string[] = []) => {
     userTrackAddedEventCounterRef.current += 1;
-    setLastUserTrackAddedEvent({
-      eventId: userTrackAddedEventCounterRef.current,
-    });
+    const eventId = userTrackAddedEventCounterRef.current;
+    // React can batch several manual saves into one render. Keep enough distinct
+    // additions for the survey milestone rather than losing all but the last.
+    setLastUserTrackAddedEvent((previous) => ({
+      eventId,
+      trackUris: [...new Set([...(previous?.trackUris ?? []), ...trackUris])].slice(0, 5),
+    }));
   }, []);
 
   const { applyPersistedSnapshot } = useTagDataPersistence({
@@ -74,6 +93,10 @@ export function useTagData(options: UseTagDataOptions = {}) {
     skipNextAutoSaveRef,
     persistedDataRef,
   });
+
+  const refreshPersistedTagData = useCallback(async () => {
+    applyPersistedSnapshot(await storageService.loadAllStrict());
+  }, [applyPersistedSnapshot]);
 
   const { loadTagData, retryMigration } = useTagDataInitialization({
     initRef,
@@ -170,7 +193,7 @@ export function useTagData(options: UseTagDataOptions = {}) {
       applyPersistedSnapshot(nextData);
 
       if (!trackExistedBefore) {
-        emitUserTrackAddedEvent();
+        emitUserTrackAddedEvent([trackUri]);
       }
     },
     [applyPersistedSnapshot, emitUserTrackAddedEvent, latestTagDataRef],
@@ -250,6 +273,20 @@ export function useTagData(options: UseTagDataOptions = {}) {
     [applyPersistedSnapshot, latestTagDataRef],
   );
 
+  /** Downloads the current library before it is replaced, and stops if that fails. */
+  const saveSafetyBackup = useCallback(async (reason: "before-import" | "before-reset") => {
+    await flushLocalPersistence();
+    const current = await indexedDBStorage.loadAllStrict();
+    try {
+      if (downloadSafetyTagDataBackup(current, await readCompleteBackupContents(), reason)) {
+        Spicetify.showNotification("Your current library was saved to Downloads first");
+      }
+    } catch (error) {
+      console.error("Tagify: Could not save a copy of the current library", error);
+      throw new Error("Tagify couldn't save a copy of your current library first, so nothing was changed. Please try again.");
+    }
+  }, []);
+
   const exportTagData = useCallback(async () => {
     try {
       const data = await indexedDBStorage.loadAll();
@@ -258,7 +295,7 @@ export function useTagData(options: UseTagDataOptions = {}) {
         throw new Error("No tag data found");
       }
 
-      downloadTagDataBackup(data);
+      downloadTagDataBackup(data, await readCompleteBackupContents());
       Spicetify.showNotification("Backup saved to Downloads folder");
     } catch (error) {
       console.error("Failed to export tag data:", error);
@@ -270,12 +307,51 @@ export function useTagData(options: UseTagDataOptions = {}) {
     async (backupData: unknown) => {
       try {
         validateTagDataBackup(backupData);
-        const normalizedBackupData = normalizeTagDataStructure(backupData);
+        const normalizedBackupData = normalizeTagDataStructure(
+          extractTagDataFromBackup(backupData),
+        );
+        // Files made before Smart Playlists were part of backups say nothing
+        // about them; keep the current rules instead of clearing them.
+        if (!backupIncludesSmartPlaylists(backupData)) {
+          normalizedBackupData.smartPlaylists = await indexedDBStorage.getAllSmartPlaylists();
+        }
+        await saveSafetyBackup("before-import");
+
+        if ((normalizedBackupData.smartPlaylists?.length ?? 0) > 0) {
+          clearConfirmedMembershipBaselines();
+          try {
+            const currentPlaylists =
+              await spotifyApiService.getAllUserPlaylistReferencesStrict();
+            normalizedBackupData.smartPlaylists = prepareSmartPlaylistImport(
+              normalizedBackupData.smartPlaylists ?? [],
+              currentPlaylists,
+            ).playlists;
+          } catch (error) {
+            console.warn(
+              "Could not verify imported smart-playlist bindings; membership will be re-confirmed later",
+              error,
+            );
+            normalizedBackupData.smartPlaylists =
+              (normalizedBackupData.smartPlaylists ?? []).map((playlist) => ({
+                ...playlist,
+                lastSyncAt: 0,
+                smartPlaylistTrackUris: [],
+              }));
+          }
+        }
 
         const success = await indexedDBStorage.saveAll(normalizedBackupData);
         if (!success) {
           throw new Error("Failed to save imported data to storage");
         }
+
+        const communityState = extractCommunityStateFromBackup(backupData);
+        if (communityState && hasCommunityBackupState(communityState) &&
+            !(await indexedDBStorage.restoreCommunityBackupState(communityState))) {
+          throw new Error("Tag data imported, but Community provenance could not be restored");
+        }
+        const appState = extractAppStateFromBackup(backupData);
+        if (appState) await restoreLocalDurableAppState(appState);
 
         applyPersistedSnapshot(normalizedBackupData);
         dispatchTagDataUpdatedEvent("import");
@@ -283,7 +359,9 @@ export function useTagData(options: UseTagDataOptions = {}) {
         Spicetify.showNotification(
           `Imported ${Object.keys(normalizedBackupData.tracks).length} tracks and ${
             Object.keys(normalizedBackupData.playlists).length
-          } playlists and ${Object.keys(normalizedBackupData.artists).length} artists successfully!`,
+          } playlists, ${Object.keys(normalizedBackupData.artists).length} artists, and ${
+            normalizedBackupData.smartPlaylists?.length ?? 0
+          } smart playlists successfully!`,
         );
       } catch (error) {
         console.error("Failed to import tag data:", error);
@@ -300,8 +378,9 @@ export function useTagData(options: UseTagDataOptions = {}) {
   const resetTagData = useCallback(async () => {
     try {
       const resetData = JSON.parse(JSON.stringify(defaultTagData)) as TagDataStructure;
+      await saveSafetyBackup("before-reset");
 
-      const success = await indexedDBStorage.saveAll(resetData);
+      const success = await indexedDBStorage.saveAll(resetData, "reset");
       if (!success) {
         throw new Error("Failed to reset tag data in storage");
       }
@@ -324,6 +403,34 @@ export function useTagData(options: UseTagDataOptions = {}) {
   }, [loadTagData]);
 
   useEffect(() => {
+    const prepare = () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+      pendingSaveRef.current = null;
+    };
+    const rehydrate = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; origin?: string }>).detail;
+      if (detail?.type !== "sync" || detail.origin !== "remote") return;
+      // Save an edit made while the update was applied before reloading. While
+      // a full restore pauses saving, the flush is skipped and the stale
+      // in-memory copy is discarded instead.
+      void flushLocalPersistence()
+        .catch((error) => console.error("Tagify: Could not save a recent edit before showing synced changes", error))
+        .then(() => {
+          prepare();
+          return storageService.loadAll();
+        })
+        .then((data) => applyPersistedSnapshot(data, { skipNextAutoSave: true }));
+    };
+    window.addEventListener("tagify:prepareRemoteRestore", prepare);
+    window.addEventListener("tagify:dataUpdated", rehydrate);
+    return () => {
+      window.removeEventListener("tagify:prepareRemoteRestore", prepare);
+      window.removeEventListener("tagify:dataUpdated", rehydrate);
+    };
+  }, [applyPersistedSnapshot, pendingSaveRef, saveTimeoutRef]);
+
+  useEffect(() => {
     latestTagDataRef.current = tagData;
   }, [tagData]);
 
@@ -333,6 +440,7 @@ export function useTagData(options: UseTagDataOptions = {}) {
     isLoading,
     lastSaved,
     loadTagData,
+    refreshPersistedTagData,
     applyShortcutTrackUpdate,
     applyShortcutPlaylistUpdate,
     applyShortcutArtistUpdate,

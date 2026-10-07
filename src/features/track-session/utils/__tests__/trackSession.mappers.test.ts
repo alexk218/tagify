@@ -26,6 +26,7 @@ describe("trackSession.mappers", () => {
       artists: "Artist One",
       albumName: "Album",
       albumUri: "spotify:album:xyz",
+      albumImageUrl: null,
       artistsData: [{ name: "Artist One", uri: "spotify:artist:1" }],
       duration_ms: 211000,
       release_date: "2020-01-01",
@@ -35,7 +36,7 @@ describe("trackSession.mappers", () => {
       uri: "spotify:track:abc",
       name: "Track",
       artists: [{ name: "Artist One" }],
-      album: { name: "Album" },
+      album: { name: "Album", uri: "spotify:album:xyz", images: [] },
       duration_ms: 211000,
     });
   });

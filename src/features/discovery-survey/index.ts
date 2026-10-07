@@ -4,3 +4,5 @@ export type {
   DiscoverySurveyState,
   UseDiscoverySurveyReturn,
 } from "./hooks/useDiscoverySurvey";
+
+export { useTagifyUsage } from "./services/tagifyUsage";

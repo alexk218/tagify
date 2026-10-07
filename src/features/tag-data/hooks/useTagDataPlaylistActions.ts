@@ -38,7 +38,11 @@ function needsPlaylistMetadataHydration(
     );
   }
 
-  return !playlistData.name || playlistData.trackCount === undefined;
+  return (
+    !playlistData.name ||
+    playlistData.name === "Unknown Playlist" ||
+    playlistData.trackCount === undefined
+  );
 }
 
 export function useTagDataPlaylistActions({

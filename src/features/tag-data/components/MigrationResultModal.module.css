@@ -260,3 +260,40 @@
   left: 0;
   color: #1db954;
 }
+
+.fallbackInfo {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.fallbackInfo h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--spice-text);
+  margin: 0 0 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.fallbackInfo ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fallbackInfo li {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 6px 0 6px 20px;
+  position: relative;
+}
+
+.fallbackInfo li::before {
+  content: "•";
+  position: absolute;
+  left: 6px;
+  color: var(--spice-subtext);
+}

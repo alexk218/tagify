@@ -14,6 +14,8 @@ declare module "react-rating-stars-component" {
     halfIcon?: React.ReactNode;
     fullIcon?: React.ReactNode;
     onChange?: (newRating: number) => void;
+    /** Built-in keyboard support; turn off when a wrapper handles keys. */
+    a11y?: boolean;
   }
 
   const ReactStars: FC<ReactStarsProps>;

@@ -1,0 +1,163 @@
+.trackList {
+  display: grid;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.status {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  margin: 0;
+}
+
+.rows {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.disc {
+  color: var(--spice-subtext);
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 8px 0 2px 8px;
+  text-transform: uppercase;
+}
+
+.row {
+  align-items: center;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 36px;
+  padding-right: 8px;
+}
+
+.row:hover {
+  background: rgb(255 255 255 / 7%);
+}
+
+/* Reveals each row's rating controls while you hover or use the row. */
+.row:hover,
+.row:focus-within {
+  --album-track-controls-shown: 1;
+}
+
+.open {
+  align-items: center;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--spice-text);
+  cursor: pointer;
+  display: grid;
+  font-family: inherit;
+  gap: 10px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  min-width: 0;
+  padding: 5px 0 5px 8px;
+  text-align: left;
+}
+
+.open:focus-visible {
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 35%);
+  outline: none;
+}
+
+.rowEmpty .name {
+  color: var(--spice-subtext);
+}
+
+.number {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.main {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tag {
+  background: rgb(255 255 255 / 6%);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 2px 7px;
+}
+
+.tagAccented {
+  background: color-mix(in srgb, rgb(0 0 0 / 24%) 72%, var(--tag-accent-tint) 28%);
+  border-color: var(--tag-accent-border, rgb(255 255 255 / 10%));
+  color: var(--tag-accent-text, var(--spice-text));
+}
+
+/* Fixed slots keep stars, clear, and energy lined up from row to row. */
+.values {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: auto 18px 24px;
+}
+
+.energySlot {
+  display: inline-flex;
+  justify-content: flex-end;
+}
+
+.energy {
+  background: rgb(0 0 0 / 30%);
+  border-radius: 4px;
+  color: var(--spice-text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 20px;
+  padding: 2px 6px;
+  text-align: center;
+}
+
+.showAll {
+  background: transparent;
+  border: 0;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  justify-self: start;
+  padding: 2px 8px;
+  text-decoration: underline;
+  text-decoration-color: rgb(255 255 255 / 25%);
+  text-underline-offset: 2px;
+}
+
+.showAll:hover,
+.showAll:focus-visible {
+  color: var(--spice-text);
+}

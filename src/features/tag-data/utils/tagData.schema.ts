@@ -13,6 +13,7 @@ import {
   buildTaxonomyFromCategoryTree,
   createLegacyTagIdentityId,
   migrateLegacyFilterTagId,
+  normalizeTaxonomyTree,
   normalizeTaxonomyCustomAccents,
   TAG_DATA_SCHEMA_VERSION,
 } from "@/utils/tagTaxonomy";
@@ -89,8 +90,24 @@ function normalizeTrackData(trackData: unknown): TrackData {
     ...(typeof candidate.artists === "string"
       ? { artists: candidate.artists }
       : {}),
+    ...(typeof candidate.albumName === "string"
+      ? { albumName: candidate.albumName }
+      : {}),
+    ...(typeof candidate.albumUri === "string" || candidate.albumUri === null
+      ? { albumUri: candidate.albumUri }
+      : {}),
+    ...(typeof candidate.albumImageUrl === "string" ||
+    candidate.albumImageUrl === null
+      ? { albumImageUrl: candidate.albumImageUrl }
+      : {}),
     ...(typeof candidate.backfillAttempts === "number"
       ? { backfillAttempts: candidate.backfillAttempts }
+      : {}),
+    ...(typeof candidate.audioFeaturesBackfillRevision === "string"
+      ? { audioFeaturesBackfillRevision: candidate.audioFeaturesBackfillRevision }
+      : {}),
+    ...(typeof candidate.albumBackfillAttempts === "number"
+      ? { albumBackfillAttempts: candidate.albumBackfillAttempts }
       : {}),
   };
 }
@@ -163,9 +180,10 @@ function normalizeTaxonomy(
 ): TagDataStructure["taxonomy"] {
   const customAccentsById = normalizeTaxonomyCustomAccents(taxonomy);
   const colorLibrary = normalizeColorLibrary({ ...taxonomy, customAccentsById });
+  const normalizedTree = normalizeTaxonomyTree({ ...taxonomy, tagsById: colorLibrary.tagsById });
 
   return {
-    ...taxonomy,
+    ...normalizedTree,
     ...colorLibrary,
     tagsById: Object.fromEntries(
       Object.entries(colorLibrary.tagsById || {}).map(([tagId, tag]) => [
@@ -235,6 +253,9 @@ export function normalizeTagDataStructure(value: unknown): TagDataStructure {
       tracks: nextTracks,
       playlists: nextPlaylists,
       artists: nextArtists,
+      smartPlaylists: normalizeSmartPlaylistCriteriaList(
+        (candidate as TagDataStructure).smartPlaylists,
+      ),
     };
   }
 
@@ -251,6 +272,7 @@ export function normalizeTagDataStructure(value: unknown): TagDataStructure {
       ),
       playlists: {},
       artists: {},
+      smartPlaylists: [],
     };
   }
 
@@ -402,18 +424,50 @@ export function normalizeSmartPlaylistCriteriaList(value: unknown): SmartPlaylis
 
     return [
       {
+        id:
+          typeof candidate.id === "string" && candidate.id.trim()
+            ? candidate.id
+            : `smart-playlist:${candidate.playlistId || candidate.playlistName}:${
+                typeof candidate.createdAt === "number" ? candidate.createdAt : 0
+              }`,
         playlistId: candidate.playlistId,
         playlistName: candidate.playlistName,
+        ...(typeof candidate.description === "string"
+          ? { description: candidate.description }
+          : {}),
         isActive: candidate.isActive,
         createdAt:
           typeof candidate.createdAt === "number" ? candidate.createdAt : Date.now(),
+        updatedAt:
+          typeof candidate.updatedAt === "number"
+            ? candidate.updatedAt
+            : typeof candidate.createdAt === "number"
+              ? candidate.createdAt
+              : Date.now(),
         lastSyncAt:
           typeof candidate.lastSyncAt === "number" ? candidate.lastSyncAt : 0,
+        ...(Array.isArray(candidate.pendingTagChoices) ? {
+          pendingTagChoices: [...new Set(candidate.pendingTagChoices.filter((uri): uri is string => typeof uri === "string"))],
+        } : {}),
         smartPlaylistTrackUris: Array.isArray(candidate.smartPlaylistTrackUris)
           ? candidate.smartPlaylistTrackUris.filter(
               (trackUri): trackUri is string => typeof trackUri === "string",
             )
           : [],
+        ...(candidate.source &&
+        typeof candidate.source === "object" &&
+        typeof candidate.source.recipeId === "string" &&
+        typeof candidate.source.revision === "number"
+          ? {
+              source: {
+                recipeId: candidate.source.recipeId,
+                revision: candidate.source.revision,
+                ...(typeof candidate.source.authorId === "string"
+                  ? { authorId: candidate.source.authorId }
+                  : {}),
+              },
+            }
+          : {}),
         criteria: {
           ...(() => {
             const normalizedFormula = Array.isArray(candidate.criteria.includeTagClauses)

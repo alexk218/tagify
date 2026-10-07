@@ -86,6 +86,7 @@ function renderList(
     onSelectArtist: vi.fn(),
     onOpenArtist: vi.fn(),
     onCycleTagFilter: vi.fn(),
+    onToggleTagFilter: vi.fn(),
     onRemoveTagFilter: vi.fn(),
     onSetTagFilterOperator: vi.fn(),
     onClearTagFilters: vi.fn(),
@@ -111,6 +112,7 @@ function StatefulArtistList() {
       onSelectArtist={vi.fn()}
       onOpenArtist={vi.fn()}
       onCycleTagFilter={filters.cycleTagIncludeExcludeOff}
+      onToggleTagFilter={filters.toggleBasicTagFilter}
       onRemoveTagFilter={filters.removeTagFilter}
       onSetTagFilterOperator={(operator) =>
         filters.setIncludeClauseOperator(0, operator)
@@ -122,7 +124,7 @@ function StatefulArtistList() {
 
 async function openFilters() {
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /filters/i }));
+  await user.click(screen.getByRole("button", { name: /^Filters\b/ }));
   return user;
 }
 
@@ -203,6 +205,27 @@ describe("TaggedArtistsList", () => {
     await user.click(screen.getByRole("button", { name: 'Remove "House" filter' }));
     expect(screen.getByText("DJ Alpha")).toBeInTheDocument();
     expect(screen.getByText("Beta Band")).toBeInTheDocument();
+  });
+
+  it("turns artist row tags on and off without excluding them", async () => {
+    render(<StatefulArtistList />);
+    const user = userEvent.setup();
+    const betaRow = screen.getByText("Beta Band").closest<HTMLElement>(
+      '[class*="artistItem"]',
+    );
+    expect(betaRow).not.toBeNull();
+
+    await user.click(
+      within(betaRow!).getByRole("button", { name: 'Filter artists by "Chill"' }),
+    );
+    expect(screen.queryByText("Gamma")).not.toBeInTheDocument();
+    expect(screen.getByText("DJ Alpha")).toBeInTheDocument();
+
+    await user.click(
+      within(betaRow!).getByRole("button", { name: 'Remove "Chill" from artist filters' }),
+    );
+    expect(screen.getByText("Gamma")).toBeInTheDocument();
+    expect(document.querySelectorAll('[class*="tagExcluded"]')).toHaveLength(0);
   });
 
   it("supports Match All and removable applied artist filters", async () => {

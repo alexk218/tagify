@@ -169,6 +169,14 @@ class StorageService {
     return this.initStatus === "ready";
   }
 
+  async switchAccountDatabase(): Promise<boolean> {
+    this.initPromise = null;
+    this.initStatus = "uninitialized";
+    const initialized = await indexedDBStorage.switchAccountDatabase();
+    this.initStatus = initialized ? "ready" : "error";
+    return initialized;
+  }
+
   // ============ Data Operations ============
 
   /**
@@ -182,6 +190,11 @@ class StorageService {
 
     const data = await indexedDBStorage.loadAll();
     return data || defaultTagData;
+  }
+
+  async loadAllStrict(): Promise<TagDataStructure> {
+    if (!this.isReady()) throw new Error("Your saved Tagify details are still loading. Please try again.");
+    return indexedDBStorage.loadAllStrict();
   }
 
   /**
@@ -207,9 +220,9 @@ class StorageService {
   /**
    * Save taxonomy
    */
-  async saveTaxonomy(taxonomy: TagTaxonomy): Promise<boolean> {
+  async saveTaxonomy(taxonomy: TagTaxonomy, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!this.isReady()) return false;
-    return indexedDBStorage.saveTaxonomy(taxonomy);
+    return indexedDBStorage.saveTaxonomy(taxonomy, options);
   }
 
   /**
@@ -223,17 +236,17 @@ class StorageService {
   /**
    * Save a single track
    */
-  async saveTrack(uri: string, data: TrackData): Promise<boolean> {
+  async saveTrack(uri: string, data: TrackData, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!this.isReady()) return false;
-    return indexedDBStorage.saveTrack(uri, data);
+    return indexedDBStorage.saveTrack(uri, data, options);
   }
 
   /**
    * Delete a single track
    */
-  async deleteTrack(uri: string): Promise<boolean> {
+  async deleteTrack(uri: string, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!this.isReady()) return false;
-    return indexedDBStorage.deleteTrack(uri);
+    return indexedDBStorage.deleteTrack(uri, options);
   }
 
   /**
@@ -252,6 +265,14 @@ class StorageService {
     return indexedDBStorage.saveTracks(tracks);
   }
 
+  /** Save and delete multiple tracks atomically. */
+  async saveTrackChanges(
+    changes: Map<string, TrackData | null>
+  ): Promise<boolean> {
+    if (!this.isReady()) return false;
+    return indexedDBStorage.saveTrackChanges(changes);
+  }
+
   /**
    * Get a single playlist or album
    */
@@ -263,17 +284,23 @@ class StorageService {
   /**
    * Save/update a single playlist or album
    */
-  async savePlaylist(uri: string, data: PlaylistData): Promise<boolean> {
+  async savePlaylist(uri: string, data: PlaylistData, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!this.isReady()) return false;
-    return indexedDBStorage.savePlaylist(uri, data);
+    return indexedDBStorage.savePlaylist(uri, data, options);
+  }
+
+  /** Save/update multiple playlists or albums in one transaction. */
+  async savePlaylists(playlists: Map<string, PlaylistData>): Promise<boolean> {
+    if (!this.isReady()) return false;
+    return indexedDBStorage.savePlaylists(playlists);
   }
 
   /**
    * Delete a single playlist or album
    */
-  async deletePlaylist(uri: string): Promise<boolean> {
+  async deletePlaylist(uri: string, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!this.isReady()) return false;
-    return indexedDBStorage.deletePlaylist(uri);
+    return indexedDBStorage.deletePlaylist(uri, options);
   }
 
   /**
@@ -287,17 +314,23 @@ class StorageService {
   /**
    * Save/update a single artist
    */
-  async saveArtist(uri: string, data: ArtistData): Promise<boolean> {
+  async saveArtist(uri: string, data: ArtistData, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!this.isReady()) return false;
-    return indexedDBStorage.saveArtist(uri, data);
+    return indexedDBStorage.saveArtist(uri, data, options);
+  }
+
+  /** Save/update multiple artists in one transaction. */
+  async saveArtists(artists: Map<string, ArtistData>): Promise<boolean> {
+    if (!this.isReady()) return false;
+    return indexedDBStorage.saveArtists(artists);
   }
 
   /**
    * Delete a single artist
    */
-  async deleteArtist(uri: string): Promise<boolean> {
+  async deleteArtist(uri: string, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!this.isReady()) return false;
-    return indexedDBStorage.deleteArtist(uri);
+    return indexedDBStorage.deleteArtist(uri, options);
   }
 
   /**
@@ -329,18 +362,6 @@ class StorageService {
    */
   async getDiagnostics() {
     return storageMigrationService.getDiagnostics();
-  }
-
-  /**
-   * Force re-migration (for recovery/debugging)
-   */
-  async forceMigration(
-    onProgress?: (message: string, progress: number) => void
-  ): Promise<MigrationResult> {
-    this.initStatus = "migrating";
-    const result = await storageMigrationService.forceMigration(onProgress);
-    this.initStatus = result.success ? "ready" : "error";
-    return result;
   }
 }
 

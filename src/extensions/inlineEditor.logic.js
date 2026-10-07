@@ -30,6 +30,14 @@ export function createUpdatedTrack(track, changes, now) {
   };
 }
 
+export function isTrackAnnotationEmpty(track) {
+  return (
+    Number(track?.rating) === 0 &&
+    Number(track?.energy) === 0 &&
+    (!Array.isArray(track?.tagIds) || track.tagIds.length === 0)
+  );
+}
+
 export function toggleTagId(tagIds, tagId) {
   return tagIds.includes(tagId)
     ? tagIds.filter((id) => id !== tagId)

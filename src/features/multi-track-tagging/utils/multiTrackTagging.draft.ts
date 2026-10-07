@@ -52,6 +52,32 @@ export function createDraftTagState(
   return initialDraft;
 }
 
+export function rebaseDraftTagState(
+  original: DraftTagState,
+  draft: DraftTagState,
+  latest: DraftTagState,
+): DraftTagState {
+  const rebased: DraftTagState = {};
+
+  Object.entries(latest).forEach(([trackUri, current]) => {
+    const previous = original[trackUri] ?? createDefaultDraftTrackData();
+    const edited = draft[trackUri] ?? previous;
+    const added = edited.tagIds.filter((tagId) => !hasTrackTag(previous.tagIds, tagId));
+    const removed = previous.tagIds.filter((tagId) => !hasTrackTag(edited.tagIds, tagId));
+
+    rebased[trackUri] = {
+      tagIds: [
+        ...current.tagIds.filter((tagId) => !hasTrackTag(removed, tagId)),
+        ...added.filter((tagId) => !hasTrackTag(current.tagIds, tagId)),
+      ],
+      rating: edited.rating !== previous.rating ? edited.rating : current.rating,
+      energy: edited.energy !== previous.energy ? edited.energy : current.energy,
+    };
+  });
+
+  return rebased;
+}
+
 export function findCommonTagsFromDraft(draftTags: DraftTagState): TrackTag[] {
   const trackUris = Object.keys(draftTags);
 

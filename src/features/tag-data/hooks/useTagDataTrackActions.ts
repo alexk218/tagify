@@ -1,4 +1,4 @@
-import { Dispatch, MutableRefObject, SetStateAction, useCallback } from "react";
+import { Dispatch, MutableRefObject, SetStateAction, useCallback, useRef } from "react";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { spotifyService } from "@/services/SpotifyService";
 import {
@@ -34,7 +34,7 @@ interface UseTagDataTrackActionsOptions {
   latestTagDataRef: MutableRefObject<TagDataStructure>;
   onSyncTrack: UseTagDataOptions["onSyncTrack"];
   onSyncMultipleTracks: UseTagDataOptions["onSyncMultipleTracks"];
-  emitUserTrackAddedEvent: () => void;
+  emitUserTrackAddedEvent: (trackUris?: string[]) => void;
 }
 
 const TRACK_SYNC_DELAY_MS = 100;
@@ -82,6 +82,13 @@ export function useTagDataTrackActions({
           return {
             name: item.name || "Unknown Track",
             artists: artists || "Unknown Artist",
+            albumName: item.album?.name,
+            albumUri: item.album?.uri ?? null,
+            albumImageUrl:
+              item.album?.images?.[0]?.url ||
+              item.images?.[0]?.url ||
+              item.metadata?.image_url ||
+              null,
           };
         }
 
@@ -90,6 +97,9 @@ export function useTagDataTrackActions({
           return {
             name: trackInfo.name,
             artists: trackInfo.artists,
+            albumName: trackInfo.albumName,
+            albumUri: trackInfo.albumUri,
+            albumImageUrl: trackInfo.albumImageUrl,
           };
         }
 
@@ -102,67 +112,88 @@ export function useTagDataTrackActions({
     [],
   );
 
-  const getOrCreateTrackData = useCallback(
-    async (
-      trackUri: string,
-      providedMetadata?: TrackMetadata,
-    ): Promise<TagDataStructure> => {
-      const now = Date.now();
-      const currentData = latestTagDataRef.current;
-      const existingTrack = currentData.tracks[trackUri];
+  // Creating a song waits for its details, so overlapping edits to the same
+  // new song share one creation and apply in the order they were made.
+  const pendingTrackCreationsRef = useRef(new Map<string, Promise<boolean>>());
+
+  const createTrackData = useCallback(
+    async (trackUri: string, providedMetadata?: TrackMetadata): Promise<boolean> => {
+      const metadata = providedMetadata || (await getTrackMetadata(trackUri));
+
+      let bpm: number | null = null;
+      let camelotKey: string | null = null;
+      if (!trackUri.startsWith("spotify:local:")) {
+        try {
+          const audioFeatures = await spotifyApiService.fetchAudioFeatures(trackUri);
+          bpm = audioFeatures.bpm;
+          camelotKey = audioFeatures.camelotKey;
+        } catch (error) {
+          console.error("Error fetching audio features for new track:", error);
+        }
+      }
+
+      // Other edits may have saved while this one waited.
+      const latestData = latestTagDataRef.current;
+      if (latestData.tracks[trackUri]) {
+        return false;
+      }
+
+      commitDataSnapshot({
+        ...latestData,
+        tracks: {
+          ...latestData.tracks,
+          [trackUri]: createInitialTrackData(
+            Date.now(),
+            bpm,
+            metadata || undefined,
+            camelotKey,
+          ),
+        },
+      });
+      return true;
+    },
+    [commitDataSnapshot, getTrackMetadata, latestTagDataRef],
+  );
+
+  /** Saves the song if needed; resolves true when this call created it. */
+  const ensureTrackData = useCallback(
+    async (trackUri: string, providedMetadata?: TrackMetadata): Promise<boolean> => {
+      const existingTrack = latestTagDataRef.current.tracks[trackUri];
 
       if (!existingTrack) {
-        const metadata = providedMetadata || (await getTrackMetadata(trackUri));
-
-        let bpm: number | null = null;
-        let camelotKey: string | null = null;
-        if (!trackUri.startsWith("spotify:local:")) {
-          try {
-            const audioFeatures = await spotifyApiService.fetchAudioFeatures(trackUri);
-            bpm = audioFeatures.bpm;
-            camelotKey = audioFeatures.camelotKey;
-          } catch (error) {
-            console.error("Error fetching audio features for new track:", error);
-          }
+        const pendingCreation = pendingTrackCreationsRef.current.get(trackUri);
+        if (pendingCreation) {
+          await pendingCreation;
+          return false;
         }
 
-        const nextData: TagDataStructure = {
-          ...currentData,
-          tracks: {
-            ...currentData.tracks,
-            [trackUri]: createInitialTrackData(
-              now,
-              bpm,
-              metadata || undefined,
-              camelotKey,
-            ),
-          },
-        };
-
-        commitDataSnapshot(nextData);
-        return nextData;
+        const creation = createTrackData(trackUri, providedMetadata).finally(() => {
+          pendingTrackCreationsRef.current.delete(trackUri);
+        });
+        pendingTrackCreationsRef.current.set(trackUri, creation);
+        // Awaiting here, as later edits do above, keeps them in order.
+        return await creation;
       }
 
       if (!existingTrack.name || !existingTrack.artists) {
         const metadata = providedMetadata || (await getTrackMetadata(trackUri));
+        const latestData = latestTagDataRef.current;
+        const latestTrack = latestData.tracks[trackUri];
 
-        if (metadata) {
-          const nextData: TagDataStructure = {
-            ...currentData,
+        if (metadata && latestTrack) {
+          commitDataSnapshot({
+            ...latestData,
             tracks: {
-              ...currentData.tracks,
-              [trackUri]: withTrackMetadata(existingTrack, metadata, now),
+              ...latestData.tracks,
+              [trackUri]: withTrackMetadata(latestTrack, metadata, Date.now()),
             },
-          };
-
-          commitDataSnapshot(nextData);
-          return nextData;
+          });
         }
       }
 
-      return currentData;
+      return false;
     },
-    [commitDataSnapshot, getTrackMetadata, latestTagDataRef],
+    [commitDataSnapshot, createTrackData, getTrackMetadata, latestTagDataRef],
   );
 
   const replaceTaxonomy = useCallback(
@@ -188,14 +219,14 @@ export function useTagDataTrackActions({
   const applyBatchTagUpdates = useCallback(
     async (updates: BatchTagUpdate[]) => {
       const now = Date.now();
-      let finalTrackDataMap: Record<string, TrackData | null> = {};
-
-      setTagData((currentData) => {
-        const result = applyBatchTagUpdatesToData(currentData, updates, now);
-        finalTrackDataMap = result.finalTrackDataMap;
-        latestTagDataRef.current = result.nextData;
-        return result.nextData;
-      });
+      const currentData = latestTagDataRef.current;
+      const result = applyBatchTagUpdatesToData(currentData, updates, now);
+      const finalTrackDataMap = result.finalTrackDataMap;
+      commitDataSnapshot(result.nextData);
+      const addedUris = Object.keys(finalTrackDataMap).filter((uri) =>
+        !currentData.tracks[uri] && finalTrackDataMap[uri] !== null,
+      );
+      if (addedUris.length) emitUserTrackAddedEvent(addedUris);
 
       dispatchTagDataUpdatedEvent("batchUpdate");
 
@@ -203,7 +234,7 @@ export function useTagDataTrackActions({
         onSyncMultipleTracks?.(finalTrackDataMap);
       }, TRACK_SYNC_DELAY_MS);
     },
-    [latestTagDataRef, onSyncMultipleTracks, setTagData],
+    [commitDataSnapshot, emitUserTrackAddedEvent, latestTagDataRef, onSyncMultipleTracks],
   );
 
   const setBpm = useCallback(
@@ -213,7 +244,8 @@ export function useTagDataTrackActions({
         return;
       }
 
-      const currentData = await getOrCreateTrackData(trackUri);
+      await ensureTrackData(trackUri);
+      const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
 
       if (!trackData) {
@@ -230,7 +262,7 @@ export function useTagDataTrackActions({
       commitDataSnapshot(nextData);
       syncTrackAfterDelay(trackUri, finalTrackData);
     },
-    [commitDataSnapshot, getOrCreateTrackData, latestTagDataRef, syncTrackAfterDelay],
+    [commitDataSnapshot, ensureTrackData, latestTagDataRef, syncTrackAfterDelay],
   );
 
   const setCamelotKey = useCallback(
@@ -240,7 +272,8 @@ export function useTagDataTrackActions({
         return;
       }
 
-      const currentData = await getOrCreateTrackData(trackUri);
+      await ensureTrackData(trackUri);
+      const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
 
       if (!trackData) {
@@ -257,7 +290,7 @@ export function useTagDataTrackActions({
       commitDataSnapshot(nextData);
       syncTrackAfterDelay(trackUri, finalTrackData);
     },
-    [commitDataSnapshot, getOrCreateTrackData, latestTagDataRef, syncTrackAfterDelay],
+    [commitDataSnapshot, ensureTrackData, latestTagDataRef, syncTrackAfterDelay],
   );
 
   const updateBpm = useCallback(
@@ -282,12 +315,8 @@ export function useTagDataTrackActions({
       tagId: string,
       metadata?: TrackMetadata,
     ) => {
-      const trackExistedBefore = Object.prototype.hasOwnProperty.call(
-        latestTagDataRef.current.tracks,
-        trackUri,
-      );
-
-      const currentData = await getOrCreateTrackData(trackUri, metadata);
+      const createdTrack = await ensureTrackData(trackUri, metadata);
+      const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
 
       if (!trackData) {
@@ -304,14 +333,14 @@ export function useTagDataTrackActions({
       commitDataSnapshot(nextData);
       syncTrackAfterDelay(trackUri, finalTrackData);
 
-      if (!trackExistedBefore && finalTrackData !== null) {
-        emitUserTrackAddedEvent();
+      if (createdTrack && finalTrackData !== null) {
+        emitUserTrackAddedEvent([trackUri]);
       }
     },
     [
       commitDataSnapshot,
       emitUserTrackAddedEvent,
-      getOrCreateTrackData,
+      ensureTrackData,
       latestTagDataRef,
       syncTrackAfterDelay,
     ],
@@ -323,12 +352,8 @@ export function useTagDataTrackActions({
       rating: number,
       metadata?: TrackMetadata,
     ) => {
-      const trackExistedBefore = Object.prototype.hasOwnProperty.call(
-        latestTagDataRef.current.tracks,
-        trackUri,
-      );
-
-      const currentData = await getOrCreateTrackData(trackUri, metadata);
+      const createdTrack = await ensureTrackData(trackUri, metadata);
+      const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
 
       if (!trackData) {
@@ -345,14 +370,14 @@ export function useTagDataTrackActions({
       commitDataSnapshot(nextData);
       syncTrackAfterDelay(trackUri, finalTrackData);
 
-      if (!trackExistedBefore && finalTrackData !== null) {
-        emitUserTrackAddedEvent();
+      if (createdTrack && finalTrackData !== null) {
+        emitUserTrackAddedEvent([trackUri]);
       }
     },
     [
       commitDataSnapshot,
       emitUserTrackAddedEvent,
-      getOrCreateTrackData,
+      ensureTrackData,
       latestTagDataRef,
       syncTrackAfterDelay,
     ],
@@ -364,12 +389,8 @@ export function useTagDataTrackActions({
       energy: number,
       metadata?: TrackMetadata,
     ) => {
-      const trackExistedBefore = Object.prototype.hasOwnProperty.call(
-        latestTagDataRef.current.tracks,
-        trackUri,
-      );
-
-      const currentData = await getOrCreateTrackData(trackUri, metadata);
+      const createdTrack = await ensureTrackData(trackUri, metadata);
+      const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
 
       if (!trackData) {
@@ -386,14 +407,14 @@ export function useTagDataTrackActions({
       commitDataSnapshot(nextData);
       syncTrackAfterDelay(trackUri, finalTrackData);
 
-      if (!trackExistedBefore && finalTrackData !== null) {
-        emitUserTrackAddedEvent();
+      if (createdTrack && finalTrackData !== null) {
+        emitUserTrackAddedEvent([trackUri]);
       }
     },
     [
       commitDataSnapshot,
       emitUserTrackAddedEvent,
-      getOrCreateTrackData,
+      ensureTrackData,
       latestTagDataRef,
       syncTrackAfterDelay,
     ],

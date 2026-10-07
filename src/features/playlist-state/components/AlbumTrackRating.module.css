@@ -1,0 +1,48 @@
+.stars {
+  cursor: pointer;
+  display: inline-flex;
+  line-height: 1;
+}
+
+.stars:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid rgb(255 255 255 / 35%);
+  outline-offset: 3px;
+}
+
+/* Unrated tracks stay quiet until their row is hovered or in use. */
+.starsUnrated {
+  opacity: calc(0.45 + 0.55 * var(--album-track-controls-shown, 0));
+  transition: opacity 120ms ease;
+}
+
+.clearSlot {
+  display: inline-flex;
+}
+
+.clear {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  opacity: var(--album-track-controls-shown, 0);
+  padding: 0;
+  transition: opacity 120ms ease;
+  width: 18px;
+}
+
+.clear:hover {
+  background: rgb(255 255 255 / 10%);
+  color: var(--spice-text);
+}
+
+.clear:focus-visible {
+  opacity: 1;
+  outline: 2px solid rgb(255 255 255 / 35%);
+  outline-offset: 1px;
+}

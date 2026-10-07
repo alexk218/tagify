@@ -1,0 +1,96 @@
+.lens {
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 3%);
+  margin: 10px 0 0;
+  overflow: hidden;
+}
+
+.lens > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  list-style: none;
+  min-height: 34px;
+  padding: 7px 11px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color 0.18s ease;
+}
+
+.lens > summary:hover {
+  background: rgb(255 255 255 / 5%);
+}
+
+.lens > summary::-webkit-details-marker {
+  display: none;
+}
+
+.lens > summary span {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.lens > summary svg {
+  width: 14px;
+  height: 14px;
+  color: var(--spice-button);
+}
+
+.lens > summary > small {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.lens small,
+.message {
+  color: var(--spice-subtext);
+}
+
+.body {
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+}
+
+.contributors {
+  display: grid;
+  gap: 7px;
+}
+
+.contributors article {
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 8px;
+  padding: 9px 10px;
+}
+
+.contributors article.ownContributor {
+  border-color: rgb(139 124 246 / 46%);
+  background: rgb(139 124 246 / 10%);
+}
+
+.contributors article > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.contributors article > span small {
+  border: 1px solid rgb(139 124 246 / 42%);
+  border-radius: 999px;
+  color: #c7bdff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+.contributors p,
+.message {
+  font-size: 12px;
+  margin: 4px 0 0;
+}

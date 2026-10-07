@@ -16,7 +16,10 @@ import {
 import { formatTimestamp } from "@/utils/formatters";
 import { buildTagAccentCssVars } from "@/features/tag-data/utils/tagAccent";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
-import { BasicTagFilterBar } from "@/features/filter-state";
+import {
+  BasicTagFilterBar,
+  getBasicTagFilterOperatorStorageKey,
+} from "@/features/filter-state";
 import styles from "./TaggedArtistsList.module.css";
 
 type SortBy = "dateModified" | "name" | "followerCount" | "rating" | "energy";
@@ -32,7 +35,10 @@ interface TaggedArtistsListProps {
   activeArtistUri: string | null;
   onSelectArtist: (artistUri: string) => void;
   onOpenArtist: (artistUri: string) => void;
+  /** Filters panel: include, then exclude, then off. */
   onCycleTagFilter: (tagId: string, operator: TagFilterOperator) => void;
+  /** Tags on a row: on, then off. */
+  onToggleTagFilter: (tagId: string, operator: TagFilterOperator) => void;
   onRemoveTagFilter: (tagId: string) => void;
   onSetTagFilterOperator: (operator: TagFilterOperator) => void;
   onClearTagFilters: () => void;
@@ -53,6 +59,7 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
   onSelectArtist,
   onOpenArtist,
   onCycleTagFilter,
+  onToggleTagFilter,
   onRemoveTagFilter,
   onSetTagFilterOperator,
   onClearTagFilters,
@@ -91,7 +98,7 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
   );
   const [tagFilterOperator, setTagFilterOperator] =
     useLocalStorage<TagFilterOperator>(
-      "tagify:artistListTagFilterOperator",
+      getBasicTagFilterOperatorStorageKey("artists"),
       TAG_FILTER_OPERATORS.OR,
     );
   const basicTagClause = includeTagClauses[0];
@@ -606,33 +613,37 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
                     ) : null}
                   </div>
                   <div className={styles.tags}>
-                    {resolvedTags.map((tag) => (
-                      <span
-                        key={tag.id}
-                        className={`${styles.tag} ${
-                          tag.tag.accentId ? styles.tagAccented : ""
-                        } ${activeTagFilters.includes(tag.id) ? styles.tagActive : ""} ${
-                          excludedTagFilters.includes(tag.id) ? styles.tagExcluded : ""
-                        }`}
-                        style={buildTagAccentCssVars(
-                          tag.tag.accentId ?? null,
-                          customAccentsById,
-                        )}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onCycleTagFilter(tag.id, tagFilterOperator);
-                        }}
-                        title={
-                          activeTagFilters.includes(tag.id)
-                            ? `Exclude "${tag.name}" from artist results`
-                            : excludedTagFilters.includes(tag.id)
-                              ? `Remove "${tag.name}" from artist filters`
-                              : `Filter artists by "${tag.name}"`
-                        }
-                      >
-                        {tag.name}
-                      </span>
-                    ))}
+                    {resolvedTags.map((tag) => {
+                      const tagTitle =
+                        activeTagFilters.includes(tag.id) ||
+                        excludedTagFilters.includes(tag.id)
+                          ? `Remove "${tag.name}" from artist filters`
+                          : `Filter artists by "${tag.name}"`;
+
+                      return (
+                        <button
+                          type="button"
+                          key={tag.id}
+                          className={`${styles.tag} ${
+                            tag.tag.accentId ? styles.tagAccented : ""
+                          } ${activeTagFilters.includes(tag.id) ? styles.tagActive : ""} ${
+                            excludedTagFilters.includes(tag.id) ? styles.tagExcluded : ""
+                          }`}
+                          style={buildTagAccentCssVars(
+                            tag.tag.accentId ?? null,
+                            customAccentsById,
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onToggleTagFilter(tag.id, tagFilterOperator);
+                          }}
+                          aria-label={tagTitle}
+                          title={tagTitle}
+                        >
+                          {tag.name}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

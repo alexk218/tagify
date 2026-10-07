@@ -1,5 +1,5 @@
 import type { CustomTagAccent, PresetTagAccentId, TagColorTheme, TagTaxonomy } from "@/types/tagData";
-import { TAG_ACCENT_PRESET_OPTIONS, getTagAccentTokens } from "./tagAccent";
+import { TAG_ACCENT_PRESET_OPTIONS, getTagAccentTokens, truncateName } from "./tagAccent";
 
 export const DEFAULT_COLOR_THEME_ID = "theme:default";
 export const COLOR_LIBRARY_FORMAT = "tagify-colors";
@@ -137,9 +137,10 @@ export function serializeColorLibrary(taxonomy: TagTaxonomy, themeId?: string): 
 }
 
 export function uniqueImportedName(name: string, used: Set<string>): string {
-  let candidate = name.trim().slice(0, 32);
+  const base = name.trim().replace(/[<>]/g, "");
+  let candidate = truncateName(base, 32);
   let suffix = 1;
-  while (used.has(candidate.toLocaleLowerCase())) candidate = `${name.trim().slice(0, Math.max(1, 28 - String(suffix).length))} (${suffix++})`;
+  while (used.has(candidate.toLocaleLowerCase())) candidate = `${truncateName(base, Math.max(1, 28 - String(suffix).length))} (${suffix++})`;
   used.add(candidate.toLocaleLowerCase());
   return candidate;
 }

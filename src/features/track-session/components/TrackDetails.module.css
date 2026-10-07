@@ -168,7 +168,8 @@
 
 .metadataGrid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  /* Two columns when there is room, one when the track column is narrow. */
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 2px 12px;
   max-width: 35rem;
 }

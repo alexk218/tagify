@@ -278,7 +278,7 @@ export function buildExportData(tagData: TagDataStructure): ExportDataResult {
       tags: resolvedTags.map((tag) => ({
         tagId: tag.id,
         categoryId: tag.category.id,
-        subcategoryId: tag.subcategory.id,
+        subcategoryId: tag.subcategory?.id ?? tag.parent.id,
         name: tag.name,
         full_path: tag.displayPath,
       })),
@@ -316,7 +316,7 @@ export function buildExportData(tagData: TagDataStructure): ExportDataResult {
       tags: resolvedTags.map((tag) => ({
         tagId: tag.id,
         categoryId: tag.category.id,
-        subcategoryId: tag.subcategory.id,
+        subcategoryId: tag.subcategory?.id ?? tag.parent.id,
         name: tag.name,
         full_path: tag.displayPath,
       })),
@@ -346,7 +346,7 @@ export function buildExportData(tagData: TagDataStructure): ExportDataResult {
       tags: resolvedTags.map((tag) => ({
         tagId: tag.id,
         categoryId: tag.category.id,
-        subcategoryId: tag.subcategory.id,
+        subcategoryId: tag.subcategory?.id ?? tag.parent.id,
         name: tag.name,
         full_path: tag.displayPath,
       })),

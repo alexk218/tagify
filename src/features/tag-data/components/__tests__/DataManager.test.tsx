@@ -28,6 +28,7 @@ const taxonomyBackup: TagDataStructure = {
 describe("DataManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete window.TagifySync;
   });
 
   it("passes taxonomy backups through to the importer", async () => {

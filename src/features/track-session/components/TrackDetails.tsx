@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import styles from "./TrackDetails.module.css";
+import communityLinkStyles from "../../community/CommunityEntityLink.module.css";
 import { TagTaxonomy } from "@/types/tagData";
 import { formatTimestamp } from "@/utils/formatters";
 import ReactStars from "react-rating-stars-component";
 import { SpotifyTrack } from "@/types/SpotifyTypes";
-import { Lock, LockOpen } from "lucide-react";
+import { ExternalLink, Lock, LockOpen } from "lucide-react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faStar, faStarHalf } from "@fortawesome/free-solid-svg-icons";
 import { normalizeCamelotKey } from "@/utils/camelotKey";
@@ -18,6 +19,18 @@ import {
   organizeTrackTagsByCategory,
 } from "@/features/track-session/utils/trackDetails.tags";
 import { buildTagAccentCssVars } from "@/features/tag-data";
+import { CommunityEntityLens, getCommunityEntityUrl } from "@/features/community";
+import { AlbumProgressLine } from "@/features/playlist-state";
+
+const COMMUNITY_ENTITY_API_PATTERN =
+  /^https:\/\/community\.tagify\.fm\/entity\/(track|album|artist)\/([A-Za-z0-9]{10,64})$/;
+
+function getCommunityEntityApiUrl(communityUrl: string | null): string | null {
+  if (!communityUrl) return null;
+  const match = communityUrl.match(COMMUNITY_ENTITY_API_PATTERN);
+  if (!match) return null;
+  return `https://community.tagify.fm/api/v2/entities/${match[1]}/${match[2]}`;
+}
 
 interface TrackDetailsProps {
   displayedTrack: SpotifyTrack; // The track displayed in TrackDetails
@@ -37,6 +50,12 @@ interface TrackDetailsProps {
   onToggleLock: () => void;
   onSwitchToCurrentTrack: (track: SpotifyTrack | null) => void;
   onUpdateBpm: (trackUri: string) => Promise<number | null>;
+  /** How much of this track's album is rated or tagged; omitted for local files. */
+  albumProgress?: {
+    albumUri: string;
+    taggedTrackCount: number;
+    knownTrackCount: number | null;
+  } | null;
 }
 
 const TrackDetails: React.FC<TrackDetailsProps> = ({
@@ -56,6 +75,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   isLocked = false,
   onToggleLock,
   onSwitchToCurrentTrack,
+  albumProgress,
 }: TrackDetailsProps) => {
   const artistNames = useMemo(
     () =>
@@ -87,6 +107,27 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
     });
   const [isEditingBpm, setIsEditingBpm] = useState(false);
   const [editBpmValue, setEditBpmValue] = useState<string>("");
+  const communityUrl = getCommunityEntityUrl(displayedTrack.uri || "");
+  const communityEntityApiUrl = getCommunityEntityApiUrl(communityUrl);
+  const [hasCommunityEntity, setHasCommunityEntity] = useState(false);
+
+  useEffect(() => {
+    setHasCommunityEntity(false);
+    if (!communityEntityApiUrl) return;
+
+    let isCurrent = true;
+    void fetch(communityEntityApiUrl)
+      .then((response) => {
+        if (isCurrent) setHasCommunityEntity(response.ok);
+      })
+      .catch(() => {
+        if (isCurrent) setHasCommunityEntity(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [communityEntityApiUrl]);
 
   const handleBpmClick = () => {
     setIsEditingBpm(true);
@@ -99,8 +140,8 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
     const numericValue = parseInt(editBpmValue.trim());
     if (editBpmValue.trim() === "") {
       onSetBpm(null);
-    } else if (isNaN(numericValue) || numericValue < 1 || numericValue > 300) {
-      Spicetify.showNotification("BPM must be between 1 and 300", true);
+    } else if (isNaN(numericValue) || numericValue < 20 || numericValue > 400) {
+      Spicetify.showNotification("BPM must be between 20 and 400", true);
       return;
     } else {
       onSetBpm(numericValue);
@@ -176,6 +217,18 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   return (
     <div className={styles.container}>
       <div className={styles.lockControlContainer}>
+        {communityUrl && hasCommunityEntity ? (
+          <a
+            className={communityLinkStyles.communityLink}
+            href={communityUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open this track in Tagify Community"
+            aria-label="Open this track in Tagify Community"
+          >
+            <ExternalLink size={14} aria-hidden="true" />
+          </a>
+        ) : null}
         {isLocked &&
           currentlyPlayingTrack &&
           currentlyPlayingTrack.uri !== displayedTrack.uri && (
@@ -288,6 +341,13 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
             <p className={styles.trackAlbum}>
               {displayedTrack.album?.name || "Unknown Album"}
             </p>
+            {albumProgress ? (
+              <AlbumProgressLine
+                albumUri={albumProgress.albumUri}
+                taggedTrackCount={albumProgress.taggedTrackCount}
+                knownTrackCount={albumProgress.knownTrackCount}
+              />
+            ) : null}
 
             {/* New Track Metadata Section */}
             <div className={styles.trackMetadata}>
@@ -327,8 +387,8 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
                               onBlur={handleBpmCancel}
                               className={styles.bpmEditInput}
                               placeholder="Enter BPM"
-                              min="1"
-                              max="300"
+                              min="20"
+                              max="400"
                               autoFocus
                             />
                             <button
@@ -633,6 +693,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
           </div>
         )}
       </div>
+      <CommunityEntityLens entityUri={displayedTrack.uri || ""} />
     </div>
   );
 };

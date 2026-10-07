@@ -2,6 +2,7 @@ import { TagDataStructure } from "@/types/tagData";
 import { indexedDBStorage } from "./IndexedDBStorageService";
 import { defaultTagData } from "@/constants/defaultTagData";
 import { normalizeTagDataStructure } from "@/features/tag-data/utils/tagData.schema";
+import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 
 const TAG_DATA_KEY = "tagify:tagData";
 const MIGRATION_STATUS_KEY = "tagify:idb-migration-status";
@@ -47,6 +48,7 @@ interface IndexedDBSummary {
   trackCount: number;
   categoryCount: number;
   hasData: boolean;
+  hasUserContent: boolean;
 }
 
 /**
@@ -113,20 +115,27 @@ class StorageMigrationService {
         trackCount: 0,
         categoryCount: 0,
         hasData: false,
+        hasUserContent: false,
       };
     }
 
-    const [trackCount, taxonomy] = await Promise.all([
+    const [trackCount, playlistCount, artistCount, smartPlaylists, taxonomy] = await Promise.all([
       indexedDBStorage.getTrackCount(),
+      indexedDBStorage.getPlaylistCount(),
+      indexedDBStorage.getArtistCount(),
+      indexedDBStorage.getAllSmartPlaylists(),
       indexedDBStorage.getTaxonomy(),
     ]);
     const categoryCount = taxonomy.categoryOrder.length;
+    const hasUserContent = trackCount > 0 || playlistCount > 0 || artistCount > 0 ||
+      smartPlaylists.length > 0;
 
     return {
       initialized: true,
       trackCount,
       categoryCount,
-      hasData: trackCount > 0 || categoryCount > 0,
+      hasData: hasUserContent || categoryCount > 0,
+      hasUserContent,
     };
   }
 
@@ -267,6 +276,81 @@ class StorageMigrationService {
       };
     }
 
+    // An older localStorage backup is not a migration source once a real
+    // IndexedDB library exists. This also covers lost migration flags after
+    // replacing the app files and libraries containing only Smart Playlists.
+    const existing = await this.summarizeIndexedDB();
+    if (existing.initialized && (
+      (state.status === "not-started" && existing.hasUserContent) ||
+      getDesktopSyncConfiguration()
+    )) {
+      const completedAt = Date.now();
+      this.saveMigrationState({
+        status: "completed", completedAt, startedAt,
+        trackCount: existing.trackCount, categoryCount: existing.categoryCount,
+      });
+      return {
+        success: true, status: "completed", tracksMigrated: existing.trackCount,
+        categoriesMigrated: existing.categoryCount, backupCreated: false,
+        startedAt, completedAt, durationMs: completedAt - startedAt,
+      };
+    }
+
+    // The orchestrator migration flag makes IndexedDB canonical. The retained
+    // localStorage value is only a rollback artifact and must never be migrated
+    // again after a database loss. A paired empty replica is intentionally left
+    // empty so Cloud Sync can require an explicit restore confirmation.
+    if (this.hasOrchestratorIndexedDBMigration()) {
+      const indexedDBSummary = await this.summarizeIndexedDB();
+      if (!indexedDBSummary.initialized) {
+        return {
+          success: false,
+          status: "failed",
+          tracksMigrated: 0,
+          categoriesMigrated: 0,
+          error: "Failed to initialize IndexedDB",
+          backupCreated: false,
+          startedAt,
+          completedAt: Date.now(),
+          durationMs: Date.now() - startedAt,
+        };
+      }
+
+      if (indexedDBSummary.hasData || getDesktopSyncConfiguration()) {
+        const completedAt = Date.now();
+        this.saveMigrationState({
+          status: "completed",
+          completedAt,
+          startedAt: state.startedAt || startedAt,
+          trackCount: indexedDBSummary.trackCount,
+          categoryCount: indexedDBSummary.categoryCount,
+        });
+        return {
+          success: true,
+          status: "completed",
+          tracksMigrated: indexedDBSummary.trackCount,
+          categoriesMigrated: indexedDBSummary.categoryCount,
+          backupCreated: false,
+          startedAt: state.startedAt || startedAt,
+          completedAt,
+          durationMs: completedAt - startedAt,
+        };
+      }
+
+      return {
+        success: false,
+        status: "failed",
+        tracksMigrated: 0,
+        categoriesMigrated: 0,
+        error:
+          "IndexedDB migration was previously marked complete, but the database is now empty. Tagify did not overwrite the database with defaults or stale localStorage data.",
+        backupCreated: false,
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
     // Check if there's anything to migrate
     const localData = this.getLocalStorageData();
 
@@ -374,7 +458,7 @@ class StorageMigrationService {
       categoryCount,
     });
 
-    onProgress?.("Initializing IndexedDB...", 10);
+    onProgress?.("Preparing your library...", 10);
 
     // Step 3: Initialize IndexedDB
     const initialized = await indexedDBStorage.init();
@@ -399,7 +483,7 @@ class StorageMigrationService {
       };
     }
 
-    onProgress?.(`Migrating ${trackCount} tracks...`, 20);
+    onProgress?.(`Saving ${trackCount} songs...`, 20);
 
     // Step 4: Save all data to IndexedDB
     try {
@@ -409,7 +493,7 @@ class StorageMigrationService {
         throw new Error("saveAll returned false");
       }
 
-      onProgress?.("Verifying migration...", 80);
+      onProgress?.("Checking your saved songs...", 80);
 
       // Step 5: Verify migration succeeded
       const verifyTrackCount = await indexedDBStorage.getTrackCount();
@@ -427,7 +511,7 @@ class StorageMigrationService {
         );
       }
 
-      onProgress?.("Migration complete!", 100);
+      onProgress?.("Your library is ready!", 100);
 
       const completedAt = Date.now();
 
@@ -478,23 +562,6 @@ class StorageMigrationService {
         durationMs: Date.now() - startedAt,
       };
     }
-  }
-
-  /**
-   * Force re-migration (for debugging/recovery)
-   * Resets migration state and re-runs migration from localStorage
-   */
-  async forceMigration(
-    onProgress?: (message: string, progress: number) => void
-  ): Promise<MigrationResult> {
-    // Reset state
-    this.saveMigrationState({ status: "not-started" });
-
-    // Clear IndexedDB
-    await indexedDBStorage.clearAll();
-
-    // Run migration
-    return this.migrate(onProgress);
   }
 
   /**

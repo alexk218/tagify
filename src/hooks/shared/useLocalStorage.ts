@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function useLocalStorage<T>(
   key: string,
   initialValue: T
 ): [T, (value: T | ((val: T) => T)) => void] {
+  const initialValueRef = useRef(initialValue);
   // State to store our value
   const [storedValue, setStoredValue] = useState<T>(() => {
     try {
@@ -50,6 +51,22 @@ export function useLocalStorage<T>(
       console.error(`Error saving localStorage key "${key}":`, error);
     }
   };
+
+  useEffect(() => {
+    const reload = () => {
+      try {
+        const item = window.localStorage.getItem(key);
+        if (item === null) { setStoredValue(initialValueRef.current); return; }
+        if (typeof initialValueRef.current === "string") setStoredValue(item as T);
+        else {
+          try { setStoredValue(JSON.parse(item)); }
+          catch { setStoredValue(item as unknown as T); }
+        }
+      } catch (error) { console.error(`Error reloading localStorage key "${key}":`, error); }
+    };
+    window.addEventListener("tagify:durableStateRestored", reload);
+    return () => window.removeEventListener("tagify:durableStateRestored", reload);
+  }, [key]);
 
   return [storedValue, setValue];
 }

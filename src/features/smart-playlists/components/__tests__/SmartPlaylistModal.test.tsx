@@ -1,15 +1,25 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import SmartPlaylistModal from "@/features/smart-playlists/components/SmartPlaylistModal";
+import SmartPlaylistModal, {
+  SMART_PLAYLIST_MOBILE_TAGGING_INTRO_KEY,
+} from "@/features/smart-playlists/components/SmartPlaylistModal";
 import { SmartPlaylistCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
 import { TagCategory } from "@/types/tagData";
 import { spotifyApiService } from "@/services/SpotifyApiService";
+import { storageService } from "@/services/storage/StorageService";
+import { defaultTagData } from "@/constants/defaultTagData";
+import { markConfirmedMembershipBaselines, clearConfirmedMembershipBaselines } from "../../utils/smartPlaylist.storage";
 import React, { act } from "react";
 import {
   buildTaxonomyFromCategoryTree,
   createLegacyTagIdentityId,
 } from "@/utils/tagTaxonomy";
+
+const { history } = vi.hoisted(() => ({ history: {
+  ready: true, mobileTaggingIntroSeen: true, markSeen: vi.fn(),
+} }));
+vi.mock("@/features/onboarding/hooks/usePromptHistory", () => ({ usePromptHistory: () => history }));
 
 const mockTagCategories: TagCategory[] = [
   {
@@ -97,15 +107,25 @@ const mockSmartPlaylists: SmartPlaylistCriteria[] = [
 ];
 
 describe("SmartPlaylistModal", () => {
+  afterEach(() => { vi.restoreAllMocks(); clearConfirmedMembershipBaselines(); });
   const mockOnUpdateSmartPlaylists = vi.fn();
+  const mockOnEditPlaylist = vi.fn();
   const mockOnSyncPlaylist = vi.fn();
   const mockOnExportSmartPlaylists = vi.fn();
-  const mockOnImportSmartPlaylists = vi.fn();
-  const mockOnCleanupDeletedSmartPlaylists = vi.fn().mockResolvedValue(undefined);
+  const mockOnImportSmartPlaylists = vi.fn().mockResolvedValue({
+    importedCount: 2,
+    relinkedCount: 0,
+    unresolvedCount: 0,
+    verificationUnavailable: false,
+  });
   const mockOnClose = vi.fn();
 
   beforeEach(() => {
+    history.ready = true;
+    history.mobileTaggingIntroSeen = true;
+    history.markSeen.mockImplementation(() => { history.mobileTaggingIntroSeen = true; });
     vi.clearAllMocks();
+    localStorage.setItem(SMART_PLAYLIST_MOBILE_TAGGING_INTRO_KEY, "seen");
 
     // Mock playlist metadata sync API used by the modal.
     (global.Spicetify.Platform as any).PlaylistAPI = {
@@ -119,6 +139,10 @@ describe("SmartPlaylistModal", () => {
       playlist1: 2,
       playlist2: 0,
     });
+    vi.spyOn(
+      spotifyApiService,
+      "getAllUserPlaylistReferencesStrict",
+    ).mockResolvedValue([]);
   });
 
   const renderModal = (props = {}) => {
@@ -126,11 +150,11 @@ describe("SmartPlaylistModal", () => {
       <SmartPlaylistModal
         smartPlaylists={mockSmartPlaylists}
         taxonomy={mockTaxonomy}
+        onEditPlaylist={mockOnEditPlaylist}
         onUpdateSmartPlaylists={mockOnUpdateSmartPlaylists}
         onSyncPlaylist={mockOnSyncPlaylist}
         onExportSmartPlaylists={mockOnExportSmartPlaylists}
         onImportSmartPlaylists={mockOnImportSmartPlaylists}
-        onCleanupDeletedSmartPlaylists={mockOnCleanupDeletedSmartPlaylists}
         onClose={mockOnClose}
         {...props}
       />
@@ -138,6 +162,17 @@ describe("SmartPlaylistModal", () => {
   };
 
   describe("Rendering", () => {
+    it.each([
+      { actual: ["spotify:track:matched"], status: "In Sync" },
+      { actual: ["spotify:track:matched", "spotify:local:wrong"], status: "Needs Sync" },
+    ])("accounts for manual local-file additions when showing $status", async ({ actual, status }) => {
+      const matched = { rating: 5, energy: 7, bpm: 125, tagIds: [HOUSE_TAG_ID] };
+      vi.spyOn(storageService, "loadAllStrict").mockResolvedValue({ ...defaultTagData, tracks: { "spotify:track:matched": matched, "spotify:local:matched": matched, "spotify:local:wrong": { ...matched, rating: 1 } } });
+      vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict").mockResolvedValue(actual);
+      markConfirmedMembershipBaselines(mockSmartPlaylists, new Set(["playlist1"]));
+      renderModal({ smartPlaylists: [mockSmartPlaylists[0]] });
+      expect(await screen.findByText(status)).toBeInTheDocument();
+    });
     it("should render modal with smart playlists", () => {
       renderModal();
 
@@ -146,6 +181,16 @@ describe("SmartPlaylistModal", () => {
       );
       expect(screen.getByText("Electronic House Mix")).toBeInTheDocument();
       expect(screen.getByText("Chill Vibes")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Share" })).toHaveAttribute(
+        "title",
+        "Save your smart playlist setups to share with someone",
+      );
+      expect(screen.getByRole("button", { name: "Import" })).toHaveAttribute(
+        "title",
+        "Add smart playlist setups that someone shared with you",
+      );
+      expect(screen.getByText("Create, organize, and share playlists that stay up to date automatically.")).toBeInTheDocument();
+      expect(screen.queryByText(/legacy|portable|recipe|binding/i)).not.toBeInTheDocument();
     });
 
     it("should render empty state when no smart playlists exist", () => {
@@ -153,6 +198,101 @@ describe("SmartPlaylistModal", () => {
 
       expect(screen.getByText("No Smart Playlists Yet")).toBeInTheDocument();
       expect(screen.getByText(/Create a playlist with filters/)).toBeInTheDocument();
+    });
+
+    it("explains sharing on hover or keyboard focus", () => {
+      renderModal();
+
+      const infoButton = screen.getByRole("button", {
+        name: "About sharing smart playlists",
+      });
+      const tooltip = document.getElementById("smart-playlist-share-info");
+      expect(infoButton).toHaveAttribute(
+        "aria-describedby",
+        "smart-playlist-share-info",
+      );
+      expect(infoButton).not.toHaveAttribute("aria-expanded");
+      expect(tooltip).toHaveAttribute("role", "tooltip");
+      expect(tooltip).toHaveTextContent("What does Share include?");
+      expect(screen.getByText(/does not include the songs/i)).toBeInTheDocument();
+      expect(screen.getByText(/does not.*access to your Spotify account/i)).toBeInTheDocument();
+      expect(screen.getByText(/create their own Spotify playlists/i)).toBeInTheDocument();
+    });
+
+    it("introduces mobile tagging once per account and keeps help accessible", async () => {
+      const user = userEvent.setup();
+      history.mobileTaggingIntroSeen = false;
+
+      const firstView = renderModal();
+
+      expect(
+        screen.getByRole("heading", { name: "Tag songs from your phone" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/mobile tagging shortcuts/i)).toBeInTheDocument();
+      expect(screen.getByText(/spotify on your phone/i)).toBeInTheDocument();
+      expect(screen.getByText(/tells you exactly what changed/i)).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Got it" }));
+      expect(history.markSeen).toHaveBeenCalledWith("mobileTaggingIntroSeen");
+      firstView.unmount();
+
+      localStorage.clear();
+      renderModal();
+      expect(screen.queryByRole("heading", { name: "Tag songs from your phone" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Mobile tagging" }));
+      expect(screen.getByRole("heading", { name: "Tag songs from your phone" })).toBeInTheDocument();
+    });
+
+    it("waits for account history while allowing mobile help to open manually", async () => {
+      history.ready = false;
+      history.mobileTaggingIntroSeen = false;
+      renderModal();
+      expect(screen.queryByRole("heading", { name: "Tag songs from your phone" })).not.toBeInTheDocument();
+      await userEvent.setup().click(screen.getByRole("button", { name: "Mobile tagging" }));
+      expect(screen.getByRole("heading", { name: "Tag songs from your phone" })).toBeInTheDocument();
+    });
+
+    it("keeps imported definitions visible when their old Spotify IDs cannot be resolved", async () => {
+      (global.Spicetify.Platform as any).PlaylistAPI.getMetadata = vi
+        .fn()
+        .mockRejectedValue(new Error("playlist not found"));
+
+      renderModal({
+        smartPlaylists: [
+          { ...mockSmartPlaylists[0], playlistId: "old-4-star", playlistName: "4★" },
+          { ...mockSmartPlaylists[1], playlistId: "old-4-5-star", playlistName: "4.5★" },
+        ],
+      });
+
+      expect(screen.getByText("4★")).toBeInTheDocument();
+      expect(screen.getByText("4.5★")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(mockOnUpdateSmartPlaylists).not.toHaveBeenCalled();
+      });
+    });
+
+    it("keeps an imported recipe unbound until the user creates its Spotify playlist", async () => {
+      const user = userEvent.setup();
+      const onBindRecipe = vi.fn().mockResolvedValue(undefined);
+      const recipe = {
+        ...mockSmartPlaylists[0],
+        id: "recipe-1",
+        playlistId: "",
+        isActive: false,
+        playlistName: "Portable House",
+        smartPlaylistTrackUris: [],
+      };
+
+      renderModal({ smartPlaylists: [recipe], tracks: {}, onBindRecipe });
+
+      expect(screen.getByText("Not Connected")).toBeInTheDocument();
+      await user.click(
+        screen.getByRole("button", { name: "Create Spotify Playlist" }),
+      );
+      expect(onBindRecipe).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Create playlist and enable sync" }));
+      expect(onBindRecipe).toHaveBeenCalledWith(recipe);
+      expect(screen.queryByRole("button", { name: /Enable Sync/i })).not.toBeInTheDocument();
     });
 
     it("should display playlist criteria correctly", () => {
@@ -182,6 +322,22 @@ describe("SmartPlaylistModal", () => {
       if (inactivePlaylist) {
         expect(inactivePlaylist.className).toMatch(/inactive/i);
       }
+    });
+  });
+
+  describe("Filter editing", () => {
+    it("starts editing the selected playlist's filters", async () => {
+      const user = userEvent.setup();
+      renderModal();
+
+      const playlistItem = screen
+        .getByText("Electronic House Mix")
+        .closest('[class*="playlistItem"]') as HTMLElement;
+      await user.click(
+        within(playlistItem).getByRole("button", { name: /edit filters/i }),
+      );
+
+      expect(mockOnEditPlaylist).toHaveBeenCalledWith(mockSmartPlaylists[0]);
     });
   });
 
@@ -459,14 +615,14 @@ describe("SmartPlaylistModal", () => {
       const chillPlaylist = screen.getByText("Chill Vibes").closest('[class*="playlistItem"]');
 
       // Electronic House Mix playlist (has 2 tracks in smartPlaylistTrackUris)
-      expect(electronicPlaylist).toHaveTextContent("2"); // Expected count
+      expect(electronicPlaylist).toHaveTextContent("2"); // Tracked count
       expect(electronicPlaylist).toHaveTextContent("In Playlist");
-      expect(electronicPlaylist).toHaveTextContent("Expected");
+      expect(electronicPlaylist).toHaveTextContent("Tracked");
 
       // Chill Vibes playlist (has 0 tracks in smartPlaylistTrackUris)
-      expect(chillPlaylist).toHaveTextContent("0"); // Expected count
+      expect(chillPlaylist).toHaveTextContent("0"); // Tracked count
       expect(chillPlaylist).toHaveTextContent("In Playlist");
-      expect(chillPlaylist).toHaveTextContent("Expected");
+      expect(chillPlaylist).toHaveTextContent("Tracked");
     });
   });
 

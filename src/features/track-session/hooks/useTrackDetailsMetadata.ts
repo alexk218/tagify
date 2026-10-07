@@ -42,6 +42,32 @@ function createBaseMetadata(sourceContext: string | null): ExtendedTrackMetadata
   };
 }
 
+async function fetchAudioFeatureMetadata(
+  trackUri: string,
+  trackData: TrackDetailsTrackData,
+): Promise<Pick<ExtendedTrackMetadata, "bpm" | "camelotKey">> {
+  let bpm: number | null = trackData.bpm ?? null;
+  let camelotKey = normalizeCamelotKey(trackData.camelotKey);
+
+  if (bpm === null || camelotKey === null) {
+    try {
+      const audioFeatures = await audioFeaturesService.getAudioFeaturesFromUri(
+        trackUri,
+      );
+      if (bpm === null) {
+        bpm = audioFeatures?.bpm ?? null;
+      }
+      if (camelotKey === null) {
+        camelotKey = normalizeCamelotKey(audioFeatures?.camelotKey);
+      }
+    } catch (error) {
+      console.error("Error auto-fetching audio features:", error);
+    }
+  }
+
+  return { bpm, camelotKey };
+}
+
 export function useTrackDetailsMetadata({
   displayedTrack,
   artistNames,
@@ -170,24 +196,18 @@ export function useTrackDetailsMetadata({
           return;
         }
 
-        const metadata = await spotifyService.getTrackMetadata(displayedTrack.uri);
-        if (!metadata) {
-          if (isCancelled) {
-            return;
-          }
-
-          setContextUri(null);
-          setAlbumCover(null);
-          setIsLoadingCover(false);
-          setTrackMetadata(createBaseMetadata(null));
-          metadataTrackUriRef.current = displayedTrack.uri;
-          return;
-        }
+        const [metadata, audioFeatureMetadata] = await Promise.all([
+          spotifyService.getTrackMetadata(displayedTrack.uri).catch((error) => {
+            console.error("Error fetching track metadata:", error);
+            return null;
+          }),
+          fetchAudioFeatureMetadata(displayedTrack.uri, trackData),
+        ]);
 
         let sourceContext: string | null = null;
         let nextContextUri: string | null = null;
 
-        if (Spicetify.Player?.data?.context?.uri) {
+        if (metadata && Spicetify.Player?.data?.context?.uri) {
           nextContextUri = Spicetify.Player.data.context.uri;
           const parts = nextContextUri.split(":");
 
@@ -208,24 +228,7 @@ export function useTrackDetailsMetadata({
           }
         }
 
-        let bpm: number | null = trackData.bpm ?? null;
-        let camelotKey = normalizeCamelotKey(trackData.camelotKey);
-
-        if (bpm === null || camelotKey === null) {
-          try {
-            const audioFeatures = await audioFeaturesService.getAudioFeaturesFromUri(
-              displayedTrack.uri,
-            );
-            if (bpm === null) {
-              bpm = audioFeatures?.bpm ?? null;
-            }
-            if (camelotKey === null) {
-              camelotKey = normalizeCamelotKey(audioFeatures?.camelotKey);
-            }
-          } catch (error) {
-            console.error("Error auto-fetching audio features:", error);
-          }
-        }
+        const { bpm, camelotKey } = audioFeatureMetadata;
 
         if (hasPersistedTrackData) {
           if (trackData.bpm === null && bpm !== null) {
@@ -244,10 +247,10 @@ export function useTrackDetailsMetadata({
         }
 
         setContextUri(nextContextUri);
-        setAlbumCover(metadata.albumCoverUrl);
+        setAlbumCover(metadata?.albumCoverUrl ?? null);
         setIsLoadingCover(false);
         setTrackMetadata({
-          ...metadata,
+          ...(metadata ?? createBaseMetadata(null)),
           bpm,
           camelotKey,
           sourceContext,

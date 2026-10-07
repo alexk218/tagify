@@ -1,4 +1,5 @@
 import React, {
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -8,6 +9,8 @@ import React, {
 import styles from "./TrackList.module.css";
 import { parseLocalFileUri } from "@/utils/LocalFileParser";
 import type { SmartPlaylistCriteria } from "@/features/smart-playlists";
+import type { SmartPlaylistImportSummary } from "@/features/smart-playlists";
+import { createSharedSmartPlaylist, type SmartPlaylistRecipeSelection } from "@/features/smart-playlists";
 import { TagTaxonomy } from "@/types/tagData";
 import { CreatePlaylistModal } from "@/features/playlist-state";
 import { trackService } from "@/services/TrackService";
@@ -20,10 +23,13 @@ import {
 } from "@/constants/trackList";
 import ReactStars from "react-rating-stars-component";
 import { SmartPlaylistModal } from "@/features/smart-playlists";
+import { collectMatchingTrackUris } from "@/features/smart-playlists";
+import type { SpotifyPlaylistReference } from "@/features/smart-playlists";
 import { formatTimestamp } from "@/utils/formatters";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faBoltLightning,
+  faFloppyDisk,
   faStar,
   faStarHalf,
 } from "@fortawesome/free-solid-svg-icons";
@@ -166,13 +172,17 @@ interface TrackListProps {
     isPublic: boolean,
     isSmartPlaylist: boolean,
   ) => Promise<string | null>;
-  onCreateSmartPlaylist: (criteria: SmartPlaylistCriteria) => void;
+  onCreateSmartPlaylist: (criteria: SmartPlaylistCriteria) => Promise<void>;
   smartPlaylists: SmartPlaylistCriteria[];
-  onSetSmartPlaylists: (updatedPlaylists: SmartPlaylistCriteria[]) => void;
+  onSetSmartPlaylists: (value: React.SetStateAction<SmartPlaylistCriteria[]>) => Promise<void>;
   onSyncPlaylist: (playlist: SmartPlaylistCriteria) => Promise<void>;
-  onCleanupDeletedSmartPlaylists: () => Promise<void>;
-  onExportSmartPlaylists: () => void;
-  onImportSmartPlaylists: (data: SmartPlaylistCriteria[]) => void;
+  onExportSmartPlaylists: (taxonomy: TagTaxonomy, selected?: SmartPlaylistCriteria[]) => Promise<void> | void;
+  onImportSmartPlaylists: (
+    data: unknown,
+    selections?: SmartPlaylistRecipeSelection[],
+  ) => Promise<SmartPlaylistImportSummary>;
+  requestedSmartPlaylistEditId?: string | null;
+  onSmartPlaylistEditRequestHandled?: () => void;
 }
 
 const TrackList: React.FC<TrackListProps> = ({
@@ -201,14 +211,18 @@ const TrackList: React.FC<TrackListProps> = ({
   smartPlaylists,
   onSetSmartPlaylists,
   onSyncPlaylist,
-  onCleanupDeletedSmartPlaylists,
   onExportSmartPlaylists,
   onImportSmartPlaylists,
+  requestedSmartPlaylistEditId = null,
+  onSmartPlaylistEditRequestHandled,
 }) => {
   const [showCreatePlaylistModal, setShowCreatePlaylistModal] =
     useState<boolean>(false);
   const [showSmartPlaylistModal, setShowSmartPlaylistModal] =
     useState<boolean>(false);
+  const [editingSmartPlaylist, setEditingSmartPlaylist] =
+    useState<SmartPlaylistCriteria | null>(null);
+  const handledSmartPlaylistEditRequestRef = useRef<string | null>(null);
   const [tagFilterEditorMode, setTagFilterEditorMode] =
     useLocalStorage<TagFilterEditorMode>(
       TAG_FILTER_EDITOR_MODE_STORAGE_KEY,
@@ -225,14 +239,19 @@ const TrackList: React.FC<TrackListProps> = ({
     displayCount,
     setDisplayCount,
     ratingFilters,
+    setRatingFilters,
     energyMinFilter,
+    setEnergyMinFilter,
     energyMaxFilter,
+    setEnergyMaxFilter,
     showFilterOptions,
     setShowFilterOptions,
     tagSearchTerm,
     setTagSearchTerm,
     bpmMinFilter,
+    setBpmMinFilter,
     bpmMaxFilter,
+    setBpmMaxFilter,
     setCamelotKeyFilters,
     showAdvancedFilters,
     setShowAdvancedFilters,
@@ -626,6 +645,49 @@ const TrackList: React.FC<TrackListProps> = ({
     isSmartPlaylist: boolean,
   ) => {
     setShowCreatePlaylistModal(false);
+
+    if (editingSmartPlaylist) {
+      const updatedPlaylist: SmartPlaylistCriteria = {
+        ...editingSmartPlaylist,
+        criteria: buildSmartPlaylistCriteria({
+          playlistId: editingSmartPlaylist.playlistId,
+          playlistName: editingSmartPlaylist.playlistName,
+          trackUris: editingSmartPlaylist.smartPlaylistTrackUris,
+          includeTagClauses,
+          clauseConnectors,
+          ratingFilters,
+          energyMinFilter,
+          energyMaxFilter,
+          bpmMinFilter,
+          bpmMaxFilter,
+          normalizedCamelotKeyFilters,
+        }).criteria,
+      };
+      try {
+        await onSetSmartPlaylists((current) => current.map((playlist) =>
+          (updatedPlaylist.id
+            ? playlist.id === updatedPlaylist.id
+            : playlist.playlistId === updatedPlaylist.playlistId)
+            ? updatedPlaylist
+            : playlist,
+        ));
+      } catch (error) {
+        console.error("Could not save smart playlist changes:", error);
+        Spicetify.showNotification("Tagify couldn't save those Smart Playlist changes. Please try again.", true);
+        return;
+      }
+      setEditingSmartPlaylist(null);
+
+      if (updatedPlaylist.isActive) {
+        await onSyncPlaylist(updatedPlaylist);
+      }
+
+      Spicetify.showNotification(
+        `Saved filter changes to "${updatedPlaylist.playlistName}"`,
+      );
+      return;
+    }
+
     if (filteredTracks.length === 0) return;
 
     const trackUris: string[] = filteredTracks.map(([uri]) => uri);
@@ -652,19 +714,160 @@ const TrackList: React.FC<TrackListProps> = ({
           bpmMaxFilter,
           normalizedCamelotKeyFilters,
         });
-      onCreateSmartPlaylist(smartPlaylistCriteria);
+      try {
+        await onCreateSmartPlaylist(smartPlaylistCriteria);
+        Spicetify.showNotification(
+          `Created smart playlist "${playlistName}" with ${trackUris.filter((uri) => !uri.startsWith("spotify:local:")).length} tracks.${trackUris.some((uri) => uri.startsWith("spotify:local:")) ? " Local tracks need to be added manually." : ""}`,
+        );
+        if (!trackUris.some((uri) => uri.startsWith("spotify:local:"))) {
+          Spicetify.Platform.History.push(`/playlist/${playlistId}`);
+        }
+      } catch (error) {
+        console.error("Could not save smart playlist:", error);
+        Spicetify.showNotification(
+          "The Spotify playlist was created, but Tagify couldn't keep it updated. Check available storage and try again.",
+          true,
+        );
+      }
     }
   };
 
   const handleCreatePlaylistClick = () => {
-    if (filteredTracks.length > 0) {
+    if (filteredTracks.length > 0 || editingSmartPlaylist) {
       setShowCreatePlaylistModal(true);
     }
   };
 
+  const handleCloseCreatePlaylistModal = () => {
+    setShowCreatePlaylistModal(false);
+    setEditingSmartPlaylist(null);
+  };
+
+  const handleEditSmartPlaylist = useCallback(
+    (playlist: SmartPlaylistCriteria) => {
+      onReplaceTagFilterFormula({
+        clauses: playlist.criteria.includeTagClauses,
+        connectors: playlist.criteria.clauseConnectors,
+      });
+      setRatingFilters(playlist.criteria.ratingFilters);
+      setEnergyMinFilter(playlist.criteria.energyMinFilter);
+      setEnergyMaxFilter(playlist.criteria.energyMaxFilter);
+      setBpmMinFilter(playlist.criteria.bpmMinFilter);
+      setBpmMaxFilter(playlist.criteria.bpmMaxFilter);
+      setCamelotKeyFilters(playlist.criteria.camelotKeyFilters ?? []);
+      setShowFilterOptions(true);
+      setShowAdvancedFilters(
+        playlist.criteria.bpmMinFilter !== null ||
+          playlist.criteria.bpmMaxFilter !== null ||
+          (playlist.criteria.camelotKeyFilters?.length ?? 0) > 0,
+      );
+      setEditingSmartPlaylist(playlist);
+      setShowSmartPlaylistModal(false);
+    },
+    [
+      onReplaceTagFilterFormula,
+      setBpmMaxFilter,
+      setBpmMinFilter,
+      setCamelotKeyFilters,
+      setEnergyMaxFilter,
+      setEnergyMinFilter,
+      setRatingFilters,
+      setShowAdvancedFilters,
+      setShowFilterOptions,
+    ],
+  );
+
+  const handleBindSmartPlaylistRecipe = useCallback(
+    async (
+      playlist: SmartPlaylistCriteria,
+      existingPlaylist?: SpotifyPlaylistReference,
+    ) => {
+      if (playlist.source) {
+        if (existingPlaylist) throw new Error("Shared setups create a new Spotify playlist so your existing playlists stay unchanged.");
+        if (!playlist.id) throw new Error("Open this saved setup again before creating its playlist.");
+        const created = await createSharedSmartPlaylist(playlist.id);
+        Spicetify.Platform.History.push(`/playlist/${created.playlistId}`);
+        return;
+      }
+      const matchingTrackUris = collectMatchingTrackUris(tracks, playlist.criteria);
+      const playlistId =
+        existingPlaylist?.playlistId ??
+        (await onCreatePlaylist(
+          matchingTrackUris,
+          playlist.playlistName,
+          playlist.description ?? "Created from a Tagify smart-playlist recipe",
+          false,
+          true,
+        ));
+      if (!playlistId) return;
+      const bound = {
+        ...playlist,
+        playlistId,
+        playlistName: existingPlaylist?.playlistName ?? playlist.playlistName,
+        isActive: true,
+        lastSyncAt: 0,
+        smartPlaylistTrackUris: existingPlaylist ? [] : matchingTrackUris,
+        pendingTagChoices: [],
+        updatedAt: Date.now(),
+      };
+      try {
+        await onSetSmartPlaylists((current) => current.map((candidate) =>
+          candidate.id === playlist.id ? bound : candidate,
+        ));
+        await onSyncPlaylist(bound);
+        if (!existingPlaylist && !matchingTrackUris.some((uri) => uri.startsWith("spotify:local:"))) {
+          Spicetify.Platform.History.push(`/playlist/${playlistId}`);
+        }
+      } catch (error) {
+        console.error("Could not connect smart playlist:", error);
+        Spicetify.showNotification("Tagify couldn't connect this Smart Playlist. Please try again.", true);
+      }
+    },
+    [onCreatePlaylist, onSetSmartPlaylists, onSyncPlaylist, smartPlaylists, tracks],
+  );
+
+  useEffect(() => {
+    if (!requestedSmartPlaylistEditId) {
+      handledSmartPlaylistEditRequestRef.current = null;
+      return;
+    }
+
+    if (
+      handledSmartPlaylistEditRequestRef.current ===
+      requestedSmartPlaylistEditId
+    ) {
+      return;
+    }
+
+    const requestedPlaylist = smartPlaylists.find(
+      (playlist) => playlist.playlistId === requestedSmartPlaylistEditId,
+    );
+
+    if (requestedPlaylist) {
+      handledSmartPlaylistEditRequestRef.current = requestedSmartPlaylistEditId;
+      handleEditSmartPlaylist(requestedPlaylist);
+      onSmartPlaylistEditRequestHandled?.();
+      return;
+    }
+
+    // Smart playlists hydrate from storage after the first render.
+    if (smartPlaylists.length > 0) {
+      handledSmartPlaylistEditRequestRef.current = requestedSmartPlaylistEditId;
+      Spicetify.showNotification(
+        "This Smart Playlist could not be found in Tagify.",
+        true,
+      );
+      onSmartPlaylistEditRequestHandled?.();
+    }
+  }, [
+    handleEditSmartPlaylist,
+    onSmartPlaylistEditRequestHandled,
+    requestedSmartPlaylistEditId,
+    smartPlaylists,
+  ]);
+
   const handleSmartPlaylistClick = async () => {
     setShowSmartPlaylistModal(true);
-    // onCleanupDeletedSmartPlaylists();
   };
 
   const navigateToAlbum = async (uri: string) => {
@@ -738,6 +941,18 @@ const TrackList: React.FC<TrackListProps> = ({
                     } tracks`
                   : `${Object.keys(deferredTracks).length} tracks`}
               </span>
+              {editingSmartPlaylist && (
+                <span
+                  className={styles.smartPlaylistEditingBadge}
+                  role="status"
+                  aria-label={`Editing ${editingSmartPlaylist.playlistName}`}
+                >
+                  <FontAwesomeIcon icon={faBoltLightning} />
+                  <span className={styles.smartPlaylistEditingLabel}>
+                    Editing {editingSmartPlaylist.playlistName}
+                  </span>
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -754,14 +969,19 @@ const TrackList: React.FC<TrackListProps> = ({
 
           {/* Create Playlist button */}
           <button
-            className={styles.createPlaylistButton}
+            className={`${styles.createPlaylistButton} ${
+              editingSmartPlaylist ? styles.saveSmartPlaylistButton : ""
+            }`}
             onClick={handleCreatePlaylistClick}
-            {...(filteredTracks.length > 0 && {
-              title: `Create playlist with ${filteredTracks.length} tracks`,
+            {...((filteredTracks.length > 0 || editingSmartPlaylist) && {
+              title: editingSmartPlaylist
+                ? `Save filters to ${editingSmartPlaylist.playlistName}`
+                : `Create playlist with ${filteredTracks.length} tracks`,
             })}
-            disabled={filteredTracks.length === 0}
+            disabled={filteredTracks.length === 0 && !editingSmartPlaylist}
           >
-            Create Playlist
+            {editingSmartPlaylist && <FontAwesomeIcon icon={faFloppyDisk} />}
+            {editingSmartPlaylist ? "Save Smart Playlist" : "Create Playlist"}
           </button>
 
           {/* Smart Playlist button */}
@@ -1817,7 +2037,8 @@ const TrackList: React.FC<TrackListProps> = ({
           bpmMinFilter={bpmMinFilter}
           bpmMaxFilter={bpmMaxFilter}
           camelotKeyFilters={normalizedCamelotKeyFilters}
-          onClose={() => setShowCreatePlaylistModal(false)}
+          editingSmartPlaylistName={editingSmartPlaylist?.playlistName}
+          onClose={handleCloseCreatePlaylistModal}
           onCreatePlaylist={handleCreatePlaylist}
         />
       )}
@@ -1825,11 +2046,13 @@ const TrackList: React.FC<TrackListProps> = ({
         <SmartPlaylistModal
           smartPlaylists={smartPlaylists}
           taxonomy={taxonomy}
+          tracks={tracks}
+          onEditPlaylist={handleEditSmartPlaylist}
           onUpdateSmartPlaylists={onSetSmartPlaylists}
           onSyncPlaylist={onSyncPlaylist}
-          onExportSmartPlaylists={onExportSmartPlaylists}
+          onExportSmartPlaylists={(selected) => onExportSmartPlaylists(taxonomy, selected)}
           onImportSmartPlaylists={onImportSmartPlaylists}
-          onCleanupDeletedSmartPlaylists={onCleanupDeletedSmartPlaylists}
+          onBindRecipe={handleBindSmartPlaylistRecipe}
           onClose={() => setShowSmartPlaylistModal(false)}
         />
       )}

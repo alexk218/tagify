@@ -1,74 +1,37 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderInlineEditorPresentation } from "../inlineEditor.presentation";
 
-describe("inline editor presentation", () => {
-  it("updates energy and tag status immediately when the same control re-renders", () => {
-    const control = document.createElement("div");
-    const onRate = vi.fn();
+const tagGroups = [
+  {
+    categoryName: "Genre",
+    subcategoryName: "Electronic",
+    tags: [{ id: "house", name: "House", accent: null }],
+  },
+];
 
-    renderInlineEditorPresentation(control, {
-      rating: 4,
-      energy: 0,
-      tagStatus: "none",
-      tagListTooltip: "",
-      compact: false,
-      onRate,
-    });
-
-    expect(control.querySelector(".tagify-energy-rating-label")).toBeNull();
-    expect(control.querySelector(".tagify-tag-status-indicator")).toBeNull();
-
-    renderInlineEditorPresentation(control, {
-      rating: 4,
-      energy: 7,
-      tagStatus: "incomplete",
-      tagListTooltip: "House",
-      compact: false,
-      onRate,
-    });
-
-    expect(
-      control.querySelector(".tagify-energy-rating-label"),
-    ).toHaveTextContent("E 7");
-    expect(
-      control.querySelector(".tagify-tag-status-indicator"),
-    ).toHaveAttribute("title", "House");
-
-    renderInlineEditorPresentation(control, {
-      rating: 4,
-      energy: 7,
-      tagStatus: "complete",
-      tagListTooltip: "House\nLate Night",
-      compact: false,
-      onRate,
-    });
-
-    expect(
-      control.querySelectorAll(".tagify-tag-status-indicator"),
-    ).toHaveLength(1);
-    expect(
-      control.querySelector(".tagify-tag-status-indicator"),
-    ).toHaveAttribute("title", "House\nLate Night");
-    expect(
-      control.querySelector(".tagify-tag-status-indicator").style.color,
-    ).toBe("rgb(29, 185, 84)");
+function render(overrides = {}) {
+  const control = document.createElement("div");
+  renderInlineEditorPresentation(control, {
+    rating: 4,
+    energy: 7,
+    tagStatus: "complete",
+    tagGroups,
+    onRate: vi.fn(),
+    onEnergy: vi.fn(),
+    ...overrides,
   });
+  return control;
+}
 
-  it("keeps stars centered between balanced status slots and isolates their clicks", () => {
+describe("inline editor presentation", () => {
+  it("keeps combined mode centered and opens compact tag and energy editors directly", () => {
+    const onOpenTags = vi.fn();
+    const onOpenEnergy = vi.fn();
     const parent = document.createElement("div");
-    const control = document.createElement("div");
     const onNavigate = vi.fn();
     parent.addEventListener("click", onNavigate);
+    const control = render({ onOpenTags, onOpenEnergy });
     parent.appendChild(control);
-
-    renderInlineEditorPresentation(control, {
-      rating: 4,
-      energy: 7,
-      tagStatus: "incomplete",
-      tagListTooltip: "House",
-      compact: false,
-      onRate: vi.fn(),
-    });
 
     expect(Array.from(control.children, (child) => child.className)).toEqual([
       "tagify-inline-leading",
@@ -78,56 +41,75 @@ describe("inline editor presentation", () => {
     expect(control.style.gridTemplateColumns).toBe(
       "minmax(0, 1fr) auto minmax(0, 1fr)",
     );
-    expect(
-      control.querySelector(".tagify-inline-leading").firstElementChild,
-    ).toHaveClass("tagify-tag-status-indicator");
-    expect(
-      control.querySelector(".tagify-inline-trailing").firstElementChild,
-    ).toHaveClass("tagify-energy-rating-label");
 
-    control.querySelector(".tagify-tag-status-indicator").click();
-    control.querySelector(".tagify-energy-rating-label").click();
-    expect(onNavigate).toHaveBeenCalledTimes(2);
-
-    control.querySelector(".tagify-star-rating-control").click();
-    expect(onNavigate).toHaveBeenCalledTimes(2);
-  });
-
-  it.each([
-    ["stars only", 0, "none"],
-    ["stars and energy", 7, "none"],
-    ["stars and tags", 0, "incomplete"],
-    ["stars, energy, and tags", 7, "complete"],
-  ])("keeps the star section in the center slot with %s", (_, energy, tagStatus) => {
-    const control = document.createElement("div");
-
-    renderInlineEditorPresentation(control, {
-      rating: 4,
-      energy,
-      tagStatus,
-      tagListTooltip: tagStatus === "none" ? "" : "House",
-      compact: false,
-      onRate: vi.fn(),
-    });
-
-    expect(control.children[1]).toHaveClass("tagify-star-rating-control");
-    expect(control.children[0]).toHaveClass("tagify-inline-leading");
-    expect(control.children[2]).toHaveClass("tagify-inline-trailing");
+    const tagButton = control.querySelector(".tagify-tag-status-indicator");
+    const energyButton = control.querySelector(".tagify-energy-rating-label");
+    tagButton.click();
+    energyButton.click();
+    expect(onOpenTags).toHaveBeenCalledWith(tagButton);
+    expect(onOpenEnergy).toHaveBeenCalledWith(energyButton);
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
   it("uses equal fixed side rails in the compact playbar layout", () => {
-    const control = document.createElement("div");
-
-    renderInlineEditorPresentation(control, {
-      rating: 4,
-      energy: 10,
-      tagStatus: "complete",
-      tagListTooltip: "House",
-      compact: true,
-      onRate: vi.fn(),
-    });
-
+    const control = render({ compact: true });
     expect(control.style.gridTemplateColumns).toBe("26px auto 26px");
     expect(control.children[1]).toHaveClass("tagify-star-rating-control");
+  });
+
+  it("always renders an interactive empty star affordance in stars mode", () => {
+    const control = render({ displayMode: "stars", rating: 0 });
+    expect(control.querySelectorAll(".tagify-rating-star")).toHaveLength(5);
+    expect(control.children).toHaveLength(1);
+  });
+
+  it("always renders the ten-step slider in energy mode, including when unset", () => {
+    const control = render({ displayMode: "energy", energy: 0 });
+    const slider = control.querySelector(".tagify-energy-control");
+    expect(slider).toHaveAttribute("role", "slider");
+    expect(slider).toHaveAttribute("aria-valuetext", "Energy not set");
+    expect(slider.querySelectorAll(".tagify-energy-segment")).toHaveLength(10);
+    expect(slider).toHaveTextContent("E—");
+  });
+
+  it("shows a detailed first-tag pill in tracklist tags mode", () => {
+    const control = render({
+      displayMode: "tags",
+      tagGroups: [
+        ...tagGroups,
+        {
+          categoryName: "Mood",
+          subcategoryName: "Time",
+          tags: [{ id: "night", name: "Late Night", accent: null }],
+        },
+      ],
+    });
+    expect(control.querySelector(".tagify-tag-status-indicator")).toHaveTextContent(
+      "House +1",
+    );
+  });
+
+  it("shows a tag count in compact tags mode", () => {
+    const control = render({ displayMode: "tags", compact: true });
+    expect(control.querySelector(".tagify-tag-status-indicator")).toHaveTextContent(
+      "1 tag",
+    );
+  });
+
+  it("shows Add tags when tags mode has no assigned tags", () => {
+    const control = render({
+      displayMode: "tags",
+      tagStatus: "none",
+      tagGroups: [],
+    });
+    expect(control.querySelector(".tagify-tag-status-indicator")).toHaveTextContent(
+      "Add tags",
+    );
+  });
+
+  it("renders nothing when disabled", () => {
+    const control = render({ displayMode: "disabled" });
+    expect(control).toBeEmptyDOMElement();
+    expect(control.style.display).toBe("none");
   });
 });

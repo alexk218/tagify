@@ -302,6 +302,39 @@ download_tagify() {
     log "✓ Archive extracted"
 }
 
+install_community_recovery_bootstrap() {
+    local tagify_dir="$1"
+    local state_dir="$USER_HOME/.config/tagify"
+    local key_file="$state_dir/install-recovery-key"
+    local extension_file="$tagify_dir/extension.js"
+
+    sudo -u "$ACTUAL_USER" mkdir -p "$state_dir"
+    chmod 700 "$state_dir"
+    chown "$ACTUAL_USER:staff" "$state_dir"
+
+    if [ ! -s "$key_file" ] || ! grep -Eq '^tgfy_install_[A-Za-z0-9_-]{43}$' "$key_file"; then
+        local random_value
+        random_value=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
+        printf 'tgfy_install_%s\n' "$random_value" > "$key_file"
+        chmod 600 "$key_file"
+        chown "$ACTUAL_USER:staff" "$key_file"
+    fi
+
+    if [ ! -f "$extension_file" ]; then
+        error_exit "Tagify extension.js is missing; automatic Community reconnection could not be installed"
+    fi
+
+    local recovery_key
+    recovery_key=$(tr -d '\r\n' < "$key_file")
+    {
+        printf 'globalThis.__tagifyInstallRecoveryKey="%s";\n' "$recovery_key"
+        cat "$extension_file"
+    } > "$extension_file.recovery"
+    mv "$extension_file.recovery" "$extension_file"
+    chown "$ACTUAL_USER:staff" "$extension_file"
+    log "✓ Automatic Community reconnection is ready"
+}
+
 # Install Tagify
 install_tagify() {
     log "Installing Tagify..."
@@ -377,6 +410,8 @@ install_tagify() {
     if [ ! -d "$tagify_dir" ]; then
         error_exit "Tagify directory not found after installation"
     fi
+
+    install_community_recovery_bootstrap "$tagify_dir"
     
     # Check if directory has files
     local installed_file_count=$(find "$tagify_dir" -type f 2>/dev/null | wc -l)

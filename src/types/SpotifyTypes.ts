@@ -5,7 +5,7 @@ export interface SpotifyTrack {
   uri: string;
   name: string;
   artists: { name: string }[];
-  album: { name: string };
+  album: { name: string; uri?: string | null; images?: { url: string }[] };
   duration_ms: number;
 }
 
@@ -19,7 +19,9 @@ export interface SpicetifyHistoryLocation {
     trackUri?: string;
     trackUris?: string[];
     playlistUri?: string;
-    [key: string]: any;
+    artistUri?: string;
+    editSmartPlaylistId?: string;
+    [key: string]: unknown;
   };
 }
 

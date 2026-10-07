@@ -9,6 +9,125 @@
   padding: 20px;
 }
 
+.mobileTaggingOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 76%);
+}
+
+.mobileTaggingIntro {
+  width: min(500px, 100%);
+  padding: 22px;
+  border: 1px solid rgb(92 160 255 / 30%);
+  border-radius: 14px;
+  color: var(--spice-text);
+  background: color-mix(in srgb, var(--spice-card) 94%, black 6%);
+  box-shadow: 0 18px 54px rgb(0 0 0 / 55%);
+}
+
+.mobileTaggingIntroHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.mobileTaggingKicker {
+  display: block;
+  margin-bottom: 5px;
+  color: #7db3ff;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mobileTaggingIntroHeader h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.25;
+}
+
+.mobileTaggingIntroHeader h2 svg {
+  color: #7db3ff;
+}
+
+.mobileTaggingCloseButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 7px;
+  color: var(--spice-text);
+  background: rgb(255 255 255 / 3%);
+  cursor: pointer;
+}
+
+.mobileTaggingCloseButton:hover {
+  background: rgb(255 255 255 / 9%);
+}
+
+.mobileTaggingLead {
+  margin: 16px 0 0;
+  color: var(--spice-text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.mobileTaggingSteps {
+  display: grid;
+  gap: 9px;
+  margin: 16px 0;
+  padding-left: 22px;
+  color: var(--spice-subtext);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.mobileTaggingSteps li::marker {
+  color: #7db3ff;
+  font-weight: 700;
+}
+
+.mobileTaggingNote {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--spice-subtext);
+  background: rgb(92 160 255 / 8%);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mobileTaggingPrimaryButton {
+  width: 100%;
+  height: 38px;
+  margin-top: 16px;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  background: color-mix(in srgb, var(--spice-accent) 82%, #4a83ff 18%);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mobileTaggingPrimaryButton:hover {
+  filter: brightness(1.08);
+}
+
 .modal {
   width: min(860px, 100%);
   max-height: 88vh;
@@ -23,6 +142,7 @@
 
 .modalHeader {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
@@ -31,6 +151,7 @@
 }
 
 .titleBlock {
+  flex: 1;
   min-width: 0;
 }
 
@@ -72,6 +193,70 @@
 
 .headerButton:hover {
   background: rgb(255 255 255 / 6%);
+}
+
+.shareInfoTooltip {
+  position: relative;
+  display: inline-flex;
+}
+
+.shareInfoButton {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgb(92 160 255 / 38%);
+  border-radius: 50%;
+  color: #7db3ff;
+  background: rgb(92 160 255 / 12%);
+  cursor: pointer;
+}
+
+.shareInfoButton:hover,
+.shareInfoButton:focus-visible {
+  color: #b8d5ff;
+  background: rgb(92 160 255 / 24%);
+  outline: none;
+}
+
+.shareInfoPanel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 4px;
+  width: min(360px, calc(100vw - 48px));
+  padding: 11px 13px;
+  border: 1px solid rgb(92 160 255 / 25%);
+  border-radius: 8px;
+  color: var(--spice-text);
+  background: color-mix(in srgb, var(--spice-card) 94%, black 6%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 38%);
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    visibility 0.16s ease;
+}
+
+.shareInfoTooltip:hover .shareInfoPanel,
+.shareInfoTooltip:focus-within .shareInfoPanel {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.shareInfoPanel p {
+  margin: 0;
+  color: var(--spice-subtext);
 }
 
 .exportButton {

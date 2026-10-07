@@ -26,19 +26,24 @@ export function createInitialTrackData(
     dateModified: now,
     name: metadata?.name,
     artists: metadata?.artists,
+    albumName: metadata?.albumName,
+    albumUri: metadata?.albumUri,
+    albumImageUrl: metadata?.albumImageUrl,
   };
 }
 
 export function withTrackMetadata(
   trackData: TrackData,
   metadata: TrackMetadata,
-  now: number,
+  _now: number,
 ): TrackData {
   return {
     ...trackData,
     name: trackData.name || metadata.name,
     artists: trackData.artists || metadata.artists,
-    dateModified: now,
+    albumName: trackData.albumName || metadata.albumName,
+    albumUri: trackData.albumUri || metadata.albumUri,
+    albumImageUrl: trackData.albumImageUrl || metadata.albumImageUrl,
   };
 }
 

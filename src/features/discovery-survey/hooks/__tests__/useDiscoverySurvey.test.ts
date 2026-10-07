@@ -2,6 +2,13 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useDiscoverySurvey } from "@/features/discovery-survey/hooks/useDiscoverySurvey";
 
+const { recordDiscoveryAnswer, history } = vi.hoisted(() => ({
+  recordDiscoveryAnswer: vi.fn().mockResolvedValue(true),
+  history: { ready: true, accountDigest: null as string | null, discoverySurveyDismissed: false, markSeen: vi.fn() },
+}));
+vi.mock("../../services/tagifyUsage", () => ({ recordDiscoveryAnswer, getUsageAccountDigest: vi.fn().mockResolvedValue(null) }));
+vi.mock("@/features/onboarding/hooks/usePromptHistory", () => ({ usePromptHistory: () => history }));
+
 const SURVEY_STORAGE_KEY = "tagify:discoverySurvey";
 
 function createStorageMock(initial: Record<string, string> = {}) {
@@ -21,14 +28,16 @@ function createStorageMock(initial: Record<string, string> = {}) {
 describe("useDiscoverySurvey", () => {
   beforeEach(() => {
     createStorageMock();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    recordDiscoveryAnswer.mockClear();
+    Object.assign(history, { ready: true, accountDigest: null, discoverySurveyDismissed: false });
+    history.markSeen.mockClear();
   });
 
-  it("shows survey when no prior state exists", async () => {
+  it("does not show the survey on first opening", async () => {
     const { result } = renderHook(() => useDiscoverySurvey("1.2.3"));
 
     await waitFor(() => {
-      expect(result.current.shouldShowSurvey).toBe(true);
+      expect(result.current.shouldShowSurvey).toBe(false);
     });
     expect(result.current.skipCount).toBe(0);
   });
@@ -52,7 +61,6 @@ describe("useDiscoverySurvey", () => {
 
   it("persists completion and posts discovery payload", async () => {
     const store = createStorageMock();
-    const fetchMock = vi.mocked(fetch);
 
     const { result } = renderHook(() => useDiscoverySurvey("2.0.0"));
 
@@ -62,7 +70,7 @@ describe("useDiscoverySurvey", () => {
 
     await waitFor(() => {
       expect(result.current.shouldShowSurvey).toBe(false);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(recordDiscoveryAnswer).toHaveBeenCalledTimes(1);
     });
 
     const saved = JSON.parse(store.get(SURVEY_STORAGE_KEY) || "{}");
@@ -70,6 +78,8 @@ describe("useDiscoverySurvey", () => {
     expect(saved.source).toBe("friend");
     expect(saved.otherDetails).toBe("discord");
     expect(saved.surveyVersion).toBe("2.0.0");
+
+    expect(recordDiscoveryAnswer).toHaveBeenCalledWith("2.0.0", { source: "friend", otherDetails: "discord" }, null);
   });
 
   it("increments skip count and hides survey", async () => {
@@ -115,4 +125,82 @@ describe("useDiscoverySurvey", () => {
       expect(result.current.shouldShowSurvey).toBe(false);
     });
   });
+  it("waits for five distinct manually added songs, including a batch", () => {
+    const { result, rerender } = renderHook(({ event }) => useDiscoverySurvey("3.0.0", { lastUserTrackAddedEvent: event }), {
+      initialProps: { event: null as null | { eventId: number; trackUris: string[] } },
+    });
+    rerender({ event: { eventId: 1, trackUris: ["one", "two", "three", "four"] } });
+    expect(result.current.shouldShowSurvey).toBe(false);
+    rerender({ event: { eventId: 2, trackUris: ["four"] } });
+    expect(result.current.shouldShowSurvey).toBe(false);
+    rerender({ event: { eventId: 3, trackUris: ["five"] } });
+    expect(result.current.shouldShowSurvey).toBe(true);
+  });
+
+  it("remembers progress between visits and waits until another dialog closes", () => {
+    createStorageMock({ [SURVEY_STORAGE_KEY]: JSON.stringify({ hasCompletedSurvey: false, taggedSongUris: ["one", "two", "three", "four"] }) });
+    const { result, rerender } = renderHook(({ canShow }) => useDiscoverySurvey("3.0.0", {
+      canShowSurvey: canShow, lastUserTrackAddedEvent: { eventId: 1, trackUris: ["five"] },
+    }), { initialProps: { canShow: false } });
+    expect(result.current.shouldShowSurvey).toBe(false);
+    rerender({ canShow: true });
+    expect(result.current.shouldShowSurvey).toBe(true);
+  });
+
+  it("does not undo an old dismissal even after the milestone", () => {
+    createStorageMock({ [SURVEY_STORAGE_KEY]: JSON.stringify({ hasDismissedSurvey: true, taggedSongUris: ["one", "two", "three", "four", "five"] }) });
+    const { result } = renderHook(() => useDiscoverySurvey("3.0.0"));
+    expect(result.current.shouldShowSurvey).toBe(false);
+  });
+
+  it("waits for account history before showing discovery and honors a recovered skip", () => {
+    createStorageMock({ [SURVEY_STORAGE_KEY]: JSON.stringify({ taggedSongUris: ["one", "two", "three", "four", "five"] }) });
+    history.ready = false;
+    const { result, rerender } = renderHook(() => useDiscoverySurvey("3.0.0"));
+    expect(result.current.shouldShowSurvey).toBe(false);
+    history.ready = true;
+    history.discoverySurveyDismissed = true;
+    rerender();
+    expect(result.current.shouldShowSurvey).toBe(false);
+    history.discoverySurveyDismissed = false;
+    rerender();
+    expect(result.current.shouldShowSurvey).toBe(true);
+  });
+
+  it("keeps progress and answers with the account that supplied them", () => {
+    const a = "a".repeat(64), b = "b".repeat(64);
+    history.accountDigest = a;
+    const store = createStorageMock({ [`${SURVEY_STORAGE_KEY}:${a}`]: JSON.stringify({ taggedSongUris: ["one", "two", "three", "four", "five"] }) });
+    const { result, rerender } = renderHook(() => useDiscoverySurvey("3.0.0"));
+    expect(result.current.shouldShowSurvey).toBe(true);
+    act(() => result.current.completeSurvey("friend"));
+    expect(recordDiscoveryAnswer).toHaveBeenCalledWith("3.0.0", { source: "friend", otherDetails: undefined }, a);
+    expect(history.markSeen).toHaveBeenCalledWith("discoverySurveyDismissed");
+    expect(JSON.parse(store.get(`${SURVEY_STORAGE_KEY}:${a}`) || "{}").hasCompletedSurvey).toBe(true);
+    history.accountDigest = b;
+    rerender();
+    expect(result.current.shouldShowSurvey).toBe(false);
+    expect(result.current.skipCount).toBe(0);
+    history.accountDigest = a;
+    rerender();
+    expect(result.current.shouldShowSurvey).toBe(false);
+  });
+
+  it("keeps the five-song milestone while Spotify is still resolving the account", () => {
+    const store = createStorageMock();
+    history.ready = false;
+    const { result, rerender } = renderHook(({ event }) => useDiscoverySurvey("3.0.0", { lastUserTrackAddedEvent: event }), {
+      initialProps: { event: null as null | { eventId: number; trackUris: string[] } },
+    });
+    const event = { eventId: 1, trackUris: ["one", "two", "three", "four", "five"] };
+    rerender({ event });
+    expect(result.current.shouldShowSurvey).toBe(false);
+    history.accountDigest = "a".repeat(64);
+    history.ready = true;
+    rerender({ event });
+    expect(result.current.shouldShowSurvey).toBe(true);
+    expect(JSON.parse(store.get(`${SURVEY_STORAGE_KEY}:${history.accountDigest}`) || "{}").taggedSongUris).toHaveLength(5);
+    expect(store.has(SURVEY_STORAGE_KEY)).toBe(false);
+  });
+
 });

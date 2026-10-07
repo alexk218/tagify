@@ -5,6 +5,7 @@ import {
   TagSubcategory,
   TagTaxonomy,
   TaxonomyCategory,
+  TaxonomyFolder,
   TaxonomySubcategory,
   TaxonomyTag,
   TrackData,
@@ -14,7 +15,7 @@ import {
   normalizeTagAccentId,
 } from "@/features/tag-data/utils/tagAccent";
 
-export const TAG_DATA_SCHEMA_VERSION = 8;
+export const TAG_DATA_SCHEMA_VERSION = 9;
 
 type OpaquePrefix = "cat" | "sub" | "tag";
 
@@ -22,10 +23,12 @@ export interface ResolvedTagNode {
   id: string;
   name: string;
   tag: TaxonomyTag;
-  subcategory: TaxonomySubcategory;
+  subcategory: TaxonomySubcategory | null;
+  parent: TaxonomyCategory | TaxonomyFolder;
   category: TaxonomyCategory;
   categoryName: string;
   subcategoryName: string;
+  folderPath: string[];
   displayPath: string;
   categoryOrder: number;
   subcategoryOrder: number;
@@ -99,6 +102,8 @@ export function createEmptyTaxonomy(): TagTaxonomy {
   return {
     categoryOrder: [],
     categoriesById: {},
+    foldersById: {},
+    childrenByParentId: {},
     subcategoriesById: {},
     tagsById: {},
     customAccentsById: {},
@@ -121,7 +126,9 @@ export function buildTaxonomyFromCategoryTree(categories: TagCategory[]): TagTax
       id: nextCategoryId,
       name: category.name,
       subcategoryIds: [],
+      childIds: [],
     };
+    taxonomy.childrenByParentId![nextCategoryId] = [];
 
     category.subcategories.forEach((subcategory) => {
       const nextSubcategoryId = isOpaqueId(subcategory.id, "sub")
@@ -129,12 +136,18 @@ export function buildTaxonomyFromCategoryTree(categories: TagCategory[]): TagTax
         : createLegacySubcategoryIdentityId(category.id, subcategory.id);
 
       taxonomy.categoriesById[nextCategoryId].subcategoryIds.push(nextSubcategoryId);
+      taxonomy.categoriesById[nextCategoryId].childIds!.push(nextSubcategoryId);
+      taxonomy.childrenByParentId![nextCategoryId].push(nextSubcategoryId);
       taxonomy.subcategoriesById[nextSubcategoryId] = {
         id: nextSubcategoryId,
         name: subcategory.name,
+        parentId: nextCategoryId,
         categoryId: nextCategoryId,
         tagIds: [],
+        childIds: [],
       };
+      taxonomy.foldersById![nextSubcategoryId] = taxonomy.subcategoriesById[nextSubcategoryId];
+      taxonomy.childrenByParentId![nextSubcategoryId] = [];
 
       subcategory.tags.forEach((tag) => {
         const nextTagId = isOpaqueId(tag.id, "tag")
@@ -142,9 +155,12 @@ export function buildTaxonomyFromCategoryTree(categories: TagCategory[]): TagTax
           : createLegacyTagIdentityId(category.id, subcategory.id, tag.id);
 
         taxonomy.subcategoriesById[nextSubcategoryId].tagIds.push(nextTagId);
+        taxonomy.subcategoriesById[nextSubcategoryId].childIds!.push(nextTagId);
+        taxonomy.childrenByParentId![nextSubcategoryId].push(nextTagId);
         taxonomy.tagsById[nextTagId] = {
           id: nextTagId,
           name: tag.name,
+          parentId: nextSubcategoryId,
           subcategoryId: nextSubcategoryId,
           accentId: normalizeTagAccentId(tag.accentId),
         };
@@ -176,71 +192,96 @@ function buildSubcategoryNode(
   taxonomy: TagTaxonomy,
   subcategory: TaxonomySubcategory,
 ): TagSubcategory {
+  const childIds = taxonomy.childrenByParentId?.[subcategory.id] || subcategory.childIds || subcategory.tagIds;
   return {
     id: subcategory.id,
     name: subcategory.name,
-    tags: subcategory.tagIds
+    tags: childIds
       .map((tagId) => taxonomy.tagsById[tagId])
       .filter((tag): tag is TaxonomyTag => Boolean(tag))
       .map((tag) => buildTagNode(tag, taxonomy.customAccentsById)),
+    subcategories: childIds
+      .map((folderId) => taxonomy.subcategoriesById[folderId])
+      .filter((folder): folder is TaxonomySubcategory => Boolean(folder))
+      .map((folder) => buildSubcategoryNode(taxonomy, folder)),
   };
 }
 
 export function buildCategoryTree(taxonomy: TagTaxonomy): TagCategory[] {
-  return taxonomy.categoryOrder
-    .map((categoryId) => taxonomy.categoriesById[categoryId])
+  const normalized = normalizeTaxonomyTree(taxonomy);
+  return normalized.categoryOrder
+    .map((categoryId) => normalized.categoriesById[categoryId])
     .filter((category): category is TaxonomyCategory => Boolean(category))
     .map((category) => ({
       id: category.id,
       name: category.name,
-      subcategories: category.subcategoryIds
-        .map((subcategoryId) => taxonomy.subcategoriesById[subcategoryId])
+      tags: (normalized.childrenByParentId?.[category.id] || [])
+        .map((childId) => normalized.tagsById[childId])
+        .filter((tag): tag is TaxonomyTag => Boolean(tag))
+        .map((tag) => buildTagNode(tag, normalized.customAccentsById)),
+      subcategories: (normalized.childrenByParentId?.[category.id] || category.subcategoryIds)
+        .map((subcategoryId) => normalized.subcategoriesById[subcategoryId])
         .filter((subcategory): subcategory is TaxonomySubcategory => Boolean(subcategory))
-        .map((subcategory) => buildSubcategoryNode(taxonomy, subcategory)),
+        .map((subcategory) => buildSubcategoryNode(normalized, subcategory)),
     }));
 }
 
 export function buildResolvedTagLookup(
   taxonomy: TagTaxonomy,
 ): Map<string, ResolvedTagNode> {
+  const normalized = normalizeTaxonomyTree(taxonomy);
   const resolvedTagLookup = new Map<string, ResolvedTagNode>();
 
-  taxonomy.categoryOrder.forEach((categoryId, categoryOrder) => {
-    const category = taxonomy.categoriesById[categoryId];
+  normalized.categoryOrder.forEach((categoryId, categoryOrder) => {
+    const category = normalized.categoriesById[categoryId];
     if (!category) {
       return;
     }
-
-    category.subcategoryIds.forEach((subcategoryId, subcategoryOrder) => {
-      const subcategory = taxonomy.subcategoriesById[subcategoryId];
-      if (!subcategory) {
-        return;
-      }
-
-      subcategory.tagIds.forEach((tagId, tagOrder) => {
-        const tag = taxonomy.tagsById[tagId];
-        if (!tag) {
-          return;
-        }
-
-        resolvedTagLookup.set(tagId, {
-          id: tag.id,
-          name: tag.name,
-          tag,
-          subcategory,
-          category,
-          categoryName: category.name,
-          subcategoryName: subcategory.name,
-          displayPath: `${category.name} > ${subcategory.name} > ${tag.name}`,
-          categoryOrder,
-          subcategoryOrder,
-          tagOrder,
-        });
-      });
-    });
+    visitTaxonomyChildren(normalized, category.id, [category.name], category, categoryOrder, resolvedTagLookup);
   });
 
   return resolvedTagLookup;
+}
+
+function visitTaxonomyChildren(
+  taxonomy: TagTaxonomy,
+  parentId: string,
+  path: string[],
+  category: TaxonomyCategory,
+  categoryOrder: number,
+  resolvedTagLookup: Map<string, ResolvedTagNode>,
+) {
+  (taxonomy.childrenByParentId?.[parentId] || []).forEach((childId, index) => {
+    const folder = taxonomy.subcategoriesById[childId];
+    if (folder) {
+      visitTaxonomyChildren(taxonomy, folder.id, [...path, folder.name], category, categoryOrder, resolvedTagLookup);
+      return;
+    }
+    const tag = taxonomy.tagsById[childId];
+    if (!tag) return;
+    const parent = taxonomy.subcategoriesById[parentId] || taxonomy.categoriesById[parentId];
+    if (!parent) return;
+    const folderPath = path.slice(1);
+    resolvedTagLookup.set(tagIdOf(tag), {
+      id: tag.id,
+      name: tag.name,
+      tag,
+      subcategory: taxonomy.subcategoriesById[tag.subcategoryId] || null,
+      parent,
+      category,
+      categoryName: category.name,
+      subcategoryName: folderPath.at(-1) || category.name,
+      folderPath,
+      displayPath: [...path, tag.name].join(" > "),
+      categoryOrder,
+      subcategoryOrder: index,
+      tagOrder: index,
+    });
+  });
+}
+
+function tagIdOf(tag: TaxonomyTag) {
+  return tag.id;
 }
 
 export function resolveTagId(
@@ -327,14 +368,15 @@ export function findDisplayTagName(
     return resolvedTag.name;
   }
 
-  return `${resolvedTag.name} (${resolvedTag.subcategoryName} / ${resolvedTag.categoryName})`;
+  return `${resolvedTag.name} (${[resolvedTag.categoryName, ...resolvedTag.folderPath].filter(Boolean).join(" / ")})`;
 }
 
 export function collectTagIdsForSubcategory(
   taxonomy: TagTaxonomy,
   subcategoryId: string,
 ): string[] {
-  return [...(taxonomy.subcategoriesById[subcategoryId]?.tagIds || [])];
+  const normalized = normalizeTaxonomyTree(taxonomy);
+  return collectTagIdsForParent(normalized, subcategoryId);
 }
 
 export function collectTagIdsForCategory(
@@ -346,9 +388,70 @@ export function collectTagIdsForCategory(
     return [];
   }
 
-  return category.subcategoryIds.flatMap((subcategoryId) =>
-    collectTagIdsForSubcategory(taxonomy, subcategoryId),
-  );
+  return collectTagIdsForParent(normalizeTaxonomyTree(taxonomy), categoryId);
+}
+
+export function collectTagIdsForParent(taxonomy: TagTaxonomy, parentId: string): string[] {
+  const normalized = normalizeTaxonomyTree(taxonomy);
+  return (normalized.childrenByParentId?.[parentId] || []).flatMap((childId) => (
+    normalized.tagsById[childId] ? [childId] : collectTagIdsForParent(normalized, childId)
+  ));
+}
+
+export function normalizeTaxonomyTree(taxonomy: TagTaxonomy): TagTaxonomy {
+  const next = JSON.parse(JSON.stringify(taxonomy)) as TagTaxonomy;
+  next.foldersById = { ...(next.foldersById || {}), ...next.subcategoriesById };
+  next.childrenByParentId = { ...(next.childrenByParentId || {}) };
+  const appendChild = (parentId: string, childId: string) => {
+    const children = next.childrenByParentId![parentId] || [];
+    next.childrenByParentId![parentId] = children.includes(childId) ? children : [...children, childId];
+  };
+  next.categoryOrder.forEach((categoryId) => {
+    const category = next.categoriesById[categoryId];
+    if (!category) return;
+    const childIds = [...new Set([...(category.childIds || []), ...(category.subcategoryIds || [])])];
+    category.childIds = childIds;
+    next.childrenByParentId![categoryId] = [...new Set([...(next.childrenByParentId![categoryId] || []), ...childIds])];
+  });
+  Object.values(next.foldersById).forEach((folder) => {
+    const parentId = folder.parentId || folder.categoryId;
+    if (!parentId) return;
+    folder.parentId = parentId;
+    folder.categoryId ||= rootCategoryId(next, parentId) || parentId;
+    folder.childIds = [...new Set([...(folder.childIds || []), ...(folder.tagIds || [])])];
+    next.subcategoriesById[folder.id] = folder;
+    next.childrenByParentId![folder.id] = [...new Set([...(next.childrenByParentId![folder.id] || []), ...folder.childIds])];
+    appendChild(parentId, folder.id);
+    const parentCategory = next.categoriesById[parentId];
+    if (parentCategory && !parentCategory.subcategoryIds.includes(folder.id)) parentCategory.subcategoryIds.push(folder.id);
+    if (parentCategory && !parentCategory.childIds?.includes(folder.id)) parentCategory.childIds = [...(parentCategory.childIds || []), folder.id];
+  });
+  Object.values(next.tagsById).forEach((tag) => {
+    const parentId = tag.parentId || tag.subcategoryId;
+    tag.parentId = parentId;
+    tag.subcategoryId = parentId;
+    appendChild(parentId, tag.id);
+    const parentFolder = next.subcategoriesById[parentId];
+    if (parentFolder && !parentFolder.tagIds.includes(tag.id)) parentFolder.tagIds.push(tag.id);
+    if (parentFolder && !parentFolder.childIds?.includes(tag.id)) parentFolder.childIds = [...(parentFolder.childIds || []), tag.id];
+    const parentCategory = next.categoriesById[parentId];
+    if (parentCategory && !parentCategory.childIds?.includes(tag.id)) parentCategory.childIds = [...(parentCategory.childIds || []), tag.id];
+  });
+  return next;
+}
+
+function rootCategoryId(taxonomy: TagTaxonomy, nodeId: string): string | null {
+  if (taxonomy.categoriesById[nodeId]) return nodeId;
+  let cursor = taxonomy.foldersById?.[nodeId] || taxonomy.subcategoriesById[nodeId];
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    const parentId = cursor.parentId || cursor.categoryId;
+    if (!parentId) return null;
+    if (taxonomy.categoriesById[parentId]) return parentId;
+    cursor = taxonomy.foldersById?.[parentId] || taxonomy.subcategoriesById[parentId];
+  }
+  return null;
 }
 
 export function migrateLegacyFilterTagId(tagId: string): string {

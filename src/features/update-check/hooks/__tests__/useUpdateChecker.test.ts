@@ -5,8 +5,6 @@ import { useUpdateChecker } from "@/features/update-check/hooks/useUpdateChecker
 const serviceMocks = vi.hoisted(() => {
   return {
     checkForUpdates: vi.fn(),
-    isDismissed: vi.fn(),
-    dismissVersion: vi.fn(),
   };
 });
 
@@ -19,10 +17,6 @@ vi.mock("@/services/VersionCheckerService", () => {
     ) {}
 
     checkForUpdates = serviceMocks.checkForUpdates;
-
-    static isDismissed = serviceMocks.isDismissed;
-
-    static dismissVersion = serviceMocks.dismissVersion;
   }
 
   return {
@@ -34,9 +28,6 @@ describe("useUpdateChecker", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     serviceMocks.checkForUpdates.mockReset();
-    serviceMocks.isDismissed.mockReset();
-    serviceMocks.dismissVersion.mockReset();
-    serviceMocks.isDismissed.mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -93,7 +84,7 @@ describe("useUpdateChecker", () => {
     expect(result.current.updateInfo?.latestVersion).toBe("2.0.0");
 
     act(() => {
-      result.current.dismissUpdate(false);
+      result.current.dismissUpdate();
     });
 
     expect(result.current.updateInfo).toBeNull();
@@ -103,18 +94,18 @@ describe("useUpdateChecker", () => {
     });
 
     expect(result.current.updateInfo).toBeNull();
-    expect(serviceMocks.dismissVersion).not.toHaveBeenCalled();
   });
 
-  it("supports permanent dismiss via VersionCheckerService", async () => {
+  it("shows a previously hidden update despite the old saved preference", async () => {
+    localStorage.setItem("tagify:dismissedVersions", JSON.stringify(["3.1.0"]));
     serviceMocks.checkForUpdates.mockResolvedValue({
       hasUpdate: true,
-      latestVersion: "2.1.0",
+      latestVersion: "3.1.0",
     });
 
     const { result } = renderHook(() =>
       useUpdateChecker({
-        currentVersion: "1.0.0",
+        currentVersion: "3.0.0",
         repoOwner: "owner",
         repoName: "repo",
         checkOnMount: false,
@@ -125,34 +116,64 @@ describe("useUpdateChecker", () => {
       await result.current.checkForUpdates();
     });
 
+    expect(result.current.updateInfo?.latestVersion).toBe("3.1.0");
+  });
+
+  it("shows the update again after reopening the app", async () => {
+    serviceMocks.checkForUpdates.mockResolvedValue({
+      hasUpdate: true,
+      latestVersion: "3.1.0",
+    });
+    const renderChecker = () => renderHook(() =>
+      useUpdateChecker({
+        currentVersion: "3.0.0",
+        repoOwner: "owner",
+        repoName: "repo",
+        checkOnMount: false,
+      }),
+    );
+    const firstSession = renderChecker();
+    await act(async () => {
+      await firstSession.result.current.checkForUpdates();
+    });
     act(() => {
-      result.current.dismissUpdate(true);
+      firstSession.result.current.dismissUpdate();
     });
+    expect(firstSession.result.current.updateInfo).toBeNull();
+    firstSession.unmount();
 
-    expect(serviceMocks.dismissVersion).toHaveBeenCalledWith("2.1.0");
-    expect(result.current.updateInfo).toBeNull();
+    const nextSession = renderChecker();
+    await act(async () => {
+      await nextSession.result.current.checkForUpdates();
+    });
+    expect(nextSession.result.current.updateInfo?.latestVersion).toBe("3.1.0");
   });
 
-  it("does not surface updates that are already permanently dismissed", async () => {
-    serviceMocks.checkForUpdates.mockResolvedValue({
+  it("shows a newer release after closing an earlier one in the same session", async () => {
+    serviceMocks.checkForUpdates.mockResolvedValueOnce({
       hasUpdate: true,
-      latestVersion: "2.2.0",
+      latestVersion: "3.1.0",
+    }).mockResolvedValueOnce({
+      hasUpdate: true,
+      latestVersion: "3.2.0",
     });
-    serviceMocks.isDismissed.mockReturnValue(true);
-
     const { result } = renderHook(() =>
       useUpdateChecker({
-        currentVersion: "1.0.0",
+        currentVersion: "3.0.0",
         repoOwner: "owner",
         repoName: "repo",
         checkOnMount: false,
       }),
     );
-
     await act(async () => {
       await result.current.checkForUpdates();
     });
-
-    expect(result.current.updateInfo).toBeNull();
+    act(() => {
+      result.current.dismissUpdate();
+    });
+    await act(async () => {
+      await result.current.checkForUpdates();
+    });
+    expect(result.current.updateInfo?.latestVersion).toBe("3.2.0");
   });
 });

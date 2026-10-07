@@ -5,25 +5,72 @@ import {
   TagTaxonomy,
   TrackData,
 } from "@/types/tagData";
+import type {
+  InstalledTaxonomyRecordV1,
+  OwnerTaxonomyIdentityMappingV1,
+  PublicationPolicyV1,
+} from "@tagify/community-contracts";
+import type { CommunityBackupStateV2 } from "@/features/tag-data/utils/tagData.backup";
+import type { DurableAppStateDocumentV2 } from "@tagify/sync-contracts";
+import type { SmartPlaylistCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
+import { installSmartPlaylistRecipeBundle, type InstalledSmartPlaylistRecipes, type SmartPlaylistRecipeSelection } from "@/features/smart-playlists/utils/smartPlaylist.recipes";
+import type { SmartPlaylistRecipeBundle } from "@/features/smart-playlists/model/smartPlaylist.types";
+import { preserveSmartPlaylistMembership } from "@/features/smart-playlists/utils/smartPlaylist.membership";
+import { preserveLocalFileTags } from "@/services/sync/PreserveLocalFileTags";
+import { rebuildDeviceTaxonomy } from "@/services/sync/PreserveLocalTaxonomyMetadata";
+import { taxonomyFromShadowRecord, type TaxonomyShadowRecord } from "@/services/sync/SyncTaxonomy";
+import type { ReplicaManifest } from "@/services/sync/SyncLocalState";
 import { IStorageService, StorageMetadata } from "./IStorageService";
-import { normalizeTagDataStructure } from "@/features/tag-data/utils/tagData.schema";
+import {
+  normalizeSmartPlaylistCriteriaList,
+  normalizeTagDataStructure,
+} from "@/features/tag-data/utils/tagData.schema";
 import {
   buildCategoryTree,
   createEmptyTaxonomy,
   TAG_DATA_SCHEMA_VERSION,
 } from "@/utils/tagTaxonomy";
+import {
+  appendIntent,
+  ensureSyncStores,
+  entityFromUri,
+  getTagifyDatabaseName,
+  isActiveSyncDatabase,
+  makeEntityDeleteIntent,
+  makeEntityReplaceIntent,
+  makeSnapshotIntent,
+  makeTaxonomyIntent,
+  noteLocalFileChange,
+  SYNC_STORES,
+  TAGIFY_DATABASE_VERSION,
+  type LocalSyncIntent,
+  type SnapshotReplaceIntent,
+  type TaxonomyReplaceIntent,
+} from "@/services/sync/SyncLocalState";
 
-const DB_NAME = "tagify-db";
-const DB_VERSION = 5;
+const DB_VERSION = TAGIFY_DATABASE_VERSION;
 
 // Object store names
 const STORES = {
   TRACKS: "tracks",
   PLAYLISTS: "playlists",
   ARTISTS: "artists",
+  SMART_PLAYLISTS: "smartPlaylists",
   CATEGORIES: "categories",
   METADATA: "metadata",
+  COMMUNITY_POLICY: "community-policy",
+  COMMUNITY_INSTALLATIONS: "community-installations",
+  COMMUNITY_ROLLBACKS: "community-rollbacks",
+  OUTBOX: SYNC_STORES.OUTBOX,
 } as const;
+
+interface CommunityRollbackRecord {
+  id: string;
+  createdAt: string;
+  taxonomy: TagTaxonomy;
+  installationId: string;
+  previousInstallation: InstalledTaxonomyRecordV1 | null;
+}
 
 // Metadata keys
 const META_KEYS = {
@@ -74,7 +121,7 @@ export class IndexedDBStorageService implements IStorageService {
   private openDatabase(): Promise<boolean> {
     return new Promise((resolve) => {
       try {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        const request = indexedDB.open(getTagifyDatabaseName(), DB_VERSION);
 
         request.onerror = (event) => {
           console.error("IndexedDB: Failed to open database", event);
@@ -104,7 +151,7 @@ export class IndexedDBStorageService implements IStorageService {
         request.onupgradeneeded = (event) => {
           const db = (event.target as IDBOpenDBRequest).result;
           const transaction = (event.target as IDBOpenDBRequest).transaction;
-          this.createSchema(db, transaction ?? undefined);
+          IndexedDBStorageService.createSchema(db, transaction ?? undefined);
         };
       } catch (error) {
         console.error("IndexedDB: Exception during init", error);
@@ -113,7 +160,7 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
-  private ensureTrackIndexes(trackStore: IDBObjectStore): void {
+  private static ensureTrackIndexes(trackStore: IDBObjectStore): void {
     if (!trackStore.indexNames.contains("by-rating")) {
       trackStore.createIndex("by-rating", "rating", { unique: false });
     }
@@ -133,7 +180,8 @@ export class IndexedDBStorageService implements IStorageService {
     }
   }
 
-  private createSchema(db: IDBDatabase, transaction?: IDBTransaction): void {
+  static createSchema(db: IDBDatabase, transaction?: IDBTransaction): void {
+    ensureSyncStores(db);
     // Tracks store with indexes
     let trackStore: IDBObjectStore | null = null;
     if (!db.objectStoreNames.contains(STORES.TRACKS)) {
@@ -145,7 +193,7 @@ export class IndexedDBStorageService implements IStorageService {
     }
 
     if (trackStore) {
-      this.ensureTrackIndexes(trackStore);
+      IndexedDBStorageService.ensureTrackIndexes(trackStore);
     }
 
     let playlistStore: IDBObjectStore | null = null;
@@ -198,6 +246,10 @@ export class IndexedDBStorageService implements IStorageService {
       }
     }
 
+    if (!db.objectStoreNames.contains(STORES.SMART_PLAYLISTS)) {
+      db.createObjectStore(STORES.SMART_PLAYLISTS, { keyPath: "id" });
+    }
+
     // Categories store (single document containing all categories)
     if (!db.objectStoreNames.contains(STORES.CATEGORIES)) {
       db.createObjectStore(STORES.CATEGORIES, { keyPath: "id" });
@@ -207,9 +259,24 @@ export class IndexedDBStorageService implements IStorageService {
     if (!db.objectStoreNames.contains(STORES.METADATA)) {
       db.createObjectStore(STORES.METADATA, { keyPath: "key" });
     }
+
+    if (!db.objectStoreNames.contains(STORES.COMMUNITY_POLICY)) {
+      db.createObjectStore(STORES.COMMUNITY_POLICY, { keyPath: "id" });
+    }
+    if (!db.objectStoreNames.contains(STORES.COMMUNITY_INSTALLATIONS)) {
+      db.createObjectStore(STORES.COMMUNITY_INSTALLATIONS, {
+        keyPath: "installationId",
+      });
+    }
+    if (!db.objectStoreNames.contains(STORES.COMMUNITY_ROLLBACKS)) {
+      const rollbackStore = db.createObjectStore(STORES.COMMUNITY_ROLLBACKS, {
+        keyPath: "id",
+      });
+      rollbackStore.createIndex("by-created-at", "createdAt", { unique: false });
+    }
   }
 
-  private resetConnection(): void {
+  resetConnection(): void {
     if (!this.db) {
       return;
     }
@@ -223,8 +290,19 @@ export class IndexedDBStorageService implements IStorageService {
     }
   }
 
+  async switchAccountDatabase(): Promise<boolean> {
+    this.resetConnection();
+    this.initPromise = null;
+    return this.init();
+  }
+
   private isConnectionHealthy(): boolean {
     if (!this.db) {
+      return false;
+    }
+
+    if (!isActiveSyncDatabase(this.db)) {
+      this.resetConnection();
       return false;
     }
 
@@ -254,16 +332,18 @@ export class IndexedDBStorageService implements IStorageService {
 
     try {
       // Check if we have any data
-      const [trackCount, playlistCount, artistCount, taxonomy] = await Promise.all([
+      const [trackCount, playlistCount, artistCount, smartPlaylists, taxonomy] = await Promise.all([
         this.getTrackCount(),
         this.getPlaylistCount(),
         this.getArtistCount(),
+        this.getAllSmartPlaylists(),
         this.getTaxonomy(),
       ]);
       return (
         trackCount > 0 ||
         playlistCount > 0 ||
         artistCount > 0 ||
+        smartPlaylists.length > 0 ||
         taxonomy.categoryOrder.length > 0
       );
     } catch {
@@ -272,44 +352,52 @@ export class IndexedDBStorageService implements IStorageService {
   }
 
   async loadAll(): Promise<TagDataStructure | null> {
-    if (!(await this.ensureReady())) {
-      console.error("IndexedDB: Database not initialized");
-      return null;
-    }
-
     try {
-      const [taxonomyRecord, legacyCategories, tracks, playlists, artists] =
-        await Promise.all([
-          this.getStoredTaxonomyRecord(),
-          this.getStoredLegacyCategories(),
-          this.getAllTracks(),
-          this.getAllPlaylists(),
-          this.getAllArtists(),
-        ]);
-
-      return normalizeTagDataStructure(
-        taxonomyRecord
-          ? {
-              schemaVersion: TAG_DATA_SCHEMA_VERSION,
-              taxonomy: taxonomyRecord,
-              tracks,
-              playlists,
-              artists,
-            }
-          : {
-              categories: legacyCategories,
-              tracks,
-              playlists,
-              artists,
-            },
-      );
+      return await this.loadAllStrict();
     } catch (error) {
       console.error("IndexedDB: Failed to load all data", error);
       return null;
     }
   }
 
-  async saveAll(data: TagDataStructure): Promise<boolean> {
+  /** A single consistent read; failed reads must never resemble an empty library. */
+  async loadAllStrict(): Promise<TagDataStructure> {
+    if (!(await this.ensureReady())) {
+      throw new Error("Your saved Tagify details could not be read. Please try again.");
+    }
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([
+        STORES.CATEGORIES, STORES.TRACKS, STORES.PLAYLISTS, STORES.ARTISTS, STORES.SMART_PLAYLISTS,
+      ], "readonly");
+      const categories = transaction.objectStore(STORES.CATEGORIES).getAll();
+      const tracks = transaction.objectStore(STORES.TRACKS).getAll();
+      const playlists = transaction.objectStore(STORES.PLAYLISTS).getAll();
+      const artists = transaction.objectStore(STORES.ARTISTS).getAll();
+      const smartPlaylists = transaction.objectStore(STORES.SMART_PLAYLISTS).getAll();
+      transaction.onerror = transaction.onabort = () => reject(transaction.error ?? new Error("Your saved Tagify details could not be read. Please try again."));
+      transaction.oncomplete = () => {
+        try {
+          const byUri = (records: Array<{ uri: string }>) => Object.fromEntries(records.map(({ uri, ...value }) => [uri, value]));
+          const taxonomy = categories.result.find((record) => record.id === CATEGORY_DOCUMENT_KEYS.TAXONOMY)?.data;
+          const normalized = normalizeTagDataStructure({
+            ...(taxonomy ? { schemaVersion: TAG_DATA_SCHEMA_VERSION, taxonomy } : {
+              categories: categories.result.find((record) => record.id === CATEGORY_DOCUMENT_KEYS.LEGACY_CATEGORIES)?.data ?? [],
+            }),
+            tracks: byUri(tracks.result), playlists: byUri(playlists.result), artists: byUri(artists.result),
+            smartPlaylists: smartPlaylists.result,
+          });
+          normalized.smartPlaylists = normalizeSmartPlaylistCriteriaList(smartPlaylists.result);
+          if (normalized.smartPlaylists.length !== smartPlaylists.result.length) throw new Error("Your saved Smart Playlists need recovery before syncing.");
+          for (const record of tracks.result) {
+            if (record.dateModified !== undefined && normalized.tracks[record.uri]) normalized.tracks[record.uri].dateModified = record.dateModified;
+          }
+          resolve(normalized);
+        } catch (error) { reject(error); }
+      };
+    });
+  }
+
+  async saveAll(data: TagDataStructure, snapshotReason: SnapshotReplaceIntent["reason"] = "import"): Promise<boolean> {
     if (!(await this.ensureReady())) {
       console.error("IndexedDB: Database not initialized");
       return false;
@@ -321,8 +409,10 @@ export class IndexedDBStorageService implements IStorageService {
           STORES.TRACKS,
           STORES.PLAYLISTS,
           STORES.ARTISTS,
+          STORES.SMART_PLAYLISTS,
           STORES.CATEGORIES,
           STORES.METADATA,
+          STORES.OUTBOX,
         ],
         "readwrite"
       );
@@ -330,6 +420,7 @@ export class IndexedDBStorageService implements IStorageService {
       const trackStore = transaction.objectStore(STORES.TRACKS);
       const playlistStore = transaction.objectStore(STORES.PLAYLISTS);
       const artistStore = transaction.objectStore(STORES.ARTISTS);
+      const smartPlaylistStore = transaction.objectStore(STORES.SMART_PLAYLISTS);
       const categoryStore = transaction.objectStore(STORES.CATEGORIES);
       const metadataStore = transaction.objectStore(STORES.METADATA);
 
@@ -337,6 +428,7 @@ export class IndexedDBStorageService implements IStorageService {
       trackStore.clear();
       playlistStore.clear();
       artistStore.clear();
+      smartPlaylistStore.clear();
       categoryStore.clear();
 
       // Save taxonomy
@@ -355,9 +447,14 @@ export class IndexedDBStorageService implements IStorageService {
         artistStore.put({ uri, ...artistData });
       }
 
+      for (const playlist of data.smartPlaylists || []) {
+        smartPlaylistStore.put(playlist);
+      }
+
       // Update metadata
       metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
       metadataStore.put({ key: META_KEYS.VERSION, value: TAG_DATA_SCHEMA_VERSION });
+      appendIntent(transaction, makeSnapshotIntent(snapshotReason));
 
       return new Promise((resolve) => {
         transaction.oncomplete = () => resolve(true);
@@ -368,6 +465,112 @@ export class IndexedDBStorageService implements IStorageService {
       });
     } catch (error) {
       console.error("IndexedDB: Failed to save all data", error);
+      return false;
+    }
+  }
+
+  async replaceCloudReplica(
+    data: TagDataStructure,
+    manifest: ReplicaManifest,
+    syncStateRecords: unknown[],
+    appState: DurableAppStateDocumentV2[],
+    localAppState: DurableAppStateDocumentV2[] = [],
+    options: { keepQueuedEdits?: boolean } = {},
+  ): Promise<boolean> {
+    if (!(await this.ensureReady())) return false;
+    try {
+      const previous = await this.loadAllStrict();
+      const previousSmartPlaylists = previous.smartPlaylists ?? [];
+      const smartPlaylistDocument = [...localAppState, ...appState].find((document) => document.domain === "smart-playlists");
+      const durableSmartPlaylists = smartPlaylistDocument
+        ? preserveSmartPlaylistMembership(normalizeSmartPlaylistCriteriaList(portableSmartPlaylistDefinitions(smartPlaylistDocument.value)), previousSmartPlaylists)
+        : previousSmartPlaylists;
+      if (smartPlaylistDocument && (
+        !Array.isArray(smartPlaylistDocument.value) ||
+        durableSmartPlaylists.length !== smartPlaylistDocument.value.length
+      )) {
+        throw new Error("The Community smart playlist backup is incomplete");
+      }
+      // Cloud annotations cannot represent local files or other non-Spotify
+      // identities. A cloud refresh must not delete those device-only records.
+      const localOnly = <T>(records: Record<string, T>, kind: "track" | "playlist" | "artist") =>
+        Object.fromEntries(Object.entries(records).filter(([uri]) => !entityFromUri(uri, kind))) as Record<string, T>;
+      const localOnlyTracks = localOnly(previous.tracks, "track");
+      const localOnlyPlaylists = localOnly(previous.playlists, "playlist");
+      const localOnlyArtists = localOnly(previous.artists, "artist");
+      const taxonomy = rebuildDeviceTaxonomy(
+        preserveLocalFileTags(data.taxonomy, previous.taxonomy, localOnlyTracks),
+        previous.taxonomy,
+      );
+      const stores = [
+        STORES.TRACKS, STORES.PLAYLISTS, STORES.ARTISTS, STORES.SMART_PLAYLISTS, STORES.CATEGORIES, STORES.METADATA,
+        SYNC_STORES.OUTBOX, SYNC_STORES.STATE, SYNC_STORES.CONFLICTS, SYNC_STORES.TOMBSTONES,
+        SYNC_STORES.APP_STATE, SYNC_STORES.RECOVERY_CHECKPOINT,
+      ];
+      const transaction = this.db!.transaction(stores, "readwrite");
+      const writeReplica = (pendingIntents: LocalSyncIntent[]) => {
+        stores.forEach((store) => transaction.objectStore(store).clear());
+        transaction.objectStore(SYNC_STORES.RECOVERY_CHECKPOINT).put({
+          key: "pre-restore", createdAt: new Date().toISOString(), data: previous,
+        });
+        transaction.objectStore(STORES.CATEGORIES).put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: taxonomy });
+        // Cloud annotations carry tags, ratings, energy, BPM, and key only. Keep
+        // each existing record's timestamps and cached details.
+        const putPreserved = <T extends { dateModified?: number; dateCreated?: number }>(store: string, incoming: Record<string, T>, existing: Record<string, T>) => {
+          Object.entries(incoming).forEach(([uri, value]) => {
+            const previousDateModified = existing[uri]?.dateModified;
+            const previousDateCreated = existing[uri]?.dateCreated;
+            transaction.objectStore(store).put({
+              uri,
+              ...existing[uri],
+              ...value,
+              ...(previousDateCreated === undefined ? {} : { dateCreated: previousDateCreated }),
+              ...(previousDateModified === undefined ? {} : { dateModified: previousDateModified }),
+            });
+          });
+        };
+        putPreserved(STORES.TRACKS, { ...localOnlyTracks, ...data.tracks }, previous.tracks);
+        putPreserved(STORES.PLAYLISTS, { ...localOnlyPlaylists, ...data.playlists }, previous.playlists);
+        putPreserved(STORES.ARTISTS, { ...localOnlyArtists, ...data.artists }, previous.artists);
+        durableSmartPlaylists.forEach((value) => transaction.objectStore(STORES.SMART_PLAYLISTS).put(value));
+        transaction.objectStore(STORES.METADATA).put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        transaction.objectStore(STORES.METADATA).put({ key: META_KEYS.VERSION, value: TAG_DATA_SCHEMA_VERSION });
+        // Unsent edits from this device stay on the device and remain queued, so
+        // they back up on top of the refreshed cloud copy instead of being lost.
+        for (const intent of pendingIntents) {
+          if (intent.type === "taxonomy.replace") {
+            transaction.objectStore(STORES.CATEGORIES).put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: previous.taxonomy });
+          } else if (intent.type === "entity.replace" || intent.type === "entity.delete") {
+            const uri = `spotify:${intent.entity.kind}:${intent.entity.providerId}`;
+            const [store, records] = intent.entity.kind === "track" ? [STORES.TRACKS, previous.tracks] as const
+              : intent.entity.kind === "artist" ? [STORES.ARTISTS, previous.artists] as const
+                : [STORES.PLAYLISTS, previous.playlists] as const;
+            const record = (records as Record<string, unknown>)[uri];
+            if (intent.type === "entity.delete" || !record) transaction.objectStore(store).delete(uri);
+            else transaction.objectStore(store).put({ uri, ...(record as object) });
+          }
+          transaction.objectStore(SYNC_STORES.OUTBOX).put(intent);
+        }
+        syncStateRecords.forEach((record) => transaction.objectStore(SYNC_STORES.STATE).put(record));
+        transaction.objectStore(SYNC_STORES.STATE).put(manifest);
+        appState.forEach((document) => transaction.objectStore(SYNC_STORES.APP_STATE).put(document));
+      };
+      if (options.keepQueuedEdits) {
+        // Read the queue inside this transaction so an edit saved moments ago
+        // cannot be cleared without being kept.
+        const queued = transaction.objectStore(SYNC_STORES.OUTBOX).index("by-created-at").getAll();
+        queued.onsuccess = () => writeReplica(queued.result as LocalSyncIntent[]);
+        queued.onerror = () => transaction.abort();
+      } else {
+        writeReplica([]);
+      }
+      return new Promise((resolve) => {
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = () => resolve(false);
+        transaction.onabort = () => resolve(false);
+      });
+    } catch (error) {
+      console.error("IndexedDB: Atomic cloud restore failed", error);
       return false;
     }
   }
@@ -437,27 +640,208 @@ export class IndexedDBStorageService implements IStorageService {
     }).taxonomy;
   }
 
-  async saveTaxonomy(taxonomy: TagTaxonomy): Promise<boolean> {
+  async saveTaxonomy(taxonomy: TagTaxonomy, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!(await this.ensureReady())) return false;
 
     return new Promise((resolve) => {
       try {
+        const capture = options?.captureSync !== false && Boolean(makeTaxonomyIntent(taxonomy));
         const transaction = this.db!.transaction(
-          [STORES.CATEGORIES, STORES.METADATA],
+          capture ? [STORES.CATEGORIES, STORES.METADATA, STORES.OUTBOX, SYNC_STORES.STATE] : [STORES.CATEGORIES, STORES.METADATA, STORES.OUTBOX],
           "readwrite"
         );
         const categoryStore = transaction.objectStore(STORES.CATEGORIES);
         const metadataStore = transaction.objectStore(STORES.METADATA);
+        const write = (intent: TaxonomyReplaceIntent | null) => {
+          categoryStore.clear();
+          categoryStore.put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: taxonomy });
+          metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+          metadataStore.put({ key: META_KEYS.VERSION, value: TAG_DATA_SCHEMA_VERSION });
+          appendIntent(transaction, intent);
+        };
 
-        categoryStore.clear();
-        categoryStore.put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: taxonomy });
-        metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
-        metadataStore.put({ key: META_KEYS.VERSION, value: TAG_DATA_SCHEMA_VERSION });
+        if (!capture) {
+          write(null);
+        } else {
+          // Record the cloud copy this device last knew, so sync sends only
+          // this device's differences and never reverts changes another device
+          // makes meanwhile. A still-unsent edit keeps its earlier starting point.
+          const shadowRequest = transaction.objectStore(SYNC_STORES.STATE).get("taxonomy-shadow");
+          const outboxRequest = transaction.objectStore(STORES.OUTBOX).getAll();
+          outboxRequest.onsuccess = () => {
+            const pending = (outboxRequest.result as LocalSyncIntent[])
+              .filter((intent): intent is TaxonomyReplaceIntent => intent.type === "taxonomy.replace")
+              .sort((left, right) => left.createdAt - right.createdAt)[0];
+            const shadow = shadowRequest.result as TaxonomyShadowRecord | undefined;
+            const base = pending ? pending.base : shadow ? taxonomyFromShadowRecord(shadow) : undefined;
+            write(makeTaxonomyIntent(taxonomy, undefined, base));
+          };
+          outboxRequest.onerror = () => transaction.abort();
+        }
 
         transaction.oncomplete = () => resolve(true);
         transaction.onerror = () => resolve(false);
+        transaction.onabort = () => resolve(false);
       } catch (error) {
         console.error("IndexedDB: Failed to save taxonomy", error);
+        resolve(false);
+      }
+    });
+  }
+
+  async getCommunityPublicationPolicy(): Promise<PublicationPolicyV1 | null> {
+    return this.getCommunityRecord<PublicationPolicyV1>(STORES.COMMUNITY_POLICY, "publication-policy");
+  }
+
+  async saveCommunityPublicationPolicy(policy: PublicationPolicyV1): Promise<boolean> {
+    if (!(await this.ensureReady())) return false;
+    return this.putCommunityRecord(STORES.COMMUNITY_POLICY, { id: "publication-policy", ...policy });
+  }
+
+  async getCommunityOwnerIdentityMapping(): Promise<OwnerTaxonomyIdentityMappingV1 | null> {
+    return this.getCommunityRecord<OwnerTaxonomyIdentityMappingV1>(STORES.COMMUNITY_POLICY, "owner-identity-mapping");
+  }
+
+  async saveCommunityOwnerIdentityMapping(mapping: OwnerTaxonomyIdentityMappingV1): Promise<boolean> {
+    if (!(await this.ensureReady())) return false;
+    return this.putCommunityRecord(STORES.COMMUNITY_POLICY, { id: "owner-identity-mapping", ...mapping });
+  }
+
+  async getCommunityInstallations(): Promise<InstalledTaxonomyRecordV1[]> {
+    if (!(await this.ensureReady())) return [];
+    return new Promise((resolve) => {
+      try {
+        const request = this.db!.transaction(STORES.COMMUNITY_INSTALLATIONS, "readonly").objectStore(STORES.COMMUNITY_INSTALLATIONS).getAll();
+        request.onsuccess = () => resolve(request.result as InstalledTaxonomyRecordV1[]);
+        request.onerror = () => resolve([]);
+      } catch {
+        resolve([]);
+      }
+    });
+  }
+
+  async restoreCommunityBackupState(state: CommunityBackupStateV2): Promise<boolean> {
+    if (!(await this.ensureReady())) return false;
+    return new Promise((resolve) => {
+      try {
+        const transaction = this.db!.transaction(
+          [STORES.COMMUNITY_POLICY, STORES.COMMUNITY_INSTALLATIONS, STORES.COMMUNITY_ROLLBACKS],
+          "readwrite",
+        );
+        const policyStore = transaction.objectStore(STORES.COMMUNITY_POLICY);
+        const installations = transaction.objectStore(STORES.COMMUNITY_INSTALLATIONS);
+        policyStore.clear();
+        installations.clear();
+        transaction.objectStore(STORES.COMMUNITY_ROLLBACKS).clear();
+        if (state.publicationPolicy) policyStore.put({ id: "publication-policy", ...state.publicationPolicy });
+        if (state.ownerIdentityMapping) policyStore.put({ id: "owner-identity-mapping", ...state.ownerIdentityMapping });
+        state.installations.forEach((installation) => installations.put(installation));
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = () => resolve(false);
+      } catch (error) {
+        console.error("IndexedDB: Failed to restore Community backup state", error);
+        resolve(false);
+      }
+    });
+  }
+
+  async applyCommunityTaxonomy(
+    taxonomy: TagTaxonomy,
+    installation: InstalledTaxonomyRecordV1,
+    rollbackTaxonomy: TagTaxonomy,
+  ): Promise<string | null> {
+    if (!(await this.ensureReady())) return null;
+    const rollbackId = `rollback_${installation.installationId}_${Date.now()}`;
+    return new Promise((resolve) => {
+      try {
+        const transaction = this.db!.transaction(
+          [STORES.CATEGORIES, STORES.COMMUNITY_INSTALLATIONS, STORES.COMMUNITY_ROLLBACKS, STORES.METADATA],
+          "readwrite",
+        );
+        const installations = transaction.objectStore(STORES.COMMUNITY_INSTALLATIONS);
+        const previousRequest = installations.get(installation.installationId);
+        previousRequest.onsuccess = () => {
+          const rollback: CommunityRollbackRecord = {
+            id: rollbackId,
+            createdAt: new Date().toISOString(),
+            taxonomy: rollbackTaxonomy,
+            installationId: installation.installationId,
+            previousInstallation: (previousRequest.result as InstalledTaxonomyRecordV1 | undefined) ?? null,
+          };
+          transaction.objectStore(STORES.COMMUNITY_ROLLBACKS).put(rollback);
+          transaction.objectStore(STORES.CATEGORIES).put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: taxonomy });
+          installations.put(installation);
+          transaction.objectStore(STORES.METADATA).put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        };
+        previousRequest.onerror = () => transaction.abort();
+        transaction.oncomplete = () => resolve(rollbackId);
+        transaction.onabort = () => resolve(null);
+        transaction.onerror = () => resolve(null);
+      } catch (error) {
+        console.error("IndexedDB: Failed to apply Community taxonomy", error);
+        resolve(null);
+      }
+    });
+  }
+
+  async rollbackCommunityTaxonomy(rollbackId: string): Promise<boolean> {
+    if (!(await this.ensureReady())) return false;
+    return new Promise((resolve) => {
+      try {
+        const transaction = this.db!.transaction(
+          [STORES.CATEGORIES, STORES.COMMUNITY_INSTALLATIONS, STORES.COMMUNITY_ROLLBACKS, STORES.METADATA],
+          "readwrite",
+        );
+        const request = transaction.objectStore(STORES.COMMUNITY_ROLLBACKS).get(rollbackId);
+        request.onsuccess = () => {
+          const rollback = request.result as CommunityRollbackRecord | undefined;
+          if (!rollback) {
+            transaction.abort();
+            return;
+          }
+          transaction.objectStore(STORES.CATEGORIES).put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: rollback.taxonomy });
+          const installations = transaction.objectStore(STORES.COMMUNITY_INSTALLATIONS);
+          if (rollback.previousInstallation) installations.put(rollback.previousInstallation);
+          else installations.delete(rollback.installationId);
+          transaction.objectStore(STORES.COMMUNITY_ROLLBACKS).delete(rollbackId);
+          transaction.objectStore(STORES.METADATA).put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        };
+        request.onerror = () => transaction.abort();
+        transaction.oncomplete = () => resolve(true);
+        transaction.onabort = () => resolve(false);
+        transaction.onerror = () => resolve(false);
+      } catch (error) {
+        console.error("IndexedDB: Failed to roll back Community taxonomy", error);
+        resolve(false);
+      }
+    });
+  }
+
+  private async getCommunityRecord<T>(storeName: string, id: string): Promise<T | null> {
+    if (!(await this.ensureReady())) return null;
+    return new Promise((resolve) => {
+      try {
+        const request = this.db!.transaction(storeName, "readonly").objectStore(storeName).get(id);
+        request.onsuccess = () => {
+          if (!request.result) return resolve(null);
+          const { id: _id, ...record } = request.result;
+          resolve(record as T);
+        };
+        request.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  private async putCommunityRecord(storeName: string, value: unknown): Promise<boolean> {
+    return new Promise((resolve) => {
+      try {
+        const transaction = this.db!.transaction(storeName, "readwrite");
+        transaction.objectStore(storeName).put(value);
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = () => resolve(false);
+      } catch {
         resolve(false);
       }
     });
@@ -490,13 +874,13 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
-  async saveTrack(uri: string, data: TrackData): Promise<boolean> {
+  async saveTrack(uri: string, data: TrackData, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!(await this.ensureReady())) return false;
 
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.TRACKS, STORES.METADATA],
+          [STORES.TRACKS, STORES.METADATA, STORES.OUTBOX],
           "readwrite"
         );
         const trackStore = transaction.objectStore(STORES.TRACKS);
@@ -504,6 +888,8 @@ export class IndexedDBStorageService implements IStorageService {
 
         trackStore.put({ uri, ...data });
         metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        appendIntent(transaction, options?.captureSync === false ? null : makeEntityReplaceIntent(uri, "track", data));
+        noteLocalFileChange(transaction, uri, options?.captureSync !== false);
 
         transaction.oncomplete = () => resolve(true);
         transaction.onerror = () => resolve(false);
@@ -514,13 +900,13 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
-  async deleteTrack(uri: string): Promise<boolean> {
+  async deleteTrack(uri: string, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!(await this.ensureReady())) return false;
 
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.TRACKS, STORES.METADATA],
+          [STORES.TRACKS, STORES.METADATA, STORES.OUTBOX],
           "readwrite"
         );
         const trackStore = transaction.objectStore(STORES.TRACKS);
@@ -528,6 +914,8 @@ export class IndexedDBStorageService implements IStorageService {
 
         trackStore.delete(uri);
         metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        appendIntent(transaction, options?.captureSync === false ? null : makeEntityDeleteIntent(uri, "track"));
+        noteLocalFileChange(transaction, uri, options?.captureSync !== false);
 
         transaction.oncomplete = () => resolve(true);
         transaction.onerror = () => resolve(false);
@@ -584,19 +972,41 @@ export class IndexedDBStorageService implements IStorageService {
   }
 
   async saveTracks(tracks: Map<string, TrackData>): Promise<boolean> {
+    return this.saveTrackChanges(
+      new Map<string, TrackData | null>(tracks)
+    );
+  }
+
+  async saveTrackChanges(
+    changes: Map<string, TrackData | null>
+  ): Promise<boolean> {
     if (!(await this.ensureReady())) return false;
 
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.TRACKS, STORES.METADATA],
+          [STORES.TRACKS, STORES.METADATA, STORES.OUTBOX],
           "readwrite"
         );
         const trackStore = transaction.objectStore(STORES.TRACKS);
         const metadataStore = transaction.objectStore(STORES.METADATA);
 
-        for (const [uri, data] of tracks) {
-          trackStore.put({ uri, ...data });
+        const batchId = crypto.randomUUID();
+        for (const [uri, data] of changes) {
+          noteLocalFileChange(transaction, uri);
+          if (data === null) {
+            trackStore.delete(uri);
+            appendIntent(
+              transaction,
+              makeEntityDeleteIntent(uri, "track", batchId)
+            );
+          } else {
+            trackStore.put({ uri, ...data });
+            appendIntent(
+              transaction,
+              makeEntityReplaceIntent(uri, "track", data, batchId)
+            );
+          }
         }
 
         metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
@@ -604,7 +1014,7 @@ export class IndexedDBStorageService implements IStorageService {
         transaction.oncomplete = () => resolve(true);
         transaction.onerror = () => resolve(false);
       } catch (error) {
-        console.error("IndexedDB: Failed to save tracks", error);
+        console.error("IndexedDB: Failed to save track changes", error);
         resolve(false);
       }
     });
@@ -636,13 +1046,13 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
-  async savePlaylist(uri: string, data: PlaylistData): Promise<boolean> {
+  async savePlaylist(uri: string, data: PlaylistData, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!(await this.ensureReady())) return false;
 
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.PLAYLISTS, STORES.METADATA],
+          [STORES.PLAYLISTS, STORES.METADATA, STORES.OUTBOX],
           "readwrite"
         );
         const playlistStore = transaction.objectStore(STORES.PLAYLISTS);
@@ -650,6 +1060,7 @@ export class IndexedDBStorageService implements IStorageService {
 
         playlistStore.put({ uri, ...data });
         metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        appendIntent(transaction, options?.captureSync === false ? null : makeEntityReplaceIntent(uri, "playlist", data));
 
         transaction.oncomplete = () => resolve(true);
         transaction.onerror = () => resolve(false);
@@ -660,13 +1071,13 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
-  async deletePlaylist(uri: string): Promise<boolean> {
+  async deletePlaylist(uri: string, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!(await this.ensureReady())) return false;
 
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.PLAYLISTS, STORES.METADATA],
+          [STORES.PLAYLISTS, STORES.METADATA, STORES.OUTBOX],
           "readwrite"
         );
         const playlistStore = transaction.objectStore(STORES.PLAYLISTS);
@@ -674,6 +1085,7 @@ export class IndexedDBStorageService implements IStorageService {
 
         playlistStore.delete(uri);
         metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        appendIntent(transaction, options?.captureSync === false ? null : makeEntityDeleteIntent(uri, "playlist"));
 
         transaction.oncomplete = () => resolve(true);
         transaction.onerror = () => resolve(false);
@@ -690,14 +1102,16 @@ export class IndexedDBStorageService implements IStorageService {
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.PLAYLISTS, STORES.METADATA],
+          [STORES.PLAYLISTS, STORES.METADATA, STORES.OUTBOX],
           "readwrite"
         );
         const playlistStore = transaction.objectStore(STORES.PLAYLISTS);
         const metadataStore = transaction.objectStore(STORES.METADATA);
 
+        const batchId = crypto.randomUUID();
         for (const [uri, data] of playlists) {
           playlistStore.put({ uri, ...data });
+          appendIntent(transaction, makeEntityReplaceIntent(uri, "playlist", data, batchId));
         }
 
         metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
@@ -737,13 +1151,13 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
-  async saveArtist(uri: string, data: ArtistData): Promise<boolean> {
+  async saveArtist(uri: string, data: ArtistData, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!(await this.ensureReady())) return false;
 
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.ARTISTS, STORES.METADATA],
+          [STORES.ARTISTS, STORES.METADATA, STORES.OUTBOX],
           "readwrite"
         );
         const artistStore = transaction.objectStore(STORES.ARTISTS);
@@ -751,6 +1165,7 @@ export class IndexedDBStorageService implements IStorageService {
 
         artistStore.put({ uri, ...data });
         metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        appendIntent(transaction, options?.captureSync === false ? null : makeEntityReplaceIntent(uri, "artist", data));
 
         transaction.oncomplete = () => resolve(true);
         transaction.onerror = () => resolve(false);
@@ -761,13 +1176,13 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
-  async deleteArtist(uri: string): Promise<boolean> {
+  async deleteArtist(uri: string, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!(await this.ensureReady())) return false;
 
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.ARTISTS, STORES.METADATA],
+          [STORES.ARTISTS, STORES.METADATA, STORES.OUTBOX],
           "readwrite"
         );
         const artistStore = transaction.objectStore(STORES.ARTISTS);
@@ -775,6 +1190,7 @@ export class IndexedDBStorageService implements IStorageService {
 
         artistStore.delete(uri);
         metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        appendIntent(transaction, options?.captureSync === false ? null : makeEntityDeleteIntent(uri, "artist"));
 
         transaction.oncomplete = () => resolve(true);
         transaction.onerror = () => resolve(false);
@@ -791,14 +1207,16 @@ export class IndexedDBStorageService implements IStorageService {
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.ARTISTS, STORES.METADATA],
+          [STORES.ARTISTS, STORES.METADATA, STORES.OUTBOX],
           "readwrite"
         );
         const artistStore = transaction.objectStore(STORES.ARTISTS);
         const metadataStore = transaction.objectStore(STORES.METADATA);
 
+        const batchId = crypto.randomUUID();
         for (const [uri, data] of artists) {
           artistStore.put({ uri, ...data });
+          appendIntent(transaction, makeEntityReplaceIntent(uri, "artist", data, batchId));
         }
 
         metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
@@ -807,6 +1225,106 @@ export class IndexedDBStorageService implements IStorageService {
         transaction.onerror = () => resolve(false);
       } catch (error) {
         console.error("IndexedDB: Failed to save artists", error);
+        resolve(false);
+      }
+    });
+  }
+
+  async getAllSmartPlaylists(): Promise<SmartPlaylistCriteria[]> {
+    if (!(await this.ensureReady())) {
+      throw new Error("IndexedDB: Smart Playlists could not be opened");
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const request = this.db!
+          .transaction(STORES.SMART_PLAYLISTS, "readonly")
+          .objectStore(STORES.SMART_PLAYLISTS)
+          .getAll();
+        request.onsuccess = () => {
+          const normalized = normalizeSmartPlaylistCriteriaList(request.result);
+          if (normalized.length !== request.result.length) {
+            reject(new Error("IndexedDB: Saved Smart Playlist rules need recovery"));
+            return;
+          }
+          resolve(normalized);
+        };
+        request.onerror = () => reject(request.error ?? new Error("IndexedDB: Failed to get Smart Playlists"));
+      } catch (error) {
+        console.error("IndexedDB: Failed to get smart playlists", error);
+        reject(error);
+      }
+    });
+  }
+
+  /** Append shared setups and their new tags together; never rewrite song data or existing rules. */
+  async installSharedSmartPlaylistSetups(bundle: SmartPlaylistRecipeBundle, selections: SmartPlaylistRecipeSelection[], accountDatabase = getTagifyDatabaseName()): Promise<InstalledSmartPlaylistRecipes> {
+    if (!(await this.ensureReady())) throw new Error("Your library is still loading. Please try again.");
+    const checkAccount = () => { if (getTagifyDatabaseName() !== accountDatabase || this.db?.name !== accountDatabase) throw new Error("Your account changed. Open the share again for your current account."); };
+    checkAccount();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction(
+        [STORES.CATEGORIES, STORES.SMART_PLAYLISTS, STORES.METADATA, STORES.OUTBOX, SYNC_STORES.STATE], "readwrite",
+      );
+      const categories = transaction.objectStore(STORES.CATEGORIES).getAll();
+      const playlists = transaction.objectStore(STORES.SMART_PLAYLISTS).getAll();
+      const shadow = transaction.objectStore(SYNC_STORES.STATE).get("taxonomy-shadow");
+      const outbox = transaction.objectStore(STORES.OUTBOX).getAll();
+      let installed: InstalledSmartPlaylistRecipes;
+      let failure: unknown;
+      outbox.onsuccess = () => {
+        try {
+          checkAccount();
+          const currentTaxonomy = categories.result.find((record) => record.id === CATEGORY_DOCUMENT_KEYS.TAXONOMY)?.data;
+          const taxonomy = currentTaxonomy ?? normalizeTagDataStructure({ categories: categories.result.find((record) => record.id === CATEGORY_DOCUMENT_KEYS.LEGACY_CATEGORIES)?.data ?? [], tracks: {} }).taxonomy;
+          const current = normalizeSmartPlaylistCriteriaList(playlists.result);
+          if (current.length !== playlists.result.length) throw new Error("Your saved smart playlists could not be read. Nothing was added. Please try again.");
+          installed = installSmartPlaylistRecipeBundle(bundle, taxonomy, current, Date.now(), selections);
+          if (!installed.importedCount) return;
+          const existingIds = new Set(current.map((playlist) => playlist.id));
+          installed.playlists.filter((playlist) => !existingIds.has(playlist.id)).forEach((playlist) => transaction.objectStore(STORES.SMART_PLAYLISTS).add(playlist));
+          if (installed.createdTagCount > 0) {
+            transaction.objectStore(STORES.CATEGORIES).put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: installed.taxonomy });
+            const pending = (outbox.result as LocalSyncIntent[]).filter((intent): intent is TaxonomyReplaceIntent => intent.type === "taxonomy.replace").sort((a, b) => a.createdAt - b.createdAt)[0];
+            const base = pending ? pending.base : shadow.result ? taxonomyFromShadowRecord(shadow.result as TaxonomyShadowRecord) : undefined;
+            appendIntent(transaction, makeTaxonomyIntent(installed.taxonomy, undefined, base));
+          }
+          transaction.objectStore(STORES.METADATA).put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        } catch (error) { failure = error; transaction.abort(); }
+      };
+      transaction.oncomplete = () => resolve(installed!);
+      transaction.onerror = transaction.onabort = () => reject(failure ?? new Error("Tagify couldn’t save these setups. Nothing was added. Please try again."));
+    });
+  }
+
+  async saveSmartPlaylists(
+    playlists: SmartPlaylistCriteria[],
+  ): Promise<boolean> {
+    if (!(await this.ensureReady())) return false;
+    const normalized = normalizeSmartPlaylistCriteriaList(playlists);
+    if (normalized.length !== playlists.length ||
+        new Set(normalized.map((playlist) => playlist.id)).size !== normalized.length) {
+      console.error("IndexedDB: Refusing to replace Smart Playlists with invalid or duplicate rules");
+      return false;
+    }
+
+    return new Promise((resolve) => {
+      try {
+        const transaction = this.db!.transaction(
+          [STORES.SMART_PLAYLISTS, STORES.METADATA],
+          "readwrite",
+        );
+        const store = transaction.objectStore(STORES.SMART_PLAYLISTS);
+        store.clear();
+        normalized.forEach((playlist) => store.put(playlist));
+        transaction
+          .objectStore(STORES.METADATA)
+          .put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = () => resolve(false);
+        transaction.onabort = () => resolve(false);
+      } catch (error) {
+        console.error("IndexedDB: Failed to save smart playlists", error);
         resolve(false);
       }
     });
@@ -887,86 +1405,13 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
-  private async getAllTracks(): Promise<{ [uri: string]: TrackData }> {
-    if (!(await this.ensureReady())) return {};
-
-    return new Promise((resolve) => {
-      try {
-        const transaction = this.db!.transaction(STORES.TRACKS, "readonly");
-        const store = transaction.objectStore(STORES.TRACKS);
-        const request = store.getAll();
-
-        request.onsuccess = () => {
-          const tracks: { [uri: string]: TrackData } = {};
-          for (const record of request.result) {
-            const { uri, ...trackData } = record;
-            tracks[uri] = trackData as TrackData;
-          }
-          resolve(tracks);
-        };
-
-        request.onerror = () => resolve({});
-      } catch (error) {
-        console.error("IndexedDB: Failed to get all tracks", error);
-        resolve({});
-      }
-    });
-  }
-
-  private async getAllPlaylists(): Promise<{ [uri: string]: PlaylistData }> {
-    if (!(await this.ensureReady())) return {};
-
-    return new Promise((resolve) => {
-      try {
-        const transaction = this.db!.transaction(STORES.PLAYLISTS, "readonly");
-        const store = transaction.objectStore(STORES.PLAYLISTS);
-        const request = store.getAll();
-
-        request.onsuccess = () => {
-          const playlists: { [uri: string]: PlaylistData } = {};
-          for (const record of request.result) {
-            const { uri, ...playlistData } = record;
-            playlists[uri] = playlistData as PlaylistData;
-          }
-          resolve(playlists);
-        };
-
-        request.onerror = () => resolve({});
-      } catch (error) {
-        console.error("IndexedDB: Failed to get all playlists", error);
-        resolve({});
-      }
-    });
-  }
-
-  private async getAllArtists(): Promise<{ [uri: string]: ArtistData }> {
-    if (!(await this.ensureReady())) return {};
-
-    return new Promise((resolve) => {
-      try {
-        const transaction = this.db!.transaction(STORES.ARTISTS, "readonly");
-        const store = transaction.objectStore(STORES.ARTISTS);
-        const request = store.getAll();
-
-        request.onsuccess = () => {
-          const artists: { [uri: string]: ArtistData } = {};
-          for (const record of request.result) {
-            const { uri, ...artistData } = record;
-            artists[uri] = artistData as ArtistData;
-          }
-          resolve(artists);
-        };
-
-        request.onerror = () => resolve({});
-      } catch (error) {
-        console.error("IndexedDB: Failed to get all artists", error);
-        resolve({});
-      }
-    });
-  }
-
   async clearAll(): Promise<boolean> {
     if (!(await this.ensureReady())) return false;
+
+    if (makeSnapshotIntent("reset")) {
+      console.error("Tagify: A linked cloud library must be reset through the staged online reset flow");
+      return false;
+    }
 
     return new Promise((resolve) => {
       try {
@@ -975,6 +1420,7 @@ export class IndexedDBStorageService implements IStorageService {
             STORES.TRACKS,
             STORES.PLAYLISTS,
             STORES.ARTISTS,
+            STORES.SMART_PLAYLISTS,
             STORES.CATEGORIES,
             STORES.METADATA,
           ],
@@ -984,6 +1430,7 @@ export class IndexedDBStorageService implements IStorageService {
         transaction.objectStore(STORES.TRACKS).clear();
         transaction.objectStore(STORES.PLAYLISTS).clear();
         transaction.objectStore(STORES.ARTISTS).clear();
+        transaction.objectStore(STORES.SMART_PLAYLISTS).clear();
         transaction.objectStore(STORES.CATEGORIES).clear();
         transaction.objectStore(STORES.METADATA).clear();
 
@@ -997,10 +1444,11 @@ export class IndexedDBStorageService implements IStorageService {
   }
 
   async getMetadata(): Promise<StorageMetadata> {
-    const [trackCount, playlistCount, artistCount] = await Promise.all([
+    const [trackCount, playlistCount, artistCount, smartPlaylists] = await Promise.all([
       this.getTrackCount(),
       this.getPlaylistCount(),
       this.getArtistCount(),
+      this.getAllSmartPlaylists(),
     ]);
     const taxonomy = await this.getTaxonomy();
     const lastModified = await this.getLastModified();
@@ -1010,6 +1458,7 @@ export class IndexedDBStorageService implements IStorageService {
       trackCount,
       playlistCount,
       artistCount,
+      smartPlaylistCount: smartPlaylists.length,
       categoryCount: buildCategoryTree(taxonomy).length,
       lastModified,
       estimatedSizeBytes: null, // IndexedDB doesn't easily expose this
@@ -1042,6 +1491,19 @@ export class IndexedDBStorageService implements IStorageService {
   close(): void {
     this.resetConnection();
   }
+}
+
+function portableSmartPlaylistDefinitions(value: unknown): unknown[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) return [];
+    const {
+      lastSyncAt: _lastSyncAt,
+      smartPlaylistTrackUris: _smartPlaylistTrackUris,
+      ...definition
+    } = candidate as Record<string, unknown>;
+    return [definition];
+  });
 }
 
 // Export singleton instance

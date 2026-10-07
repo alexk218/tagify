@@ -1,22 +1,50 @@
 /* global Spicetify */
 import { keyboardShortcutService } from "../services/KeyboardShortcutService";
+import { storageService } from "../services/storage/StorageService";
+import { getTagifyDatabaseName } from "../services/sync/SyncLocalState";
+import { restoreDesktopSyncConfiguration } from "../services/sync/SyncInstallRecovery";
+import { syncRuntime } from "../services/sync/SyncRuntime";
 import { smartPlaylistSyncService } from "../services/SmartPlaylistSyncService";
+import { loadSmartPlaylistsFromStorage } from "../features/smart-playlists/utils/smartPlaylist.storage";
 import { welcomeModal } from "./WelcomeModal";
+import { createBulkTagHistoryLocation } from "./contextMenu.navigation";
 import {
   addRecentTag,
   createUpdatedTrack,
   getRatingUpdateForSelection,
   getTagIndicatorStatus,
+  isTrackAnnotationEmpty,
   toggleTagIdForSelection,
 } from "./inlineEditor.logic";
 import {
   createEnergyRatingRow,
+  createStarRatingRow,
+  getInitialInlineMenuFocusTarget,
   getSortedMenuTagCategories,
   positionInlineMenu,
-  updateEnergyRatingRowSelection,
 } from "./inlineEditor.menu";
 import { renderInlineEditorPresentation } from "./inlineEditor.presentation";
 import { getInlineEditScope } from "./inlineEditor.selection";
+import {
+  confirmSmartPlaylistRatingRemoval,
+  getSmartPlaylistRatingRemoval,
+} from "./inlineEditor.smartPlaylistRating";
+import { buildTagDetails } from "./inlineEditor.tagIndicator";
+import {
+  buildExtensionTagLookup,
+  getExtensionTagForId,
+  resolveExtensionTagFilterLabel,
+} from "./extensionTagLookup";
+import {
+  getSpotifyPlayerAnchor,
+  getSpotifyRowLayout,
+  getSpotifyTracklistHeader,
+  getSpotifyTracklists,
+  getSpotifyTrackRows,
+  insertSpotifyColumn,
+  SPOTIFY_TRACK_HEADER_SELECTOR,
+  SPOTIFY_TRACK_ROW_SELECTOR,
+} from "./spotifyLayout";
 
 (async () => {
   while (!Spicetify?.Platform) {
@@ -25,6 +53,13 @@ import { getInlineEditScope } from "./inlineEditor.selection";
 
   // Initialize global services
   keyboardShortcutService.initialize();
+  await restoreDesktopSyncConfiguration();
+  void storageService.initialize().then((result) => {
+    if (result.status === "ready") {
+      syncRuntime.start();
+      smartPlaylistSyncService.startBackgroundReconciliation();
+    }
+  });
   welcomeModal.initialize();
 
   const APP_NAME = "tagify";
@@ -32,12 +67,15 @@ import { getInlineEditScope } from "./inlineEditor.selection";
   const TAG_DATA_KEY = "tagify:tagData";
   const PLAYLIST_CACHE_KEY = "tagify:playlistCache";
   const PLAYLIST_SETTINGS_KEY = "tagify:playlistSettings";
-  const SMART_PLAYLIST_STORAGE_KEY = "tagify:smartPlaylists";
   const EXTENSION_SETTINGS_KEY = "tagify:extensionSettings";
   const SETTINGS_CHANGED_EVENT = "tagify:settingsChanged";
   const DATA_UPDATED_EVENT = "tagify:dataUpdated";
   const SMART_PLAYLIST_SYNC_EVENT = "tagify:trackChanged";
   const SMART_PLAYLISTS_UPDATED_EVENT = "tagify:smartPlaylistsUpdated";
+  let smartPlaylistCache = [];
+  void loadSmartPlaylistsFromStorage().then((playlists) => {
+    smartPlaylistCache = playlists;
+  });
 
   window.addEventListener(SMART_PLAYLIST_SYNC_EVENT, async (event) => {
     const { trackUri, trackData } = event.detail;
@@ -84,6 +122,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
     taggedArtists: {},
     tagCategories: [],
     tagLookup: new Map(),
+    customTagAccents: {},
     recentTagIds: [],
     observer: null,
     nowPlayingWidgetTagInfo: null,
@@ -104,6 +143,17 @@ import { getInlineEditScope } from "./inlineEditor.selection";
   const DEFAULT_EXTENSION_SETTINGS = {
     enableTracklistEnhancer: true,
     enablePlaybarEnhancer: true,
+    tracklistDisplayMode: "combined",
+    playbarDisplayMode: "combined",
+  };
+
+  const getDisplayMode = (value, legacyEnabled) => {
+    if (
+      ["combined", "stars", "energy", "tags", "disabled"].includes(value)
+    ) {
+      return value;
+    }
+    return legacyEnabled === false ? "disabled" : "combined";
   };
 
   const settingsUtils = {
@@ -118,10 +168,20 @@ import { getInlineEditScope } from "./inlineEditor.selection";
         );
         if (savedExtensionSettings) {
           const data = JSON.parse(savedExtensionSettings);
+          const tracklistDisplayMode = getDisplayMode(
+            data.tracklistDisplayMode,
+            data.enableTracklistEnhancer,
+          );
+          const playbarDisplayMode = getDisplayMode(
+            data.playbarDisplayMode,
+            data.enablePlaybarEnhancer,
+          );
           state.activeExtensions.tracklistEnhancer =
-            data.enableTracklistEnhancer ?? true;
+            tracklistDisplayMode !== "disabled";
           state.activeExtensions.playbarEnhancer =
-            data.enablePlaybarEnhancer ?? true;
+            playbarDisplayMode !== "disabled";
+          state.activeExtensions.tracklistDisplayMode = tracklistDisplayMode;
+          state.activeExtensions.playbarDisplayMode = playbarDisplayMode;
           return true;
         } else {
           // create initial localStorage item
@@ -148,12 +208,30 @@ import { getInlineEditScope } from "./inlineEditor.selection";
     },
 
     handleSettingsChange(newSettings) {
+      if (!newSettings || typeof newSettings !== "object") {
+        try {
+          newSettings = JSON.parse(localStorage.getItem(EXTENSION_SETTINGS_KEY) || "null");
+        } catch {
+          newSettings = null;
+        }
+      }
+      newSettings = { ...DEFAULT_EXTENSION_SETTINGS, ...newSettings };
       const oldSettings = { ...state.activeExtensions };
+      const tracklistDisplayMode = getDisplayMode(
+        newSettings.tracklistDisplayMode,
+        newSettings.enableTracklistEnhancer,
+      );
+      const playbarDisplayMode = getDisplayMode(
+        newSettings.playbarDisplayMode,
+        newSettings.enablePlaybarEnhancer,
+      );
 
       state.activeExtensions.tracklistEnhancer =
-        newSettings.enableTracklistEnhancer;
+        tracklistDisplayMode !== "disabled";
       state.activeExtensions.playbarEnhancer =
-        newSettings.enablePlaybarEnhancer;
+        playbarDisplayMode !== "disabled";
+      state.activeExtensions.tracklistDisplayMode = tracklistDisplayMode;
+      state.activeExtensions.playbarDisplayMode = playbarDisplayMode;
 
       if (
         oldSettings.tracklistEnhancer !==
@@ -175,6 +253,9 @@ import { getInlineEditScope } from "./inlineEditor.selection";
           playbarEnhancer.disable();
         }
       }
+
+      inlineEditor.refreshAll();
+      playbarEnhancer.updateNowPlayingWidget();
     },
   };
 
@@ -223,33 +304,10 @@ import { getInlineEditScope } from "./inlineEditor.selection";
                 .map((tag) => ({
                   id: tag.id,
                   name: tag.name,
+                  accentId: tag.accentId ?? null,
                 })),
             })),
         }));
-    },
-
-    buildTagLookup(categories) {
-      const lookup = new Map();
-
-      (Array.isArray(categories) ? categories : []).forEach((category) => {
-        (Array.isArray(category.subcategories) ? category.subcategories : []).forEach(
-          (subcategory) => {
-            (Array.isArray(subcategory.tags) ? subcategory.tags : []).forEach((tag) => {
-              lookup.set(tag.id, {
-                categoryId: category.id,
-                categoryName: category.name,
-                subcategoryId: subcategory.id,
-                subcategoryName: subcategory.name,
-                tagId: tag.id,
-                name: tag.name,
-                tag: tag.name,
-              });
-            });
-          },
-        );
-      });
-
-      return lookup;
     },
 
     normalizeTrackForExtension(trackData, tagLookup) {
@@ -268,7 +326,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
               ) {
                 const resolvedTag = tagLookup.get(tag.tagId);
                 const tagName =
-                  tag.name || tag.tag || resolvedTag?.name || tag.tagId;
+                  tag.name || tag.tag || resolvedTag?.name || "Tag unavailable";
 
                 return {
                   ...tag,
@@ -288,19 +346,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
 
       const tags =
         tagIds.length > 0
-          ? tagIds.map((tagId) => {
-              const resolvedTag = tagLookup.get(tagId);
-
-              if (resolvedTag) {
-                return { ...resolvedTag };
-              }
-
-              return {
-                tagId,
-                name: tagId,
-                tag: tagId,
-              };
-            })
+          ? tagIds.map((tagId) => getExtensionTagForId(tagId, tagLookup))
           : legacyTags;
 
       return {
@@ -316,19 +362,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
 
       return {
         ...playlistData,
-        tags: tagIds.map((tagId) => {
-          const resolvedTag = tagLookup.get(tagId);
-
-          if (resolvedTag) {
-            return { ...resolvedTag };
-          }
-
-          return {
-            tagId,
-            name: tagId,
-            tag: tagId,
-          };
-        }),
+        tags: tagIds.map((tagId) => getExtensionTagForId(tagId, tagLookup)),
       };
     },
 
@@ -339,19 +373,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
 
       return {
         ...artistData,
-        tags: tagIds.map((tagId) => {
-          const resolvedTag = tagLookup.get(tagId);
-
-          if (resolvedTag) {
-            return { ...resolvedTag };
-          }
-
-          return {
-            tagId,
-            name: tagId,
-            tag: tagId,
-          };
-        }),
+        tags: tagIds.map((tagId) => getExtensionTagForId(tagId, tagLookup)),
       };
     },
 
@@ -365,7 +387,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
         Array.isArray(data.categories) && data.categories.length > 0
           ? data.categories
           : taxonomyCategories;
-      const tagLookup = this.buildTagLookup(categories);
+      const tagLookup = buildExtensionTagLookup(categories, data.taxonomy);
       const rawTracks =
         data.tracks && typeof data.tracks === "object" ? data.tracks : {};
       const rawPlaylists =
@@ -406,6 +428,11 @@ import { getInlineEditScope } from "./inlineEditor.selection";
         artists,
         categories,
         tagLookup,
+        customTagAccents:
+          data.taxonomy?.customAccentsById &&
+          typeof data.taxonomy.customAccentsById === "object"
+            ? data.taxonomy.customAccentsById
+            : {},
       };
     },
 
@@ -421,19 +448,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       if (Array.isArray(track.tagIds)) {
         return track.tagIds
           .filter((tagId) => typeof tagId === "string")
-          .map((tagId) => {
-            const resolvedTag = state.tagLookup.get(tagId);
-
-            if (resolvedTag) {
-              return { ...resolvedTag };
-            }
-
-            return {
-              tagId,
-              name: tagId,
-              tag: tagId,
-            };
-          });
+          .map((tagId) => getExtensionTagForId(tagId, state.tagLookup));
       }
 
       return [];
@@ -451,19 +466,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       if (Array.isArray(playlist.tagIds)) {
         return playlist.tagIds
           .filter((tagId) => typeof tagId === "string")
-          .map((tagId) => {
-            const resolvedTag = state.tagLookup.get(tagId);
-
-            if (resolvedTag) {
-              return { ...resolvedTag };
-            }
-
-            return {
-              tagId,
-              name: tagId,
-              tag: tagId,
-            };
-          });
+          .map((tagId) => getExtensionTagForId(tagId, state.tagLookup));
       }
 
       return [];
@@ -481,19 +484,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       if (Array.isArray(artist.tagIds)) {
         return artist.tagIds
           .filter((tagId) => typeof tagId === "string")
-          .map((tagId) => {
-            const resolvedTag = state.tagLookup.get(tagId);
-
-            if (resolvedTag) {
-              return { ...resolvedTag };
-            }
-
-            return {
-              tagId,
-              name: tagId,
-              tag: tagId,
-            };
-          });
+          .map((tagId) => getExtensionTagForId(tagId, state.tagLookup));
       }
 
       return [];
@@ -540,6 +531,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
           state.taggedArtists = normalizedIdbData.artists;
           state.tagCategories = normalizedIdbData.categories;
           state.tagLookup = normalizedIdbData.tagLookup;
+          state.customTagAccents = normalizedIdbData.customTagAccents;
           return true;
         }
 
@@ -555,6 +547,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
             state.taggedArtists = normalizedLocalData.artists;
             state.tagCategories = normalizedLocalData.categories;
             state.tagLookup = normalizedLocalData.tagLookup;
+            state.customTagAccents = normalizedLocalData.customTagAccents;
             return true;
           }
         }
@@ -574,7 +567,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
           // Do not pin a lower DB version here.
           // The app currently uses versioned schema upgrades (e.g. v2), and
           // opening with a lower version throws VersionError and breaks reads.
-          const request = indexedDB.open("tagify-db");
+          const request = indexedDB.open(getTagifyDatabaseName());
 
           request.onerror = () => resolve(null);
 
@@ -708,53 +701,37 @@ import { getInlineEditScope } from "./inlineEditor.selection";
               ? changesOrFactory(normalizedCurrentTrack, trackUri)
               : changesOrFactory;
 
+          const updatedTrack = createUpdatedTrack(
+            normalizedCurrentTrack,
+            changes,
+            now,
+          );
+
           return [
             trackUri,
-            createUpdatedTrack(normalizedCurrentTrack, changes, now),
+            isTrackAnnotationEmpty(updatedTrack) ? null : updatedTrack,
           ];
         }),
       );
 
-      await new Promise((resolve, reject) => {
-        const request = indexedDB.open("tagify-db");
-        request.onerror = () => reject(new Error("Unable to open Tagify storage"));
-        request.onsuccess = (event) => {
-          const db = event.target.result;
-          if (!db.objectStoreNames.contains("tracks")) {
-            db.close();
-            reject(new Error("Tagify track storage is unavailable"));
-            return;
-          }
-
-          const transaction = db.transaction("tracks", "readwrite");
-          const trackStore = transaction.objectStore("tracks");
-          Object.entries(nextTracks).forEach(([trackUri, trackData]) => {
-            trackStore.put({ uri: trackUri, ...trackData });
-          });
-          transaction.oncomplete = () => {
-            db.close();
-            resolve();
-          };
-          transaction.onerror = () => {
-            db.close();
-            reject(new Error("Unable to save Tagify track data"));
-          };
-          transaction.onabort = () => {
-            db.close();
-            reject(new Error("Tagify track update was cancelled"));
-          };
-        };
-      });
+      const saved = await storageService.saveTrackChanges(
+        new Map(Object.entries(nextTracks)),
+      );
+      if (!saved) throw new Error("Unable to save Tagify track data");
 
       Object.entries(nextTracks).forEach(([trackUri, trackData]) => {
-        state.taggedTracks[trackUri] = this.normalizeTrackForExtension(
-          trackData,
-          state.tagLookup,
-        );
+        if (trackData === null) {
+          delete state.taggedTracks[trackUri];
+        } else {
+          state.taggedTracks[trackUri] = this.normalizeTrackForExtension(
+            trackData,
+            state.tagLookup,
+          );
+        }
       });
       window.dispatchEvent(
         new CustomEvent(DATA_UPDATED_EVENT, {
-          detail: { type: "save", trackUris: uniqueTrackUris },
+          detail: { type: "save", trackUris: uniqueTrackUris, origin: "local", batchId: crypto.randomUUID() },
         }),
       );
       Object.entries(nextTracks).forEach(([trackUri, trackData]) => {
@@ -942,34 +919,9 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       }
     },
 
-    /**
-     * Get smart playlists from localStorage
-     * @returns {Array<Object>} Smart playlist entries
-     */
+    /** @returns {Array<Object>} Smart playlist entries */
     getSmartPlaylists() {
-      try {
-        const smartPlaylistString = localStorage.getItem(
-          SMART_PLAYLIST_STORAGE_KEY,
-        );
-        if (!smartPlaylistString) {
-          return [];
-        }
-
-        const parsed = JSON.parse(smartPlaylistString);
-        if (!Array.isArray(parsed)) {
-          return [];
-        }
-
-        return parsed.filter(
-          (playlist) =>
-            playlist &&
-            typeof playlist === "object" &&
-            typeof playlist.playlistId === "string",
-        );
-      } catch (error) {
-        Logger.warn("Error reading smart playlists:", error);
-        return [];
-      }
+      return smartPlaylistCache;
     },
 
     /**
@@ -1496,18 +1448,40 @@ import { getInlineEditScope } from "./inlineEditor.selection";
         });
       } else if (trackUris.length > 1) {
         // Multiple track selection - use bulk tagging
-        const encodedUris = encodeURIComponent(JSON.stringify(trackUris));
-
-        Spicetify.Platform.History.push({
-          pathname: `/${APP_NAME}`,
-          search: `?uris=${encodedUris}`,
-          state: { trackUris },
-        });
+        Spicetify.Platform.History.push(
+          createBulkTagHistoryLocation(APP_NAME, trackUris),
+        );
       }
     },
   };
 
   const inlineEditor = {
+    ratingEditPending: false,
+
+    async saveRating(trackUris, rating, checkPlaylist = true) {
+      if (this.ratingEditPending) return false;
+      this.ratingEditPending = true;
+      try {
+        const playlistId = checkPlaylist ? utils.getCurrentPlaylistId() : null;
+        if (playlistId) {
+          const playlists = await loadSmartPlaylistsFromStorage();
+          const removal = getSmartPlaylistRatingRemoval({
+            playlist: playlists.find((playlist) => playlist.playlistId === playlistId),
+            trackUris,
+            tracks: state.taggedTracks,
+            rating,
+          });
+          if (removal && !(await confirmSmartPlaylistRatingRemoval(removal))) {
+            return false;
+          }
+        }
+        await utils.saveInlineTrackUpdates(trackUris, { rating });
+        return true;
+      } finally {
+        this.ratingEditPending = false;
+      }
+    },
+
     openMenu: null,
 
     getEditScope(trackUri) {
@@ -1532,6 +1506,17 @@ import { getInlineEditScope } from "./inlineEditor.selection";
         : `Set ${scope.trackCount} selected tracks to ${formattedValue} stars`;
     },
 
+    getEnergyActionLabel(trackUri, value, defaultLabel) {
+      const scope = this.getEditScope(trackUri);
+      if (!scope.isBulk) return defaultLabel;
+      const allHaveEnergy = scope.trackUris.every(
+        (uri) => Number(state.taggedTracks[uri]?.energy) === value,
+      );
+      return allHaveEnergy
+        ? `Clear energy ${value} from ${scope.trackCount} selected tracks`
+        : `Set ${scope.trackCount} selected tracks to energy ${value}`;
+    },
+
     notifyBulkUpdate(scope, message) {
       if (scope.isBulk) {
         Spicetify.showNotification(
@@ -1548,7 +1533,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       control.style.whiteSpace = "nowrap";
       control.style.cursor = "pointer";
       control.setAttribute("role", "group");
-      control.setAttribute("aria-label", "Tagify star rating");
+      control.setAttribute("aria-label", "Tagify track controls");
 
       control.addEventListener("contextmenu", (event) => {
         event.preventDefault();
@@ -1566,19 +1551,25 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       const energy = Number(track?.energy) || 0;
       const tagCount = utils.getTrackTags(track).length;
       const tagStatus = getTagIndicatorStatus(track, tagCount);
-      const tagListTooltip =
-        tagStatus === "none"
-          ? ""
-          : tracklistEnhancer.createTagListTooltip(trackUri);
+      const tagGroups = buildTagDetails(
+        utils.getTrackTags(track),
+        state.customTagAccents,
+      );
+      const displayMode = compact
+        ? state.activeExtensions.playbarDisplayMode
+        : state.activeExtensions.tracklistDisplayMode;
 
       renderInlineEditorPresentation(control, {
         rating,
         energy,
         tagStatus,
-        tagListTooltip,
+        tagGroups,
         compact,
+        displayMode,
         getRateActionLabel: (value, defaultLabel) =>
           this.getRatingActionLabel(trackUri, value, defaultLabel),
+        getEnergyActionLabel: (value, defaultLabel) =>
+          this.getEnergyActionLabel(trackUri, value, defaultLabel),
         onRate: async (nextRating) => {
           try {
             const scope = this.getEditScope(trackUri);
@@ -1594,9 +1585,9 @@ import { getInlineEditScope } from "./inlineEditor.selection";
               );
             }
 
-            await utils.saveInlineTrackUpdates(scope.trackUris, {
-              rating: ratingToSave,
-            });
+            if (!(await this.saveRating(scope.trackUris, ratingToSave, !compact))) {
+              return false;
+            }
             this.refreshTracks(scope.trackUris);
             this.notifyBulkUpdate(
               scope,
@@ -1607,8 +1598,38 @@ import { getInlineEditScope } from "./inlineEditor.selection";
           } catch (error) {
             console.error("Tagify: Unable to save inline rating", error);
             Spicetify.showNotification("Tagify couldn't save that rating", true);
+            return false;
           }
         },
+        onEnergy: async (nextEnergy) => {
+          try {
+            const scope = this.getEditScope(trackUri);
+            let energyToSave = nextEnergy;
+            if (scope.isBulk && nextEnergy > 0) {
+              energyToSave = getRatingUpdateForSelection(
+                scope.trackUris.map(
+                  (uri) => Number(state.taggedTracks[uri]?.energy) || 0,
+                ),
+                nextEnergy,
+              );
+            }
+            await utils.saveInlineTrackUpdates(scope.trackUris, {
+              energy: energyToSave,
+            });
+            this.refreshTracks(scope.trackUris);
+            this.notifyBulkUpdate(
+              scope,
+              energyToSave > 0
+                ? `Set energy ${energyToSave} for`
+                : "Cleared energy from",
+            );
+          } catch (error) {
+            console.error("Tagify: Unable to save inline energy", error);
+            Spicetify.showNotification("Tagify couldn't save that energy", true);
+          }
+        },
+        onOpenEnergy: (anchor) => this.showMenuForElement(trackUri, anchor, "energy"),
+        onOpenTags: (anchor) => this.showMenuForElement(trackUri, anchor, "tags"),
       });
     },
 
@@ -1642,7 +1663,12 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       this.openMenu = null;
     },
 
-    showMenu(trackUri, x, y) {
+    showMenuForElement(trackUri, anchor, initialSection) {
+      const bounds = anchor.getBoundingClientRect();
+      this.showMenu(trackUri, bounds.left, bounds.bottom, { initialSection });
+    },
+
+    showMenu(trackUri, x, y, { initialSection = null } = {}) {
       this.closeMenu();
       const scope = this.getEditScope(trackUri);
       const menu = document.createElement("div");
@@ -1720,6 +1746,50 @@ import { getInlineEditScope } from "./inlineEditor.selection";
         menu.setAttribute("aria-label", "Tagify track editor");
       }
 
+      section("Star rating");
+      const selectedRatings = scope.trackUris.map(
+        (uri) => Number(state.taggedTracks[uri]?.rating) || 0,
+      );
+      const commonRating = selectedRatings.every(
+        (rating) => rating === selectedRatings[0],
+      )
+        ? selectedRatings[0]
+        : 0;
+      const ratingRow = createStarRatingRow({
+        currentRating: commonRating,
+        getActionLabel: (value, defaultLabel) =>
+          this.getRatingActionLabel(trackUri, value, defaultLabel),
+        onSelect: async (rating, previousRating) => {
+          try {
+            let ratingToSave = rating;
+            if (scope.isBulk) {
+              const selectedRating = rating === 0 ? previousRating : rating;
+              ratingToSave = getRatingUpdateForSelection(
+                scope.trackUris.map(
+                  (uri) => Number(state.taggedTracks[uri]?.rating) || 0,
+                ),
+                selectedRating,
+              );
+            }
+            if (!(await this.saveRating(scope.trackUris, ratingToSave))) {
+              return false;
+            }
+            this.refreshTracks(scope.trackUris);
+            this.notifyBulkUpdate(
+              scope,
+              ratingToSave > 0
+                ? `Set the rating to ${ratingToSave} stars for`
+                : "Cleared the star rating from",
+            );
+          } catch (error) {
+            console.error("Tagify: Unable to save inline rating", error);
+            Spicetify.showNotification("Tagify couldn't save that rating", true);
+            throw error;
+          }
+        },
+      });
+      menu.appendChild(ratingRow);
+
       section("Energy");
       const selectedEnergyRatings = scope.trackUris.map(
         (uri) => Number(state.taggedTracks[uri]?.energy) || 0,
@@ -1735,11 +1805,14 @@ import { getInlineEditScope } from "./inlineEditor.selection";
           try {
             await utils.saveInlineTrackUpdates(scope.trackUris, { energy });
             this.refreshTracks(scope.trackUris);
-            updateEnergyRatingRowSelection(energyRow, energy);
-            this.notifyBulkUpdate(scope, `Set energy ${energy} for`);
+            this.notifyBulkUpdate(
+              scope,
+              energy > 0 ? `Set energy ${energy} for` : "Cleared energy from",
+            );
           } catch (error) {
             console.error("Tagify: Unable to save inline edit", error);
             Spicetify.showNotification("Tagify couldn't save that change", true);
+            throw error;
           }
         },
       });
@@ -1781,6 +1854,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
         );
       };
       const registerTagButton = (button, tagId, tagName) => {
+        button.dataset.tagifyTagId = tagId;
         const tagButtons = tagButtonsById.get(tagId) || [];
         tagButtons.push({ button, tagName });
         tagButtonsById.set(tagId, tagButtons);
@@ -1840,6 +1914,16 @@ import { getInlineEditScope } from "./inlineEditor.selection";
         );
         sortedCategories.forEach((category) => {
           const categoryDetails = document.createElement("details");
+          const appliedTagIds = new Set(
+            scope.trackUris.flatMap((uri) =>
+              utils.getTrackTagIds(state.taggedTracks[uri]),
+            ),
+          );
+          const categoryHasAppliedTag = category.subcategories.some(
+            (subcategory) =>
+              subcategory.tags.some((tag) => appliedTagIds.has(tag.id)),
+          );
+          categoryDetails.open = initialSection === "tags" && categoryHasAppliedTag;
           const categorySummary = document.createElement("summary");
           categorySummary.textContent = category.name;
           categorySummary.style.cursor = "pointer";
@@ -1847,6 +1931,9 @@ import { getInlineEditScope } from "./inlineEditor.selection";
           categoryDetails.appendChild(categorySummary);
           category.subcategories.forEach((subcategory) => {
             const subcategoryDetails = document.createElement("details");
+            subcategoryDetails.open =
+              initialSection === "tags" &&
+              subcategory.tags.some((tag) => appliedTagIds.has(tag.id));
             subcategoryDetails.style.marginLeft = "12px";
             const subcategorySummary = document.createElement("summary");
             subcategorySummary.textContent = subcategory.name;
@@ -1885,6 +1972,19 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       positionInlineMenu(menu, x, y);
       menu.style.visibility = "visible";
       this.openMenu = menu;
+      if (initialSection === "tags") {
+        const hasAppliedTag = menu.querySelector(
+          'button[data-tagify-tag-id][aria-pressed="true"], button[data-tagify-tag-id][aria-pressed="mixed"]',
+        );
+        const firstAppliedButton = getInitialInlineMenuFocusTarget(menu, "tags");
+        const firstCategory = menu.querySelector("details");
+        if (!hasAppliedTag && firstCategory) {
+          firstCategory.open = true;
+        }
+        firstAppliedButton?.focus();
+      } else if (initialSection === "energy") {
+        getInitialInlineMenuFocusTarget(menu, "energy")?.focus();
+      }
       const closeOnOutsideClick = (event) => {
         if (!menu.contains(event.target)) {
           this.closeMenu();
@@ -1898,9 +1998,20 @@ import { getInlineEditScope } from "./inlineEditor.selection";
     },
   };
 
+  const tracklistMutationSelector = [
+    ".main-trackList-indexable",
+    '[role="grid"]',
+    SPOTIFY_TRACK_ROW_SELECTOR,
+    SPOTIFY_TRACK_HEADER_SELECTOR,
+  ].join(", ");
+
   // Tracklist indicator feature - adds 'Tagify' column to tracklists
   const tracklistEnhancer = {
     tracklistObservers: new Set(),
+    observedTracklists: new Map(),
+    observerReconnectTimeout: null,
+    columnRestorers: new Map(),
+    originalColumnCounts: new Map(),
     updateInterval: null,
     processedElements: new WeakSet(),
     lastProcessedCount: 0,
@@ -2020,54 +2131,22 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       // Clear any existing tracklist observers
       this.tracklistObservers.forEach((observer) => observer.disconnect());
       this.tracklistObservers.clear();
-
-      // Observer watches for tracklist changes
-      const tracklistObserver = new MutationObserver(() => {
-        // CHECK IF STILL ACTIVE BEFORE PROCESSING
-        if (!state.activeExtensions.tracklistEnhancer) return;
-        this.updateTracklists();
-      });
-
-      // Store reference for cleanup
-      this.tracklistObservers.add(tracklistObserver);
+      this.observedTracklists.clear();
 
       // Main observer - detects when tracklists are added to the DOM (when you change playlists)
-      state.observer = new MutationObserver(async (mutations) => {
+      state.observer = new MutationObserver((mutations) => {
         // CHECK IF STILL ACTIVE BEFORE PROCESSING
         if (!state.activeExtensions.tracklistEnhancer) return;
 
-        for (const mutation of mutations) {
-          if (mutation.type === "childList") {
-            const addedTracklists = Array.from(mutation.addedNodes).filter(
-              (node) =>
-                node.nodeType === Node.ELEMENT_NODE &&
-                (node.classList?.contains("main-trackList-indexable") ||
-                  node.querySelector?.(".main-trackList-indexable")),
-            );
-
-            if (addedTracklists.length > 0) {
-              this.updateTracklists();
-
-              // Observe each tracklist for changes
-              const tracklists = document.getElementsByClassName(
-                "main-trackList-indexable",
-              );
-              for (const tracklist of tracklists) {
-                const newObserver = new MutationObserver(() => {
-                  if (!state.activeExtensions.tracklistEnhancer) return;
-                  this.updateTracklists();
-                });
-
-                newObserver.observe(tracklist, {
-                  childList: true, // Watch for added/removed children
-                  subtree: true, // Watch all descendants
-                });
-
-                // Store reference for cleanup
-                this.tracklistObservers.add(newObserver);
-              }
-            }
-          }
+        const addedTracklistContent = mutations.some((mutation) =>
+          Array.from(mutation.addedNodes).some((node) =>
+            node.nodeType === Node.ELEMENT_NODE &&
+            (node.matches(tracklistMutationSelector) || node.querySelector(tracklistMutationSelector)),
+          ),
+        );
+        if (addedTracklistContent) {
+          this.updateTracklists();
+          getSpotifyTracklists().forEach((tracklist) => this.observeTracklist(tracklist));
         }
       });
 
@@ -2078,22 +2157,17 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       });
 
       // Get all tracklists and observe them for changes
-      const tracklists = document.getElementsByClassName(
-        "main-trackList-indexable",
-      );
-      for (const tracklist of tracklists) {
-        const newObserver = new MutationObserver(() => {
-          if (!state.activeExtensions.tracklistEnhancer) return;
-          this.updateTracklists();
-        });
+      getSpotifyTracklists().forEach((tracklist) => this.observeTracklist(tracklist));
+    },
 
-        newObserver.observe(tracklist, {
-          childList: true,
-          subtree: true,
-        });
-
-        this.tracklistObservers.add(newObserver);
-      }
+    observeTracklist(tracklist) {
+      if (this.observedTracklists.has(tracklist)) return;
+      const observer = new MutationObserver(() => {
+        if (state.activeExtensions.tracklistEnhancer) this.updateTracklists();
+      });
+      observer.observe(tracklist, { childList: true, subtree: true });
+      this.observedTracklists.set(tracklist, observer);
+      this.tracklistObservers.add(observer);
     },
 
     /**
@@ -2103,9 +2177,24 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       // CHECK IF STILL ACTIVE BEFORE PROCESSING
       if (!state.activeExtensions.tracklistEnhancer) return;
 
-      const tracklists = document.getElementsByClassName(
-        "main-trackList-indexable",
-      );
+      for (const [grid, observer] of this.observedTracklists) {
+        if (!grid.isConnected) {
+          observer.disconnect();
+          this.observedTracklists.delete(grid);
+          this.tracklistObservers.delete(observer);
+        }
+      }
+      for (const [column, restore] of this.columnRestorers) {
+        if (!column.isConnected) {
+          restore();
+          this.columnRestorers.delete(column);
+        }
+      }
+      for (const grid of this.originalColumnCounts.keys()) {
+        if (!grid.isConnected) this.originalColumnCounts.delete(grid);
+      }
+
+      const tracklists = getSpotifyTracklists();
 
       if (tracklists.length === 0) {
         Logger.debug("No tracklists found, skipping update");
@@ -2133,9 +2222,9 @@ import { getInlineEditScope } from "./inlineEditor.selection";
     hasTracklistChanged(tracklist) {
       // Check if we've already processed this exact tracklist
       if (this.processedElements.has(tracklist)) {
-        const trackRows = tracklist.querySelectorAll(
-          ".main-trackList-trackListRow",
-        );
+        const header = getSpotifyTracklistHeader(tracklist);
+        if (header && !header.querySelector(".tagify-header")) return true;
+        const trackRows = getSpotifyTrackRows(tracklist);
         const currentCount = trackRows.length;
 
         // Check if track count changed
@@ -2166,9 +2255,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
      */
     markTracklistAsProcessed(tracklist) {
       this.processedElements.add(tracklist);
-      const trackRows = tracklist.querySelectorAll(
-        ".main-trackList-trackListRow",
-      );
+      const trackRows = getSpotifyTrackRows(tracklist);
       tracklist.dataset.tagifyLastCount = trackRows.length.toString();
     },
 
@@ -2182,17 +2269,13 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       Logger.log("Actually processing tracklist (changes detected)");
 
       // Add column to header first (with duplicate check)
-      const header = tracklist.querySelector(
-        ".main-trackList-trackListHeaderRow",
-      );
+      const header = getSpotifyTracklistHeader(tracklist);
       if (header && !header.querySelector(".tagify-header")) {
         this.addColumnToHeader(header);
       }
 
       // Only process unprocessed track rows
-      const trackRows = tracklist.querySelectorAll(
-        ".main-trackList-trackListRow",
-      );
+      const trackRows = getSpotifyTrackRows(tracklist);
       const unprocessedRows = Array.from(trackRows).filter(
         (row) => !row.querySelector(".tagify-info"),
       );
@@ -2231,7 +2314,19 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       // Add the last column (usually duration/menu)
       template += " [last] minmax(120px,1fr)";
 
-      return `grid-template-columns: ${template} !important`;
+      return template;
+    },
+
+    insertColumn(row, column, layout) {
+      const grid = row.closest('[role="grid"]');
+      if (grid && !this.originalColumnCounts.has(grid)) {
+        this.originalColumnCounts.set(grid, grid.getAttribute("aria-colcount"));
+      }
+      const template = this.buildDynamicGrid(layout.columns.length + 1, layout.columnIndex);
+      this.columnRestorers.set(column, insertSpotifyColumn(layout, column, template));
+      if (grid) {
+        grid.setAttribute("aria-colcount", String(Math.max(Number(grid.getAttribute("aria-colcount")) || 0, layout.columnIndex + 1)));
+      }
     },
 
     /**
@@ -2241,26 +2336,14 @@ import { getInlineEditScope } from "./inlineEditor.selection";
     addColumnToHeader(header) {
       if (!header || header.querySelector(".tagify-header")) return;
 
-      // Find the last column to insert before
-      const lastColumn = header.querySelector(".main-trackList-rowSectionEnd");
-      if (!lastColumn) return;
-
-      // Count existing columns before adding ours
-      const existingColumns = header.querySelectorAll(
-        '[class*="main-trackList-rowSection"]',
-      );
-      const currentColumnCount = existingColumns.length;
-
-      // Get current column index and increment it for the last column
-      const colIndex = parseInt(lastColumn.getAttribute("aria-colindex"));
-      lastColumn.setAttribute("aria-colindex", (colIndex + 1).toString());
+      const layout = getSpotifyRowLayout(header);
+      if (!layout) return;
 
       // Create our new column
       const tagColumn = document.createElement("div");
       tagColumn.classList.add("main-trackList-rowSectionVariable");
       tagColumn.classList.add("tagify-header");
       tagColumn.setAttribute("role", "columnheader");
-      tagColumn.setAttribute("aria-colindex", colIndex.toString());
       tagColumn.style.display = "flex";
       tagColumn.style.justifyContent = "center";
 
@@ -2277,13 +2360,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       headerButton.appendChild(headerText);
       tagColumn.appendChild(headerButton);
 
-      // Insert our column before the last column
-      header.insertBefore(tagColumn, lastColumn);
-
-      // Build and apply dynamic grid template based on new column count
-      const newColumnCount = currentColumnCount + 1;
-      const gridTemplate = this.buildDynamicGrid(newColumnCount, colIndex);
-      header.setAttribute("style", gridTemplate);
+      this.insertColumn(header, tagColumn, layout);
     },
 
     /**
@@ -2314,25 +2391,14 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       if (!trackUri.includes("track") && !trackUri.startsWith("spotify:local:"))
         return;
 
-      // Find the last column to insert before
-      const lastColumn = row.querySelector(".main-trackList-rowSectionEnd");
-      if (!lastColumn) return;
-
-      // Count existing columns before adding ours
-      const existingColumns = row.querySelectorAll(
-        '[class*="main-trackList-rowSection"]',
-      );
-      const currentColumnCount = existingColumns.length;
-
-      // Get column index and increment it for the last column
-      const colIndex = parseInt(lastColumn.getAttribute("aria-colindex"));
-      lastColumn.setAttribute("aria-colindex", (colIndex + 1).toString());
+      const layout = getSpotifyRowLayout(row);
+      if (!layout) return;
 
       // Create our tag info column
       const tagColumn = document.createElement("div");
       tagColumn.classList.add("main-trackList-rowSectionVariable");
       tagColumn.classList.add("tagify-info");
-      tagColumn.setAttribute("aria-colindex", colIndex.toString());
+      tagColumn.setAttribute("role", "gridcell");
       tagColumn.style.display = "flex";
       tagColumn.style.alignItems = "center";
 
@@ -2360,13 +2426,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       container.appendChild(inlineEditor.createControl(trackUri));
       tagColumn.appendChild(container);
 
-      // Insert our column before the last column
-      row.insertBefore(tagColumn, lastColumn);
-
-      // Apply the same dynamic grid template to maintain consistency
-      const newColumnCount = currentColumnCount + 1;
-      const gridTemplate = this.buildDynamicGrid(newColumnCount, colIndex);
-      row.setAttribute("style", gridTemplate);
+      this.insertColumn(row, tagColumn, layout);
     },
 
     /**
@@ -2461,7 +2521,9 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       callback();
 
       // Reconnect observers after a brief delay
-      setTimeout(() => {
+      clearTimeout(this.observerReconnectTimeout);
+      this.observerReconnectTimeout = setTimeout(() => {
+        this.observerReconnectTimeout = null;
         this.reconnectObservers();
       }, 100);
     },
@@ -2470,6 +2532,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
      * Reconnect all observers
      */
     reconnectObservers() {
+      if (!state.activeExtensions.tracklistEnhancer) return;
       // Clear existing observers
       this.tracklistObservers.forEach((observer) => observer.disconnect());
       this.tracklistObservers.clear();
@@ -2496,6 +2559,8 @@ import { getInlineEditScope } from "./inlineEditor.selection";
      * Disable the tracklist enhancer
      */
     disable() {
+      clearTimeout(this.observerReconnectTimeout);
+      this.observerReconnectTimeout = null;
       // Clear the smart update interval
       if (this.smartUpdateInterval) {
         clearTimeout(this.smartUpdateInterval);
@@ -2512,19 +2577,14 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       this.tracklistObservers.forEach((observer) => observer.disconnect());
       this.tracklistObservers.clear();
 
-      // Remove ALL existing tag columns immediately
-      document
-        .querySelectorAll(".tagify-header, .tagify-info")
-        .forEach((el) => {
-          el.remove();
-        });
-
-      // Reset grid styles that were modified
-      document
-        .querySelectorAll('[style*="grid-template-columns"]')
-        .forEach((el) => {
-          el.removeAttribute("style");
-        });
+      this.columnRestorers.forEach((restore) => restore());
+      this.columnRestorers.clear();
+      this.observedTracklists.clear();
+      this.originalColumnCounts.forEach((count, grid) => {
+        if (count === null) grid.removeAttribute("aria-colcount");
+        else grid.setAttribute("aria-colcount", count);
+      });
+      this.originalColumnCounts.clear();
 
       // Clear processed elements cache
       this.processedElements = new WeakSet();
@@ -2535,6 +2595,8 @@ import { getInlineEditScope } from "./inlineEditor.selection";
 
   // Playbar feature
   const playbarEnhancer = {
+    observer: null,
+    initialUpdateTimeout: null,
     /**
      * Initialize the playbar feature
      */
@@ -2545,8 +2607,10 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       try {
         // Wait for Player to be ready
         while (!Spicetify.Player || !Spicetify.Player.data) {
+          if (!state.activeExtensions.playbarEnhancer) return;
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
+        if (!state.activeExtensions.playbarEnhancer || state.initialized.playbarEnhancer) return;
 
         // Add listener for song changes
         Spicetify.Player.addEventListener(
@@ -2555,10 +2619,11 @@ import { getInlineEditScope } from "./inlineEditor.selection";
         );
 
         // Initial update
-        setTimeout(this.updateNowPlayingWidget, 1000);
+        this.initialUpdateTimeout = setTimeout(this.updateNowPlayingWidget, 1000);
 
         // Create a MutationObserver to watch for DOM changes
-        const observer = new MutationObserver(() => {
+        this.observer?.disconnect();
+        this.observer = new MutationObserver(() => {
           // Check if Now Playing widget might have been recreated
           if (!document.contains(state.nowPlayingWidgetTagInfo)) {
             state.nowPlayingWidgetTagInfo = null;
@@ -2567,7 +2632,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
         });
 
         // Start observing the body
-        observer.observe(document.body, {
+        this.observer.observe(document.body, {
           childList: true,
           subtree: true,
         });
@@ -2581,7 +2646,7 @@ import { getInlineEditScope } from "./inlineEditor.selection";
     /**
      * Update the Now Playing widget
      */
-    async updateNowPlayingWidget() {
+    updateNowPlayingWidget() {
       try {
         if (!state.activeExtensions.playbarEnhancer) {
           // If feature is disabled, hide existing element and return
@@ -2604,7 +2669,13 @@ import { getInlineEditScope } from "./inlineEditor.selection";
           return;
         }
 
-        // Get or create our tag info element
+        const trackInfo = getSpotifyPlayerAnchor();
+        if (!trackInfo) {
+          if (state.nowPlayingWidgetTagInfo) state.nowPlayingWidgetTagInfo.style.display = "none";
+          return;
+        }
+
+        // Get or create our tag info element only once an insertion target exists.
         if (!state.nowPlayingWidgetTagInfo) {
           state.nowPlayingWidgetTagInfo = document.createElement("div");
           state.nowPlayingWidgetTagInfo.className = "tagify-playbar-info";
@@ -2613,11 +2684,8 @@ import { getInlineEditScope } from "./inlineEditor.selection";
           state.nowPlayingWidgetTagInfo.style.display = "flex";
           state.nowPlayingWidgetTagInfo.style.alignItems = "center";
           state.nowPlayingWidgetTagInfo.style.whiteSpace = "nowrap";
-
-          // Find the track info container and add our element after it
-          const trackInfo = await utils.waitForElement(
-            ".main-nowPlayingWidget-nowPlaying .main-trackInfo-container",
-          );
+        }
+        if (trackInfo.nextElementSibling !== state.nowPlayingWidgetTagInfo) {
           trackInfo.after(state.nowPlayingWidgetTagInfo);
         }
 
@@ -2645,6 +2713,11 @@ import { getInlineEditScope } from "./inlineEditor.selection";
     },
 
     disable() {
+      this.observer?.disconnect();
+      this.observer = null;
+      clearTimeout(this.initialUpdateTimeout);
+      this.initialUpdateTimeout = null;
+      Spicetify.Player?.removeEventListener?.("songchange", this.updateNowPlayingWidget);
       if (state.nowPlayingWidgetTagInfo) {
         // Hide instead of removing (in case Spotify tries to reference it)
         state.nowPlayingWidgetTagInfo.style.display = "none";
@@ -3185,44 +3258,11 @@ import { getInlineEditScope } from "./inlineEditor.selection";
     },
 
     resolveTagFilterLabel(filter) {
-      if (typeof filter === "string") {
-        return utils.resolveTagById(filter)?.name || filter;
-      }
-
-      if (!filter || typeof filter !== "object") {
-        return "Unknown tag";
-      }
-
-      const resolvedTag = utils.resolveTagById(filter.tagId);
-      if (resolvedTag) {
-        return resolvedTag.name;
-      }
-
-      const categories = Array.isArray(state.tagCategories)
-        ? state.tagCategories
-        : [];
-
-      const category = categories.find(
-        (candidate) => candidate.id === filter.categoryId,
+      return resolveExtensionTagFilterLabel(
+        filter,
+        state.tagLookup,
+        state.tagCategories,
       );
-      if (!category) {
-        return filter.tagId || "Unknown tag";
-      }
-
-      const subcategory = Array.isArray(category.subcategories)
-        ? category.subcategories.find(
-            (candidate) => candidate.id === filter.subcategoryId,
-          )
-        : null;
-      if (!subcategory) {
-        return filter.tagId || "Unknown tag";
-      }
-
-      const tag = Array.isArray(subcategory.tags)
-        ? subcategory.tags.find((candidate) => candidate.id === filter.tagId)
-        : null;
-
-      return tag?.name || filter.tagId || "Unknown tag";
     },
 
     formatTagFilterList(filters) {
@@ -3655,11 +3695,12 @@ import { getInlineEditScope } from "./inlineEditor.selection";
       const criteria = smartPlaylist?.criteria || {};
       const criteriaRows = this.getCriteriaRows(criteria);
       const criteriaKey = this.buildCriteriaStateKey(criteria);
+      const criteriaLabelKey = this.hashString(JSON.stringify(criteriaRows));
       const playlistTagKey = (playlistTags || [])
         .map((tag) => tag?.tagId || tag?.id || tag?.name)
         .filter(Boolean)
         .join("|");
-      const stateKey = `${playlistUri}:${smartPlaylist ? isActive ? "active" : "paused" : "not-smart"}:${criteriaKey}:${playlistTagKey}:${rating}:${energy}:${entityType}`;
+      const stateKey = `${playlistUri}:${smartPlaylist ? isActive ? "active" : "paused" : "not-smart"}:${criteriaKey}:${criteriaLabelKey}:${playlistTagKey}:${rating}:${energy}:${entityType}`;
       // Skip expensive style/content rewrites unless the smart-playlist state changed.
       const stateChanged = indicator.dataset.tagifyState !== stateKey;
       const renderContext = {
@@ -3691,17 +3732,50 @@ import { getInlineEditScope } from "./inlineEditor.selection";
 
         indicator.title = smartPlaylist
           ? isActive
-            ? "Smart playlist. Hover for criteria details."
-            : "Smart playlist is paused. Hover for criteria details."
+            ? "Smart playlist. Click to edit filters; hover for criteria details."
+            : "Smart playlist is paused. Click to edit filters; hover for criteria details."
           : "";
         indicator.setAttribute(
           "aria-label",
           smartPlaylist
             ? isActive
-              ? "Smart playlist indicator. Focus for criteria details."
-              : "Smart playlist paused indicator. Focus for criteria details."
+              ? "Smart playlist indicator. Click to edit filters."
+              : "Smart playlist paused indicator. Click to edit filters."
             : `Tagged ${entityType} indicator.`,
         );
+        indicator.style.cursor = smartPlaylist ? "pointer" : "default";
+        if (smartPlaylist) {
+          indicator.setAttribute("role", "button");
+        } else {
+          indicator.removeAttribute("role");
+        }
+        indicator.onclick = smartPlaylist
+          ? (event) => {
+              event.stopPropagation();
+              this.hideFloatingPopover();
+              Spicetify.Platform.History.push({
+                pathname: `/${APP_NAME}`,
+                search: `?editSmartPlaylistId=${encodeURIComponent(
+                  smartPlaylist.playlistId,
+                )}`,
+                state: { editSmartPlaylistId: smartPlaylist.playlistId },
+              });
+            }
+          : null;
+        indicator.onkeydown = smartPlaylist
+          ? (event) => {
+              if (event.target !== indicator) {
+                return;
+              }
+
+              if (event.key !== "Enter" && event.key !== " ") {
+                return;
+              }
+
+              event.preventDefault();
+              indicator.click();
+            }
+          : null;
         indicator.dataset.tagifyState = stateKey;
         this.needsLayoutRecalc = true;
       }
@@ -4027,7 +4101,10 @@ import { getInlineEditScope } from "./inlineEditor.selection";
     };
 
     window.addEventListener(DATA_UPDATED_EVENT, dataUpdateListener);
-    window.addEventListener(SMART_PLAYLISTS_UPDATED_EVENT, () => {
+    window.addEventListener(SMART_PLAYLISTS_UPDATED_EVENT, (event) => {
+      if (Array.isArray(event.detail?.playlists)) {
+        smartPlaylistCache = event.detail.playlists;
+      }
       smartPlaylistIndicatorEnhancer.scheduleUpdate();
     });
   };

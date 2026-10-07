@@ -1,5 +1,5 @@
-import React, { useMemo } from "react";
-import { RefreshCw, X } from "lucide-react";
+import React, { useCallback, useMemo, useState } from "react";
+import { ExternalLink, RefreshCw, X } from "lucide-react";
 import ReactStars from "react-rating-stars-component";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faStar, faStarHalf } from "@fortawesome/free-solid-svg-icons";
@@ -12,6 +12,8 @@ import { formatTimestamp } from "@/utils/formatters";
 import { buildTagAccentCssVars } from "@/features/tag-data/utils/tagAccent";
 import type { ArtistMetadata } from "@/features/tag-data";
 import styles from "./ArtistDetails.module.css";
+import communityLinkStyles from "../../community/CommunityEntityLink.module.css";
+import { CommunityEntityLens, getCommunityEntityUrl } from "@/features/community";
 
 interface ArtistDetailsProps {
   artistUri: string;
@@ -59,6 +61,14 @@ const ArtistDetails: React.FC<ArtistDetailsProps> = ({
     .sort(compareResolvedTagsByTaxonomyOrder);
   const rating = artistData?.rating || 0;
   const energy = artistData?.energy || 0;
+  const [communityAvailability, setCommunityAvailability] = useState<{
+    entityUri: string;
+    hasPerspectives: boolean;
+  } | null>(null);
+  const handleCommunityAvailability = useCallback((entityUri: string, hasPerspectives: boolean) => {
+    setCommunityAvailability({ entityUri, hasPerspectives });
+  }, []);
+  const communityUrl = getCommunityEntityUrl(artistUri);
 
   const handleOpenArtist = () => {
     onOpenArtist(artistUri);
@@ -142,6 +152,18 @@ const ArtistDetails: React.FC<ArtistDetailsProps> = ({
         </div>
 
         <div className={styles.actions}>
+          {communityUrl && communityAvailability?.entityUri === artistUri && communityAvailability.hasPerspectives ? (
+            <a
+              className={communityLinkStyles.communityLink}
+              href={communityUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open this artist in Tagify Community"
+              aria-label="Open this artist in Tagify Community"
+            >
+              <ExternalLink size={14} aria-hidden="true" />
+            </a>
+          ) : null}
           <button
             className={`${styles.button} ${styles.secondaryButton}`}
             onClick={() => onRefreshMetadata(artistUri)}
@@ -240,18 +262,14 @@ const ArtistDetails: React.FC<ArtistDetailsProps> = ({
                     className={styles.tagLabelButton}
                     onClick={() => onToggleTagIncludeOff(tag.id)}
                     aria-label={
-                      isActive
-                        ? `Exclude "${tag.name}"`
-                        : isExcluded
-                          ? `Remove "${tag.name}" filter`
-                          : `Include "${tag.name}"`
+                      isActive || isExcluded
+                        ? `Remove "${tag.name}" filter`
+                        : `Include "${tag.name}"`
                     }
                     title={
-                      isActive
-                        ? `Exclude "${tag.name}" from artist results`
-                        : isExcluded
-                          ? `Remove "${tag.name}" from artist filters`
-                          : `Filter artists by "${tag.name}"`
+                      isActive || isExcluded
+                        ? `Remove "${tag.name}" from artist filters`
+                        : `Filter artists by "${tag.name}"`
                     }
                   >
                     {tag.name}
@@ -274,6 +292,7 @@ const ArtistDetails: React.FC<ArtistDetailsProps> = ({
           <p className={styles.noTags}>No tags applied</p>
         )}
       </div>
+      <CommunityEntityLens entityUri={artistUri} onAvailabilityChange={handleCommunityAvailability} />
     </section>
   );
 };

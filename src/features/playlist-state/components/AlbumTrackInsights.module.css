@@ -1,0 +1,146 @@
+.insights {
+  background: rgb(0 0 0 / 16%);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.header {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  justify-content: space-between;
+}
+
+.title {
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.progressText {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  margin: 2px 0 0;
+}
+
+.stat {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+}
+
+.stat dt {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.stat dd {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 5px;
+  margin: 0;
+}
+
+.starIcon {
+  align-self: center;
+  color: #ffd700;
+}
+
+.statValue {
+  color: var(--spice-text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.energyValue {
+  color: #1e90ff;
+}
+
+.statSource {
+  color: var(--spice-subtext);
+  font-size: 11px;
+}
+
+.commonTags {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rowLabel {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  margin-right: 2px;
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag {
+  align-items: center;
+  background: rgb(255 255 255 / 6%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  color: var(--spice-text);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  line-height: 1.2;
+  padding: 4px 6px 4px 10px;
+}
+
+.tag:hover {
+  background: rgb(255 255 255 / 12%);
+}
+
+.tagAccented {
+  background: color-mix(in srgb, rgb(0 0 0 / 24%) 72%, var(--tag-accent-tint) 28%);
+  border-color: var(--tag-accent-border, rgb(255 255 255 / 12%));
+  color: var(--tag-accent-text, var(--spice-text));
+}
+
+.tagCount {
+  background: rgb(0 0 0 / 28%);
+  border-radius: 999px;
+  color: inherit;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  min-width: 18px;
+  opacity: 0.85;
+  padding: 2px 5px;
+  text-align: center;
+}
+
+.tagActive,
+.tagActive.tagAccented {
+  background: color-mix(in srgb, var(--tag-accent-dot, #1e90ff) 64%, black 36%);
+  border-color: var(--tag-accent-border, rgb(255 255 255 / 34%));
+  color: var(--tag-accent-text, white);
+  font-weight: 700;
+}
+
+.tagExcluded,
+.tagExcluded.tagAccented {
+  background: #b91c1c;
+  border-color: rgb(248 113 113 / 55%);
+  color: white;
+  text-decoration: line-through;
+}

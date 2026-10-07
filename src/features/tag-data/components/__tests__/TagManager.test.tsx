@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import TagManager from "../TagManager";
 import { buildTaxonomyFromCategoryTree } from "@/utils/tagTaxonomy";
@@ -87,6 +87,27 @@ function renderTagManager(overrides: Partial<React.ComponentProps<typeof TagMana
   };
 }
 
+function mockCommunityCatalog(tags: Array<Record<string, unknown>>) {
+  class MockXMLHttpRequest {
+    responseType = "";
+    timeout = 0;
+    status = 200;
+    response: unknown = { tags };
+    responseText = JSON.stringify({ tags });
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    ontimeout: (() => void) | null = null;
+
+    open = vi.fn();
+    setRequestHeader = vi.fn();
+    send = vi.fn(() => {
+      queueMicrotask(() => this.onload?.());
+    });
+  }
+
+  vi.stubGlobal("XMLHttpRequest", MockXMLHttpRequest);
+}
+
 describe("TagManager", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -98,7 +119,7 @@ describe("TagManager", () => {
   it("shows the approved Taxonomy label", () => {
     renderTagManager();
 
-    expect(screen.getByText("Categories/subcategories")).toBeInTheDocument();
+    expect(screen.getByText("Categories and folders")).toBeInTheDocument();
     expect(
       screen.queryByText("Drag categories and subcategories here."),
     ).not.toBeInTheDocument();
@@ -198,13 +219,484 @@ describe("TagManager", () => {
     });
   });
 
+  it("keeps a clicked top-level category selected and allows tags directly under it", async () => {
+    const user = userEvent.setup();
+    const onSelectedSubcategoryIdChange = vi.fn();
+    const promptSpy = vi.spyOn(window, "prompt");
+    const { onReplaceTaxonomy } = renderTagManager({ onSelectedSubcategoryIdChange });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Selected path")).toHaveTextContent("Genre/Electronic");
+    });
+
+    await user.click(await screen.findByLabelText("Select category Mood"));
+
+    await waitFor(() => {
+      expect(onSelectedSubcategoryIdChange).toHaveBeenLastCalledWith(null);
+      expect(screen.getByLabelText("Selected path")).toHaveTextContent("Mood");
+    });
+    expect(screen.getByPlaceholderText(/Add tag to Mood/i)).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText(/Add tag to Mood/i), "Reflective");
+    await user.click(screen.getByRole("button", { name: /Add Tag/i }));
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+    const savedTaxonomy = onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy;
+    const moodCategoryId = savedTaxonomy.categoryOrder.find(
+      (categoryId) => savedTaxonomy.categoriesById[categoryId]?.name === "Mood",
+    );
+    const reflectiveTag = Object.values(savedTaxonomy.tagsById).find(
+      (tag) => tag.name === "Reflective",
+    );
+
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(reflectiveTag?.parentId).toBe(moodCategoryId);
+    expect(savedTaxonomy.childrenByParentId?.[moodCategoryId!]).toContain(
+      reflectiveTag?.id,
+    );
+  });
+
+  it("imports community tags directly into the selected top-level category", async () => {
+    const user = userEvent.setup();
+    const { onReplaceTaxonomy } = renderTagManager();
+    mockCommunityCatalog([
+      {
+        key: "organic",
+        name: "Organic",
+        songCount: 42,
+        contributorCount: 5,
+        assignmentCount: 51,
+      },
+    ]);
+
+    await user.click(screen.getByRole("tab", { name: "Community" }));
+    await user.click(await screen.findByRole("button", { name: /^Mood\b/ }));
+    const organicRow = (await screen.findByText("Organic")).closest("article");
+    expect(organicRow).not.toBeNull();
+
+    await user.click(within(organicRow!).getByRole("button", { name: "Import" }));
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+    const savedTaxonomy = onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy;
+    const moodCategoryId = savedTaxonomy.categoryOrder.find(
+      (categoryId) => savedTaxonomy.categoriesById[categoryId]?.name === "Mood",
+    );
+    const organicTag = Object.values(savedTaxonomy.tagsById).find(
+      (tag) => tag.name === "Organic",
+    );
+
+    expect(organicTag?.parentId).toBe(moodCategoryId);
+    expect(organicTag?.subcategoryId).toBe(moodCategoryId);
+    expect(savedTaxonomy.childrenByParentId?.[moodCategoryId!]).toContain(organicTag?.id);
+    expect(
+      Object.values(savedTaxonomy.subcategoriesById).some(
+        (subcategory) => subcategory.name === "Community Imports",
+      ),
+    ).toBe(false);
+  });
+
+  it("opens the Community filtered song search when a community tag row is clicked", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    renderTagManager();
+    mockCommunityCatalog([
+      {
+        key: "night drive",
+        name: "Night Drive",
+        songCount: 12,
+        contributorCount: 3,
+        assignmentCount: 14,
+      },
+    ]);
+
+    await user.click(screen.getByRole("tab", { name: "Community" }));
+    const tagLink = await screen.findByRole("link", {
+      name: "Open Community songs tagged Night Drive",
+    });
+
+    await user.click(tagLink);
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://community.tagify.fm/search?tag=label%3ANight%2520Drive",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
+  it("defaults community sorting to most users and supports ascending order", async () => {
+    const user = userEvent.setup();
+    renderTagManager();
+    mockCommunityCatalog([
+      {
+        key: "solo favorite",
+        name: "Solo Favorite",
+        songCount: 120,
+        contributorCount: 1,
+        assignmentCount: 140,
+      },
+      {
+        key: "group favorite",
+        name: "Group Favorite",
+        songCount: 40,
+        contributorCount: 8,
+        assignmentCount: 44,
+      },
+      {
+        key: "small crowd",
+        name: "Small Crowd",
+        songCount: 20,
+        contributorCount: 3,
+        assignmentCount: 22,
+      },
+    ]);
+
+    await user.click(screen.getByRole("tab", { name: "Community" }));
+
+    expect(screen.getByRole("combobox", { name: "Sort community tags" })).toHaveValue("contributors");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("Most users");
+    expect(screen.queryByRole("option", { name: "Most assignments" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Niche" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Minimum community user count" })).not.toBeInTheDocument();
+
+    const getCommunityTagNames = () =>
+      screen
+        .getAllByRole("link", { name: /Open Community songs tagged/ })
+        .map((row) => within(row).getByText(/Favorite|Crowd/).textContent);
+
+    await screen.findByText("Group Favorite");
+    expect(getCommunityTagNames()).toEqual(["Group Favorite", "Small Crowd", "Solo Favorite"]);
+    expect(screen.getByText("120 public tracks · 1 user")).toBeInTheDocument();
+    expect(screen.queryByText(/assignments?/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Sort community tags ascending" }));
+
+    expect(getCommunityTagNames()).toEqual(["Solo Favorite", "Small Crowd", "Group Favorite"]);
+  });
+
+  it("does not open Community search when importing a community tag", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    renderTagManager();
+    mockCommunityCatalog([
+      {
+        key: "organic",
+        name: "Organic",
+        songCount: 42,
+        contributorCount: 5,
+        assignmentCount: 51,
+      },
+    ]);
+
+    await user.click(screen.getByRole("tab", { name: "Community" }));
+    const organicRow = (await screen.findByText("Organic")).closest("article");
+    expect(organicRow).not.toBeNull();
+
+    await user.click(within(organicRow!).getByRole("button", { name: "Import" }));
+
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it("creates nested folders under an existing folder", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "prompt").mockReturnValueOnce("Sub Mood");
+    const { onReplaceTaxonomy } = renderTagManager();
+
+    await user.click(await screen.findByLabelText("Select subcategory Electronic"));
+    const electronicRow = screen
+      .getByLabelText("Select subcategory Electronic")
+      .closest("div");
+    const nestedAddButton = electronicRow?.nextElementSibling as HTMLElement | null;
+
+    expect(nestedAddButton).toHaveTextContent("+ Add Subfolder");
+    await user.click(nestedAddButton!);
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+    const savedTaxonomy = onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy;
+    const electronicFolder = Object.values(savedTaxonomy.subcategoriesById).find(
+      (subcategory) => subcategory.name === "Electronic",
+    );
+    const subMoodFolder = Object.values(savedTaxonomy.subcategoriesById).find(
+      (subcategory) => subcategory.name === "Sub Mood",
+    );
+
+    expect(subMoodFolder?.parentId).toBe(electronicFolder?.id);
+    expect(savedTaxonomy.childrenByParentId?.[electronicFolder!.id]).toContain(
+      subMoodFolder?.id,
+    );
+  });
+
+  it("expands and collapses nested folders", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "prompt").mockReturnValueOnce("Sub Mood");
+    renderTagManager();
+
+    await user.click(await screen.findByLabelText("Select subcategory Electronic"));
+    const electronicRow = screen
+      .getByLabelText("Select subcategory Electronic")
+      .closest("div");
+    const nestedAddButton = electronicRow?.nextElementSibling as HTMLElement | null;
+    await user.click(nestedAddButton!);
+
+    expect(await screen.findByLabelText("Select subcategory Sub Mood")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Collapse Electronic" }));
+    expect(screen.queryByLabelText("Select subcategory Sub Mood")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Expand Electronic" }));
+    expect(await screen.findByLabelText("Select subcategory Sub Mood")).toBeInTheDocument();
+  });
+
+  it("renames a tag with spaces inside Tagify instead of using Spotify's native prompt", async () => {
+    const user = userEvent.setup();
+    const promptSpy = vi.spyOn(window, "prompt");
+    const { onReplaceTaxonomy } = renderTagManager();
+
+    await user.click(screen.getByRole("button", { name: "Rename tag House" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename tag" });
+    const nameInput = within(dialog).getByRole("textbox", { name: "Rename tag" });
+    await user.clear(nameInput);
+    await user.type(nameInput, "Deep House");
+    expect(nameInput).toHaveValue("Deep House");
+    expect(promptSpy).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Save name" }));
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+    const savedTaxonomy = onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy;
+    expect(Object.values(savedTaxonomy.tagsById).some((tag) => tag.name === "Deep House")).toBe(true);
+  });
+
+  it("shows and edits tags in a nested folder after selecting it", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "prompt").mockReturnValueOnce("Sub Mood");
+    const { onReplaceTaxonomy } = renderTagManager();
+
+    await user.click(screen.getByLabelText("Select subcategory Electronic"));
+    const electronicRow = screen.getByLabelText("Select subcategory Electronic").closest("div");
+    await user.click(electronicRow?.nextElementSibling as HTMLElement);
+    expect(screen.getByLabelText("Select subcategory Sub Mood")).not.toHaveAttribute("aria-describedby");
+    await user.click(screen.getByLabelText("Select subcategory Sub Mood"));
+    expect(screen.getByLabelText("Selected path")).toHaveTextContent("Genre/Electronic/Sub Mood");
+    const input = screen.getByPlaceholderText("Add tag to Sub Mood…");
+    await user.type(input, "Dream Pop");
+    await user.click(screen.getByRole("button", { name: "Add Tag" }));
+    expect(screen.getByText("Dream Pop")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Select subcategory Electronic"));
+    await user.click(screen.getByLabelText("Select subcategory Sub Mood"));
+    expect(screen.getByText("Dream Pop")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+    const savedTaxonomy = onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy;
+    expect(Object.values(savedTaxonomy.tagsById).some((tag) => tag.name === "Dream Pop")).toBe(true);
+  });
+
+  it("nests a sibling folder when it is dropped onto another folder", async () => {
+    const user = userEvent.setup();
+    const taxonomy = buildTaxonomyFromCategoryTree([
+      {
+        id: "genres-styles",
+        name: "Genres & Styles",
+        subcategories: [
+          { id: "genres", name: "Genres", tags: [] },
+          { id: "source", name: "Source", tags: [] },
+        ],
+      },
+    ]);
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      getData: vi.fn(),
+    };
+    const { onReplaceTaxonomy } = renderTagManager({ taxonomy });
+
+    const sourceRow = screen
+      .getByLabelText("Select subcategory Source")
+      .closest("div")!;
+    const genresRow = screen
+      .getByLabelText("Select subcategory Genres")
+      .closest("div")!;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 300,
+      bottom: 100,
+      width: 300,
+      height: 100,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.dragStart(sourceRow, { dataTransfer });
+    const dragOverEvent = createEvent.dragOver(genresRow, { dataTransfer });
+    const dropEvent = createEvent.drop(genresRow, { dataTransfer });
+    Object.defineProperty(dragOverEvent, "clientY", { value: 50 });
+    Object.defineProperty(dropEvent, "clientY", { value: 50 });
+    fireEvent(genresRow, dragOverEvent);
+    fireEvent(genresRow, dropEvent);
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+    const savedTaxonomy = onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy;
+    const categoryId = savedTaxonomy.categoryOrder[0];
+    const genresFolder = Object.values(savedTaxonomy.subcategoriesById).find(
+      (subcategory) => subcategory.name === "Genres",
+    );
+    const sourceFolder = Object.values(savedTaxonomy.subcategoriesById).find(
+      (subcategory) => subcategory.name === "Source",
+    );
+
+    expect(savedTaxonomy.childrenByParentId?.[categoryId]).toEqual([
+      genresFolder?.id,
+    ]);
+    expect(sourceFolder?.parentId).toBe(genresFolder?.id);
+    expect(savedTaxonomy.childrenByParentId?.[genresFolder!.id]).toContain(
+      sourceFolder?.id,
+    );
+  });
+
+  it("reorders sibling folders when dropped on a row edge", async () => {
+    const user = userEvent.setup();
+    const taxonomy = buildTaxonomyFromCategoryTree([
+      {
+        id: "genres-styles",
+        name: "Genres & Styles",
+        subcategories: [
+          { id: "genres", name: "Genres", tags: [] },
+          { id: "source", name: "Source", tags: [] },
+        ],
+      },
+    ]);
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      getData: vi.fn(),
+    };
+    const { onReplaceTaxonomy } = renderTagManager({ taxonomy });
+
+    const sourceRow = screen
+      .getByLabelText("Select subcategory Source")
+      .closest("div")!;
+    const genresRow = screen
+      .getByLabelText("Select subcategory Genres")
+      .closest("div")!;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 300,
+      bottom: 100,
+      width: 300,
+      height: 100,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.dragStart(sourceRow, { dataTransfer });
+    fireEvent.dragOver(genresRow, { dataTransfer, clientY: 5 });
+    fireEvent.drop(genresRow, { dataTransfer, clientY: 5 });
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+    const savedTaxonomy = onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy;
+    const categoryId = savedTaxonomy.categoryOrder[0];
+    const genresFolder = Object.values(savedTaxonomy.subcategoriesById).find(
+      (subcategory) => subcategory.name === "Genres",
+    );
+    const sourceFolder = Object.values(savedTaxonomy.subcategoriesById).find(
+      (subcategory) => subcategory.name === "Source",
+    );
+
+    expect(savedTaxonomy.childrenByParentId?.[categoryId]).toEqual([
+      sourceFolder?.id,
+      genresFolder?.id,
+    ]);
+    expect(sourceFolder?.parentId).toBe(categoryId);
+  });
+
+  it("reorders top-level categories when dropped on a category row edge", async () => {
+    const user = userEvent.setup();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      getData: vi.fn(),
+    };
+    const { onReplaceTaxonomy } = renderTagManager();
+
+    const genreRow = screen.getByLabelText("Select category Genre").closest("div")!;
+    const moodRow = screen.getByLabelText("Select category Mood").closest("div")!;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 300,
+      bottom: 100,
+      width: 300,
+      height: 100,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.dragStart(moodRow, { dataTransfer });
+    fireEvent.dragOver(genreRow, { dataTransfer, clientY: 5 });
+    fireEvent.drop(genreRow, { dataTransfer, clientY: 5 });
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+    const savedTaxonomy = onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy;
+    expect(savedTaxonomy.categoryOrder.map((categoryId) => savedTaxonomy.categoriesById[categoryId]?.name)).toEqual([
+      "Mood",
+      "Genre",
+    ]);
+  });
+
+  it("reorders tags with native drag and drop", async () => {
+    const user = userEvent.setup();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      getData: vi.fn(),
+    };
+    const { onReplaceTaxonomy } = renderTagManager();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 300,
+      bottom: 100,
+      width: 300,
+      height: 100,
+      toJSON: () => ({}),
+    });
+
+    const technoChip = screen.getByText("Techno").closest('[draggable="true"]')!;
+    const houseChip = screen.getByText("House").closest('[draggable="true"]')!;
+    fireEvent.dragStart(technoChip, { dataTransfer });
+    const dragOverEvent = createEvent.dragOver(houseChip, { dataTransfer });
+    const dropEvent = createEvent.drop(houseChip, { dataTransfer });
+    Object.defineProperty(dragOverEvent, "clientY", { value: 5 });
+    Object.defineProperty(dropEvent, "clientY", { value: 5 });
+    fireEvent(houseChip, dragOverEvent);
+    fireEvent(houseChip, dropEvent);
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+    const savedTaxonomy = onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy;
+    const electronicFolder = Object.values(savedTaxonomy.subcategoriesById).find(
+      (subcategory) => subcategory.name === "Electronic",
+    );
+    expect(
+      savedTaxonomy.childrenByParentId?.[electronicFolder!.id].map(
+        (childId) => savedTaxonomy.tagsById[childId]?.name,
+      ),
+    ).toEqual(["Techno", "House"]);
+  });
+
   it("filters the tree without losing the current selection", async () => {
     const user = userEvent.setup();
     renderTagManager();
 
     await user.click(await screen.findByLabelText("Select subcategory Percussion"));
     const searchInput = screen.getByPlaceholderText(
-      "Search categories, subcategories, and tags…",
+      "Search categories, folders, and tags…",
     );
 
     await user.type(searchInput, "House");

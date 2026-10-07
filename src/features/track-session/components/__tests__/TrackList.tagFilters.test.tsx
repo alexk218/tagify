@@ -3,6 +3,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { useFilterState } from "@/features/filter-state";
+import { usePlaylistState } from "@/features/playlist-state";
+import type { SmartPlaylistCriteria } from "@/features/smart-playlists";
 import { TagTaxonomy } from "@/types/tagData";
 import TrackList from "../TrackList";
 
@@ -42,8 +44,27 @@ const taxonomy: TagTaxonomy = {
   ungroupedColorIds: [],
 };
 
-function TrackListHarness() {
+interface TrackListHarnessProps {
+  smartPlaylists?: SmartPlaylistCriteria[];
+  requestedSmartPlaylistEditId?: string | null;
+  onSmartPlaylistEditRequestHandled?: () => void;
+  useRealPlaylistCreation?: boolean;
+  onCreateSmartPlaylist?: (criteria: SmartPlaylistCriteria) => Promise<void>;
+  onSetSmartPlaylists?: (value: React.SetStateAction<SmartPlaylistCriteria[]>) => Promise<void>;
+  onSyncPlaylist?: (criteria: SmartPlaylistCriteria) => Promise<void>;
+}
+
+function TrackListHarness({
+  smartPlaylists = [],
+  requestedSmartPlaylistEditId = null,
+  onSmartPlaylistEditRequestHandled,
+  useRealPlaylistCreation = false,
+  onCreateSmartPlaylist = vi.fn(),
+  onSetSmartPlaylists = vi.fn(),
+  onSyncPlaylist = vi.fn().mockResolvedValue(undefined),
+}: TrackListHarnessProps = {}) {
   const filters = useFilterState("tracks");
+  const { createPlaylistFromFilters } = usePlaylistState();
 
   return (
     <TrackList
@@ -84,14 +105,15 @@ function TrackListHarness() {
       onPlayTrack={vi.fn()}
       onTagTrack={vi.fn()}
       onClearTagFilters={filters.clearTagFilters}
-      onCreatePlaylist={vi.fn().mockResolvedValue(null)}
-      onCreateSmartPlaylist={vi.fn()}
-      smartPlaylists={[]}
-      onSetSmartPlaylists={vi.fn()}
-      onSyncPlaylist={vi.fn().mockResolvedValue(undefined)}
-      onCleanupDeletedSmartPlaylists={vi.fn().mockResolvedValue(undefined)}
+      onCreatePlaylist={useRealPlaylistCreation ? createPlaylistFromFilters : vi.fn().mockResolvedValue(null)}
+      onCreateSmartPlaylist={onCreateSmartPlaylist}
+      smartPlaylists={smartPlaylists}
+      onSetSmartPlaylists={onSetSmartPlaylists}
+      onSyncPlaylist={onSyncPlaylist}
       onExportSmartPlaylists={vi.fn()}
       onImportSmartPlaylists={vi.fn()}
+      requestedSmartPlaylistEditId={requestedSmartPlaylistEditId}
+      onSmartPlaylistEditRequestHandled={onSmartPlaylistEditRequestHandled}
     />
   );
 }
@@ -105,6 +127,41 @@ describe("TrackList tag filtering", () => {
     }
 
     vi.stubGlobal("IntersectionObserver", IntersectionObserverMock);
+  });
+
+  it("saves a new smart-playlist rule before opening its Spotify playlist", async () => {
+    const user = userEvent.setup();
+    const historyPush = vi.spyOn(Spicetify.Platform.History, "push");
+    const createSpotifyPlaylist = vi.spyOn(Spicetify.Platform.RootlistAPI as any, "createPlaylist")
+      .mockResolvedValue("spotify:playlist:new-smart-playlist");
+    const addSpotifyTracks = vi.spyOn(Spicetify.Platform.PlaylistAPI as any, "add")
+      .mockResolvedValue(undefined);
+    let finishSavingRule!: () => void;
+    const savingRule = new Promise<void>((resolve) => { finishSavingRule = resolve; });
+    const onCreateSmartPlaylist = vi.fn().mockReturnValue(savingRule);
+
+    try {
+      render(<TrackListHarness useRealPlaylistCreation onCreateSmartPlaylist={onCreateSmartPlaylist} />);
+      await user.click(screen.getByRole("button", { name: /^Filters/ }));
+      await user.click(screen.getByRole("button", { name: "House" }));
+      await waitFor(() => expect(screen.getByText("House Track")).toBeInTheDocument());
+      await user.click(screen.getByRole("button", { name: "Create Playlist" }));
+      await screen.findByRole("heading", { name: "Create Playlist" });
+      await user.click(screen.getByLabelText(/Smart playlist/i));
+      await user.click(screen.getAllByRole("button", { name: "Create Playlist" })[1]);
+
+      await waitFor(() => expect(onCreateSmartPlaylist).toHaveBeenCalledTimes(1));
+      expect(createSpotifyPlaylist).toHaveBeenCalledTimes(1);
+      expect(addSpotifyTracks).toHaveBeenCalledTimes(1);
+      expect(historyPush).not.toHaveBeenCalled();
+
+      finishSavingRule();
+      await waitFor(() => expect(historyPush).toHaveBeenCalledWith("/playlist/new-smart-playlist"));
+    } finally {
+      historyPush.mockRestore();
+      createSpotifyPlaylist.mockRestore();
+      addSpotifyTracks.mockRestore();
+    }
   });
 
   it("cycles a tag through Match, NOT, and off without a separate NOT lane", async () => {
@@ -229,5 +286,90 @@ describe("TrackList tag filtering", () => {
     expect(houseFilter).toHaveAccessibleName("House");
     expect(screen.getByText("House Track")).toBeInTheDocument();
     expect(screen.getByText("Chill Track")).toBeInTheDocument();
+  });
+
+  it("opens a prominent edit state from a playlist indicator request", async () => {
+    const onRequestHandled = vi.fn();
+    const smartPlaylist: SmartPlaylistCriteria = {
+      playlistId: "smart-house",
+      playlistName: "Smart House",
+      criteria: {
+        includeTagClauses: [
+          {
+            tagIds: ["house"],
+            excludedTagIds: [],
+            operator: "OR",
+          },
+        ],
+        clauseConnectors: [],
+        ratingFilters: [5],
+        energyMinFilter: null,
+        energyMaxFilter: null,
+        bpmMinFilter: null,
+        bpmMaxFilter: null,
+        camelotKeyFilters: [],
+      },
+      isActive: true,
+      createdAt: 1,
+      lastSyncAt: 1,
+      smartPlaylistTrackUris: ["spotify:track:house"],
+    };
+
+    render(
+      <TrackListHarness
+        smartPlaylists={[smartPlaylist]}
+        requestedSmartPlaylistEditId={smartPlaylist.playlistId}
+        onSmartPlaylistEditRequestHandled={onRequestHandled}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("status", { name: "Editing Smart House" }),
+    ).toHaveTextContent("Editing Smart House");
+    expect(
+      screen.getByRole("button", { name: "Save Smart Playlist" }),
+    ).toHaveAttribute("title", "Save filters to Smart House");
+    expect(screen.getByRole("button", { name: "MATCH House" })).toBeEnabled();
+    expect(onRequestHandled).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for edited smart-playlist rules to save before syncing", async () => {
+    const user = userEvent.setup();
+    const smartPlaylist: SmartPlaylistCriteria = {
+      playlistId: "smart-house",
+      playlistName: "Smart House",
+      criteria: {
+        includeTagClauses: [{ tagIds: ["house"], excludedTagIds: [], operator: "OR" }],
+        clauseConnectors: [],
+        ratingFilters: [],
+        energyMinFilter: null,
+        energyMaxFilter: null,
+        bpmMinFilter: null,
+        bpmMaxFilter: null,
+      },
+      isActive: true,
+      createdAt: 1,
+      lastSyncAt: 1,
+      smartPlaylistTrackUris: [],
+    };
+    let finishSaving!: () => void;
+    const saving = new Promise<void>((resolve) => { finishSaving = resolve; });
+    const onSetSmartPlaylists = vi.fn().mockReturnValue(saving);
+    const onSyncPlaylist = vi.fn().mockResolvedValue(undefined);
+
+    render(<TrackListHarness
+      smartPlaylists={[smartPlaylist]}
+      requestedSmartPlaylistEditId={smartPlaylist.playlistId}
+      onSetSmartPlaylists={onSetSmartPlaylists}
+      onSyncPlaylist={onSyncPlaylist}
+    />);
+    await user.click(await screen.findByRole("button", { name: "Save Smart Playlist" }));
+    await user.click(screen.getByRole("button", { name: "Save Filter Changes" }));
+    await waitFor(() => expect(onSetSmartPlaylists).toHaveBeenCalledTimes(1));
+    expect(onSyncPlaylist).not.toHaveBeenCalled();
+    finishSaving();
+    await waitFor(() => expect(onSyncPlaylist).toHaveBeenCalledWith(expect.objectContaining({
+      playlistId: "smart-house",
+    })));
   });
 });

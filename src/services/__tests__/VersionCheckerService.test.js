@@ -303,55 +303,6 @@ describe("VersionCheckerService", () => {
     });
   });
 
-  describe("Version Dismissal", () => {
-    // Mock localStorage for Vitest
-    const mockLocalStorage = (() => {
-      let store = {};
-
-      return {
-        getItem: vi.fn((key) => store[key] || null),
-        setItem: vi.fn((key, value) => {
-          store[key] = value.toString();
-        }),
-        removeItem: vi.fn((key) => {
-          delete store[key];
-        }),
-        clear: vi.fn(() => {
-          store = {};
-        }),
-      };
-    })();
-
-    beforeEach(() => {
-      // Mock localStorage
-      Object.defineProperty(global, "localStorage", {
-        value: mockLocalStorage,
-        writable: true,
-      });
-
-      // Clear localStorage before each test
-      mockLocalStorage.clear();
-      vi.clearAllMocks();
-    });
-
-    test("can dismiss version permanently", () => {
-      VersionCheckerService.dismissVersion("1.0.3");
-      expect(VersionCheckerService.isDismissed("1.0.3")).toBe(true);
-      expect(VersionCheckerService.isDismissed("1.0.4")).toBe(false);
-    });
-
-    test("persists dismissed versions in localStorage", () => {
-      VersionCheckerService.dismissVersion("1.0.3");
-
-      // Verify localStorage was called
-      expect(mockLocalStorage.setItem).toHaveBeenCalled();
-
-      // Create new service instance to test persistence
-      const newChecker = new VersionCheckerService("1.0.2", "alexk218", "tagify");
-      expect(VersionCheckerService.isDismissed("1.0.3")).toBe(true);
-    });
-  });
-
   describe("Real-world Scenarios", () => {
     test("typical development progression", async () => {
       const scenarios = [

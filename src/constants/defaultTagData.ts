@@ -192,4 +192,5 @@ export const defaultTagData: TagDataStructure = {
   tracks: {},
   playlists: {},
   artists: {},
+  smartPlaylists: [],
 };

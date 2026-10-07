@@ -1,5 +1,42 @@
+import { renderEnergyControl } from "./inlineEditor.energyControl";
 import { renderStarRatingControl } from "./inlineEditor.ratingControl";
 import { createTagStatusIndicator } from "./inlineEditor.tagIndicator";
+
+function createEnergyLabel(energy, compact, onOpenEnergy) {
+  if (energy <= 0) return null;
+  const label = document.createElement("button");
+  label.type = "button";
+  label.className = "tagify-energy-rating-label";
+  label.textContent = `E ${energy}`;
+  label.setAttribute("aria-label", `Edit energy ${energy}`);
+  label.style.padding = "0";
+  label.style.border = "0";
+  label.style.background = "transparent";
+  label.style.color = "var(--spice-subtext)";
+  label.style.fontSize = compact ? "10px" : "11px";
+  label.style.lineHeight = "1";
+  label.style.cursor = "pointer";
+  label.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onOpenEnergy?.(label);
+  });
+  return label;
+}
+
+function createRatingControl({ rating, compact, getRateActionLabel, onRate }) {
+  const ratingControl = document.createElement("span");
+  ratingControl.className = "tagify-star-rating-control";
+  ratingControl.style.display = "inline-flex";
+  ratingControl.style.alignItems = "center";
+  ratingControl.addEventListener("click", (event) => event.stopPropagation());
+  renderStarRatingControl(ratingControl, {
+    rating,
+    compact,
+    getActionLabel: getRateActionLabel,
+    onRate,
+  });
+  return ratingControl;
+}
 
 export function renderInlineEditorPresentation(
   control,
@@ -7,14 +44,69 @@ export function renderInlineEditorPresentation(
     rating = 0,
     energy = 0,
     tagStatus = "none",
-    tagListTooltip = "",
+    tagGroups = [],
     compact = false,
+    displayMode = "combined",
     getRateActionLabel,
+    getEnergyActionLabel,
     onRate,
+    onEnergy,
+    onOpenEnergy,
+    onOpenTags,
   },
 ) {
   control.replaceChildren();
-  control.style.display = "grid";
+  const selectedMode = ["combined", "stars", "energy", "tags", "disabled"].includes(
+    displayMode,
+  )
+    ? displayMode
+    : "combined";
+
+  if (selectedMode === "disabled") {
+    control.style.display = "none";
+    return;
+  }
+  control.style.display = selectedMode === "combined" ? "grid" : "inline-flex";
+
+  if (selectedMode === "stars") {
+    control.style.alignItems = "center";
+    control.style.width = "auto";
+    control.appendChild(
+      createRatingControl({ rating, compact, getRateActionLabel, onRate }),
+    );
+    return;
+  }
+
+  if (selectedMode === "energy") {
+    control.style.alignItems = "center";
+    control.style.width = "auto";
+    const energyControl = document.createElement("span");
+    renderEnergyControl(energyControl, {
+      energy,
+      compact,
+      getActionLabel: getEnergyActionLabel,
+      onEnergy,
+    });
+    control.appendChild(energyControl);
+    return;
+  }
+
+  if (selectedMode === "tags") {
+    control.style.alignItems = "center";
+    control.style.width = "auto";
+    control.appendChild(
+      createTagStatusIndicator({
+        status: tagStatus,
+        groups: tagGroups,
+        compact,
+        detailed: true,
+        showEmpty: true,
+        onOpenEditor: onOpenTags,
+      }),
+    );
+    return;
+  }
+
   control.style.gridTemplateColumns = compact
     ? "26px auto 26px"
     : "minmax(0, 1fr) auto minmax(0, 1fr)";
@@ -28,6 +120,13 @@ export function renderInlineEditorPresentation(
   leadingSlot.style.alignItems = "center";
   leadingSlot.style.justifyContent = "flex-end";
   leadingSlot.style.minWidth = "0";
+  const tagIndicator = createTagStatusIndicator({
+    status: tagStatus,
+    groups: tagGroups,
+    compact,
+    onOpenEditor: onOpenTags,
+  });
+  if (tagIndicator) leadingSlot.appendChild(tagIndicator);
 
   const trailingSlot = document.createElement("span");
   trailingSlot.className = "tagify-inline-trailing";
@@ -35,38 +134,12 @@ export function renderInlineEditorPresentation(
   trailingSlot.style.alignItems = "center";
   trailingSlot.style.justifyContent = "flex-start";
   trailingSlot.style.minWidth = "0";
+  const energyLabel = createEnergyLabel(energy, compact, onOpenEnergy);
+  if (energyLabel) trailingSlot.appendChild(energyLabel);
 
-  const tagIndicator = createTagStatusIndicator(tagStatus, tagListTooltip);
-  if (tagIndicator) {
-    leadingSlot.appendChild(tagIndicator);
-  }
-
-  let energyLabel = null;
-  if (energy > 0) {
-    energyLabel = document.createElement("span");
-    energyLabel.className = "tagify-energy-rating-label";
-    energyLabel.textContent = `E ${energy}`;
-    energyLabel.style.color = "var(--spice-subtext)";
-    energyLabel.style.fontSize = compact ? "10px" : "11px";
-    energyLabel.style.lineHeight = "1";
-    energyLabel.style.cursor = "pointer";
-  }
-
-  const ratingControl = document.createElement("span");
-  ratingControl.className = "tagify-star-rating-control";
-  ratingControl.style.display = "inline-flex";
-  ratingControl.style.alignItems = "center";
-  ratingControl.addEventListener("click", (event) => event.stopPropagation());
-  renderStarRatingControl(ratingControl, {
-    rating,
-    compact,
-    getActionLabel: getRateActionLabel,
-    onRate,
-  });
-
-  if (energyLabel) {
-    trailingSlot.appendChild(energyLabel);
-  }
-
-  control.append(leadingSlot, ratingControl, trailingSlot);
+  control.append(
+    leadingSlot,
+    createRatingControl({ rating, compact, getRateActionLabel, onRate }),
+    trailingSlot,
+  );
 }

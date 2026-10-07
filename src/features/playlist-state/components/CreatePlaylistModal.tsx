@@ -23,6 +23,7 @@ interface CreatePlaylistModalProps {
   bpmMinFilter: number | null;
   bpmMaxFilter: number | null;
   camelotKeyFilters: string[];
+  editingSmartPlaylistName?: string;
   onClose: () => void;
   onCreatePlaylist: (
     playlistName: string,
@@ -44,9 +45,11 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   bpmMinFilter,
   bpmMaxFilter,
   camelotKeyFilters,
+  editingSmartPlaylistName,
   onClose,
   onCreatePlaylist,
 }) => {
+  const isEditingSmartPlaylist = Boolean(editingSmartPlaylistName);
   const [isSmartPlaylist, setIsSmartPlaylist] = useState(false);
   const normalizedCamelotKeyFilters = sortCamelotKeys(camelotKeyFilters);
 
@@ -202,7 +205,11 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
       <div className={styles.modalOverlay} onClick={onClose}>
         <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
           <div className={styles.modalHeader}>
-            <h2 className={styles.modalTitle}>Create Playlist</h2>
+            <h2 className={styles.modalTitle}>
+              {isEditingSmartPlaylist
+                ? "Edit Smart Playlist"
+                : "Create Playlist"}
+            </h2>
             <button className="modal-close-button" onClick={onClose}>
               ×
             </button>
@@ -222,37 +229,46 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} className={styles.playlistForm}>
-              <div className={styles.formField}>
-                <label htmlFor="playlist-name" className={styles.label}>
-                  Playlist Name
-                </label>
-                <input
-                  id="playlist-name"
-                  type="text"
-                  value={playlistName}
-                  onChange={(e) => setPlaylistName(e.target.value)}
-                  className={styles.input}
-                  placeholder="Enter playlist name"
-                  maxLength={100}
-                />
-              </div>
+              {!isEditingSmartPlaylist && (
+                <div className={styles.formField}>
+                  <label htmlFor="playlist-name" className={styles.label}>
+                    Playlist Name
+                  </label>
+                  <input
+                    id="playlist-name"
+                    type="text"
+                    value={playlistName}
+                    onChange={(e) => setPlaylistName(e.target.value)}
+                    className={styles.input}
+                    placeholder="Enter playlist name"
+                    maxLength={100}
+                  />
+                </div>
+              )}
 
-              <div className={styles.formField}>
-                <label htmlFor="playlist-description" className={styles.label}>
-                  Description
-                </label>
-                <textarea
-                  id="playlist-description"
-                  value={playlistDescription}
-                  onChange={(e) => setPlaylistDescription(e.target.value)}
-                  className={styles.textarea}
-                  placeholder="Enter playlist description"
-                  maxLength={300}
-                />
-              </div>
+              {!isEditingSmartPlaylist && (
+                <div className={styles.formField}>
+                  <label htmlFor="playlist-description" className={styles.label}>
+                    Description
+                  </label>
+                  <textarea
+                    id="playlist-description"
+                    value={playlistDescription}
+                    onChange={(e) => setPlaylistDescription(e.target.value)}
+                    className={styles.textarea}
+                    placeholder="Enter playlist description"
+                    maxLength={300}
+                  />
+                </div>
+              )}
 
-              <div className={styles.formField}>
-                <label className="form-checkbox-label">
+              {isEditingSmartPlaylist ? (
+                <p>
+                  Save the current filters to <strong>{editingSmartPlaylistName}</strong>.
+                </p>
+              ) : (
+                <div className={styles.formField}>
+                  <label className="form-checkbox-label">
                   <input
                     type="checkbox"
                     checked={isPublic}
@@ -287,7 +303,8 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
                     </p>
                   </div>
                 )}
-              </div>
+                </div>
+              )}
 
               <div className={styles.filtersContainer}>
                 {activeTagFormula.length === 0 &&
@@ -376,7 +393,9 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
                   Cancel
                 </button>
                 <button type="submit" className={styles.createButton}>
-                  Create Playlist
+                  {isEditingSmartPlaylist
+                    ? "Save Filter Changes"
+                    : "Create Playlist"}
                 </button>
               </div>
             </form>

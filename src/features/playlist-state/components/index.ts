@@ -1,3 +1,4 @@
+export { default as AlbumProgressLine } from "./AlbumProgressLine";
 export { default as CreatePlaylistModal } from "./CreatePlaylistModal";
 export { default as LocalTracksModal } from "./LocalTracksModal";
 export { default as PlaylistDetails } from "./PlaylistDetails";

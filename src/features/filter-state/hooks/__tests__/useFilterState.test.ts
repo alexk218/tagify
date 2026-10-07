@@ -359,4 +359,64 @@ describe("useFilterState", () => {
       expect(store.has(LEGACY_FILTER_STORAGE_KEY)).toBe(false);
     });
   });
+
+  describe("toggleBasicTagFilter", () => {
+    it("turns a card tag filter on, then off, without excluding it", () => {
+      const { result } = renderHook(() => useFilterState("albums"));
+
+      act(() => result.current.toggleBasicTagFilter(HOUSE_TAG_ID));
+      expect(result.current.activeTagFilters).toEqual([HOUSE_TAG_ID]);
+
+      act(() => result.current.toggleBasicTagFilter(HOUSE_TAG_ID));
+      expect(result.current.activeTagFilters).toEqual([]);
+      expect(result.current.excludedTagFilters).toEqual([]);
+      expect(result.current.includeTagClauses).toEqual([]);
+    });
+
+    it("turns off a tag that was excluded from the Filters panel", () => {
+      createStorageMock({
+        "tagify:filterState:albums": JSON.stringify({
+          includeTagClauses: [
+            { tagIds: [CHILL_TAG_ID], excludedTagIds: [HOUSE_TAG_ID], operator: "OR" },
+          ],
+          clauseConnectors: [],
+        }),
+      });
+      const { result } = renderHook(() => useFilterState("albums"));
+
+      act(() => result.current.toggleBasicTagFilter(HOUSE_TAG_ID));
+
+      expect(result.current.excludedTagFilters).toEqual([]);
+      expect(result.current.activeTagFilters).toEqual([CHILL_TAG_ID]);
+    });
+
+    it("starts a filter with the list's saved Match All choice", () => {
+      createStorageMock({ "tagify:albumListTagFilterOperator": "AND" });
+      const { result } = renderHook(() => useFilterState("albums"));
+
+      act(() => result.current.toggleBasicTagFilter(HOUSE_TAG_ID));
+      act(() => result.current.toggleBasicTagFilter(CHILL_TAG_ID));
+
+      expect(result.current.includeTagClauses).toEqual([
+        { tagIds: [HOUSE_TAG_ID, CHILL_TAG_ID], excludedTagIds: [], operator: "AND" },
+      ]);
+    });
+
+    it("keeps the operator of a filter that is already applied", () => {
+      createStorageMock({
+        "tagify:artistListTagFilterOperator": "AND",
+        "tagify:filterState:artists": JSON.stringify({
+          includeTagClauses: [{ tagIds: [CHILL_TAG_ID], excludedTagIds: [], operator: "OR" }],
+          clauseConnectors: [],
+        }),
+      });
+      const { result } = renderHook(() => useFilterState("artists"));
+
+      act(() => result.current.toggleBasicTagFilter(PEAK_TAG_ID, "AND"));
+
+      expect(result.current.includeTagClauses).toEqual([
+        { tagIds: [CHILL_TAG_ID, PEAK_TAG_ID], excludedTagIds: [], operator: "OR" },
+      ]);
+    });
+  });
 });

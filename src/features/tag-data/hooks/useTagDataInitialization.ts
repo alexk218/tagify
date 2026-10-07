@@ -6,6 +6,7 @@ import {
 } from "@/services/MigrationOrchestrator";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { TagDataStructure } from "@/types/tagData";
+import { runMetadataBackfillOnce } from "@/features/metadata-backfill";
 
 interface UseTagDataInitializationOptions {
   initRef: MutableRefObject<boolean>;
@@ -63,10 +64,28 @@ export function useTagDataInitialization({
     } else {
       console.error("[useTagData] Orchestrator failed:", result.error);
       setStorageError(result.error || "Migration failed");
-      applyPersistedSnapshot(result.data, { updateLastSaved: false });
+      // The fallback may be an old localStorage backup. Showing it as the
+      // persisted baseline would let an ordinary edit overwrite newer data.
     }
 
     setIsLoading(false);
+
+    if (result.success) {
+      void runMetadataBackfillOnce()
+        .then(async (updatedCount) => {
+          if (updatedCount === 0) {
+            return;
+          }
+
+          const data = await indexedDBStorage.loadAll();
+          if (data) {
+            applyPersistedSnapshot(data);
+          }
+        })
+        .catch((error) => {
+          console.error("[useTagData] Metadata backfill failed:", error);
+        });
+    }
   }, [
     applyPersistedSnapshot,
     initRef,

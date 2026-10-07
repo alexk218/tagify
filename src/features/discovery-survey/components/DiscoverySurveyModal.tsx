@@ -1,7 +1,6 @@
 import React, { useRef, useState } from "react";
 import { Portal } from "@/components/ui";
 import styles from "./DiscoverySurveyModal.module.css";
-import packageJson from "@/package";
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -146,10 +145,10 @@ const DiscoverySurveyModal: React.FC<DiscoverySurveyModalProps> = ({
               <FontAwesomeIcon icon={faChampagneGlasses} size="2x" />
               <div>
                 <h2 className={styles.modalTitle}>
-                  Welcome to Tagify {packageJson.version}!
+                  One quick question
                 </h2>
                 <p className={styles.subtitle}>
-                  Enjoy the latest version of Tagify
+                  Optional — you can keep using Tagify without answering
                 </p>
               </div>
             </div>
@@ -161,8 +160,7 @@ const DiscoverySurveyModal: React.FC<DiscoverySurveyModalProps> = ({
                 How did you discover Tagify?
               </h3>
               <p className={styles.questionSubtext}>
-                Share how you found Tagify and help us improve. More feedback
-                means a stronger app with more great features for you.
+                Your answer helps us understand how people find Tagify.
               </p>
 
               <div className={styles.optionsGrid}>
@@ -249,7 +247,7 @@ const DiscoverySurveyModal: React.FC<DiscoverySurveyModalProps> = ({
                     Submitting...
                   </>
                 ) : (
-                  "Continue"
+                  "Send answer"
                 )}
               </button>
             </div>

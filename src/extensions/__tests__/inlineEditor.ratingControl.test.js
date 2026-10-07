@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 import { renderStarRatingControl } from "../inlineEditor.ratingControl";
 
 describe("inline star rating control", () => {
+  it("restores the saved stars after cancellation returns focus to the clicked rating", async () => {
+    const control = document.createElement("div");
+    document.body.append(control);
+    renderStarRatingControl(control, { rating: 5, onRate: async () => {
+      control.querySelector('[aria-label="Set rating to 4 stars"]').dispatchEvent(new Event("focus"));
+      return false;
+    } });
+    control.querySelector('[aria-label="Set rating to 4 stars"]').click();
+    await vi.waitFor(() => expect([...control.querySelectorAll(".tagify-rating-star-fill")].map(fill => fill.style.width)).toEqual(Array(5).fill("100%")));
+    control.remove();
+  });
   it("renders five visible stars with half-star actions", () => {
     const control = document.createElement("div");
     const onRate = vi.fn();

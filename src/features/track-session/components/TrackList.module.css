@@ -1191,6 +1191,72 @@
   box-shadow: 0 4px 12px rgb(0 0 0 / 20%);
 }
 
+.saveSmartPlaylistButton {
+  width: 14em;
+  background: linear-gradient(135deg, #1ed760, #14a84b);
+  color: #07140b;
+  border-color: rgb(150 255 184 / 85%);
+  box-shadow:
+    0 0 0 2px rgb(30 215 96 / 22%),
+    0 6px 20px rgb(30 215 96 / 38%);
+  animation: smart-playlist-save-pulse 2.4s ease-in-out infinite;
+}
+
+.saveSmartPlaylistButton:hover:not(:disabled) {
+  background: linear-gradient(135deg, #3be477, #1ed760);
+  border-color: #c5ffd8;
+  box-shadow:
+    0 0 0 3px rgb(30 215 96 / 30%),
+    0 8px 26px rgb(30 215 96 / 52%);
+  transform: translateY(-1px);
+}
+
+.smartPlaylistEditingBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 5px 9px;
+  color: #8bf0ae;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgb(30 215 96 / 12%);
+  border: 1px solid rgb(30 215 96 / 35%);
+  border-radius: 999px;
+}
+
+.smartPlaylistEditingLabel {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.smartPlaylistEditingBadge svg {
+  flex: 0 0 auto;
+  color: #1ed760;
+}
+
+@keyframes smart-playlist-save-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px rgb(30 215 96 / 18%),
+      0 6px 20px rgb(30 215 96 / 30%);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 4px rgb(30 215 96 / 28%),
+      0 8px 26px rgb(30 215 96 / 48%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .saveSmartPlaylistButton {
+    animation: none;
+  }
+}
+
 .smartPlaylistButton {
   background: linear-gradient(
     135deg,

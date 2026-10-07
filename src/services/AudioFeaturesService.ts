@@ -97,9 +97,54 @@ const audioFeaturesRateLimiter = new RateLimiter({
 export interface AudioFeatures {
   bpm: number;
   key: string;
-  mode: number; // 1 = major, 2 = minor
+  mode: number; // Spotify Web API uses 1 = major, 0 = minor
   camelotKey: string | null;
 }
+
+const SPOTIFY_KEY_NAMES = [
+  "C",
+  "C#",
+  "D",
+  "D#",
+  "E",
+  "F",
+  "F#",
+  "G",
+  "G#",
+  "A",
+  "A#",
+  "B",
+] as const;
+
+const MAJOR_CAMELOT_KEYS = [
+  "8B",
+  "3B",
+  "10B",
+  "5B",
+  "12B",
+  "7B",
+  "2B",
+  "9B",
+  "4B",
+  "11B",
+  "6B",
+  "1B",
+] as const;
+
+const MINOR_CAMELOT_KEYS = [
+  "5A",
+  "12A",
+  "7A",
+  "2A",
+  "9A",
+  "4A",
+  "11A",
+  "6A",
+  "1A",
+  "8A",
+  "3A",
+  "10A",
+] as const;
 
 // Cache audio features results from TrackDetails -> return that to hooks instead of re-fetching
 interface AudioFeaturesCacheEntry {
@@ -110,7 +155,7 @@ interface AudioFeaturesCacheEntry {
 const AUDIO_FEATURES_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_AUDIO_FEATURES_CACHE_ENTRIES = 1000;
 
-class AudioFeaturesService {
+export class AudioFeaturesService {
   private extendedMetadataRequest: protobuf.Type | null = null;
   private audioFeaturesResponse: protobuf.Type | null = null;
   private country: string = "US";
@@ -138,7 +183,7 @@ class AudioFeaturesService {
 
     try {
       const productStateValues =
-        await Spicetify.Platform.ProductStateAPI.getValues();
+        (await Spicetify.Platform.ProductStateAPI.getValues()) || {};
       this.country = productStateValues["country"] ?? "US";
       this.catalogue = productStateValues["catalogue"] ?? "premium";
       this.initialized = true;
@@ -236,6 +281,145 @@ class AudioFeaturesService {
     }
   }
 
+  private getAccessToken(): string | null {
+    return (
+      Spicetify.Platform.AuthorizationAPI.getState?.()?.token?.accessToken ||
+      null
+    );
+  }
+
+  private mapSpotifyAudioFeaturesPayload(payload: any): AudioFeatures | null {
+    const tempo = payload?.tempo ?? payload?.track?.tempo;
+    const key = payload?.key ?? payload?.track?.key;
+    const mode = payload?.mode ?? payload?.track?.mode;
+
+    if (typeof tempo !== "number" || tempo <= 0) {
+      return null;
+    }
+
+    const roundedBpm = Math.round(tempo);
+    const keyName =
+      typeof key === "number" && key >= 0 && key < SPOTIFY_KEY_NAMES.length
+        ? SPOTIFY_KEY_NAMES[key]
+        : "Unknown";
+    const camelotKey =
+      typeof key === "number" && key >= 0 && key < SPOTIFY_KEY_NAMES.length
+        ? mode === 1
+          ? MAJOR_CAMELOT_KEYS[key]
+          : mode === 0
+            ? MINOR_CAMELOT_KEYS[key]
+            : null
+        : null;
+
+    return {
+      bpm: roundedBpm,
+      key: keyName,
+      mode: typeof mode === "number" ? mode : 0,
+      camelotKey: normalizeCamelotKey(camelotKey),
+    };
+  }
+
+  private async getAudioFeaturesFromSpotifyClientApi(
+    trackIds: string[]
+  ): Promise<(AudioFeatures | null)[]> {
+    const accessToken = this.getAccessToken();
+    if (!accessToken || trackIds.length === 0) {
+      return new Array(trackIds.length).fill(null);
+    }
+
+    const headers = { Authorization: `Bearer ${accessToken}` };
+
+    return Promise.all(
+      trackIds.map(async (trackId) => {
+        try {
+          const response = await fetch(
+            `https://spclient.wg.spotify.com/audio-attributes/v1/audio-analysis/${trackId}`,
+            { headers }
+          );
+
+          if (!response.ok) {
+            console.warn(
+              `AudioFeaturesService: Spotify client audio-analysis request failed for ${trackId}: ${response.status}`
+            );
+            return null;
+          }
+
+          return this.mapSpotifyAudioFeaturesPayload(await response.json());
+        } catch (error) {
+          console.warn(
+            `AudioFeaturesService: Spotify client audio-analysis request failed for ${trackId}`,
+            error
+          );
+          return null;
+        }
+      })
+    );
+  }
+
+  private async getAudioFeaturesFromWebApi(
+    trackIds: string[]
+  ): Promise<(AudioFeatures | null)[]> {
+    const accessToken = this.getAccessToken();
+    if (!accessToken || trackIds.length === 0) {
+      return new Array(trackIds.length).fill(null);
+    }
+
+    const headers = { Authorization: `Bearer ${accessToken}` };
+
+    try {
+      const response = await fetch(
+        `https://api.spotify.com/v1/audio-features?ids=${trackIds.join(",")}`,
+        { headers }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const audioFeatures = Array.isArray(data?.audio_features)
+          ? data.audio_features
+          : [];
+
+        return trackIds.map((_, index) =>
+          this.mapSpotifyAudioFeaturesPayload(audioFeatures[index])
+        );
+      }
+
+      console.warn(
+        `AudioFeaturesService: Spotify Web API audio-features request failed: ${response.status}`
+      );
+    } catch (error) {
+      console.warn(
+        "AudioFeaturesService: Spotify Web API audio-features request failed",
+        error
+      );
+    }
+
+    return Promise.all(
+      trackIds.map(async (trackId) => {
+        try {
+          const response = await fetch(
+            `https://api.spotify.com/v1/audio-analysis/${trackId}`,
+            { headers }
+          );
+
+          if (!response.ok) {
+            console.warn(
+              `AudioFeaturesService: Spotify Web API audio-analysis request failed for ${trackId}: ${response.status}`
+            );
+            return null;
+          }
+
+          return this.mapSpotifyAudioFeaturesPayload(await response.json());
+        } catch (error) {
+          console.warn(
+            `AudioFeaturesService: Spotify Web API audio-analysis request failed for ${trackId}`,
+            error
+          );
+          return null;
+        }
+      })
+    );
+  }
+
   /**
    * Fetch audio features (BPM, key, mode) for one or more tracks
    * @param trackIds Array of Spotify track IDs (not URIs)
@@ -327,21 +511,59 @@ class AudioFeaturesService {
 
     const trackUris = trackIds.map((id) => `spotify:track:${id}`);
 
-    // Extension kind 222 = audio features
-    const buf = await this.getExtendedMetadata(trackUris, 222);
-    const msg = audioFeaturesResponse.decode(buf) as any;
+    let results: (AudioFeatures | null)[] = new Array(trackIds.length).fill(null);
 
-    return msg.response.map((resp: any) => {
-      if (!resp.attributes?.attributes) return null;
+    try {
+      // Extension kind 222 = audio features in Spotify's extended metadata API.
+      const buf = await this.getExtendedMetadata(trackUris, 222);
+      const msg = audioFeaturesResponse.decode(buf) as any;
+      const responses = Array.isArray(msg.response) ? msg.response : [];
 
-      const attributes = resp.attributes.attributes;
-      return {
-        bpm: Math.round(attributes.bpm),
-        key: attributes.key?.key || "Unknown",
-        mode: attributes.key?.majorMinor || 0,
-        camelotKey: normalizeCamelotKey(attributes.key?.camelot?.key),
-      };
-    });
+      results = trackIds.map((_, index) => {
+        const attributes = responses[index]?.attributes?.attributes;
+        if (!attributes) return null;
+
+        return {
+          bpm: Math.round(attributes.bpm),
+          key: attributes.key?.key || "Unknown",
+          mode: attributes.key?.majorMinor || 0,
+          camelotKey: normalizeCamelotKey(attributes.key?.camelot?.key),
+        };
+      });
+    } catch (error) {
+      console.warn(
+        "AudioFeaturesService: Extended metadata audio features failed, trying Spotify client audio-analysis fallback",
+        error
+      );
+    }
+
+    const missingIndexes = results
+      .map((features, index) => (features === null ? index : -1))
+      .filter((index) => index >= 0);
+
+    if (missingIndexes.length > 0) {
+      const fallbackTrackIds = missingIndexes.map((index) => trackIds[index]);
+      let fallbackResults =
+        await this.getAudioFeaturesFromSpotifyClientApi(fallbackTrackIds);
+
+      if (fallbackResults.some((features) => features === null)) {
+        const webApiTrackIds = fallbackTrackIds.filter(
+          (_, index) => fallbackResults[index] === null
+        );
+        const webApiResults = await this.getAudioFeaturesFromWebApi(webApiTrackIds);
+        let webApiIndex = 0;
+
+        fallbackResults = fallbackResults.map((features) =>
+          features ?? webApiResults[webApiIndex++] ?? null
+        );
+      }
+
+      missingIndexes.forEach((originalIndex, fallbackIndex) => {
+        results[originalIndex] = fallbackResults[fallbackIndex] ?? null;
+      });
+    }
+
+    return results;
   }
 
   /**

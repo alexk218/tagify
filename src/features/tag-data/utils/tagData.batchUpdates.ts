@@ -18,19 +18,17 @@ export function applyBatchTagUpdatesToData(
     tracks: { ...currentData.tracks },
   };
 
-  updates.forEach(({ trackUri, toAdd, toRemove, newRating, newEnergy }) => {
-    if (!nextData.tracks[trackUri]) {
-      nextData.tracks[trackUri] = {
-        rating: 0,
-        energy: 0,
-        bpm: null,
-        tagIds: [],
-        dateCreated: now,
-        dateModified: now,
-      };
-    }
-
-    let trackTags = [...(nextData.tracks[trackUri].tagIds || [])];
+  updates.forEach(({ trackUri, toAdd, toRemove, newRating, newEnergy, albumDetails }) => {
+    const existingTrack: TrackData = nextData.tracks[trackUri] || {
+      rating: 0,
+      energy: 0,
+      bpm: null,
+      tagIds: [],
+      dateCreated: now,
+      dateModified: now,
+    };
+    const existingTags = existingTrack.tagIds || [];
+    let trackTags = [...existingTags];
 
     toRemove.forEach((tagToRemove) => {
       trackTags = trackTags.filter((tag) => !isSameTrackTag(tag, tagToRemove));
@@ -43,13 +41,39 @@ export function applyBatchTagUpdatesToData(
       }
     });
 
+    const rating = newRating !== undefined ? newRating : existingTrack.rating;
+    const energy = newEnergy !== undefined ? newEnergy : existingTrack.energy;
+    const tagsChanged =
+      trackTags.length !== existingTags.length ||
+      trackTags.some((tag, index) => !isSameTrackTag(tag, existingTags[index]));
+
+    // An update that changes nothing must not move the track in Last Updated order.
+    if (!tagsChanged && rating === existingTrack.rating && energy === existingTrack.energy) {
+      return;
+    }
+
+    // Details only describe tracks that are not already linked to another album.
+    const sameAlbumDetails =
+      albumDetails &&
+      (!existingTrack.albumUri || existingTrack.albumUri === albumDetails.albumUri)
+        ? albumDetails
+        : undefined;
     const updatedTrackData: TrackData = {
-      ...nextData.tracks[trackUri],
+      ...existingTrack,
+      ...(sameAlbumDetails?.albumUri && !existingTrack.albumUri
+        ? { albumUri: sameAlbumDetails.albumUri }
+        : {}),
+      ...(sameAlbumDetails?.albumName && !existingTrack.albumName
+        ? { albumName: sameAlbumDetails.albumName }
+        : {}),
+      ...(sameAlbumDetails?.albumImageUrl && !existingTrack.albumImageUrl
+        ? { albumImageUrl: sameAlbumDetails.albumImageUrl }
+        : {}),
       tagIds: trackTags,
-      rating: newRating !== undefined ? newRating : nextData.tracks[trackUri].rating,
-      energy: newEnergy !== undefined ? newEnergy : nextData.tracks[trackUri].energy,
+      rating,
+      energy,
       dateModified: now,
-      dateCreated: nextData.tracks[trackUri].dateCreated || now,
+      dateCreated: existingTrack.dateCreated || now,
     };
 
     nextData.tracks[trackUri] = updatedTrackData;

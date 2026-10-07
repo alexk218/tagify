@@ -113,6 +113,11 @@
   gap: 16px;
 }
 
+.displayModeItem {
+  align-items: flex-start;
+  gap: 16px;
+}
+
 .settingsSelect {
   background: rgb(0 0 0 / 20%);
   border: 1px solid rgb(255 255 255 / 12%);

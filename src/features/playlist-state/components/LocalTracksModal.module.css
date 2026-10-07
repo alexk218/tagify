@@ -50,18 +50,6 @@
   color: var(--spice-text);
 }
 
-.closeButton {
-  background: transparent;
-  border: none;
-  color: var(--spice-text);
-  font-size: 24px;
-  cursor: pointer;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .modalBody {
   padding: 24px;
   overflow-y: auto;
@@ -80,30 +68,6 @@
   color: var(--spice-text);
   font-size: 15px;
   line-height: 1.5;
-}
-
-.instructions {
-  margin-top: 16px;
-  padding: 16px;
-  background: rgb(255 255 255 / 10%);
-  border-radius: 4px;
-}
-
-.instructions h3 {
-  margin: 0 0 12px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--spice-text);
-}
-
-.instructions li {
-  margin-bottom: 8px;
-  color: var(--spice-text);
-  font-size: 14px;
-}
-
-.instructions li:last-child {
-  margin-bottom: 0;
 }
 
 .tracksSection {
@@ -160,11 +124,6 @@
 .trackName {
   font-weight: 600;
   color: var(--spice-text);
-  font-size: 14px;
-}
-
-.trackArtist {
-  color: var(--spice-subtext);
   font-size: 14px;
 }
 

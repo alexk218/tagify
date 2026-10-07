@@ -3,13 +3,13 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.29
+    1.0.30
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
 #>
 
-$SCRIPT_VERSION = "1.0.29"
+$SCRIPT_VERSION = "1.0.30"
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -945,6 +945,45 @@ function Install-Spicetify {
 #endregion Spicetify Installation
 
 #region Tagify Installation
+function Install-CommunityRecoveryBootstrap {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TagifyDir
+    )
+
+    $stateDir = "$env:LOCALAPPDATA\Tagify"
+    $keyFile = Join-Path $stateDir "install-recovery-key"
+    if (-not (Test-Path $stateDir)) {
+        New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
+    }
+
+    $recoveryKey = $null
+    if (Test-Path $keyFile) {
+        $candidate = (Get-Content -Path $keyFile -Raw).Trim()
+        if ($candidate -match '^tgfy_install_[A-Za-z0-9_-]{43}$') {
+            $recoveryKey = $candidate
+        }
+    }
+    if (-not $recoveryKey) {
+        $bytes = New-Object byte[] 32
+        $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $generator.GetBytes($bytes) } finally { $generator.Dispose() }
+        $encoded = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+        $recoveryKey = "tgfy_install_$encoded"
+        [IO.File]::WriteAllText($keyFile, "$recoveryKey`n", (New-Object Text.UTF8Encoding($false)))
+    }
+
+    $extensionPath = Join-Path $TagifyDir "extension.js"
+    if (-not (Test-Path $extensionPath)) {
+        Write-ErrorAndExit "Tagify extension.js is missing; automatic Community reconnection could not be installed"
+    }
+    $source = [IO.File]::ReadAllText($extensionPath)
+    $bootstrap = "globalThis.__tagifyInstallRecoveryKey=`"$recoveryKey`";`n"
+    [IO.File]::WriteAllText($extensionPath, $bootstrap + $source, (New-Object Text.UTF8Encoding($false)))
+    Write-Log "Automatic Community reconnection is ready"
+}
+
 function Download-TagifyRelease {
     [CmdletBinding()]
     param([string]$DownloadUrl)
@@ -1043,6 +1082,8 @@ function Install-TagifyFiles {
     if ($installedFileCount -eq 0) {
         Write-ErrorAndExit "Tagify directory is empty after installation"
     }
+
+    Install-CommunityRecoveryBootstrap -TagifyDir $tagifyDir
     
     Write-Log "Tagify files installed: $installedFileCount files"
     return $tagifyDir

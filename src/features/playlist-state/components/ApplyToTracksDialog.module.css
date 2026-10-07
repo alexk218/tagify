@@ -1,0 +1,206 @@
+.overlay {
+  background: rgb(0 0 0 / 72%);
+  box-sizing: border-box;
+  display: grid;
+  inset: 0;
+  padding: 24px;
+  place-items: center;
+  position: fixed;
+  z-index: 10010;
+}
+
+.dialog {
+  background: var(--spice-main, #181818);
+  border: 1px solid #414141;
+  border-radius: 16px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 45%);
+  box-sizing: border-box;
+  color: var(--spice-text, #fff);
+  max-height: 85vh;
+  outline: none;
+  overflow: auto;
+  padding: 24px 28px;
+  width: min(500px, 100%);
+}
+
+.eyebrow {
+  color: var(--spice-subtext, #b3b3b3);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.title {
+  font-size: 22px;
+  line-height: 1.25;
+  margin: 6px 0 2px;
+  overflow-wrap: anywhere;
+}
+
+.subtitle {
+  color: var(--spice-subtext, #b3b3b3);
+  font-size: 13px;
+  margin: 0;
+  min-height: 1.4em;
+}
+
+.description {
+  color: var(--spice-text, #fff);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 16px 0 0;
+  opacity: 0.85;
+}
+
+.status {
+  color: var(--spice-subtext, #b3b3b3);
+  font-size: 13px;
+  margin: 18px 0 0;
+}
+
+.status p {
+  margin: 0 0 10px;
+}
+
+.retryButton {
+  background: transparent;
+  border: 1px solid #666;
+  border-radius: 999px;
+  color: var(--spice-text, #fff);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 14px;
+}
+
+.options {
+  border: 0;
+  display: grid;
+  gap: 8px;
+  margin: 18px 0 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.legend {
+  color: var(--spice-subtext, #b3b3b3);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.option {
+  align-items: flex-start;
+  border: 1px solid #505050;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.optionChecked {
+  background: rgb(29 185 84 / 10%);
+  border-color: var(--spice-button, #1db954);
+}
+
+.option input {
+  accent-color: var(--spice-button, #1db954);
+  flex-shrink: 0;
+  margin: 2px 0 0;
+}
+
+.optionUnavailable {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.optionText {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.optionTitle {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 6px 10px;
+}
+
+.optionDetail {
+  color: var(--spice-subtext, #b3b3b3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tagNames {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tagName {
+  background: rgb(255 255 255 / 9%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+}
+
+.ratingStars {
+  display: inline-flex;
+  line-height: 1;
+}
+
+.energyValue {
+  color: #1e90ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.error {
+  color: #ffb1b1;
+  font-size: 13px;
+  margin: 14px 0 0;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 22px;
+}
+
+.actions button {
+  background: transparent;
+  border: 1px solid #666;
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 18px;
+}
+
+.actions .primary {
+  background: var(--spice-button, #1db954);
+  border-color: transparent;
+  color: #000;
+}
+
+.actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.actions button:focus-visible,
+.retryButton:focus-visible,
+.option:focus-within {
+  outline: 2px solid var(--spice-text, #fff);
+  outline-offset: 3px;
+}

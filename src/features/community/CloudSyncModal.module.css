@@ -1,0 +1,127 @@
+.overlay { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 24px; overflow-y: auto; overscroll-behavior: contain; background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
+.modal { width: min(680px, 100%); max-height: min(820px, calc(100vh - 48px)); display: grid; grid-template-rows: auto minmax(0, 1fr); border: 1px solid rgb(255 255 255 / 12%); border-radius: 16px; overflow: hidden; color: var(--spice-text); background: var(--spice-main); box-shadow: 0 24px 80px rgb(0 0 0 / 55%); }
+.onboardingModal { width: min(920px, 100%); max-height: min(900px, calc(100vh - 32px)); }
+.modal header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 20px 22px; border-bottom: 1px solid rgb(255 255 255 / 9%); }
+.modal header p { margin: 0 0 3px; color: #9b8cff; font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.modal h2 { display: flex; gap: 9px; align-items: center; margin: 0; font-size: 21px; }
+.modal header button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; color: var(--spice-subtext); background: transparent; cursor: pointer; }
+.modal header button:hover { color: var(--spice-text); background: rgb(255 255 255 / 9%); }
+.body { min-height: 0; display: grid; grid-auto-rows: max-content; align-content: start; gap: 17px; padding: 22px; overflow: auto; overscroll-behavior: contain; }
+.body p { margin: 0; color: var(--spice-subtext); line-height: 1.6; }
+.warning { display: flex; gap: 11px; align-items: flex-start; padding: 13px; border: 1px solid rgb(226 168 102 / 28%); border-radius: 10px; color: #f1d0a8; background: rgb(226 168 102 / 9%); line-height: 1.5; }
+.warning svg { flex: 0 0 auto; margin-top: 2px; }
+.consent { display: flex; gap: 10px; align-items: flex-start; line-height: 1.45; }
+.consent input { margin-top: 3px; accent-color: #9b8cff; }
+.primary, .actions button, .secondary { min-height: 38px; display: inline-flex; justify-content: center; gap: 8px; align-items: center; padding: 8px 14px; border: 1px solid rgb(155 140 255 / 36%); border-radius: 9px; color: white; background: #7566d8; cursor: pointer; font-weight: 700; }
+.primary:disabled, .actions button:disabled { opacity: .5; cursor: not-allowed; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.actions button { flex: 1; min-width: 180px; background: rgb(155 140 255 / 13%); }
+.quietAction { justify-self: start; min-height: 28px; padding: 3px 5px; border: 0; color: var(--spice-subtext); background: transparent; cursor: pointer; font-size: 11px; font-weight: 600; opacity: .68; }
+.quietAction:hover { color: var(--spice-text); opacity: 1; text-decoration: underline; }
+.secondary { color: var(--spice-subtext); background: transparent; border-color: rgb(255 255 255 / 12%); }
+.code { display: grid; gap: 8px; place-items: center; padding: 22px; border-radius: 12px; background: rgb(155 140 255 / 10%); }
+.code span { color: var(--spice-subtext); }
+.code strong { font: 800 30px/1 monospace; letter-spacing: .15em; }
+.connected { display: flex; gap: 11px; align-items: center; color: #66d19e; }
+.connected div { display: grid; }
+.connected span { color: var(--spice-subtext); font-size: 12px; }
+.reconnectRequired { display: flex; gap: 11px; align-items: center; color: #f1b36f; }
+.reconnectRequired div { display: grid; }
+.reconnectRequired span { color: var(--spice-subtext); font-size: 12px; }
+.accountCard { display: flex; gap: 11px; align-items: center; padding: 12px; border: 1px solid rgb(102 209 158 / 24%); border-radius: 10px; background: rgb(102 209 158 / 8%); color: #96e4ba; }
+.accountCard div { display: grid; gap: 2px; min-width: 0; }
+.accountCard strong { color: var(--spice-text); font-size: 13px; }
+.accountCard span { color: var(--spice-subtext); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.error { padding: 11px; border-radius: 9px; color: #ffb0b5; background: rgb(239 124 131 / 10%); }
+.success { padding: 11px; border-radius: 9px; color: #96e4ba; background: rgb(102 209 158 / 9%); }
+.onboardingIntro { display: grid; gap: 6px; padding: 2px 0; }
+.onboardingIntro h3 { margin: 0; font-size: 20px; line-height: 1.25; }
+.onboardingIntro p { max-width: 56ch; }
+.onboardingHero { display: flex; gap: 14px; align-items: flex-start; padding: 16px; border: 1px solid rgb(155 140 255 / 20%); border-radius: 12px; background: rgb(155 140 255 / 8%); }
+.onboardingHero svg { flex: 0 0 auto; color: #b7adff; }
+.onboardingHero h3 { margin: 0 0 5px; font-size: 20px; line-height: 1.25; }
+.onboardingHero p { margin: 0; }
+.mergeReview { display: grid; gap: 15px; padding: 16px; border: 1px solid rgb(155 140 255 / 24%); border-radius: 13px; background: rgb(155 140 255 / 6%); }
+.mergeReviewHeading { display: flex; justify-content: space-between; gap: 14px; }
+.mergeReviewHeading h3 { margin: 2px 0 6px; font-size: 20px; }
+.mergeReviewHeading p { max-width: 72ch; font-size: 13px; line-height: 1.5; }
+.mergeEyebrow { color: #b7adff !important; font-size: 10px !important; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
+.mergeLibraryCards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.mergeLibraryCards article { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 10px; padding: 12px; border: 1px solid rgb(255 255 255 / 9%); border-radius: 10px; background: rgb(0 0 0 / 13%); }
+.mergeLibraryCards strong { grid-column: 1 / -1; margin-bottom: 3px; font-size: 13px; }
+.mergeLibraryCards span { color: var(--spice-subtext); font-size: 11px; }
+.mergeSafeSummary, .mergeNoConflicts { display: flex; gap: 9px; align-items: flex-start; padding: 11px; border: 1px solid rgb(102 209 158 / 22%); border-radius: 9px; color: #9be6bd; background: rgb(102 209 158 / 7%); font-size: 12px; line-height: 1.45; }
+.mergeSafeSummary svg, .mergeNoConflicts svg { flex: 0 0 auto; margin-top: 1px; }
+.mergeChoiceSection { display: grid; gap: 10px; padding-top: 2px; }
+.mergeChoiceSection > div:first-child { display: grid; gap: 3px; }
+.mergeChoiceSection span { color: var(--spice-subtext); font-size: 11px; }
+.mergeBulkChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.mergeBulkChoices button, .mergeConflictChoices button { min-height: 38px; padding: 8px 11px; border: 1px solid rgb(255 255 255 / 11%); border-radius: 9px; color: var(--spice-subtext); background: rgb(0 0 0 / 14%); cursor: pointer; font-weight: 700; }
+.mergeBulkChoices button:hover, .mergeConflictChoices button:hover { color: var(--spice-text); border-color: rgb(155 140 255 / 38%); }
+.mergeChoiceSelected, .mergeValueSelected { color: white !important; border-color: rgb(155 140 255 / 70%) !important; background: rgb(117 102 216 / 30%) !important; box-shadow: inset 0 0 0 1px rgb(155 140 255 / 18%); }
+.mergeConflictToolbar { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.mergeFilters { display: flex; gap: 5px; flex-wrap: wrap; }
+.mergeFilters button { min-height: 28px; padding: 4px 8px; border: 1px solid transparent; border-radius: 7px; color: var(--spice-subtext); background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; }
+.mergeFilters button:hover, .mergeFilters .mergeFilterActive { color: var(--spice-text); border-color: rgb(255 255 255 / 10%); background: rgb(255 255 255 / 7%); }
+.mergeSearch { display: flex; gap: 7px; align-items: center; min-width: 180px; min-height: 30px; padding: 0 9px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 8px; color: var(--spice-subtext); background: rgb(0 0 0 / 15%); }
+.mergeSearch input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--spice-text); background: transparent; font-size: 11px; }
+.mergeConflictList { display: grid; gap: 8px; max-height: 310px; padding-right: 3px; overflow: auto; overscroll-behavior: contain; }
+.mergeConflict { display: grid; gap: 9px; padding: 11px; border: 1px solid rgb(255 255 255 / 9%); border-radius: 10px; background: rgb(0 0 0 / 12%); }
+.mergeConflictTitle { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.mergeConflictTitle strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.mergeConflictTitle span { flex: 0 0 auto; color: var(--spice-subtext); font-size: 10px; }
+.mergeConflictChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.mergeConflictChoices button { display: grid; gap: 2px; min-width: 0; text-align: left; }
+.mergeConflictChoices span { font-size: 9px; letter-spacing: .07em; text-transform: uppercase; }
+.mergeConflictChoices strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--spice-text); font-size: 11px; }
+.mergeEmpty { padding: 18px; text-align: center; font-size: 12px; }
+.mergeActions { display: flex; gap: 9px; justify-content: flex-end; }
+.mergeActions button { min-width: 180px; }
+.mergeSuccess { display: flex; gap: 11px; align-items: center; color: #96e4ba; }
+.mergeSuccess div { display: grid; gap: 3px; }
+.mergeSuccess span { color: var(--spice-subtext); font-size: 11px; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.visibilityPanel { overflow: hidden; border: 1px solid rgb(255 255 255 / 9%); border-radius: 10px; background: rgb(255 255 255 / 3%); }
+.visibilityPanelExpanded { background: rgb(255 255 255 / 4%); }
+.visibilityDisclosure { display: flex; justify-content: space-between; gap: 12px; align-items: center; width: 100%; min-height: 46px; padding: 10px 12px; border: 0; color: var(--spice-text); background: transparent; cursor: pointer; text-align: left; }
+.visibilityDisclosure:hover { background: rgb(255 255 255 / 5%); }
+.visibilityDisclosure > span { display: grid; gap: 2px; min-width: 0; }
+.visibilityDisclosure strong { display: inline-flex; gap: 7px; align-items: center; font-size: 13px; }
+.visibilityDisclosure small { color: var(--spice-subtext); font-size: 11px; }
+.visibilityDisclosure > svg { flex: 0 0 auto; color: var(--spice-subtext); }
+.visibilityContent { display: grid; gap: 12px; padding: 0 12px 12px; border-top: 1px solid rgb(255 255 255 / 7%); }
+.visibilitySummary { margin: 0; padding-top: 12px; color: var(--spice-subtext); font-size: 12px; line-height: 1.5; }
+.checkRow { display: flex; gap: 9px; align-items: flex-start; color: var(--spice-text); line-height: 1.35; }
+.checkRow input { margin-top: 2px; accent-color: #9b8cff; }
+.visibilityCheckbox { margin-top: 2px; accent-color: #e74c3c; }
+.visibilityToolbar { display: flex; gap: 10px; align-items: center; }
+.visibilityToolbar .searchBox { flex: 1 1 auto; }
+.visibilityReloadButton { display: grid; flex: 0 0 auto; place-items: center; width: 32px; height: 32px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 8px; color: var(--spice-subtext); background: rgb(255 255 255 / 5%); cursor: pointer; }
+.visibilityReloadButton:hover { color: var(--spice-text); background: rgb(255 255 255 / 9%); }
+.visibilityTreeActions { display: inline-flex; gap: 6px; flex: 0 0 auto; }
+.visibilityTreeActions button { min-height: 32px; padding: 0 10px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 8px; color: var(--spice-subtext); background: rgb(255 255 255 / 5%); cursor: pointer; font-size: 12px; font-weight: 700; }
+.visibilityTreeActions button:hover { color: var(--spice-text); background: rgb(255 255 255 / 9%); }
+.searchBox { display: flex; gap: 8px; align-items: center; min-height: 34px; padding: 0 10px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 9px; background: rgb(0 0 0 / 14%); }
+.searchBox input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--spice-text); background: transparent; }
+.visibilityTree { display: grid; gap: 5px; padding: 9px; border: 1px solid rgb(255 255 255 / 8%); border-radius: 10px; background: rgb(0 0 0 / 12%); }
+.visibilityTree:focus-visible { outline: 2px solid rgb(155 140 255 / 72%); outline-offset: 2px; }
+.visibilityNode { display: grid; gap: 6px; }
+.visibilityNodeRow { display: grid; grid-template-columns: 24px auto minmax(0, 1fr); gap: 8px; align-items: center; min-height: 32px; padding: 4px 6px; border-radius: 8px; color: var(--spice-text); }
+.visibilityNodeRow:hover { background: rgb(255 255 255 / 5%); }
+.visibilityExpandButton { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; color: var(--spice-subtext); background: transparent; cursor: pointer; }
+.visibilityExpandButton:hover:not(:disabled) { color: var(--spice-text); background: rgb(255 255 255 / 8%); }
+.visibilityExpandButton:disabled { opacity: .65; cursor: default; }
+.visibilityNodeLabel { display: grid; gap: 1px; min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.visibilityNodeLabel:disabled { cursor: default; }
+.visibilityNode strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.visibilityNode small { color: var(--spice-subtext); font-size: 11px; }
+.visibilityChildren { display: grid; gap: 4px; margin-left: 20px; padding-left: 10px; border-left: 1px solid rgb(255 255 255 / 9%); }
+@media (max-width: 620px) {
+  .mergeLibraryCards, .mergeBulkChoices, .mergeConflictChoices { grid-template-columns: 1fr; }
+  .mergeConflictToolbar, .mergeActions { align-items: stretch; flex-direction: column; }
+  .mergeSearch { width: auto; }
+  .visibilityToolbar { align-items: stretch; flex-direction: column; }
+  .visibilityTreeActions { width: 100%; }
+  .visibilityTreeActions button { flex: 1; }
+  .overlay { padding: 12px; }
+}

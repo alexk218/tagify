@@ -15,7 +15,7 @@ import { faGithub } from "@fortawesome/free-brands-svg-icons";
 
 interface UpdateBannerProps {
   updateInfo: UpdateInfo;
-  onDismiss: (permanently?: boolean) => void;
+  onDismiss: () => void;
 }
 
 type ExpandedSection = "update" | "changelog" | null;
@@ -54,7 +54,6 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   const [expandedSection, setExpandedSection] = useState<ExpandedSection>(null);
   const [activeTab, setActiveTab] = useState<UpdateTab>(defaultUpdateTab);
   const [isAnimating, setIsAnimating] = useState(false);
-  const [dontRemindMe, setDontRemindMe] = useState(false);
   const [copiedCommand, setCopiedCommand] = useState(false);
 
   const handleDownloadInstaller = () => {
@@ -74,7 +73,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   const handleDismiss = () => {
     setIsAnimating(true);
     setTimeout(() => {
-      onDismiss(dontRemindMe);
+      onDismiss();
     }, 300);
   };
 
@@ -355,32 +354,6 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
             </div>
           </div>
         )}
-
-        {/* Dismissal options */}
-        <div className={styles.dismissalOptions}>
-          <label className={styles.checkboxLabel}>
-            <input
-              type="checkbox"
-              className={styles.checkbox}
-              checked={dontRemindMe}
-              onChange={(e) => setDontRemindMe(e.target.checked)}
-            />
-            <span className={styles.checkboxCustom}>
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                className={styles.checkIcon}
-              >
-                <path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z" />
-              </svg>
-            </span>
-            <span className={styles.checkboxText}>
-              Don't remind me about this version
-            </span>
-          </label>
-        </div>
       </div>
     </div>
   );
