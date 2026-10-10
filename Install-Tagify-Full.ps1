@@ -628,7 +628,13 @@ function Test-TagifyUpdateAvailable {
     }
     
     try {
-        return [version]$LatestVersion -gt [version]$CurrentVersion
+        $current = $CurrentVersion.Trim().TrimStart('v')
+        $latest = $LatestVersion.Trim().TrimStart('v')
+        if ($latest.Contains('-')) { return $false }
+        $installedPrerelease = $current.Contains('-')
+        $installed = [version]($current.Split('+')[0].Split('-')[0])
+        $available = [version]($latest.Split('+')[0])
+        return ($available -gt $installed) -or (($available -eq $installed) -and $installedPrerelease)
     }
     catch {
         Write-Log "Could not compare versions: Current=$CurrentVersion, Latest=$LatestVersion"
