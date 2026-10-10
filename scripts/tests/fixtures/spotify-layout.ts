@@ -1,4 +1,5 @@
 import type { TrackData } from "../../../src/types/tagData";
+import { createEmptyTaxonomy, TAG_DATA_SCHEMA_VERSION } from "../../../src/utils/tagTaxonomy";
 
 const params = new URLSearchParams(location.search);
 const layout = params.get("layout") || "modern";
@@ -19,17 +20,27 @@ export const syncRuntime = { start() {} };
 export const welcomeModal = { initialize() {} };
 export const loadSmartPlaylistsFromStorage = async () => [];
 export const smartPlaylistSyncService = { startBackgroundReconciliation() {}, async syncTrack() {} };
-export const storageService = {
-  initialize: async () => ({ status: "ready" }),
-  async saveTrackChanges(changes: Map<string, TrackData | null>) {
+export const storageService = { initialize: async () => ({ status: "ready" }) };
+export const flushLocalPersistence = async () => {};
+// Saved songs live in memory; edits change them like the real library does.
+export const indexedDBStorage = {
+  init: async () => true,
+  loadAllStrict: async () => ({
+    schemaVersion: TAG_DATA_SCHEMA_VERSION, taxonomy: createEmptyTaxonomy(),
+    tracks: structuredClone(tracks), playlists: {}, artists: {}, smartPlaylists: [],
+  }),
+  async patchTracks(changes: Record<string, (current: TrackData | null) => TrackData | null | undefined>) {
     writes++;
-    changes.forEach((track, uri) => {
-      if (track) tracks[uri] = track;
+    const saved: Record<string, TrackData | null> = {};
+    Object.entries(changes).forEach(([uri, change]) => {
+      const next = change(tracks[uri] ? { ...tracks[uri] } : null);
+      if (next === undefined) return;
+      saved[uri] = next;
+      if (next) tracks[uri] = next;
       else delete tracks[uri];
     });
-    localStorage.setItem("tagify:tagData", JSON.stringify({ tracks, categories: [] }));
     status();
-    return true;
+    return saved;
   },
 };
 
@@ -43,7 +54,6 @@ Object.assign(globalThis, { Spicetify: {
   Platform: { History: { location: { pathname: "/playlist/example" }, listen() {}, push() {} } },
   ContextMenu: { Item: class { register() {} } }, showNotification: console.info,
 } });
-localStorage.setItem("tagify:tagData", JSON.stringify({ tracks, categories: [] }));
 localStorage.setItem("tagify:extensionSettings", JSON.stringify({ tracklistDisplayMode: "stars", playbarDisplayMode: "stars" }));
 
 function renderTracklist() {

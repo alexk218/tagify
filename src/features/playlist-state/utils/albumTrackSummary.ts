@@ -40,39 +40,33 @@ function getPrimaryArtist(artists: string | undefined): string | null {
   return primaryArtist || null;
 }
 
-export function buildAlbumTrackSummaries(
-  tracks: Record<string, TrackData>,
-  taxonomy: TagTaxonomy,
-): Map<string, AlbumTrackSummary> {
-  const accumulators = new Map<string, AlbumTrackAccumulator>();
-  const resolvedTags = buildResolvedTagLookup(taxonomy);
+export function hasTrackAnnotation(track: TrackData | undefined, taxonomy: TagTaxonomy): track is TrackData {
+  return Boolean(track && (track.rating > 0 || track.energy > 0 || track.tagIds.some((id) => Boolean(taxonomy.tagsById[id]))));
+}
 
-  Object.values(tracks).forEach((track) => {
-    if (!track.albumUri) {
-      return;
-    }
+/** One contribution per track, regardless of repeated playlist entries. */
+export function summarizeTrackUris(
+  tracks: Record<string, TrackData>, taxonomy: TagTaxonomy, uris: Iterable<string>,
+  resolvedTags = buildResolvedTagLookup(taxonomy),
+): AlbumTrackSummary {
+  const accumulator: AlbumTrackAccumulator = {
+    taggedTrackCount: 0,
+    tracksWithTagsCount: 0,
+    ratingTotal: 0,
+    ratedTrackCount: 0,
+    energyTotal: 0,
+    energyTrackCount: 0,
+    tagCounts: new Map<string, number>(),
+    albumName: null,
+    artistCounts: new Map<string, number>(),
+    imageUrl: null,
+    lastTaggedAt: 0,
+  };
 
-    const knownTagIds = Array.from(new Set(track.tagIds)).filter((tagId) =>
-      resolvedTags.has(tagId),
-    );
-    if (track.rating <= 0 && track.energy <= 0 && knownTagIds.length === 0) {
-      return;
-    }
-
-    const accumulator = accumulators.get(track.albumUri) || {
-      taggedTrackCount: 0,
-      tracksWithTagsCount: 0,
-      ratingTotal: 0,
-      ratedTrackCount: 0,
-      energyTotal: 0,
-      energyTrackCount: 0,
-      tagCounts: new Map<string, number>(),
-      albumName: null,
-      artistCounts: new Map<string, number>(),
-      imageUrl: null,
-      lastTaggedAt: 0,
-    };
-
+  for (const uri of new Set(uris)) {
+    const track = tracks[uri];
+    if (!hasTrackAnnotation(track, taxonomy)) continue;
+    const knownTagIds = Array.from(new Set(track.tagIds)).filter((id) => resolvedTags.has(id));
     accumulator.taggedTrackCount += 1;
     accumulator.albumName ||= track.albumName || null;
     accumulator.imageUrl ||= track.albumImageUrl || null;
@@ -106,65 +100,88 @@ export function buildAlbumTrackSummaries(
       accumulator.tagCounts.set(tagId, (accumulator.tagCounts.get(tagId) || 0) + 1);
     });
 
-    accumulators.set(track.albumUri, accumulator);
+  }
+  const commonTags = Array.from(accumulator.tagCounts, ([tagId, trackCount]) => ({
+    tagId,
+    trackCount,
+    coverage: trackCount / accumulator.taggedTrackCount,
+  }))
+    .filter(
+      (tag) =>
+        accumulator.tracksWithTagsCount >= MIN_CONTRIBUTING_TRACKS &&
+        tag.coverage >= COMMON_TAG_MIN_COVERAGE,
+    )
+    .sort((left, right) => {
+      const countComparison = right.trackCount - left.trackCount;
+      if (countComparison !== 0) {
+        return countComparison;
+      }
+
+      const leftResolved = resolvedTags.get(left.tagId);
+      const rightResolved = resolvedTags.get(right.tagId);
+      if (leftResolved && rightResolved) {
+        return compareResolvedTagsByTaxonomyOrder(leftResolved, rightResolved);
+      }
+
+      return left.tagId.localeCompare(right.tagId);
+    });
+
+  // Most tracks share the album artist; featured artists only appear on a few.
+  const artistName =
+    Array.from(accumulator.artistCounts).reduce<[string, number] | null>(
+      (best, entry) => (!best || entry[1] > best[1] ? entry : best),
+      null,
+    )?.[0] ?? null;
+
+  const summary: AlbumTrackSummary = {
+    taggedTrackCount: accumulator.taggedTrackCount,
+    ratedTrackCount: accumulator.ratedTrackCount,
+    ratingAverage:
+      accumulator.ratedTrackCount >= MIN_CONTRIBUTING_TRACKS
+        ? accumulator.ratingTotal / accumulator.ratedTrackCount
+        : null,
+    energyTrackCount: accumulator.energyTrackCount,
+    energyAverage:
+      accumulator.energyTrackCount >= MIN_CONTRIBUTING_TRACKS
+        ? accumulator.energyTotal / accumulator.energyTrackCount
+        : null,
+    commonTags,
+    albumName: accumulator.albumName,
+    artistName,
+    imageUrl: accumulator.imageUrl,
+    lastTaggedAt: accumulator.lastTaggedAt || null,
+
+  };
+
+  return summary;
+}
+
+export function buildAlbumTrackSummaries(
+  tracks: Record<string, TrackData>, taxonomy: TagTaxonomy,
+  membership: Readonly<Record<string, readonly string[]>> = {},
+): Map<string, AlbumTrackSummary> {
+  const albums = new Map<string, Set<string>>();
+  Object.entries(tracks).forEach(([uri, track]) => {
+    if (track.albumUri && hasTrackAnnotation(track, taxonomy)) {
+      const members = albums.get(track.albumUri) ?? new Set<string>();
+      members.add(uri);
+      albums.set(track.albumUri, members);
+    }
   });
-
-  return new Map(
-    Array.from(accumulators, ([albumUri, accumulator]) => {
-      const commonTags = Array.from(accumulator.tagCounts, ([tagId, trackCount]) => ({
-        tagId,
-        trackCount,
-        coverage: trackCount / accumulator.taggedTrackCount,
-      }))
-        .filter(
-          (tag) =>
-            accumulator.tracksWithTagsCount >= MIN_CONTRIBUTING_TRACKS &&
-            tag.coverage >= COMMON_TAG_MIN_COVERAGE,
-        )
-        .sort((left, right) => {
-          const countComparison = right.trackCount - left.trackCount;
-          if (countComparison !== 0) {
-            return countComparison;
-          }
-
-          const leftResolved = resolvedTags.get(left.tagId);
-          const rightResolved = resolvedTags.get(right.tagId);
-          if (leftResolved && rightResolved) {
-            return compareResolvedTagsByTaxonomyOrder(leftResolved, rightResolved);
-          }
-
-          return left.tagId.localeCompare(right.tagId);
-        });
-
-      // Most tracks share the album artist; featured artists only appear on a few.
-      const artistName =
-        Array.from(accumulator.artistCounts).reduce<[string, number] | null>(
-          (best, entry) => (!best || entry[1] > best[1] ? entry : best),
-          null,
-        )?.[0] ?? null;
-
-      const summary: AlbumTrackSummary = {
-        taggedTrackCount: accumulator.taggedTrackCount,
-        ratedTrackCount: accumulator.ratedTrackCount,
-        ratingAverage:
-          accumulator.ratedTrackCount >= MIN_CONTRIBUTING_TRACKS
-            ? accumulator.ratingTotal / accumulator.ratedTrackCount
-            : null,
-        energyTrackCount: accumulator.energyTrackCount,
-        energyAverage:
-          accumulator.energyTrackCount >= MIN_CONTRIBUTING_TRACKS
-            ? accumulator.energyTotal / accumulator.energyTrackCount
-            : null,
-        commonTags,
-        albumName: accumulator.albumName,
-        artistName,
-        imageUrl: accumulator.imageUrl,
-        lastTaggedAt: accumulator.lastTaggedAt || null,
-      };
-
-      return [albumUri, summary];
-    }),
-  );
+  Object.entries(membership).forEach(([albumUri, uris]) => {
+    const members = albums.get(albumUri) ?? new Set<string>();
+    uris.forEach((uri) => members.add(uri));
+    albums.set(albumUri, members);
+  });
+  const result = new Map<string, AlbumTrackSummary>();
+  const resolvedTags = buildResolvedTagLookup(taxonomy);
+  albums.forEach((uris, albumUri) => {
+    const summary = summarizeTrackUris(tracks, taxonomy, uris, resolvedTags);
+    if (!summary.taggedTrackCount) return;
+    if (membership[albumUri]) summary.totalTrackCount = uris.size;
+    result.set(albumUri, summary);
+  });
+  return result;
 }
 
 export function getAlbumProgress(

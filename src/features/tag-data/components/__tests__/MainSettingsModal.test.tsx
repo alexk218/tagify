@@ -79,3 +79,27 @@ describe("MainSettingsModal display settings", () => {
     expect(screen.getByLabelText("Playbar Display")).toHaveValue("disabled");
   });
 });
+
+describe("MainSettingsModal when changes can't be saved", () => {
+  it("explains that saving is paused and offers a retry in plain words", async () => {
+    localStorage.setItem("tagify:fallbackMode", JSON.stringify({ active: true, reason: "VersionError", failedAt: 1, retryCount: 1 }));
+    const onRetryMigration = vi.fn().mockResolvedValue({ success: true, fallbackMode: false });
+    render(
+      <MainSettingsModal
+        onClose={vi.fn()}
+        showSupportButtons
+        onToggleSupportButtons={vi.fn()}
+        showUpdateProtectionButton
+        onToggleUpdateProtectionButton={vi.fn()}
+        onRetryMigration={onRetryMigration}
+      />,
+    );
+
+    expect(await screen.findByText("Saving is paused")).toBeVisible();
+    expect(screen.queryByText(/IndexedDB|upgrade/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    await vi.waitFor(() => expect(Spicetify.showNotification).toHaveBeenCalledWith("Your library is open again. Changes will save.", false));
+    expect(onRetryMigration).toHaveBeenCalledTimes(1);
+  });
+});

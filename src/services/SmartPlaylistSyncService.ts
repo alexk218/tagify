@@ -13,14 +13,18 @@ import {
   hasConfirmedMembershipBaseline,
   loadSmartPlaylistsFromStorage,
   markConfirmedMembershipBaselines,
+  clearConfirmedMembershipBaselines,
   updateSmartPlaylistsInStorage,
 } from "@/features/smart-playlists/utils/smartPlaylist.storage";
 import { dispatchTagDataUpdatedEvent } from "@/features/tag-data/utils/tagData.events";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { spotifyService } from "@/services/SpotifyService";
+import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { storageService } from "@/services/storage/StorageService";
+import { recordingDisplayKeys } from "@/features/recording-reuse/utils/recordingLibrary";
 import {
   flushLocalPersistence,
+  getTagifyDatabaseName,
   isLocalPersistencePaused,
 } from "@/services/sync/SyncLocalState";
 import { smartPlaylistTagChoices, applyTagChoice, type TagChoice } from "@/features/smart-playlists/utils/smartPlaylist.tagChoices";
@@ -58,7 +62,103 @@ function uniqueTrackUris(trackUris: string[]): string[] {
   return Array.from(new Set(trackUris));
 }
 
+/**
+ * The Tagify page and the background extension are separate bundles, each with
+ * its own SmartPlaylistSyncService. Both change the same Spotify playlists,
+ * saved songs and last-confirmed membership, so their work takes turns: one
+ * copy's playlist additions must never look like songs added in Spotify to the
+ * other copy while it is reading Spotify.
+ */
+export const SMART_PLAYLIST_SYNC_LOCK = "tagify:smart-playlist-sync";
+
+export interface SmartPlaylistSyncLockManager {
+  request<T>(
+    name: string,
+    options: { mode: "exclusive"; signal?: AbortSignal },
+    callback: () => Promise<T>,
+  ): Promise<T>;
+}
+
+/**
+ * How long one copy waits for the other to finish. A stuck Spotify request
+ * in one copy then delays the other's work to a later pass instead of
+ * blocking it indefinitely.
+ */
+const SMART_PLAYLIST_LOCK_WAIT_MS = 60_000;
+
+function defaultLockManager(): SmartPlaylistSyncLockManager | undefined {
+  return typeof navigator === "undefined"
+    ? undefined
+    : (navigator.locks as SmartPlaylistSyncLockManager | undefined);
+}
+
+/** Details looked up for a song that has no saved record yet. */
+interface NewTrackDetails {
+  name?: string;
+  artists?: string;
+  bpm: number | null;
+  camelotKey?: string;
+}
+
+function localFileDetails(trackUri: string): NewTrackDetails {
+  const [, , localArtist, , localTrackName] = trackUri.split(":");
+  let name: string | undefined;
+  let artists: string | undefined;
+  try {
+    name = localTrackName ? decodeURIComponent(localTrackName) : undefined;
+    artists = localArtist ? decodeURIComponent(localArtist) : undefined;
+  } catch {
+    name = localTrackName || undefined;
+    artists = localArtist || undefined;
+  }
+  return { bpm: null, ...(name ? { name } : {}), ...(artists ? { artists } : {}) };
+}
+
+function newTrackRecord(
+  trackUri: string,
+  details: NewTrackDetails | undefined,
+  now: number,
+): TrackData {
+  const { name, artists, bpm, camelotKey } = details ??
+    (trackUri.startsWith("spotify:local:") ? localFileDetails(trackUri) : { bpm: null });
+  return {
+    rating: 0,
+    energy: 0,
+    bpm,
+    ...(camelotKey ? { camelotKey } : {}),
+    tagIds: [],
+    dateCreated: now,
+    dateModified: now,
+    ...(name ? { name } : {}),
+    ...(artists ? { artists } : {}),
+  };
+}
+
+/**
+ * Adds details looked up for a new song to a record saved in the meantime,
+ * filling only what is still missing. Details are not annotations, so Last
+ * Updated stays unchanged.
+ */
+function withMissingDetails(track: TrackData, details: NewTrackDetails | undefined): TrackData {
+  if (!details) return track;
+  const missing: Partial<TrackData> = {
+    ...(!track.name && details.name ? { name: details.name } : {}),
+    ...(!track.artists && details.artists ? { artists: details.artists } : {}),
+    ...(track.bpm == null && details.bpm != null ? { bpm: details.bpm } : {}),
+    ...(!track.camelotKey && details.camelotKey ? { camelotKey: details.camelotKey } : {}),
+  };
+  return Object.keys(missing).length > 0 ? { ...track, ...missing } : track;
+}
+
+function sameTagIds(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((tagId, index) => tagId === right[index]);
+}
+
 export class SmartPlaylistSyncService {
+  constructor(
+    private readonly lockManager: SmartPlaylistSyncLockManager | undefined = defaultLockManager(),
+  ) {}
+
   private lastFailureNoticeAt = -Infinity;
   private operationQueue: Promise<void> = Promise.resolve();
   private backgroundStarted = false;
@@ -101,7 +201,20 @@ export class SmartPlaylistSyncService {
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.operationQueue.then(operation, operation);
+    // The queue keeps this copy's order; the lock takes turns with the other bundle.
+    const exclusive = () => this.lockManager
+      ? this.lockManager.request(
+          SMART_PLAYLIST_SYNC_LOCK,
+          { mode: "exclusive", signal: AbortSignal.timeout(SMART_PLAYLIST_LOCK_WAIT_MS) },
+          operation,
+        ).catch((error: unknown) => {
+          if (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) {
+            throw new Error("Smart Playlists are still updating elsewhere in Tagify. They'll catch up on the next check.");
+          }
+          throw error;
+        })
+      : operation();
+    const result = this.operationQueue.then(exclusive, exclusive);
     this.operationQueue = result.then(
       () => undefined,
       () => undefined,
@@ -121,70 +234,39 @@ export class SmartPlaylistSyncService {
       .map(({ playlist }) => playlist);
   }
 
-  private async createInitialTrackData(trackUri: string): Promise<TrackData> {
-    const now = Date.now();
-    let name: string | undefined;
-    let artists: string | undefined;
-    let bpm: number | null = null;
-    let camelotKey: string | null = null;
-
+  private async fetchNewTrackDetails(trackUri: string): Promise<NewTrackDetails> {
     if (trackUri.startsWith("spotify:local:")) {
-      const [, , localArtist, , localTrackName] = trackUri.split(":");
-      try {
-        name = localTrackName ? decodeURIComponent(localTrackName) : undefined;
-        artists = localArtist ? decodeURIComponent(localArtist) : undefined;
-      } catch {
-        name = localTrackName || undefined;
-        artists = localArtist || undefined;
-      }
-    } else {
-      const [metadataResult, audioFeaturesResult] = await Promise.allSettled([
-        spotifyService.getTrack(trackUri),
-        spotifyApiService.fetchAudioFeatures(trackUri),
-      ]);
-
-      if (metadataResult.status === "fulfilled" && metadataResult.value) {
-        name = metadataResult.value.name;
-        artists = metadataResult.value.artists;
-      }
-      if (audioFeaturesResult.status === "fulfilled") {
-        bpm = audioFeaturesResult.value.bpm;
-        camelotKey = audioFeaturesResult.value.camelotKey;
-      }
+      return localFileDetails(trackUri);
     }
-
+    const [metadataResult, audioFeaturesResult] = await Promise.allSettled([
+      spotifyService.getTrack(trackUri),
+      spotifyApiService.fetchAudioFeatures(trackUri),
+    ]);
+    const metadata = metadataResult.status === "fulfilled" ? metadataResult.value : null;
+    const audioFeatures = audioFeaturesResult.status === "fulfilled" ? audioFeaturesResult.value : null;
     return {
-      rating: 0,
-      energy: 0,
-      bpm,
-      ...(camelotKey ? { camelotKey } : {}),
-      tagIds: [],
-      dateCreated: now,
-      dateModified: now,
-      ...(name ? { name } : {}),
-      ...(artists ? { artists } : {}),
+      bpm: audioFeatures?.bpm ?? null,
+      ...(audioFeatures?.camelotKey ? { camelotKey: audioFeatures.camelotKey } : {}),
+      ...(metadata?.name ? { name: metadata.name } : {}),
+      ...(metadata?.artists ? { artists: metadata.artists } : {}),
     };
   }
 
+  /** Applies each playlist's criteria in order (oldest first) to one song. */
   private applyCriteriaForMemberships(
     trackData: TrackData,
-    trackUri: string,
     playlists: SmartPlaylistCriteria[],
-    membershipByPlaylistId: Map<string, string[]>,
+    now: number,
   ): TrackData {
-    const now = Date.now();
-    const updated = playlists.reduce((current, playlist) => {
-      const membership = membershipByPlaylistId.get(playlist.playlistId) ?? [];
-      return membership.includes(trackUri)
-        ? applySmartPlaylistCriteriaToTrack(current, playlist.criteria, now)
-        : current;
-    }, trackData);
+    const updated = playlists.reduce(
+      (current, playlist) => applySmartPlaylistCriteriaToTrack(current, playlist.criteria, now),
+      trackData,
+    );
 
     const mutableCriteriaUnchanged =
       updated.rating === trackData.rating &&
       updated.energy === trackData.energy &&
-      updated.tagIds.length === trackData.tagIds.length &&
-      updated.tagIds.every((tagId, index) => tagId === trackData.tagIds[index]);
+      sameTagIds(updated.tagIds, trackData.tagIds);
 
     if (mutableCriteriaUnchanged) {
       return trackData;
@@ -197,81 +279,97 @@ export class SmartPlaylistSyncService {
     };
   }
 
+  /**
+   * Gives songs newly found in Spotify playlists the playlists' tags, rating
+   * and energy. Details for songs without a saved record are looked up first;
+   * each song is then changed from its current saved record in one step, so
+   * tags, ratings and other edits saved in the meantime are kept.
+   */
   private async applyInboundCriteria(
     playlists: SmartPlaylistCriteria[],
     membershipByPlaylistId: Map<string, string[]>,
-    providedTrackData: Record<string, TrackData | null> = {},
+    expectedDatabaseName: string,
+    knownTracks?: Record<string, TrackData | undefined>,
   ): Promise<{
     updatedCount: number;
     tracks: Map<string, TrackData>;
     notifications: SmartPlaylistAppliedCriteriaNotification[];
   }> {
+    const tracks = new Map<string, TrackData>();
+    const notifications: SmartPlaylistAppliedCriteriaNotification[] = [];
     const memberTrackUris = uniqueTrackUris(
       Array.from(membershipByPlaylistId.values()).flat(),
     );
-    const missingUris = memberTrackUris.filter((uri) => !Object.prototype.hasOwnProperty.call(providedTrackData, uri));
-    const stored = missingUris.length ? await storageService.loadAllStrict() : null;
-    const storedTracks = new Map(missingUris.flatMap((uri) => stored?.tracks[uri] ? [[uri, stored.tracks[uri]] as const] : []));
-    const pending = new Map<string, Set<string>>();
-    const tracksToSave = new Map<string, TrackData>();
-    const notifications: SmartPlaylistAppliedCriteriaNotification[] = [];
+    if (memberTrackUris.length === 0) {
+      return { updatedCount: 0, tracks, notifications };
+    }
 
+    // Only decides which songs need a lookup; the save reads every record again.
+    const known = knownTracks ??
+      Object.fromEntries(await storageService.getTracks(memberTrackUris));
+    const details = new Map<string, NewTrackDetails>();
     for (const trackUri of memberTrackUris) {
-      const hasProvidedTrackData = Object.prototype.hasOwnProperty.call(
-        providedTrackData,
-        trackUri,
-      );
-      const provided = providedTrackData[trackUri];
-      const existing = hasProvidedTrackData
-        ? provided
-        : storedTracks.get(trackUri) ?? null;
-      const initial = existing ?? (await this.createInitialTrackData(trackUri));
-      if (existing) {
-        storedTracks.set(trackUri, existing);
+      if (!known[trackUri]) {
+        details.set(trackUri, await this.fetchNewTrackDetails(trackUri));
       }
-      const updated = this.applyCriteriaForMemberships(
-        initial,
-        trackUri,
-        playlists,
-        membershipByPlaylistId,
-      );
+    }
 
-      for (const playlist of playlists) {
-        if (!(membershipByPlaylistId.get(playlist.playlistId) ?? []).includes(trackUri)) continue;
+    const memberSets = new Map(
+      Array.from(membershipByPlaylistId, ([playlistId, uris]) => [playlistId, new Set(uris)]),
+    );
+    const pending = new Map<string, Set<string>>();
+    const now = Date.now();
+    const applyToSavedTrack = (trackUri: string) => (current: TrackData | null) => {
+      const trackPlaylists = playlists.filter((playlist) =>
+        memberSets.get(playlist.playlistId)?.has(trackUri),
+      );
+      const initial = current
+        ? withMissingDetails(current, details.get(trackUri))
+        : newTrackRecord(trackUri, details.get(trackUri), now);
+      const updated = this.applyCriteriaForMemberships(initial, trackPlaylists, now);
+      const undecided = trackPlaylists.filter((playlist) => {
         const choices = smartPlaylistTagChoices(updated.tagIds, playlist.criteria);
-        if (!choices || choices.length > 1) {
-          const uris = pending.get(playlist.playlistId) ?? new Set<string>();
-          uris.add(trackUri);
-          pending.set(playlist.playlistId, uris);
-        }
-      }
-      if (updated !== initial || [...pending.values()].some((uris) => uris.has(trackUri))) {
-        tracksToSave.set(trackUri, updated);
-        storedTracks.set(trackUri, updated);
+        return !choices || choices.length > 1;
+      });
+      undecided.forEach((playlist) => {
+        const uris = pending.get(playlist.playlistId) ?? new Set<string>();
+        uris.add(trackUri);
+        pending.set(playlist.playlistId, uris);
+      });
+
+      const applied = updated !== initial || undecided.length > 0;
+      if (applied) {
         notifications.push({
           trackName: updated.name,
           artists: updated.artists,
-          playlistNames: playlists
-            .filter((playlist) =>
-              (membershipByPlaylistId.get(playlist.playlistId) ?? []).includes(
-                trackUri,
-              ),
-            )
-            .map((playlist) => playlist.playlistName),
-          addedTagIds: updated.tagIds.filter(
-            (tagId) => !initial.tagIds.includes(tagId),
-          ),
-          removedTagIds: initial.tagIds.filter(
-            (tagId) => !updated.tagIds.includes(tagId),
-          ),
-          ...(updated.rating !== initial.rating
-            ? { rating: updated.rating }
-            : {}),
-          ...(updated.energy !== initial.energy
-            ? { energy: updated.energy }
-            : {}),
+          playlistNames: trackPlaylists.map((playlist) => playlist.playlistName),
+          addedTagIds: updated.tagIds.filter((tagId) => !initial.tagIds.includes(tagId)),
+          removedTagIds: initial.tagIds.filter((tagId) => !updated.tagIds.includes(tagId)),
+          ...(updated.rating !== initial.rating ? { rating: updated.rating } : {}),
+          ...(updated.energy !== initial.energy ? { energy: updated.energy } : {}),
         });
       }
+      if (!current && !applied) return undefined;
+      tracks.set(trackUri, updated);
+      return updated === current ? undefined : updated;
+    };
+
+    let saved: Record<string, TrackData | null>;
+    try {
+      saved = await indexedDBStorage.patchTracks(
+        Object.fromEntries(memberTrackUris.map((trackUri) => [trackUri, applyToSavedTrack(trackUri)])),
+        { expectedDatabaseName },
+      );
+    } catch (error) {
+      console.error("Tagify: Smart Playlist changes to new songs could not be saved", error);
+      throw new Error("Smart Playlist changes to your songs could not be saved. Please try again.");
+    }
+    // Linked copies of a song receive the same changes.
+    Object.entries(saved).forEach(([trackUri, trackData]) => {
+      if (trackData) tracks.set(trackUri, trackData);
+    });
+    if (Object.keys(saved).length > 0) {
+      dispatchTagDataUpdatedEvent("smartPlaylistSync");
     }
 
     // Persist the pending choice before advancing the membership baseline.
@@ -279,17 +377,10 @@ export class SmartPlaylistSyncService {
       const uris = pending.get(playlist.playlistId);
       return uris ? { ...playlist, pendingTagChoices: [...new Set([...(playlist.pendingTagChoices ?? []), ...uris])] } : playlist;
     }));
-    if (tracksToSave.size > 0) {
-      const saved = await storageService.saveTracks(tracksToSave);
-      if (!saved) {
-        throw new Error("Failed to persist smart-playlist track criteria");
-      }
-      dispatchTagDataUpdatedEvent("smartPlaylistSync");
-    }
 
     return {
-      updatedCount: tracksToSave.size,
-      tracks: storedTracks,
+      updatedCount: notifications.length,
+      tracks,
       notifications,
     };
   }
@@ -326,8 +417,9 @@ export class SmartPlaylistSyncService {
       return summary;
     }
     await flushLocalPersistence();
+    const databaseName = getTagifyDatabaseName();
 
-    const playlists = (await this.getOrderedActivePlaylists()).filter(
+    let playlists = (await this.getOrderedActivePlaylists()).filter(
       (playlist) => !targetPlaylistId || playlist.playlistId === targetPlaylistId,
     );
     if (playlists.length === 0) {
@@ -337,6 +429,7 @@ export class SmartPlaylistSyncService {
       return summary;
     }
 
+    // A failed read stops here, before Spotify or any saved song changes.
     const allTagData = await storageService.loadAllStrict();
     const membershipByPlaylistId = new Map<string, string[]>();
     const inboundAdditionsByPlaylistId = new Map<string, string[]>();
@@ -356,17 +449,6 @@ export class SmartPlaylistSyncService {
           playlist.playlistId,
           uniqueTrackUris(deduplicated.trackUris),
         );
-        const previousMembership = new Set(
-          uniqueTrackUris(playlist.smartPlaylistTrackUris ?? []),
-        );
-        inboundAdditionsByPlaylistId.set(
-          playlist.playlistId,
-          hasConfirmedMembershipBaseline(playlist)
-            ? uniqueTrackUris(deduplicated.trackUris).filter(
-                (trackUri) => !previousMembership.has(trackUri),
-              )
-            : [],
-        );
         summary.duplicatesRemovedCount += deduplicated.removedCount;
         successfullyFetched.add(playlist.playlistId);
       } catch (error) {
@@ -382,10 +464,42 @@ export class SmartPlaylistSyncService {
       return summary;
     }
 
+    // Reading Spotify takes time. Compare with the membership saved now as
+    // well, so songs Tagify added meanwhile are not taken for songs added in
+    // Spotify, and leave playlists that were turned off or replaced alone.
+    const latestPlaylists = new Map(
+      (await this.getSmartPlaylists()).map((playlist) => [playlist.playlistId, playlist]),
+    );
+    playlists = playlists.flatMap((playlist) => {
+      const latest = latestPlaylists.get(playlist.playlistId);
+      if (!latest?.isActive || latest.createdAt !== playlist.createdAt) {
+        successfullyFetched.delete(playlist.playlistId);
+        return [];
+      }
+      const fetched = membershipByPlaylistId.get(playlist.playlistId);
+      if (fetched) {
+        const known = new Set([
+          ...(playlist.smartPlaylistTrackUris ?? []),
+          ...(latest.smartPlaylistTrackUris ?? []),
+        ]);
+        inboundAdditionsByPlaylistId.set(
+          playlist.playlistId,
+          hasConfirmedMembershipBaseline(latest)
+            ? fetched.filter((trackUri) => !known.has(trackUri))
+            : [],
+        );
+      }
+      return [latest];
+    });
+    if (successfullyFetched.size === 0) {
+      return summary;
+    }
+
     const inbound = await this.applyInboundCriteria(
       playlists,
       inboundAdditionsByPlaylistId,
-      Object.fromEntries(Array.from(inboundAdditionsByPlaylistId.values()).flat().map((uri) => [uri, allTagData.tracks[uri] ?? null])),
+      databaseName,
+      allTagData.tracks,
     );
     summary.metadataUpdatedCount = inbound.updatedCount;
 
@@ -409,6 +523,7 @@ export class SmartPlaylistSyncService {
       const matchingTrackUris = collectMatchingTrackUris(
         allTagData.tracks,
         playlist.criteria,
+        currentMembership,
       );
 
       if (hasConfirmedMembershipBaseline(playlist)) {
@@ -506,7 +621,8 @@ export class SmartPlaylistSyncService {
           const choicesChanged = pendingTagChoices?.length !== playlist.pendingTagChoices?.length;
           const membershipChanged = previous.length !== confirmed.length ||
             previous.some((uri, index) => uri !== confirmed[index]);
-          if (background && !membershipChanged && !choicesChanged && !writtenPlaylistIds.has(playlist.playlistId)) {
+          if (background && playlist.lastSyncAt && hasConfirmedMembershipBaseline(playlist) &&
+              !membershipChanged && !choicesChanged && !writtenPlaylistIds.has(playlist.playlistId)) {
             return playlist;
           }
           changed = true;
@@ -527,24 +643,92 @@ export class SmartPlaylistSyncService {
     return this.enqueue(() => this.reconcileNow());
   }
 
+  /** Restore and confirm membership while background sync in either bundle waits. */
+  async restoreLibrary<T>(restore: () => Promise<T>): Promise<{ result: T; failedPlaylistNames: string[] }> {
+    return this.enqueue(async () => {
+      const databaseName = getTagifyDatabaseName();
+      const checkAccount = () => {
+        if (getTagifyDatabaseName() !== databaseName) {
+          throw new Error("Your Spotify account changed. Return to the account where you started importing your backup.");
+        }
+      };
+      const result = await restore();
+      checkAccount();
+      clearConfirmedMembershipBaselines();
+      const playlists = await this.getSmartPlaylists();
+      const confirmed = new Map<string, { playlist: SmartPlaylistCriteria; members: string[] }>();
+      const failedPlaylistNames: string[] = [];
+      for (const playlist of playlists) {
+        if (!playlist.playlistId) continue;
+        try {
+          const members = await spotifyApiService.getAllTrackUrisInPlaylistStrict(playlist.playlistId);
+          checkAccount();
+          confirmed.set(playlist.playlistId, { playlist, members: uniqueTrackUris(members) });
+        } catch (error) {
+          checkAccount();
+          console.warn("Could not check restored Smart Playlist", playlist.playlistName, error);
+          failedPlaylistNames.push(playlist.playlistName);
+        }
+      }
+      checkAccount();
+      const confirmedIds = new Set<string>();
+      if (confirmed.size) {
+        const saved = await this.updateSmartPlaylists((current) => {
+          checkAccount();
+          return current.map((playlist) => {
+            const checked = confirmed.get(playlist.playlistId);
+            if (!checked || playlist.id !== checked.playlist.id ||
+                playlist.createdAt !== checked.playlist.createdAt ||
+                JSON.stringify(playlist.criteria) !== JSON.stringify(checked.playlist.criteria)) return playlist;
+            confirmedIds.add(playlist.playlistId);
+            return { ...playlist, smartPlaylistTrackUris: checked.members, lastSyncAt: Date.now() };
+          });
+        });
+        checkAccount();
+        markConfirmedMembershipBaselines(saved, confirmedIds);
+      }
+      return { result, failedPlaylistNames };
+    });
+  }
+
   async resolveTagChoice(playlistId: string, trackUri: string, choice: TagChoice): Promise<void> {
     return this.enqueue(async () => {
       if (isLocalPersistencePaused()) throw new Error("Your library is updating. Please try again shortly.");
+      if (!storageService.isReady()) throw new Error("Your saved Tagify details are still loading. Please try again.");
       await flushLocalPersistence();
+      const databaseName = getTagifyDatabaseName();
       const playlist = (await this.getSmartPlaylists()).find((item) => item.playlistId === playlistId);
       if (!playlist?.pendingTagChoices?.includes(trackUri)) return;
       const members = await spotifyApiService.getAllTrackUrisInPlaylistStrict(playlistId);
       if (members.includes(trackUri)) {
-        const data = await storageService.loadAllStrict();
-        const previous = data.tracks[trackUri] ?? await this.createInitialTrackData(trackUri);
-        const tagIds = applyTagChoice(previous.tagIds, choice);
-        if (!evaluateTagFilterFormula(tagIds, { clauses: playlist.criteria.includeTagClauses, connectors: playlist.criteria.clauseConnectors })) {
-          throw new Error("The playlist filters have changed. Please review your choice again.");
-        }
-        if (!(await storageService.saveTracks(new Map([[trackUri, { ...previous, tagIds, dateModified: Date.now() }]])))) {
+        const formula = { clauses: playlist.criteria.includeTagClauses, connectors: playlist.criteria.clauseConnectors };
+        // Look up a new song first; the save then starts from the current saved record.
+        const details = (await storageService.getTracks([trackUri])).has(trackUri)
+          ? undefined
+          : await this.fetchNewTrackDetails(trackUri);
+        let filtersChanged = false;
+        let saved: Record<string, TrackData | null>;
+        try {
+          saved = await indexedDBStorage.patchTracks({
+            [trackUri]: (current) => {
+              const base = current
+                ? withMissingDetails(current, details)
+                : newTrackRecord(trackUri, details, Date.now());
+              const tagIds = applyTagChoice(base.tagIds, choice);
+              if (!evaluateTagFilterFormula(tagIds, formula)) {
+                filtersChanged = true;
+                throw new Error("The chosen tags no longer match the playlist filters");
+              }
+              if (sameTagIds(tagIds, base.tagIds)) return base === current ? undefined : base;
+              return { ...base, tagIds, dateModified: Date.now() };
+            },
+          }, { expectedDatabaseName: databaseName });
+        } catch (error) {
+          if (filtersChanged) throw new Error("The playlist filters have changed. Please review your choice again.");
+          console.error("Tagify: Smart Playlist tag choice could not be saved", error);
           throw new Error("Your tags could not be saved. Please try again.");
         }
-        dispatchTagDataUpdatedEvent("smartPlaylistSync");
+        if (Object.keys(saved).length > 0) dispatchTagDataUpdatedEvent("smartPlaylistSync");
       }
       await this.updateSmartPlaylists((current) => current.map((item) => item.playlistId === playlistId
         ? { ...item, pendingTagChoices: item.pendingTagChoices?.filter((uri) => uri !== trackUri) }
@@ -587,7 +771,15 @@ export class SmartPlaylistSyncService {
       ]),
     );
     const currentTracks = new Map<string, TrackData>();
-    let membershipChanged = false;
+    const recordingTracks = Object.values(trackUpdates).some(data => data?.recordingGroupId)
+      ? (await storageService.loadAllStrict()).tracks : {};
+    Object.entries(trackUpdates).forEach(([uri, data]) => { if (data) recordingTracks[uri] = data; else delete recordingTracks[uri]; });
+    const recordingKeys = recordingDisplayKeys(recordingTracks);
+    const addedByPlaylistId = new Map<string, Set<string>>();
+    const removedByPlaylistId = new Map<string, Set<string>>();
+    const recordChange = (changes: Map<string, Set<string>>, playlistId: string, trackUri: string) => {
+      changes.set(playlistId, (changes.get(playlistId) ?? new Set()).add(trackUri));
+    };
     let playlistUpdateFailed = false;
 
     for (const [trackUri, provided] of Object.entries(trackUpdates)) {
@@ -603,13 +795,15 @@ export class SmartPlaylistSyncService {
         if (isMember && !matches && !playlist.pendingTagChoices?.includes(trackUri) && hasConfirmedMembershipBaseline(playlist)) {
           if (await spotifyApiService.removeTrackFromPlaylist(trackUri, playlist.playlistId)) {
             membership.splice(membership.indexOf(trackUri), 1);
-            membershipChanged = true;
+            recordChange(removedByPlaylistId, playlist.playlistId, trackUri);
           } else playlistUpdateFailed = true;
           continue;
         }
         if (isMember || !matches) {
           continue;
         }
+        const recording = recordingKeys.get(trackUri);
+        if (recording && membership.some(uri => recordingKeys.get(uri) === recording && recordingTracks[uri] && evaluateTrackMatchesCriteria(recordingTracks[uri], playlist.criteria))) continue;
 
         const result = await spotifyApiService.addTrackToSpotifyPlaylist(
           trackUri,
@@ -617,7 +811,7 @@ export class SmartPlaylistSyncService {
         );
         if (result.success && result.wasAdded) {
           membership.push(trackUri);
-          membershipChanged = true;
+          recordChange(addedByPlaylistId, playlist.playlistId, trackUri);
         }
         if (!result.success) playlistUpdateFailed = true;
       }
@@ -628,18 +822,26 @@ export class SmartPlaylistSyncService {
       Spicetify.showNotification("Your changes are saved. Smart Playlists will update when Spotify is available.");
     }
 
-    if (membershipChanged) {
+    if (addedByPlaylistId.size > 0 || removedByPlaylistId.size > 0) {
       const now = Date.now();
-      await this.updateSmartPlaylists((current) => current.map((playlist) => {
-        const membership = membershipByPlaylistId.get(playlist.playlistId);
-        return membership
-          ? {
-              ...playlist,
-              smartPlaylistTrackUris: membership,
-              lastSyncAt: now,
-            }
-          : playlist;
-      }));
+      // Apply only this pass's additions and removals to the membership saved
+      // now, so membership recorded meanwhile is never replaced.
+      await this.updateSmartPlaylists((current) => {
+        const next = current.map((playlist) => {
+          const added = addedByPlaylistId.get(playlist.playlistId);
+          const removed = removedByPlaylistId.get(playlist.playlistId);
+          if (!added && !removed) return playlist;
+          return {
+            ...playlist,
+            smartPlaylistTrackUris: uniqueTrackUris([
+              ...(playlist.smartPlaylistTrackUris ?? []).filter((trackUri) => !removed?.has(trackUri)),
+              ...(added ?? []),
+            ]),
+            lastSyncAt: now,
+          };
+        });
+        return next.some((playlist, index) => playlist !== current[index]) ? next : current;
+      });
     }
   }
 
@@ -665,59 +867,64 @@ export class SmartPlaylistSyncService {
     }
 
     await this.enqueue(async () => {
-      const playlists = await this.getSmartPlaylists();
-      const playlist = playlists.find(
+      if (!storageService.isReady() || isLocalPersistencePaused()) {
+        return;
+      }
+      const playlist = (await this.getSmartPlaylists()).find(
         (candidate) => candidate.playlistId === playlistId && candidate.isActive,
       );
-      if (!playlist || isLocalPersistencePaused()) {
+      if (!playlist) {
         return;
       }
 
+      const knownMembers = new Set(playlist.smartPlaylistTrackUris ?? []);
       const additions = uniqueTrackUris(trackUris).filter(
-        (trackUri) =>
-          !(playlist.smartPlaylistTrackUris ?? []).includes(trackUri),
+        (trackUri) => !knownMembers.has(trackUri),
       );
       if (additions.length === 0) {
         return;
       }
 
-      const updates: Record<string, TrackData | null> = {};
-      const allTagData = await storageService.loadAllStrict();
-      const stored = new Map(Object.entries(allTagData.tracks));
-      additions.forEach((trackUri) => {
-        updates[trackUri] = stored.get(trackUri) ?? null;
-      });
+      await flushLocalPersistence();
       const inbound = await this.applyInboundCriteria(
-        playlists,
+        [playlist],
         new Map([[playlistId, additions]]),
-        updates,
+        getTagifyDatabaseName(),
       );
-      showSmartPlaylistCriteriaAppliedNotifications(
-        inbound.notifications,
-        allTagData.taxonomy,
-      );
-      const updatedPlaylists = await this.updateSmartPlaylists((current) => current.map((candidate) =>
-        candidate.playlistId === playlistId
-          ? {
-              ...candidate,
-              smartPlaylistTrackUris: uniqueTrackUris([
-                ...(candidate.smartPlaylistTrackUris ?? []),
-                ...additions,
-              ]),
-              lastSyncAt: Date.now(),
-            }
-          : candidate,
-      ));
-      markConfirmedMembershipBaselines(
-        updatedPlaylists,
-        new Set([playlistId]),
-      );
+      if (inbound.notifications.length > 0) {
+        try {
+          showSmartPlaylistCriteriaAppliedNotifications(
+            inbound.notifications,
+            await storageService.getTaxonomy(),
+          );
+        } catch (error) {
+          console.error("Tagify: Smart Playlist changes are saved but could not be announced", error);
+        }
+      }
+      // Until the first full check records which songs were already in the
+      // playlist, one addition must not stand in for that record: every older
+      // song would then look newly added and receive the playlist's criteria.
+      if (hasConfirmedMembershipBaseline(playlist)) {
+        const updatedPlaylists = await this.updateSmartPlaylists((current) => current.map((candidate) =>
+          candidate.playlistId === playlistId
+            ? {
+                ...candidate,
+                smartPlaylistTrackUris: uniqueTrackUris([
+                  ...(candidate.smartPlaylistTrackUris ?? []),
+                  ...additions,
+                ]),
+                lastSyncAt: Date.now(),
+              }
+            : candidate,
+        ));
+        markConfirmedMembershipBaselines(
+          updatedPlaylists,
+          new Set([playlistId]),
+        );
+      }
 
       const appliedUpdates = Object.fromEntries(
-        additions.map((trackUri) => [
-          trackUri,
-          inbound.tracks.get(trackUri) ?? updates[trackUri],
-        ]),
+        additions.map((trackUri) => [trackUri, inbound.tracks.get(trackUri) ?? null]),
       );
       await this.syncTracksNow(appliedUpdates);
     });

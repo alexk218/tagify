@@ -2,9 +2,11 @@ import React from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { albumTrackListsStore } from "../../services/albumTrackLists";
 import PlaylistDetails from "../PlaylistDetails";
 import { albumTrackTotalsStore } from "../../services/albumTrackTotals";
 import { spotifyApiService } from "@/services/SpotifyApiService";
+import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import {
   AlbumTrackSummary,
   PlaylistData,
@@ -98,6 +100,7 @@ function renderDetails(
     taxonomy,
     activeTagFilters: [],
     excludedTagFilters: [],
+    onAddTag: vi.fn(),
     onSetRating: vi.fn(),
     onSetEnergy: vi.fn(),
     onRemoveTag: vi.fn(),
@@ -126,6 +129,8 @@ function renderAlbum(overrides: Partial<React.ComponentProps<typeof PlaylistDeta
 
 describe("PlaylistDetails", () => {
   beforeEach(() => {
+    albumTrackListsStore.clear();
+    vi.spyOn(indexedDBStorage, "getPrivateNote").mockResolvedValue(undefined);
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: false, json: async () => ({}) })),
@@ -156,13 +161,49 @@ describe("PlaylistDetails", () => {
     expect(screen.queryByLabelText("Tracks on this album")).not.toBeInTheDocument();
   });
 
+  it("reconciles the header with five Spotify rows despite two saved album associations", async () => {
+    const ratings = [3.5, 3, 4, 4, 4];
+    const tracks: Record<string, TrackData> = Object.fromEntries(ratings.map((rating, i) => [
+      `spotify:track:${i}`, { rating, energy: 0, bpm: null, tagIds: ["rock"],
+        albumUri: i < 2 ? "spotify:album:glass" : i === 2 ? null : "spotify:album:other",
+        dateModified: 123 + i },
+    ]));
+    const original = structuredClone(tracks);
+    vi.mocked(spotifyApiService.getAlbumTracks).mockResolvedValue(ratings.map((_, i) => ({
+      uri: `spotify:track:${i}`, name: `Track ${i}`, artists: "Maya Fields", discNumber: 1, trackNumber: i + 1,
+    })));
+    renderAlbum({ tracks, albumTrackSummary: { ...albumTrackSummary, taggedTrackCount: 2, ratedTrackCount: 2, ratingAverage: 3.25 } });
+    await waitFor(() => expect(screen.getByText("All 5 tracks rated or tagged")).toBeInTheDocument());
+    expect(screen.getByText("3.7")).toBeInTheDocument();
+    expect(screen.getAllByRole("slider", { name: /Rating for "Track/ })).toHaveLength(5);
+    expect(tracks).toEqual(original);
+  });
+
+  it("shows playlist averages separately and allows failed refreshes to be retried", async () => {
+    const onRefreshTrackInsights = vi.fn();
+    const props = renderDetails({ playlistData: { ...playlistData, rating: 4 },
+      playlistTrackInsights: { status: "failed", uris: ["spotify:track:a", "spotify:track:b"],
+        totalTrackCount: 2, listedTrackCount: 3, summary: { ...albumTrackSummary, taggedTrackCount: 2, ratedTrackCount: 2, ratingAverage: 3.5 } },
+      onRefreshTrackInsights,
+    });
+    expect(screen.getByText("Your playlist rating")).toBeInTheDocument();
+    const insights = screen.getByLabelText("Tracks in this playlist");
+    expect(insights).toHaveTextContent("Track average3.5from 2 tracks");
+    expect(within(insights).getByText("2 of 2 distinct tracks rated or tagged")).toBeInTheDocument();
+    expect(screen.getByText(/Showing the last checked playlist/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRefreshTrackInsights).toHaveBeenCalledOnce();
+    expect(props.onSetRating).not.toHaveBeenCalled();
+    expect(props.onApplyTrackUpdates).not.toHaveBeenCalled();
+  });
+
   it("separates the album's own values from what its tracks say", () => {
     renderAlbum();
 
     expect(screen.getByText("Maya Fields")).toBeInTheDocument();
     expect(screen.getByText("2021")).toBeInTheDocument();
     expect(screen.getByText("13 tracks")).toBeInTheDocument();
-    expect(screen.getByText("Album rating")).toBeInTheDocument();
+    expect(screen.getByText("Your album rating")).toBeInTheDocument();
     expect(screen.getByText("Album energy")).toBeInTheDocument();
     expect(screen.getByLabelText("Album tags")).toHaveTextContent("Rock");
 
@@ -176,13 +217,13 @@ describe("PlaylistDetails", () => {
       "aria-valuemax",
       "13",
     );
-    expect(insights).toHaveTextContent("Average rating4.3from 8 tracks");
+    expect(insights).toHaveTextContent("Track average4.3from 8 tracks");
     expect(insights).toHaveTextContent("Average energy6.5from 6 tracks");
     expect(
       within(screen.getByLabelText("Common tags on your tracks")).getAllByRole("button"),
     ).toHaveLength(2);
     expect(screen.getByLabelText("Common tags on your tracks")).toHaveTextContent(
-      "Rock6Ambient3",
+      "Rock6AddedAmbient3Add",
     );
     expect(screen.queryByText(/coverage|threshold/i)).not.toBeInTheDocument();
   });
@@ -395,17 +436,11 @@ describe("PlaylistDetails", () => {
     expect(within(tracksSection).queryByText("Other Album Song")).not.toBeInTheDocument();
   });
 
-  it("filters the album list from a common track tag", async () => {
-    const props = renderAlbum();
-    const user = userEvent.setup();
-
-    await user.click(
-      within(screen.getByLabelText("Common tags on your tracks")).getByRole("button", {
-        name: /Ambient/,
-      }),
-    );
-
-    expect(props.onToggleTagIncludeOff).toHaveBeenCalledWith("ambient");
+  it("offers album track tags as suggestions without filter controls", () => {
+    renderAlbum();
+    const suggestions = within(screen.getByLabelText("Common tags on your tracks"));
+    expect(suggestions.getByRole("button", { name: "Add Ambient to this album" })).toBeInTheDocument();
+    expect(suggestions.queryByRole("button", { name: /Filter by/ })).not.toBeInTheDocument();
   });
 
   it("measures progress against a saved album length when only tracks are tagged", () => {
@@ -583,3 +618,31 @@ describe("PlaylistDetails", () => {
     expect(props.onApplyTrackUpdates).not.toHaveBeenCalled();
   });
 });
+
+it("shows common playlist track tags as Add-only suggestions", async () => {
+  const onToggleTagIncludeOff = vi.fn();
+  const onRemoveTag = vi.fn();
+  const props = renderDetails({ playlistData: { ...playlistData, tagIds: [] }, onToggleTagIncludeOff, onRemoveTag,
+    playlistTrackInsights: { status: "loaded", uris: [], listedTrackCount: 9, totalTrackCount: 9, summary: albumTrackSummary } });
+  const commonTags = screen.getByLabelText("Common tags on your tracks");
+  expect(within(commonTags).getByRole("button", { name: "Add Rock to this playlist" })).toBeInTheDocument();
+  expect(within(commonTags).queryByRole("button", { name: /filter/i })).not.toBeInTheDocument();
+  await userEvent.click(within(commonTags).getByRole("button", { name: "Add Ambient to this playlist" }));
+  expect(props.onAddTag).toHaveBeenCalledWith("ambient");
+  expect(onToggleTagIncludeOff).not.toHaveBeenCalled();
+  expect(onRemoveTag).not.toHaveBeenCalled();
+});
+
+for (const kind of ["album", "playlist"] as const) {
+  it(`adds a suggested tag to the ${kind} without filtering or editing tracks`, async () => {
+    const props = kind === "album" ? renderAlbum() : renderDetails({
+      playlistData: { ...playlistData, tagIds: ["rock"] },
+      playlistTrackInsights: { status: "loaded", uris: [], listedTrackCount: 9, totalTrackCount: 9, summary: albumTrackSummary },
+    });
+    await userEvent.click(screen.getByRole("button", { name: `Add Ambient to this ${kind}` }));
+    expect(props.onAddTag).toHaveBeenCalledWith("ambient");
+    expect(props.onToggleTagIncludeOff).not.toHaveBeenCalled();
+    expect(props.onApplyTrackUpdates).not.toHaveBeenCalled();
+    expect(props.onRemoveTag).not.toHaveBeenCalled();
+  });
+}

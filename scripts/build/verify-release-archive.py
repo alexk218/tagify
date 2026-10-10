@@ -9,7 +9,7 @@ from zipfile import BadZipFile, ZipFile
 
 
 def verify_archive(path: Path, expected: str) -> None:
-    if not re.fullmatch(r"tagify-" + re.escape(expected) + r"(?:-metadata-corrected)?\.zip", path.name):
+    if not re.fullmatch(r"tagify-v?" + re.escape(expected) + r"(?:-metadata-corrected)?\.zip", path.name):
         raise ValueError(f"Archive filename must identify {expected}")
     with ZipFile(path) as archive:
         if archive.testzip() is not None:
@@ -20,12 +20,12 @@ def verify_archive(path: Path, expected: str) -> None:
         for name in ("index.js", "extension.js", "WelcomeModal.js"):
             source = archive.read(f"tagify/{name}").decode("utf-8")
             versions = re.findall(
-                r'var package_default\s*=\s*\{\s*name:\s*"tagify-secret",\s*version:\s*"([^"]+)"',
+                r'\bpackage_default\s*=\s*\{\s*name:\s*"tagify-secret",\s*version:\s*"([^"]+)"',
                 source,
             )
             if versions != [expected]:
                 raise ValueError(f"{name} embeds {versions or 'no recognizable package version'}, expected {expected}")
-            backup_versions = re.findall(r'var TAGIFY_BACKUP_EXPORT_VERSION\s*=\s*"([^"]+)"', source)
+            backup_versions = re.findall(r'\bTAGIFY_BACKUP_EXPORT_VERSION\s*=\s*"([^"]+)"', source)
             if any(version != expected for version in backup_versions):
                 raise ValueError(f"{name} contains stale backup version metadata")
 

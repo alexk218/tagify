@@ -1,3 +1,5 @@
+import { rememberRuleFacts } from "@/features/automatic-tags/facts";
+import { trackArtistIdentitiesStore } from "@/services/trackArtistIdentities";
 import { debugLog } from "@/utils/debug";
 import { graphqlRateLimiter } from "@/utils/RateLimiter";
 import { requestSpicetifyGraphQL } from "@/services/spicetifyGraphQL";
@@ -85,11 +87,12 @@ export interface ContextInfo {
 
 /**
  * SpotifyService - Centralized service for all Spotify API interactions
- * Uses GraphQL and internal APIs instead of CosmosAsync to avoid rate limiting (429 errors)
+ * Uses Spotify desktop APIs; every transport can be rate limited.
  */
 class SpotifyService {
   private locale: string = "en";
   private getTrackGraphQLCallCount = 0;
+  private trackReads = new Map<string, Promise<GraphQLTrackResponse>>();
 
   constructor() {
     this.initLocale();
@@ -109,20 +112,31 @@ class SpotifyService {
     trackUri: string,
     caller: string,
   ): Promise<GraphQLTrackResponse> {
+    const pending = this.trackReads.get(trackUri);
+    if (pending) return pending;
     this.getTrackGraphQLCallCount += 1;
-    debugLog(
-      `[API #${this.getTrackGraphQLCallCount}] GraphQL.getTrack (${caller}): ${trackUri}`,
-    );
-
+    debugLog(`[API #${this.getTrackGraphQLCallCount}] GraphQL.getTrack (${caller}): ${trackUri}`);
     const { GraphQL, Locale } = Spicetify;
-
-    return requestSpicetifyGraphQL<GraphQLTrackResponse>(
-      GraphQL.Definitions.getTrack,
-      {
-        uri: trackUri,
-        locale: Locale?.getLocale() || this.locale,
-      },
-    );
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const task = Promise.race([
+      requestSpicetifyGraphQL<GraphQLTrackResponse>(GraphQL.Definitions.getTrack, {
+        uri: trackUri, locale: Locale?.getLocale() || this.locale,
+      }),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("Spotify track request timed out")), 10_000);
+      }),
+    ]).then((response) => {
+      if (!response.errors?.length && response.data?.trackUnion) {
+        trackArtistIdentitiesStore.remember(trackUri, this.extractArtists(response.data.trackUnion));
+        rememberRuleFacts(trackUri, { durationMs: response.data.trackUnion.duration?.totalMilliseconds, albumUri: response.data.trackUnion.albumOfTrack?.uri, name: response.data.trackUnion.name, artists: this.extractArtists(response.data.trackUnion).map(artist => artist.name).join(", ") });
+      }
+      return response;
+    }).finally(() => {
+      if (timeout) clearTimeout(timeout);
+      this.trackReads.delete(trackUri);
+    });
+    this.trackReads.set(trackUri, task);
+    return task;
   }
 
   /**
@@ -228,6 +242,8 @@ class SpotifyService {
       return [];
     }
 
+    const cached = trackArtistIdentitiesStore.getSnapshot()[trackUri];
+    if (cached) return cached.artists;
     return graphqlRateLimiter.execute(
       `getTrackArtists:${trackUri}`,
       async () => {

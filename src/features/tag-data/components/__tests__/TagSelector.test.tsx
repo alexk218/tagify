@@ -88,6 +88,30 @@ describe("TagSelector", () => {
     seedExpandedState();
   });
 
+  it("creates and applies a tag in the selected folder without opening the manager", async () => {
+    const user = userEvent.setup();
+    const onCreateTag = vi.fn().mockResolvedValue("new-tag");
+    const { onToggleTag, onOpenTagManager } = renderTagSelector({ onCreateTag });
+    await user.type(screen.getByRole("textbox", { name: "Search tags" }), "Ambient");
+    await user.selectOptions(screen.getByRole("combobox", { name: "New tag category or folder" }), "electronic");
+    await user.click(screen.getByRole("button", { name: "Create and apply “Ambient”" }));
+    expect(onCreateTag).toHaveBeenCalledWith("Ambient", "electronic");
+    expect(onToggleTag).toHaveBeenCalledWith("new-tag");
+    expect(onOpenTagManager).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Search tags" })).toHaveValue("");
+  });
+
+  it("Enter adds a single match without removing an applied tag, and search can be cleared", async () => {
+    const user = userEvent.setup();
+    const { onToggleTag } = renderTagSelector({ trackTagIds: ["alpha"] });
+    const input = screen.getByRole("textbox", { name: "Search tags" });
+    await user.type(input, "alp{Enter}");
+    expect(onToggleTag).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Clear tag search" }));
+    await user.type(input, "zul{Enter}");
+    expect(onToggleTag).toHaveBeenCalledWith("zulu");
+  });
+
   it("defaults to custom order", () => {
     renderTagSelector();
 
@@ -164,4 +188,13 @@ describe("TagSelector", () => {
     expect(screen.getByLabelText("Tag sort order")).toHaveValue("alphabetical-desc");
     expectTagOrder(["Zulu", "Mike", "Alpha"]);
   });
+});
+
+it("keeps the full name of a long clipped tag available on hover and to assistive technology", () => {
+  seedExpandedState();
+  const name = "Song length · from 3:00 through 5:00 · regular songs";
+  renderTagSelector({ categories: [{ ...categories[0], subcategories: [{ ...categories[0].subcategories[0], tags: [{ id: "long", name }] }] }] });
+  const button = screen.getByRole("button", { name });
+  expect(button).toHaveAttribute("title", name);
+  expect(button).toHaveTextContent(name);
 });

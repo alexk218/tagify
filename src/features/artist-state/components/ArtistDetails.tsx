@@ -1,22 +1,25 @@
+import { TrackInsightStats, type ArtistTrackInsights } from "@/features/track-insights";
 import React, { useCallback, useMemo, useState } from "react";
-import { ExternalLink, RefreshCw, X } from "lucide-react";
-import ReactStars from "react-rating-stars-component";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faStar, faStarHalf } from "@fortawesome/free-solid-svg-icons";
+import { ExternalLink, RefreshCw } from "lucide-react";
 import { ArtistData, TagTaxonomy } from "@/types/tagData";
 import {
   buildResolvedTagLookup,
   compareResolvedTagsByTaxonomyOrder,
 } from "@/utils/tagTaxonomy";
-import { formatTimestamp } from "@/utils/formatters";
-import { buildTagAccentCssVars } from "@/features/tag-data/utils/tagAccent";
+import { formatCondensedDate, formatTimestamp } from "@/utils/formatters";
 import type { ArtistMetadata } from "@/features/tag-data";
-import styles from "./ArtistDetails.module.css";
+import {
+  EntityDetailsCard,
+  EntityIconButton,
+  EntityOwnValues,
+  type EntityMetaItem,
+} from "@/features/entity-views";
 import communityLinkStyles from "../../community/CommunityEntityLink.module.css";
 import { CommunityEntityLens, getCommunityEntityUrl } from "@/features/community";
 
 interface ArtistDetailsProps {
   artistUri: string;
+  trackInsights?: ArtistTrackInsights;
   artistData?: ArtistData;
   artistMetadata?: ArtistMetadata | null;
   taxonomy: TagTaxonomy;
@@ -24,6 +27,7 @@ interface ArtistDetailsProps {
   excludedTagFilters: string[];
   onSetRating: (rating: number) => void;
   onSetEnergy: (energy: number) => void;
+  onAddTag: (tagId: string) => void;
   onRemoveTag: (tagId: string) => void;
   onToggleTagIncludeOff: (tagId: string) => void;
   onOpenArtist: (artistUri: string) => void;
@@ -36,6 +40,7 @@ function formatFollowers(followerCount: number): string {
 
 const ArtistDetails: React.FC<ArtistDetailsProps> = ({
   artistUri,
+  trackInsights,
   artistData,
   artistMetadata,
   taxonomy,
@@ -43,6 +48,7 @@ const ArtistDetails: React.FC<ArtistDetailsProps> = ({
   excludedTagFilters,
   onSetRating,
   onSetEnergy,
+  onAddTag,
   onRemoveTag,
   onToggleTagIncludeOff,
   onOpenArtist,
@@ -50,17 +56,20 @@ const ArtistDetails: React.FC<ArtistDetailsProps> = ({
 }) => {
   const resolvedLookup = useMemo(() => buildResolvedTagLookup(taxonomy), [taxonomy]);
   const customAccentsById = taxonomy.customAccentsById;
-  const displayName = artistData?.name || artistMetadata?.name || "Unknown Artist";
+  const displayName = artistData?.name || artistMetadata?.name || trackInsights?.summaries.get(artistUri)?.artistName || "Unknown Artist";
   const imageUrl = artistData?.imageUrl ?? artistMetadata?.imageUrl ?? null;
   const followerCount =
     artistData?.followerCount ?? artistMetadata?.followerCount ?? null;
   const genres = artistData?.genres ?? artistMetadata?.genres ?? [];
-  const sortedTags = (artistData?.tagIds || [])
-    .map((tagId) => resolvedLookup.get(tagId))
-    .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag))
-    .sort(compareResolvedTagsByTaxonomyOrder);
-  const rating = artistData?.rating || 0;
-  const energy = artistData?.energy || 0;
+  const artistTagIds = artistData?.tagIds;
+  const sortedTags = useMemo(
+    () =>
+      (artistTagIds || [])
+        .map((tagId) => resolvedLookup.get(tagId))
+        .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag))
+        .sort(compareResolvedTagsByTaxonomyOrder),
+    [artistTagIds, resolvedLookup],
+  );
   const [communityAvailability, setCommunityAvailability] = useState<{
     entityUri: string;
     hasPerspectives: boolean;
@@ -69,93 +78,46 @@ const ArtistDetails: React.FC<ArtistDetailsProps> = ({
     setCommunityAvailability({ entityUri, hasPerspectives });
   }, []);
   const communityUrl = getCommunityEntityUrl(artistUri);
+  // Community links appear only once the artist has perspectives to show.
+  const communityLinkUrl =
+    communityUrl && communityAvailability?.entityUri === artistUri && communityAvailability.hasPerspectives
+      ? communityUrl
+      : null;
 
-  const handleOpenArtist = () => {
-    onOpenArtist(artistUri);
-  };
-
-  const handleOpenArtistKeyDown = (
-    event: React.KeyboardEvent<HTMLElement>,
-  ) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      handleOpenArtist();
-    }
-  };
-
-  const handleEnergyInput = (event: React.ChangeEvent<HTMLInputElement>) => {
-    onSetEnergy(parseInt(event.target.value, 10));
-  };
-
-  const handleEnergyClick = (event: React.MouseEvent<HTMLInputElement>) => {
-    const sliderElement = event.currentTarget;
-    const rect = sliderElement.getBoundingClientRect();
-    const clickPosition = event.clientX - rect.left;
-    const sliderWidth = rect.width;
-    const percentage = clickPosition / sliderWidth;
-    const energyValue = Math.max(1, Math.min(10, Math.round(1 + percentage * 9)));
-
-    onSetEnergy(energyValue);
-  };
+  const dateTitle = [
+    artistData?.dateCreated ? `First tagged ${formatTimestamp(artistData.dateCreated)}` : null,
+    artistData?.dateModified ? `Last updated ${formatTimestamp(artistData.dateModified)}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const meta: EntityMetaItem[] = [
+    ...(followerCount !== null && followerCount !== undefined
+      ? [{ key: "followers", content: `${formatFollowers(followerCount)} followers` }]
+      : []),
+    ...(genres.length > 0 ? [{ key: "genres", content: genres.slice(0, 3).join(", ") }] : []),
+    ...(artistData?.dateModified
+      ? [{
+          key: "updated",
+          content: `Updated ${formatCondensedDate(artistData.dateModified)}`,
+          title: dateTitle,
+        }]
+      : []),
+  ];
 
   return (
-    <section className={styles.container}>
-      <div className={styles.header}>
-        {imageUrl ? (
-          <img
-            src={imageUrl}
-            alt={`${displayName} artist image`}
-            className={`${styles.cover} ${styles.clickableCover}`}
-            onClick={handleOpenArtist}
-            onKeyDown={handleOpenArtistKeyDown}
-            role="button"
-            tabIndex={0}
-            title="Open artist in Spotify"
-          />
-        ) : (
-          <div
-            className={`${styles.cover} ${styles.coverPlaceholder} ${styles.clickableCover}`}
-            onClick={handleOpenArtist}
-            onKeyDown={handleOpenArtistKeyDown}
-            role="button"
-            tabIndex={0}
-            title="Open artist in Spotify"
-          >
-            ♪
-          </div>
-        )}
-
-        <div className={styles.titleBlock}>
-          <p className={styles.eyebrow}>Artist</p>
-          <h2
-            className={`${styles.title} ${styles.clickableTitle}`}
-            onClick={handleOpenArtist}
-            onKeyDown={handleOpenArtistKeyDown}
-            role="button"
-            tabIndex={0}
-            title="Open artist in Spotify"
-          >
-            {displayName}
-          </h2>
-          <p className={styles.meta}>
-            {followerCount !== null && followerCount !== undefined ? (
-              <span>{formatFollowers(followerCount)} followers</span>
-            ) : null}
-            {genres.length > 0 ? <span>{genres.slice(0, 3).join(", ")}</span> : null}
-            {artistData?.dateCreated ? (
-              <span>Tagged {formatTimestamp(artistData.dateCreated, true)}</span>
-            ) : null}
-            {artistData?.dateModified ? (
-              <span>Updated {formatTimestamp(artistData.dateModified, true)}</span>
-            ) : null}
-          </p>
-        </div>
-
-        <div className={styles.actions}>
-          {communityUrl && communityAvailability?.entityUri === artistUri && communityAvailability.hasPerspectives ? (
+    <EntityDetailsCard
+      kind="artist"
+      name={displayName}
+      imageUrl={imageUrl}
+      meta={meta}
+      openTitle="Open artist in Spotify"
+      onOpen={() => onOpenArtist(artistUri)}
+      actions={
+        <>
+          {communityLinkUrl ? (
             <a
               className={communityLinkStyles.communityLink}
-              href={communityUrl}
+              href={communityLinkUrl}
               target="_blank"
               rel="noopener noreferrer"
               title="Open this artist in Tagify Community"
@@ -164,136 +126,39 @@ const ArtistDetails: React.FC<ArtistDetailsProps> = ({
               <ExternalLink size={14} aria-hidden="true" />
             </a>
           ) : null}
-          <button
-            className={`${styles.button} ${styles.secondaryButton}`}
+          <EntityIconButton
+            label="Refresh artist details from Spotify"
             onClick={() => onRefreshMetadata(artistUri)}
-            title="Refresh artist metadata"
           >
-            <RefreshCw size={15} aria-hidden="true" />
-            <span>Refresh</span>
-          </button>
-        </div>
-      </div>
-
-      <div className={styles.controlsPanel}>
-        <div className={styles.controlSection}>
-          <label className={styles.label}>Rating: {rating > 0 ? rating : ""}</label>
-          <div className={styles.ratingContainer}>
-            <div className={styles.stars} key={`artist-stars-${rating}`}>
-              <ReactStars
-                count={5}
-                value={rating}
-                onChange={(newRating: number) => onSetRating(newRating)}
-                size={24}
-                isHalf={true}
-                emptyIcon={<FontAwesomeIcon icon={faStar} />}
-                halfIcon={<FontAwesomeIcon icon={faStarHalf} />}
-                fullIcon={<FontAwesomeIcon icon={faStar} />}
-                activeColor="#ffd700"
-                color="var(--spice-button-disabled)"
-              />
-            </div>
-
-            {rating > 0 ? (
-              <button
-                className={styles.clearButton}
-                onClick={() => onSetRating(0)}
-                aria-label="Clear artist rating"
-              >
-                Clear
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        <div className={styles.controlSection}>
-          <label className={styles.label}>
-            Energy:
-            {energy > 0 ? <span className={styles.energyValue}>{energy}</span> : null}
-          </label>
-          <div className={styles.energyContainer}>
-            <input
-              type="range"
-              min="1"
-              max="10"
-              value={energy || 5}
-              data-is-set={energy > 0 ? "true" : "false"}
-              className={`${styles.energySlider} ${
-                energy === 0 ? styles.energySliderUnset : ""
-              }`}
-              onChange={handleEnergyInput}
-              onClick={handleEnergyClick}
-              onDoubleClick={() => onSetEnergy(0)}
-            />
-            {energy > 0 ? (
-              <button
-                className={styles.clearButton}
-                onClick={() => onSetEnergy(0)}
-                aria-label="Clear artist energy"
-              >
-                Clear
-              </button>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
-      <div className={styles.tagsSection}>
-        {sortedTags.length > 0 ? (
-          <div className={styles.tags}>
-            {sortedTags.map((tag) => {
-              const isActive = activeTagFilters.includes(tag.id);
-              const isExcluded = excludedTagFilters.includes(tag.id);
-
-              return (
-                <span
-                  key={tag.id}
-                  className={`${styles.tag} ${
-                    tag.tag.accentId ? styles.tagAccented : ""
-                  } ${isActive ? styles.tagActive : ""} ${
-                    isExcluded ? styles.tagExcluded : ""
-                  }`}
-                  style={buildTagAccentCssVars(
-                    tag.tag.accentId ?? null,
-                    customAccentsById,
-                  )}
-                >
-                  <button
-                    className={styles.tagLabelButton}
-                    onClick={() => onToggleTagIncludeOff(tag.id)}
-                    aria-label={
-                      isActive || isExcluded
-                        ? `Remove "${tag.name}" filter`
-                        : `Include "${tag.name}"`
-                    }
-                    title={
-                      isActive || isExcluded
-                        ? `Remove "${tag.name}" from artist filters`
-                        : `Filter artists by "${tag.name}"`
-                    }
-                  >
-                    {tag.name}
-                  </button>
-                  <button
-                    className={styles.removeTag}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onRemoveTag(tag.id);
-                    }}
-                    title={`Remove "${tag.name}" from this artist`}
-                  >
-                    <X size={12} aria-hidden="true" />
-                  </button>
-                </span>
-              );
-            })}
-          </div>
-        ) : (
-          <p className={styles.noTags}>No tags applied</p>
-        )}
-      </div>
+            <RefreshCw size={14} aria-hidden="true" />
+          </EntityIconButton>
+        </>
+      }
+    >
+      <EntityOwnValues
+        uri={artistUri}
+        entityLabel="Artist"
+        rating={artistData?.rating || 0}
+        energy={artistData?.energy || 0}
+        onSetRating={onSetRating}
+        onSetEnergy={onSetEnergy}
+        tags={sortedTags}
+        customAccentsById={customAccentsById}
+        activeTagFilters={activeTagFilters}
+        excludedTagFilters={excludedTagFilters}
+        onToggleTagFilter={onToggleTagIncludeOff}
+        onRemoveTag={onRemoveTag}
+      />
+      <TrackInsightStats
+        summary={trackInsights?.summaries.get(artistUri)}
+        artist={trackInsights}
+        taxonomy={taxonomy}
+        appliedTagIds={artistData?.tagIds}
+        onAddTag={onAddTag}
+        entityLabel="artist"
+      />
       <CommunityEntityLens entityUri={artistUri} onAvailabilityChange={handleCommunityAvailability} />
-    </section>
+    </EntityDetailsCard>
   );
 };
 

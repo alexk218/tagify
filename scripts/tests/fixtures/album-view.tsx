@@ -1,3 +1,7 @@
+import { ArtistDetails, TaggedArtistsList } from "../../../src/features/artist-state";
+import { usePlaylistTrackInsights, useArtistTrackInsights, playlistMembershipStore } from "../../../src/features/track-insights";
+import { useAlbumMembership } from "../../../src/features/playlist-state/hooks/useAlbumTracks";
+import { useRatingControlTheme } from "@/hooks/shared/useRatingControlTheme";
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 // eslint-disable-next-line css-modules/no-unused-class -- the example reuses only Tagify's layout classes
@@ -26,7 +30,7 @@ import {
 } from "../../../src/features/tag-data/utils/tagData.playlistMutations";
 import { buildCategoryTree, buildTaxonomyFromCategoryTree } from "../../../src/utils/tagTaxonomy";
 import { applyBatchTagUpdatesToData } from "../../../src/features/tag-data/utils/tagData.batchUpdates";
-import type { BatchTagUpdate, PlaylistData, TrackData } from "../../../src/types/tagData";
+import type { ArtistData, BatchTagUpdate, PlaylistData, TrackData } from "../../../src/types/tagData";
 
 // Isolated example library for reviewing the Albums view with production components.
 const taxonomy = buildTaxonomyFromCategoryTree([
@@ -160,6 +164,13 @@ function albumTrackUris(albumUri: string): string[] {
   return catalog[albumUri].trackNames.map((_, index) => `spotify:track:${albumId}${index + 1}`);
 }
 
+function artistUri(albumUri: string): string { return `spotify:artist:${albumUri.split(":").pop()}`; }
+const fixtureArtists: Record<string, ArtistData> = Object.fromEntries(Object.entries(catalog).map(([uri, album], index) => [artistUri(uri), {
+  name: album.artist, imageUrl: album.imageUrl, rating: uri.includes("glassHorizons") ? 4 : 0,
+  energy: uri.includes("glassHorizons") ? 7 : 0, tagIds: uri.includes("glassHorizons") ? ["tag_house"] : [],
+  followerCount: [182_400, 9_310, 48_022, 1_204_331, 3_870, 615][index], genres: [],
+  dateModified: uri.includes("glassHorizons") ? Date.now() - 2 * 60 * 60 * 1000 : undefined,
+}]));
 const DAY = 24 * 60 * 60 * 1000;
 const now = Date.now();
 
@@ -276,6 +287,59 @@ function showNotification(message: string, isError = false) {
 }
 
 const params = new URLSearchParams(window.location.search);
+if (params.has("albumFilters")) {
+  taxonomy.tagsById.tag_house.name = "Hard Rock";
+  taxonomy.tagsById["tag_night-drive"].name = "Driving";
+  const uri = "spotify:album:4glassHorizons00000000";
+  Object.keys(initialTracks).forEach((key) => delete initialTracks[key]);
+  Object.assign(initialTracks, Object.fromEntries([
+    track(uri, 0, { rating: 4, tagIds: ["house", "night-drive"] }),
+    track(uri, 1, { rating: 4.5, tagIds: ["house"] }),
+  ]));
+  Object.keys(initialPlaylists).forEach((key) => delete initialPlaylists[key]);
+  Object.assign(initialPlaylists, Object.fromEntries([
+    albumData(uri, { tagIds: ["house"] }),
+    albumData("spotify:album:bluehour", { tagIds: ["night-drive"] }),
+  ]));
+}
+// Long names and many tags, for checking how rows and cards wrap.
+if (params.has("long")) {
+  catalog["spotify:album:4glassHorizons00000000"].name = "Glass Horizons (Deluxe Anniversary Edition, Remastered with Bonus Live Recordings)";
+  catalog["spotify:album:4glassHorizons00000000"].artist = "Maya Fields & The Northern Lights Collective featuring Special Guests";
+  catalog["spotify:album:afterglow"].name = "Afterglow Disco: Extended Club Mixes and Rare Twelve-Inch Versions";
+  Object.values(initialTracks).forEach((trackData) => {
+    trackData.albumName = catalog[trackData.albumUri!]?.name ?? trackData.albumName;
+    trackData.artists = catalog[trackData.albumUri!]?.artist ?? trackData.artists;
+  });
+  const allTagIds = Object.keys(taxonomy.tagsById).map((tagId) => tagId.replace(/^tag_/, ""));
+  const roadTrip = initialPlaylists["spotify:playlist:roadtrip"];
+  roadTrip.name = "Road Trip Mix for Long Summer Drives Along the Coast With Friends";
+  roadTrip.description = "Windows down, volume up. Songs collected over three summers of driving the coast, from sunrise departures to late-night arrivals, with a few slow ones for the last hour.";
+  roadTrip.tagIds = allTagIds.map((tagId) => `tag_${tagId}`);
+  Object.assign(initialPlaylists, Object.fromEntries([
+    albumData("spotify:album:4glassHorizons00000000", { rating: 4.5, energy: 7, tagIds: allTagIds, dateModified: now - 3 * 60 * 60 * 1000 }),
+  ]));
+  const longArtist = fixtureArtists[artistUri("spotify:album:4glassHorizons00000000")];
+  longArtist.name = catalog["spotify:album:4glassHorizons00000000"].artist;
+  longArtist.tagIds = allTagIds.map((tagId) => `tag_${tagId}`);
+  longArtist.genres = ["deep house", "progressive house", "melodic techno", "downtempo"];
+}
+if (params.has("mismatch")) {
+  const uri = "spotify:album:4glassHorizons00000000";
+  albumTrackUris(uri).forEach((trackUri, index) => {
+    delete initialTracks[trackUri];
+    if (index < 5) {
+      initialTracks[trackUri] = Object.fromEntries([
+        track(uri, index, {
+          rating: [3.5, 3, 4, 4, 4][index],
+          energy: [7, 6, 8, 8, 7][index],
+          tagIds: ["house"],
+          albumUri: index < 2 ? uri : index === 2 ? null : "spotify:album:alternate",
+        }),
+      ])[trackUri];
+    }
+  });
+}
 const pause = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const albumLookups: string[] = [];
 
@@ -312,7 +376,7 @@ async function requestGraphQL(
                 name: album.trackNames[index],
                 trackNumber: index + 1,
                 discNumber: 1,
-                artists: { items: [{ uri: "spotify:artist:example", profile: { name: album.artist } }] },
+                artists: { items: [{ uri: artistUri(variables.uri!), profile: { name: album.artist } }] },
                 duration: { totalMilliseconds: 225_000 },
                 playability: { playable: true },
               },
@@ -375,7 +439,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   return nativeFetch(input, init);
 };
 
-type FixtureView = "tracks" | "albums" | "playlists";
+type FixtureView = "tracks" | "albums" | "playlists" | "artists";
 const EMPTY_TRACK_DATA = { rating: 0, energy: 0, bpm: null, camelotKey: null, tagIds: [] };
 const playableTrackUris = Object.keys(catalog)
   .filter((albumUri) => albumUri.startsWith("spotify:album:"))
@@ -411,13 +475,40 @@ audioFeaturesService.getAudioFeaturesFromUri = async () => ({
   camelotKey: "8A",
 });
 
+let playlistContents = [...roadTripTrackUris, roadTripTrackUris[0], albumTrackUris("spotify:album:4glassHorizons00000000")[7]];
+let playlistUnavailable = params.has("failPlaylist");
+spotifyApiService.getAllTrackUrisInPlaylistStrict = async () => {
+  if (params.has("slow")) await pause(600);
+  if (playlistUnavailable) throw new Error("Example Spotify failure");
+  return params.has("emptyPlaylist") ? [] : playlistContents;
+};
+let artistLookupCount = 0;
+spotifyService.getTrackArtists = async (uri) => {
+  artistLookupCount += 1;
+  if (params.has("largeArtists")) {
+    await pause(10);
+    if (params.has("throttleArtists")) throw Object.assign(new Error("Spotify throttled this read"), { status: 429, retryAfter: 120 });
+    return [{ uri: artistUri("spotify:album:4glassHorizons00000000"), name: "Maya Fields" }];
+  }
+  if (params.has("failArtist") && uri === albumTrackUris("spotify:album:4glassHorizons00000000")[0]) throw new Error("Example artist lookup failure");
+  const albumUri = Object.keys(catalog).find((album) => albumTrackUris(album).includes(uri));
+  if (!albumUri) return [];
+  return [{ uri: artistUri(albumUri), name: catalog[albumUri].artist }];
+};
 function FixtureApp() {
+  useRatingControlTheme();
+  const [lookupCount, setLookupCount] = useState(artistLookupCount);
+  useEffect(() => { const timer = setInterval(() => setLookupCount(artistLookupCount), 100); return () => clearInterval(timer); }, []);
   const [view, setView] = useState<FixtureView>(() => {
     const requestedView = params.get("view");
-    return requestedView === "tracks" || requestedView === "playlists" ? requestedView : "albums";
+    return requestedView === "tracks" || requestedView === "playlists" || requestedView === "artists" ? requestedView : "albums";
   });
-  const [tracks, setTracks] = useState(initialTracks);
+  const [tracks, setTracks] = useState(() => params.has("largeArtists") ? Object.fromEntries(Array.from({ length: 5000 }, (_, index) => [`spotify:track:large-${params.has("throttleArtists") ? "throttle" : "ok"}-${index}`, { ...Object.values(initialTracks)[0], tagIds: ["tag_house"], rating: 4 }])) : initialTracks);
+  const [artists, setArtists] = useState(fixtureArtists);
   const [playlists, setPlaylists] = useState(initialPlaylists);
+  const playlistInsights = usePlaylistTrackInsights(playlists, tracks, taxonomy, view === "playlists", "spotify:playlist:roadtrip");
+  const artistInsights = useArtistTrackInsights(tracks, taxonomy, view === "artists");
+  const [activeArtist, setActiveArtist] = useState(artistUri("spotify:album:4glassHorizons00000000"));
   const entityType = view === "playlists" ? "playlist" : "album";
   const [activeAlbumUri, setActiveAlbumUri] = useState<string | null>(
     () => params.get("album") ?? "spotify:album:4glassHorizons00000000",
@@ -429,9 +520,13 @@ function FixtureApp() {
   const albumFilters = useFilterState("albums");
   const playlistFilters = useFilterState("playlists");
   const trackFilters = useFilterState("tracks");
+  const artistFilters = useFilterState("artists");
+  const updateActiveArtist = (update: (artist: ArtistData) => ArtistData) =>
+    setArtists((current) => ({ ...current, [activeArtist]: { ...update(current[activeArtist]), dateModified: Date.now() } }));
   const filters = view === "playlists" ? playlistFilters : albumFilters;
   const categoryTree = useMemo(() => buildCategoryTree(taxonomy), []);
-  const albumTrackSummaries = useMemo(() => buildAlbumTrackSummaries(tracks, taxonomy), [tracks]);
+  const membership = useAlbumMembership();
+  const albumTrackSummaries = useMemo(() => buildAlbumTrackSummaries(tracks, taxonomy, membership), [tracks, membership]);
   const activeEntityData = activeUri ? playlists[activeUri] : undefined;
   const activeCatalogAlbum = activeUri ? catalog[activeUri] : undefined;
   const isAlbumSelected = Boolean(activeUri?.startsWith("spotify:album:"));
@@ -543,13 +638,20 @@ function FixtureApp() {
           <button onClick={() => stepTrack(1)}>Next ▶</button>
         </div>
       ) : null}
+      {view === "playlists" ? <div className="fixtureBar">
+        <span>Example playlist:</span>
+        <button onClick={() => { playlistContents = playlistContents.slice(1, 4); void playlistMembershipStore.request("spotify:playlist:roadtrip", "", true); }}>Change playlist contents</button>
+        <button onClick={() => { playlistUnavailable = true; void playlistMembershipStore.request("spotify:playlist:roadtrip", "", true); }}>Make Spotify unavailable</button>
+        <button onClick={() => { playlistUnavailable = false; void playlistMembershipStore.request("spotify:playlist:roadtrip", "", true); }}>Restore Spotify</button>
+      </div> : null}
+      {params.has("largeArtists") ? <div className="fixtureBar" role="status">Artist requests: {lookupCount} · 5,000 annotated tracks</div> : null}
       <div className={appStyles.container}>
         <div className={appStyles.header}>
           <div className={appStyles.titleArea}>
             <h1 className={appStyles.title}>Tagify</h1>
           </div>
           <div className={appStyles.viewTabs} role="tablist" aria-label="Tagify views">
-            {(["tracks", "albums", "playlists"] as const).map((tabView) => (
+            {(["tracks", "albums", "playlists", "artists"] as const).map((tabView) => (
               <button
                 key={tabView}
                 className={`${appStyles.viewTab} ${view === tabView ? appStyles.viewTabActive : ""}`}
@@ -560,9 +662,7 @@ function FixtureApp() {
                 {tabView[0].toUpperCase() + tabView.slice(1)}
               </button>
             ))}
-            <button className={appStyles.viewTab} role="tab" aria-selected={false} disabled>
-              Artists
-            </button>
+
           </div>
           <span />
         </div>
@@ -616,6 +716,38 @@ function FixtureApp() {
                 isLockedTrack={false}
               />
             </>
+          ) : view === "artists" ? (
+            <>
+              <ArtistDetails artistUri={activeArtist} artistData={artists[activeArtist]} taxonomy={taxonomy}
+                trackInsights={artistInsights} activeTagFilters={artistFilters.activeTagFilters} excludedTagFilters={artistFilters.excludedTagFilters}
+                onAddTag={(tagId) => updateActiveArtist((artist) => ({ ...artist, tagIds: Array.from(new Set([...artist.tagIds, tagId])) }))}
+                onSetRating={(rating) => updateActiveArtist((artist) => ({ ...artist, rating }))}
+                onSetEnergy={(energy) => updateActiveArtist((artist) => ({ ...artist, energy }))}
+                onRemoveTag={(tagId) => updateActiveArtist((artist) => ({ ...artist, tagIds: artist.tagIds.filter((id) => id !== tagId) }))}
+                onToggleTagIncludeOff={artistFilters.toggleBasicTagFilter}
+                onOpenArtist={(uri) => showNotification(`Opened ${uri} in Spotify`)} onRefreshMetadata={() => showNotification("Refreshed artist details")} />
+              <TagSelector
+                categories={categoryTree}
+                customAccentsById={taxonomy.customAccentsById}
+                selectedTagIds={artists[activeArtist]?.tagIds || []}
+                onToggleTag={(tagId) => updateActiveArtist((artist) => ({
+                  ...artist,
+                  tagIds: artist.tagIds.includes(tagId) ? artist.tagIds.filter((id) => id !== tagId) : [...artist.tagIds, tagId],
+                }))}
+                onOpenTagManager={() => showNotification("Tag Manager is not part of this example")}
+                targetType="artist"
+                isMultiTagging={false}
+                isLockedTrack={false}
+              />
+              <TaggedArtistsList artists={artists} taxonomy={taxonomy} trackInsights={artistInsights}
+                includeTagClauses={artistFilters.includeTagClauses} clauseConnectors={artistFilters.clauseConnectors}
+                activeTagFilters={artistFilters.activeTagFilters} excludedTagFilters={artistFilters.excludedTagFilters}
+                activeArtistUri={activeArtist} onSelectArtist={setActiveArtist} onOpenArtist={(uri) => showNotification(`Opened ${uri} in Spotify`)}
+                onCycleTagFilter={artistFilters.cycleTagIncludeExcludeOff} onToggleTagFilter={artistFilters.toggleBasicTagFilter}
+                onRemoveTagFilter={artistFilters.removeTagFilter}
+                onSetTagFilterOperator={(operator) => artistFilters.setIncludeClauseOperator(0, operator)}
+                onClearTagFilters={artistFilters.clearTagFilters} />
+            </>
           ) : (
             <>
               {activeUri ? (
@@ -625,12 +757,15 @@ function FixtureApp() {
                     playlistData={activeEntityData}
                     playlistMetadata={activeAlbumMetadata}
                     albumTrackSummary={isAlbumSelected ? albumTrackSummaries.get(activeUri) : undefined}
+                    playlistTrackInsights={playlistInsights[activeUri]}
+                    onRefreshTrackInsights={() => { void playlistMembershipStore.request(activeUri, "", true); }}
                     tracks={tracks}
                     taxonomy={taxonomy}
                     activeTagFilters={filters.activeTagFilters}
                     excludedTagFilters={filters.excludedTagFilters}
                     onSetRating={(rating) => updateActiveEntity((entity) => withPlaylistRating(entity, rating, Date.now()))}
                     onSetEnergy={(energy) => updateActiveEntity((entity) => withPlaylistEnergy(entity, energy, Date.now()))}
+                    onAddTag={(tagId) => updateActiveEntity((entity) => entity.tagIds.includes(tagId) ? entity : withToggledPlaylistTag(entity, tagId, Date.now()))}
                     onRemoveTag={(tagId) => updateActiveEntity((entity) => withToggledPlaylistTag(entity, tagId, Date.now()))}
                     onToggleTagIncludeOff={filters.toggleBasicTagFilter}
                     onOpenPlaylist={(uri) => showNotification(`Opened ${uri} in Spotify`)}
@@ -659,6 +794,7 @@ function FixtureApp() {
                 playlists={playlists}
                 tracks={tracks}
                 albumTrackSummaries={albumTrackSummaries}
+                playlistTrackInsights={playlistInsights}
                 entityType={entityType}
                 taxonomy={taxonomy}
                 includeTagClauses={filters.includeTagClauses}

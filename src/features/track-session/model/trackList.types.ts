@@ -1,12 +1,12 @@
 import { SortOption, SortOrder } from "@/constants/trackList";
 import type { SmartPlaylistCriteria } from "@/features/smart-playlists";
-import { TagAccentId, TrackTag } from "@/types/tagData";
+import { TagAccentId, TrackTag, TrackData } from "@/types/tagData";
 import type {
   TagFilterClause,
   TagFilterOperator,
 } from "@/utils/tagFilterGroups";
 
-export interface TrackListTrackData {
+export interface TrackListTrackData extends Pick<TrackData, "recordingIdentity" | "recordingGroupId" | "recordingReuseDisabled"> {
   rating: number;
   energy: number;
   bpm: number | null;

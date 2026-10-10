@@ -1,5 +1,5 @@
 // Production Albums view components with an isolated example library and Spotify boundary.
-// Run: node scripts/tests/album-view.mjs [port]  (?view=tracks|playlists, ?reset clears saved filters)
+// Run: node scripts/tests/album-view.mjs [port]  (?view=tracks|playlists|artists, ?long for long names and many tags, ?reset clears saved filters)
 import { createRequire } from "node:module";
 import { createServer } from "node:http";
 import { resolve } from "node:path";

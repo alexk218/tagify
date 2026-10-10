@@ -206,3 +206,24 @@ describe("formatTrackAverage", () => {
     expect(formatTrackAverage(6.666)).toBe("6.7");
   });
 });
+
+it("counts listed annotations with missing or different album details without rewriting the library", () => {
+  const tracks = {
+    one: track({ rating: 3.5, energy: 7, tagIds: ["house"], dateModified: 11 }),
+    two: track({ rating: 3, energy: 6, tagIds: ["house"], dateModified: 12 }),
+    three: track({ rating: 4, energy: 8, albumUri: null, tagIds: ["house"], dateModified: 13 }),
+    four: track({ rating: 4, energy: 8, albumUri: "spotify:album:alternate", tagIds: ["house"], dateModified: 14 }),
+    five: track({ rating: 4, energy: 7, albumUri: "spotify:album:alternate", tagIds: ["house"], dateModified: 15 }),
+  };
+  const original = structuredClone(tracks);
+  const summary = buildAlbumTrackSummaries(tracks, taxonomy, { "spotify:album:one": ["one", "two", "three", "four", "five", "unrated", "one"] }).get("spotify:album:one")!;
+  expect(summary).toMatchObject({ taggedTrackCount: 5, ratedTrackCount: 5, ratingAverage: 3.7, energyAverage: 7.2, totalTrackCount: 6 });
+  expect(summary.commonTags).toEqual([{ tagId: "house", trackCount: 5, coverage: 1 }]);
+  expect(tracks).toEqual(original);
+});
+
+it("retains saved tracks Spotify no longer lists in the displayed album and its total", () => {
+  const tracks = { archived: track({ rating: 4, dateModified: 7 }), listed: track({ rating: 5 }) };
+  const summary = buildAlbumTrackSummaries(tracks, taxonomy, { "spotify:album:one": ["listed", "unrated"] }).get("spotify:album:one")!;
+  expect(summary).toMatchObject({ totalTrackCount: 3, taggedTrackCount: 2, ratingAverage: 4.5 });
+});

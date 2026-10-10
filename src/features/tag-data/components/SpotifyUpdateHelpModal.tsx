@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCheck,
   faCopy,
+  faDownload,
   faShieldHalved,
   faTimes,
   faTriangleExclamation,
@@ -58,7 +59,9 @@ const SpotifyUpdateHelpModal: React.FC<SpotifyUpdateHelpModalProps> = ({
   );
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const platform = detectPlatform();
-  const terminalName = platform === "windows" ? "PowerShell" : "Terminal";
+  const installerUrl = platform === "windows"
+    ? "https://github.com/alexk218/tagify-installer/releases/latest"
+    : "https://tagify.fm";
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -117,41 +120,62 @@ const SpotifyUpdateHelpModal: React.FC<SpotifyUpdateHelpModalProps> = ({
 
           <div className={styles.body}>
             <p className={styles.explanation}>
-              Spotify updates can temporarily remove Tagify. On Windows and
-              macOS, Spicetify can block those automatic updates.
+              Spotify updates can temporarily remove Tagify.
             </p>
 
-            <div className={styles.commandSection}>
-              <div className={styles.commandHeader}>
-                <span>Run once in {terminalName}</span>
-                <span className={styles.platformBadge}>
-                  Windows &amp; macOS
-                </span>
-              </div>
-              <div className={styles.commandRow}>
-                <code>{BLOCK_SPOTIFY_UPDATES_COMMAND}</code>
-                <button
-                  aria-label="Copy Spotify update blocking command"
-                  className={`${styles.copyButton} ${
-                    copyState === "copied" ? styles.copyButtonSuccess : ""
-                  }`}
-                  onClick={handleCopy}
-                  type="button"
+            {platform !== "linux" && (
+              <div className={styles.installerSection}>
+                <p>
+                  The Tagify installer lets you block automatic Spotify updates
+                  to keep Tagify available. It also checks for Tagify and
+                  Spicetify updates and handles updating them for you, making
+                  your setup easier to maintain.
+                </p>
+                <a
+                  className={styles.installerLink}
+                  href={installerUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
-                  <FontAwesomeIcon
-                    icon={copyState === "copied" ? faCheck : faCopy}
-                  />
-                  {copyState === "copied" ? "Copied!" : "Copy command"}
-                </button>
+                  <FontAwesomeIcon icon={faDownload} />
+                  {platform === "windows"
+                    ? "Get the Windows installer"
+                    : "Visit tagify.fm"}
+                </a>
               </div>
-              <p aria-live="polite" className={styles.copyStatus}>
-                {copyState === "failed"
-                  ? "Copy failed. Select the command and copy it manually."
-                  : copyState === "copied"
-                    ? `Copied. Paste it into ${terminalName} and press Enter.`
-                    : ""}
-              </p>
-            </div>
+            )}
+
+            {platform === "mac" && (
+              <div className={styles.commandSection}>
+                <div className={styles.commandHeader}>
+                  <span>Or run once in Terminal</span>
+                  <span className={styles.platformBadge}>macOS</span>
+                </div>
+                <div className={styles.commandRow}>
+                  <code>{BLOCK_SPOTIFY_UPDATES_COMMAND}</code>
+                  <button
+                    aria-label="Copy Spotify update blocking command"
+                    className={`${styles.copyButton} ${
+                      copyState === "copied" ? styles.copyButtonSuccess : ""
+                    }`}
+                    onClick={handleCopy}
+                    type="button"
+                  >
+                    <FontAwesomeIcon
+                      icon={copyState === "copied" ? faCheck : faCopy}
+                    />
+                    {copyState === "copied" ? "Copied!" : "Copy command"}
+                  </button>
+                </div>
+                <p aria-live="polite" className={styles.copyStatus}>
+                  {copyState === "failed"
+                    ? "Copy failed. Select the command and copy it manually."
+                    : copyState === "copied"
+                      ? "Copied. Paste it into Terminal and press Enter."
+                      : ""}
+                </p>
+              </div>
+            )}
 
             {platform === "linux" && (
               <div className={styles.platformWarning}>
@@ -168,10 +192,13 @@ const SpotifyUpdateHelpModal: React.FC<SpotifyUpdateHelpModalProps> = ({
                 <strong>This does not back up your Tagify data.</strong> Keep
                 using Tagify&apos;s backup button regularly.
               </p>
-              <p>
-                To receive Spotify updates again, run{" "}
-                <code>spicetify spotify-updates unblock</code>.
-              </p>
+              {platform === "mac" && (
+                <p>
+                  To allow Spotify updates again, change the setting in the
+                  installer or run <code>spicetify spotify-updates unblock</code>
+                  {" "}in Terminal.
+                </p>
+              )}
             </div>
           </div>
         </div>

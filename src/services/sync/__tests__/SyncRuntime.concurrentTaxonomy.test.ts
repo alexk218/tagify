@@ -59,6 +59,7 @@ describe("taxonomy edits from more than one device", () => {
   });
 
   afterEach(() => {
+    (syncRuntime as unknown as { taxonomyRefreshRequested: boolean }).taxonomyRefreshRequested = false;
     indexedDBStorage.resetConnection();
     localStorage.clear();
     vi.restoreAllMocks();
@@ -110,24 +111,108 @@ describe("taxonomy edits from more than one device", () => {
     expect(saved.tagsById.techno?.name).toBe("Techno");
   });
 
-  it("keeps a rejected new tag on this device and sends it again with the next edit", async () => {
+  // A tag deleted on another device is only marked deleted in this device's
+  // cloud copy until its own edit backs up. It must not be created again.
+  it("never re-creates a tag another device deleted while this device renames a different tag", async () => {
+    expect(await storageService.saveTaxonomy(genreTaxonomy([["house", "House"], ["techno", "Techno"]]), { captureSync: false })).toBe(true);
+    await putShadow([node("genre", "category", null, "Genre", 0), node("house", "tag", "genre", "House", 0), node("techno", "tag", "genre", "Techno", 1)]);
+    expect(await storageService.saveTaxonomy(genreTaxonomy([["house", "House Music"], ["techno", "Techno"]]))).toBe(true);
+    await putShadow([
+      node("genre", "category", null, "Genre", 0), node("house", "tag", "genre", "House", 0),
+      { ...node("techno", "tag", "genre", "Techno", 1), nodeRevision: 2, deleted: true },
+    ]);
+
+    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ changes: [], projection: { complete: true }, conflictIds: [] }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ));
+    await (syncRuntime as unknown as Runtime).push(configuration);
+    const call = request.mock.calls.find(([input]) => String(input).includes("/sync/push"));
+    const body = JSON.parse(call?.[1]?.body as string) as { operations: Array<{ type: string; node: { id: string } }> };
+    expect(body.operations.map((operation) => `${operation.type}:${operation.node.id}`)).toEqual(["taxonomy.upsert:house"]);
+  });
+
+  // Another device's tag can reach this device's cloud copy before the tag
+  // list on screen is refreshed. Renaming a different tag must not delete it.
+  it("never deletes a tag from another device that this device has not shown yet", async () => {
+    expect(await storageService.saveTaxonomy(genreTaxonomy([["house", "House"]]), { captureSync: false })).toBe(true);
+    await putShadow([
+      node("genre", "category", null, "Genre", 0), node("house", "tag", "genre", "House", 0), node("techno", "tag", "genre", "Techno", 1),
+    ]);
+    expect(await storageService.saveTaxonomy(genreTaxonomy([["house", "House Music"]]))).toBe(true);
+
+    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ changes: [], projection: { complete: true }, conflictIds: [] }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ));
+    await (syncRuntime as unknown as Runtime).push(configuration);
+    const body = JSON.parse(request.mock.calls[0][1]?.body as string) as { operations: Array<{ type: string; node: { id: string } }> };
+    expect(body.operations.map((operation) => `${operation.type}:${operation.node.id}`)).toEqual(["taxonomy.upsert:house"]);
+  });
+
+  it("keeps a rejected new tag on this device and in the queue, and sends it again with the next edit", async () => {
     expect(await storageService.saveTaxonomy(genreTaxonomy([["house", "House"]]), { captureSync: false })).toBe(true);
     await putShadow([node("genre", "category", null, "Genre", 0), node("house", "tag", "genre", "House", 0)]);
     expect(await storageService.saveTaxonomy(genreTaxonomy([["house", "House"], ["trance", "Trance"]]))).toBe(true);
+    // An earlier backup asked to show other devices' taxonomy changes.
+    (syncRuntime as unknown as { taxonomyRefreshRequested: boolean }).taxonomyRefreshRequested = true;
 
-    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(JSON.stringify(
-      String(input).includes("/sync/pull")
-        ? { batches: [], headCursor: 0, conflicts: [] }
-        : { changes: [], projection: { complete: true }, conflictIds: ["rejected-trance"] },
-    ), { status: 200, headers: { "content-type": "application/json" } }));
-    await (syncRuntime as unknown as Runtime).settleLocalAndPublicSync(configuration);
+    const request = rejectingCommunity();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    await expect((syncRuntime as unknown as Runtime).settleLocalAndPublicSync(configuration)).rejects.toThrow(/sync_waiting/);
     expect((await storageService.getTaxonomy()).tagsById.trance?.name).toBe("Trance");
+    expect(await queuedTaxonomyEdits()).toBe(1);
 
     expect(await storageService.saveTaxonomy(genreTaxonomy([["house", "House Music"], ["trance", "Trance"]]))).toBe(true);
     request.mockClear();
     await (syncRuntime as unknown as Runtime).push(configuration);
-    const body = JSON.parse(request.mock.calls[0][1]?.body as string) as { operations: Array<{ type: string; node: { id: string } }> };
+    const body = JSON.parse(request.mock.calls.find((call) => String(call[0]).includes("/sync/push"))?.[1]?.body as string) as { operations: Array<{ type: string; node: { id: string } }> };
     expect(body.operations.map((operation) => operation.node.id).sort()).toEqual(["house", "trance"]);
+  });
+
+  it("keeps a tag Community has never received when the taxonomy is rebuilt from the cloud copy", async () => {
+    expect(await storageService.saveTaxonomy(genreTaxonomy([["house", "House"], ["trance", "Trance"]]), { captureSync: false })).toBe(true);
+    await putShadow([node("genre", "category", null, "Genre", 0), node("house", "tag", "genre", "House", 0), { ...node("techno", "tag", "genre", "Techno", 1), deleted: true }]);
+    expect(await storageService.saveTaxonomy(genreTaxonomy([["house", "House"], ["trance", "Trance"], ["techno", "Techno"]]), { captureSync: false })).toBe(true);
+    (syncRuntime as unknown as { taxonomyRefreshRequested: boolean }).taxonomyRefreshRequested = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(JSON.stringify(
+      String(input).includes("/sync/pull") ? { batches: [], headCursor: 0, conflicts: [] } : {},
+    ), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await (syncRuntime as unknown as { refreshDeviceTaxonomyAfterBackup(): Promise<void> }).refreshDeviceTaxonomyAfterBackup();
+
+    const saved = await storageService.getTaxonomy();
+    expect(saved.tagsById.trance?.name).toBe("Trance");
+    expect(saved.tagsById.techno).toBeUndefined();
   });
 });
 
+function rejectingCommunity() {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(JSON.stringify(
+    String(input).includes("/sync/pull")
+      ? { batches: [], headCursor: 0, conflicts: [] }
+      : String(input).includes("/sync/snapshot")
+        ? { snapshot: {
+          protocolVersion: 2, sourceStorageSchemaVersion: 9, libraryId: "123e4567-e89b-42d3-a456-426614174004", headCursor: 0,
+          generatedAt: new Date().toISOString(), colors: [], collections: [], annotations: [], appState: [],
+          taxonomy: [node("genre", "category", null, "Genre", 0), node("house", "tag", "genre", "House", 0)].map((item) => ({ ...item, parentListRevision: 1 })),
+        } }
+        : { changes: [], projection: { complete: true }, conflictIds: ["rejected-trance"] },
+  ), { status: 200, headers: { "content-type": "application/json" } }));
+}
+
+async function queuedTaxonomyEdits(): Promise<number> {
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(getTagifyDatabaseName());
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  const intents = await new Promise<Array<{ type: string }>>((resolve, reject) => {
+    const request = database.transaction("sync-outbox").objectStore("sync-outbox").getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  database.close();
+  return intents.filter((intent) => intent.type === "taxonomy.replace").length;
+}

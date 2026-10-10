@@ -13,6 +13,13 @@ const INSTALL_RECOVERY_SECRET_PATTERN = /^tgfy_install_[A-Za-z0-9_-]{43}$/;
 const RECOVERY_REENROLL_MS = 30 * 24 * 60 * 60_000;
 const SPOTIFY_TOKEN_WAIT_MS = 3_000;
 const SYNC_CLIENT_GENERATION = "event-driven-v1";
+/**
+ * Set when Community definitively finds no approved device for this
+ * installation. Spotify updates that wipe the WebView storage also remove it,
+ * so recovery after a wipe still runs on the next start.
+ */
+export const RECOVERY_UNAVAILABLE_UNTIL_KEY = "tagify:sync:recovery-unavailable-until";
+export const RECOVERY_UNAVAILABLE_SKIP_MS = 7 * 24 * 60 * 60_000;
 
 declare global {
   interface Window {
@@ -26,6 +33,32 @@ export function getInstallRecoverySecret(): string | null {
   return typeof value === "string" && INSTALL_RECOVERY_SECRET_PATTERN.test(value)
     ? value
     : null;
+}
+
+function recoveryRecentlyUnavailable(now = Date.now()): boolean {
+  try {
+    const until = Number(localStorage.getItem(RECOVERY_UNAVAILABLE_UNTIL_KEY));
+    return Number.isFinite(until) && until > now && until - now <= RECOVERY_UNAVAILABLE_SKIP_MS;
+  } catch {
+    return false;
+  }
+}
+
+function rememberRecoveryUnavailable(): void {
+  try {
+    localStorage.setItem(RECOVERY_UNAVAILABLE_UNTIL_KEY, String(Date.now() + RECOVERY_UNAVAILABLE_SKIP_MS));
+  } catch {
+    // Without the marker the next start simply checks again.
+  }
+}
+
+/** Lets the next Spotify start check for automatic reconnection again. */
+export function clearRecoveryUnavailable(): void {
+  try {
+    localStorage.removeItem(RECOVERY_UNAVAILABLE_UNTIL_KEY);
+  } catch {
+    // Nothing to clear when storage is unavailable.
+  }
 }
 
 /**
@@ -118,6 +151,10 @@ async function restoreOrEnroll(): Promise<DesktopSyncConfiguration | null> {
   }
 
   const recoverySecret = getInstallRecoverySecret();
+  // An installer recovery secret is always checked. Without one, a recent
+  // definitive "nothing to recover" answer skips the request (and the wait for
+  // Spotify's token) on every start for a week.
+  if (!recoverySecret && recoveryRecentlyUnavailable()) return null;
   const spotifyAccessToken = recoverySecret
     ? currentSpotifyAccessToken()
     : await waitForSpotifyAccessToken();
@@ -134,11 +171,20 @@ async function restoreOrEnroll(): Promise<DesktopSyncConfiguration | null> {
         platform: navigator.platform || "Spotify desktop",
       }),
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      // Only an explicit rejection means no approved device exists. Outages,
+      // rate limits, and malformed requests are retried on the next start.
+      if (response.status === 401) {
+        const body = (await response.json().catch(() => null)) as { error?: { code?: unknown } } | null;
+        if (body?.error?.code === "invalid_grant") rememberRecoveryUnavailable();
+      }
+      return null;
+    }
     const body = (await response.json()) as Record<string, unknown>;
     const next = configurationFromRecovery(body);
     if (!next) return null;
 
+    clearRecoveryUnavailable();
     setDesktopSyncConfiguration(next);
     await enrollDesktopRecovery(next);
     window.dispatchEvent(

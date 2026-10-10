@@ -4,7 +4,11 @@ import { defaultTagData } from "@/constants/defaultTagData";
 import {
   backupIncludesSmartPlaylists,
   buildTagifyBackupEnvelopeV2,
+  downloadOlderCopyBackup,
   downloadSafetyTagDataBackup,
+  extractPrivateNotesFromBackup,
+  isAutomaticFileBackupDue,
+  maybeDownloadTrailingTagDataFileBackup,
   extractAppStateFromBackup,
   hasCommunityBackupState,
   DEFAULT_AUTO_FILE_BACKUP_INTERVAL_MS,
@@ -219,6 +223,69 @@ describe("automatic tag data backup", () => {
   });
 });
 
+describe("keeping the newest changes in a backup file", () => {
+  const now = Date.UTC(2026, 9, 9, 9, 0, 0);
+  const hour = 60 * 60 * 1000;
+  const withRating = (rating: number): TagDataStructure => ({
+    ...taggedBackupData,
+    tracks: { "spotify:track:1": { ...taggedBackupData.tracks["spotify:track:1"], rating } },
+  });
+
+  it("saves edits made after the first file of the day once Tagify goes quiet", () => {
+    const files: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { files.push(this.download); });
+
+    expect(maybeDownloadAutomaticTagDataFileBackup(withRating(5), { now }).status).toBe("created");
+    // A later edit the same day is too soon for the daily file...
+    expect(maybeDownloadAutomaticTagDataFileBackup(withRating(3), { now: now + hour })).toEqual({ status: "skipped", reason: "too-soon" });
+    // ...and a trailing file waits for a quarter of the period, so edits don't download on every pause.
+    expect(maybeDownloadTrailingTagDataFileBackup(withRating(3), { now: now + hour })).toEqual({ status: "skipped", reason: "too-soon" });
+
+    const trailing = maybeDownloadTrailingTagDataFileBackup(withRating(3), { now: now + 6 * hour });
+
+    expect(trailing.status).toBe("created");
+    expect(files).toHaveLength(2);
+    expect(JSON.parse(window.localStorage.getItem(TAG_DATA_AUTO_FILE_BACKUP_METADATA_KEY) || "{}").lastBackedUpAt).toBe(now + 6 * hour);
+    expect(maybeDownloadTrailingTagDataFileBackup(withRating(3), { now: now + 13 * hour })).toEqual({ status: "skipped", reason: "unchanged" });
+  });
+
+  it("does not download an unchanged library again just because time passed", () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+
+    maybeDownloadAutomaticTagDataFileBackup(taggedBackupData, { now });
+    const later = maybeDownloadAutomaticTagDataFileBackup(taggedBackupData, { now: now + 2 * DEFAULT_AUTO_FILE_BACKUP_INTERVAL_MS });
+
+    expect(later).toEqual({ status: "skipped", reason: "unchanged" });
+    expect(click).toHaveBeenCalledTimes(1);
+  });
+
+  it("decides a file isn't due without reading the library", () => {
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    expect(isAutomaticFileBackupDue(now)).toBe(true);
+    maybeDownloadAutomaticTagDataFileBackup(taggedBackupData, { now });
+
+    expect(isAutomaticFileBackupDue(now + hour)).toBe(false);
+    expect(isAutomaticFileBackupDue(now + DEFAULT_AUTO_FILE_BACKUP_INTERVAL_MS)).toBe(true);
+    expect(isAutomaticFileBackupDue(now + DEFAULT_AUTO_FILE_BACKUP_INTERVAL_MS, "never")).toBe(false);
+
+    let reads = 0;
+    const watched = { ...withRating(2) } as TagDataStructure;
+    Object.defineProperty(watched, "tracks", { get: () => { reads += 1; return withRating(2).tracks; } });
+
+    expect(maybeDownloadAutomaticTagDataFileBackup(watched, { now: now + hour })).toEqual({ status: "skipped", reason: "too-soon" });
+    expect(reads).toBe(0);
+  });
+
+  it("names the older copy so it is never mistaken for the newest backup", () => {
+    const files: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { files.push(this.download); });
+
+    downloadOlderCopyBackup(taggedBackupData, new Date(Date.UTC(2026, 9, 9, 12, 0, 0)));
+
+    expect(files).toEqual(["tagify-older-copy-2026-10-09T12-00-00-000Z.json"]);
+  });
+});
+
 describe("complete backup files", () => {
   const community = {
     publicationPolicy: null,
@@ -275,4 +342,14 @@ describe("complete backup files", () => {
     expect(downloadSafetyTagDataBackup(defaultTagData, { community, appState }, "before-reset", now)).toBe(false);
     expect(anchors).toEqual(["tagify-before-import-2026-10-05T12-00-00-000Z.json"]);
   });
+  it("backs up a notes-only library and treats older files as silent about notes", () => {
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const privateNotes = { "spotify:artist:aaaaaaaaaaaaaaaaaaaaaa": { text: "Private artist memory" } };
+    const now = Date.UTC(2026, 9, 8);
+    expect(maybeDownloadAutomaticTagDataFileBackup(defaultTagData, { now, privateNotes }).status).toBe("created");
+    expect(downloadSafetyTagDataBackup(defaultTagData, { privateNotes }, "before-import", new Date(now))).toBe(true);
+    expect(extractPrivateNotesFromBackup(buildTagifyBackupEnvelopeV2(defaultTagData))).toBeNull();
+    expect(() => extractPrivateNotesFromBackup({ format: "tagify-backup", privateNotes: { "https://public.example": { text: "Invalid" } } })).toThrow();
+  });
+
 });

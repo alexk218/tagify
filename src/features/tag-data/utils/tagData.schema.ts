@@ -1,3 +1,4 @@
+import { normalizeRecordingIdentity } from "@/features/recording-reuse/utils/recordingReuse";
 import { defaultTagData } from "@/constants/defaultTagData";
 import type {
   LegacyTagDataStructure,
@@ -62,6 +63,42 @@ function normalizeLegacyTrackTags(trackData: Partial<LegacyTrackData>): string[]
   );
 }
 
+/**
+ * Fields Tagify understands for each saved record. The normalizers below
+ * validate these; any other field (written by a newer Tagify, for example)
+ * is kept as it is so saving, backing up, or importing a record never
+ * drops information this version doesn't know about. Older field names
+ * replaced by a known field are listed so they are not kept.
+ */
+const TRACK_FIELDS = [
+  "uri", "tags", "recordingIdentity", "recordingGroupId", "recordingReuseDisabled", "rating", "energy", "bpm",
+  "camelotKey", "tagIds", "dateCreated", "dateModified", "name", "artists", "albumName", "albumUri",
+  "albumImageUrl", "backfillAttempts", "audioFeaturesBackfillRevision", "albumBackfillAttempts",
+] as const;
+const PLAYLIST_FIELDS = [
+  "uri", "rating", "energy", "tagIds", "dateCreated", "dateModified", "name", "ownerName", "imageUrl",
+  "description", "trackCount", "snapshotId",
+] as const;
+const ARTIST_FIELDS = [
+  "uri", "rating", "energy", "tagIds", "dateCreated", "dateModified", "name", "imageUrl", "followerCount", "genres",
+] as const;
+const SMART_PLAYLIST_FIELDS = [
+  "id", "playlistId", "playlistName", "description", "isActive", "createdAt", "updatedAt", "lastSyncAt",
+  "pendingTagChoices", "smartPlaylistTrackUris", "source", "criteria",
+] as const;
+const SMART_PLAYLIST_SOURCE_FIELDS = ["recipeId", "revision", "authorId"] as const;
+const SMART_PLAYLIST_CRITERIA_FIELDS = [
+  "includeTagClauses", "clauseConnectors", "includeTagGroups", "activeTagFilters", "excludedTagFilters",
+  "isOrFilterMode", "ratingFilters", "energyMinFilter", "energyMaxFilter", "bpmMinFilter", "bpmMaxFilter",
+  "camelotKeyFilters", "camelotMinFilter", "camelotMaxFilter",
+] as const;
+
+function unknownFields(value: unknown, knownFields: readonly string[]): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([field, fieldValue]) =>
+    !knownFields.includes(field) && fieldValue !== undefined));
+}
+
 function normalizeTrackData(trackData: unknown): TrackData {
   const candidate = (trackData || {}) as Partial<TrackData & LegacyTrackData>;
 
@@ -70,6 +107,10 @@ function normalizeTrackData(trackData: unknown): TrackData {
     : normalizeLegacyTrackTags(candidate);
 
   return {
+    ...unknownFields(trackData, TRACK_FIELDS),
+    ...(normalizeRecordingIdentity(candidate.recordingIdentity) ? { recordingIdentity: normalizeRecordingIdentity(candidate.recordingIdentity) } : {}),
+    ...(normalizeRecordingIdentity(candidate.recordingIdentity) && typeof candidate.recordingGroupId === "string" && candidate.recordingGroupId && !candidate.recordingReuseDisabled ? { recordingGroupId: candidate.recordingGroupId } : {}),
+    ...(candidate.recordingReuseDisabled === true ? { recordingReuseDisabled: true } : {}),
     rating: typeof candidate.rating === "number" ? candidate.rating : 0,
     energy: typeof candidate.energy === "number" ? candidate.energy : 0,
     bpm:
@@ -116,6 +157,7 @@ function normalizePlaylistData(playlistData: unknown): PlaylistData {
   const candidate = (playlistData || {}) as Partial<PlaylistData>;
 
   return {
+    ...unknownFields(playlistData, PLAYLIST_FIELDS),
     rating: typeof candidate.rating === "number" ? candidate.rating : 0,
     energy: typeof candidate.energy === "number" ? candidate.energy : 0,
     tagIds: Array.isArray(candidate.tagIds)
@@ -150,6 +192,7 @@ function normalizeArtistData(artistData: unknown): ArtistData {
   const candidate = (artistData || {}) as Partial<ArtistData>;
 
   return {
+    ...unknownFields(artistData, ARTIST_FIELDS),
     rating: typeof candidate.rating === "number" ? candidate.rating : 0,
     energy: typeof candidate.energy === "number" ? candidate.energy : 0,
     tagIds: Array.isArray(candidate.tagIds)
@@ -195,6 +238,24 @@ function normalizeTaxonomy(
       ]),
     ),
   };
+}
+
+let normalizedDefaultTaxonomy: string | null = null;
+
+/** Whether a taxonomy holds anything beyond Tagify's starting tags. */
+export function hasCustomTaxonomy(taxonomy: TagDataStructure["taxonomy"] | null | undefined): boolean {
+  if (!taxonomy || !Array.isArray(taxonomy.categoryOrder) || taxonomy.categoryOrder.length === 0) return false;
+  normalizedDefaultTaxonomy ??= JSON.stringify(normalizeTaxonomy(defaultTagData.taxonomy));
+  return JSON.stringify(normalizeTaxonomy(taxonomy)) !== normalizedDefaultTaxonomy;
+}
+
+/** Whether a library holds anything the user made: saved records, Smart Playlists, or their own tags. */
+export function hasUserLibraryContent(data: TagDataStructure): boolean {
+  return Object.keys(data.tracks).length > 0 ||
+    Object.keys(data.playlists || {}).length > 0 ||
+    Object.keys(data.artists || {}).length > 0 ||
+    (data.smartPlaylists?.length ?? 0) > 0 ||
+    hasCustomTaxonomy(data.taxonomy);
 }
 
 function isLegacyTagDataStructure(value: unknown): value is LegacyTagDataStructure {
@@ -424,6 +485,7 @@ export function normalizeSmartPlaylistCriteriaList(value: unknown): SmartPlaylis
 
     return [
       {
+        ...unknownFields(playlist, SMART_PLAYLIST_FIELDS),
         id:
           typeof candidate.id === "string" && candidate.id.trim()
             ? candidate.id
@@ -460,6 +522,7 @@ export function normalizeSmartPlaylistCriteriaList(value: unknown): SmartPlaylis
         typeof candidate.source.revision === "number"
           ? {
               source: {
+                ...unknownFields(candidate.source, SMART_PLAYLIST_SOURCE_FIELDS),
                 recipeId: candidate.source.recipeId,
                 revision: candidate.source.revision,
                 ...(typeof candidate.source.authorId === "string"
@@ -469,6 +532,7 @@ export function normalizeSmartPlaylistCriteriaList(value: unknown): SmartPlaylis
             }
           : {}),
         criteria: {
+          ...unknownFields(candidate.criteria, SMART_PLAYLIST_CRITERIA_FIELDS),
           ...(() => {
             const normalizedFormula = Array.isArray(candidate.criteria.includeTagClauses)
               ? normalizeTagFilterFormula({

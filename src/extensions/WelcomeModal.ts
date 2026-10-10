@@ -189,8 +189,7 @@ export const welcomeModal = {
         ?.addEventListener("click", () => {
           Spicetify.PopupModal.hide();
 
-          // navigate to Tagify
-          // Spicetify.Platform.History.push("/tagify");
+          Spicetify.Platform.History.push("/tagify");
         });
     };
 

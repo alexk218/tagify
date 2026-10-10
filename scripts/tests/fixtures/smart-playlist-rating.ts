@@ -1,5 +1,6 @@
 import { evaluateTrackMatchesCriteria } from "../../../src/features/smart-playlists/utils/smartPlaylist.criteria";
 import type { TrackData } from "../../../src/types/tagData";
+import { createEmptyTaxonomy, TAG_DATA_SCHEMA_VERSION } from "../../../src/utils/tagTaxonomy";
 
 const trackUris = ["spotify:track:example1", "spotify:track:example2"];
 const tracks = Object.fromEntries(trackUris.map(uri => [uri, {
@@ -41,20 +42,27 @@ export const smartPlaylistSyncService = {
     status();
   },
 };
-let db: IDBDatabase;
-export const storageService = {
-  initialize: async () => ({ status: "ready" }),
-  async saveTrackChanges(changes: Map<string, TrackData | null>) {
+export const storageService = { initialize: async () => ({ status: "ready" }) };
+export const flushLocalPersistence = async () => {};
+// Saved songs live in memory; edits change them like the real library does.
+export const indexedDBStorage = {
+  init: async () => true,
+  loadAllStrict: async () => ({
+    schemaVersion: TAG_DATA_SCHEMA_VERSION, taxonomy: createEmptyTaxonomy(),
+    tracks: structuredClone(tracks), playlists: {}, artists: {}, smartPlaylists: [],
+  }),
+  async patchTracks(changes: Record<string, (current: TrackData | null) => TrackData | null | undefined>) {
     writes++;
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction("tracks", "readwrite");
-      changes.forEach((track, uri) => {
-        if (track) { tracks[uri] = track; tx.objectStore("tracks").put({ uri, ...track }); }
-        else { delete tracks[uri]; tx.objectStore("tracks").delete(uri); }
-      });
-      tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error);
+    const saved: Record<string, TrackData | null> = {};
+    Object.entries(changes).forEach(([uri, change]) => {
+      const next = change(tracks[uri] ? { ...tracks[uri] } : null);
+      if (next === undefined) return;
+      saved[uri] = next;
+      if (next) tracks[uri] = next;
+      else delete tracks[uri];
     });
-    status(); return true;
+    status();
+    return saved;
   },
 };
 Object.assign(window, { ratingFixture: { tracks, playlist, renderRows, status } });
@@ -64,19 +72,6 @@ Object.assign(globalThis, { Spicetify: {
 } });
 localStorage.clear();
 localStorage.setItem("tagify:extensionSettings", JSON.stringify({ tracklistDisplayMode: "stars", playbarDisplayMode: "disabled" }));
-async function start() {
-  await new Promise<void>(resolve => { const request = indexedDB.deleteDatabase(getTagifyDatabaseName()); request.onsuccess = () => resolve(); });
-  db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(getTagifyDatabaseName(), 1);
-    request.onupgradeneeded = () => { request.result.createObjectStore("tracks", { keyPath: "uri" }); request.result.createObjectStore("categories"); };
-    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
-  });
-  await new Promise<void>(resolve => {
-    const tx = db.transaction("tracks", "readwrite");
-    Object.entries(tracks).forEach(([uri, track]) => tx.objectStore("tracks").put({ uri, ...track }));
-    tx.oncomplete = () => resolve();
-  });
-  renderRows(); status();
-  await import("../../../src/extensions/extension");
-}
-void start();
+renderRows();
+status();
+void import("../../../src/extensions/extension");

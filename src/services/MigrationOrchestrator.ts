@@ -6,12 +6,18 @@ import { audioFeaturesService } from "./AudioFeaturesService";
 import { normalizeCamelotKey } from "@/utils/camelotKey";
 import packageJson from "@/package";
 import {
+  hasUserLibraryContent,
   normalizeFilterState,
   normalizeSmartPlaylistCriteriaList,
   normalizeTagDataStructure,
 } from "@/features/tag-data/utils/tagData.schema";
+import {
+  downloadOlderCopyBackup,
+  downloadTagDataBackup,
+} from "@/features/tag-data/utils/tagData.backup";
 import { isTrackEmpty } from "@/features/tag-data/utils/tagData.helpers";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
+import { setLibraryChoicePending } from "@/services/storage/libraryChoice";
 import { restoreDesktopSyncConfiguration } from "@/services/sync/SyncInstallRecovery";
 import {
   captureTrackDateModified,
@@ -23,6 +29,20 @@ const MIGRATIONS_KEY = "tagify:migrations";
 const FALLBACK_MODE_KEY = "tagify:fallbackMode";
 const FILTER_STATE_KEY = "tagify:filterState";
 const SMART_PLAYLIST_STORAGE_KEY = "tagify:smartPlaylists";
+// A failed open is often momentary (another Tagify window upgrading, or a
+// brief storage error). Try a few times before reporting it.
+const OPEN_RETRY_DELAYS_MS = [0, 250, 1_000];
+
+const LIBRARY_UNAVAILABLE_MESSAGE =
+  "Tagify couldn't open your saved library, so changes can't be saved right now. Your saved tags haven't been removed. Try again, or restart Spotify.";
+const LIBRARY_MISSING_MESSAGE =
+  "Tagify couldn't find your saved library on this device. Nothing was reset. Import your newest Tagify backup file to get your tags back.";
+const LIBRARY_OPEN_FAILED_MESSAGE =
+  "Tagify couldn't finish opening your library. Your saved tags haven't been removed. Restart Spotify to try again.";
+
+type SavedLibraryRead =
+  | { status: "read"; data: TagDataStructure; hasData: boolean; hasUserContent: boolean }
+  | { status: "unavailable"; reason: string };
 
 interface FallbackState {
   active: boolean;
@@ -57,10 +77,29 @@ export interface OrchestratorResult {
   migrationsRun: string[];
   trackCount: number;
   error?: string;
+  /**
+   * Tagify couldn't open or confirm the saved library. `data` is not the
+   * saved library, and nothing is saved until a retry succeeds.
+   */
   fallbackMode?: boolean;
   fallbackReason?: string;
-  /** The saved library was missing and an older copy kept on this device was restored. */
+  /** The saved library was missing and the user restored an older copy kept on this device. */
   restoredOlderCopy?: boolean;
+  /**
+   * The saved library is empty and an older copy kept on this device can be
+   * restored. Nothing is saved until the user chooses.
+   */
+  olderCopy?: { trackCount: number };
+  /**
+   * The user chose to restore the older copy, but changes had been saved in
+   * the meantime, so nothing was replaced and the older copy was downloaded.
+   */
+  olderCopyNotRestored?: boolean;
+}
+
+/** The user's answer when an older copy of the library can be restored. */
+export interface OrchestratorOptions {
+  olderCopy?: "restore" | "start-fresh";
 }
 
 /**
@@ -73,7 +112,7 @@ export interface OrchestratorResult {
  * 4. Return final data
  */
 class MigrationOrchestrator {
-  private isRunning = false;
+  private queue: Promise<unknown> = Promise.resolve();
 
   private getMigrationState(): MigrationState {
     try {
@@ -110,6 +149,11 @@ class MigrationOrchestrator {
     } catch (error) {
       console.error("[Orchestrator] Error saving to localStorage:", error);
     }
+  }
+
+  /** Starting fresh keeps the older copy on this device instead of replacing it. */
+  private refreshLocalCopy(data: TagDataStructure, startedFresh: boolean): void {
+    if (!startedFresh) this.saveToLocalStorage(data);
   }
 
   private getFallbackState(): FallbackState | null {
@@ -163,34 +207,32 @@ class MigrationOrchestrator {
   }
 
   /**
-   * Main entry point - runs all necessary migrations in sequence
+   * Main entry point - runs all necessary migrations in sequence. Runs one at
+   * a time; a call made during a run starts after it finishes.
    */
-  async initialize(
+  initialize(
     onProgress?: (progress: OrchestratorProgress) => void,
+    options: OrchestratorOptions = {},
   ): Promise<OrchestratorResult> {
-    // Prevent concurrent runs
-    if (this.isRunning) {
-      console.warn("[Orchestrator] Already running, waiting...");
-      // Wait for current run to complete
-      while (this.isRunning) {
-        await this.delay(100);
-      }
-      // Return data from IndexedDB after wait
-      const data = await indexedDBStorage.loadAll();
-      return {
-        success: true,
-        dataSource: "indexedDB",
-        isFreshInstall: false,
-        data: data || defaultTagData,
-        migrationsRun: [],
-        trackCount: data ? Object.keys(data.tracks).length : 0,
-      };
-    }
+    const run = this.queue.then(async () => {
+      const result = await this.run(onProgress, options);
+      // Edits from Spotify's views wait only while the question is open.
+      if (!result.olderCopy) setLibraryChoicePending(false);
+      return result;
+    });
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
 
-    this.isRunning = true;
+  private async run(
+    onProgress: ((progress: OrchestratorProgress) => void) | undefined,
+    options: OrchestratorOptions,
+  ): Promise<OrchestratorResult> {
     const migrationsRun: string[] = [];
     let isFreshInstall = false;
     let restoredOlderCopy = false;
+    let olderCopyNotRestored = false;
+    let startedFresh = false;
 
     try {
       // Spotify updates can replace the WebView storage before Spicetify is
@@ -216,12 +258,14 @@ class MigrationOrchestrator {
       let data: TagDataStructure;
       let dataSource: "localStorage" | "indexedDB" | "default";
 
-      // Check if we've already migrated to IndexedDB
-      const indexedDBReady = await indexedDBStorage.init();
-      const indexedDBStatus = indexedDBReady
-        ? await this.getIndexedDBDataStatus()
-        : { hasData: false, hasUserContent: false };
-      const indexedDBHasData = indexedDBStatus.hasData;
+      // A library that couldn't be opened or read is never treated as empty:
+      // it may hold everything the user made. Write nothing and say so.
+      const saved = await this.readSavedLibrary();
+      if (saved.status === "unavailable") {
+        return this.libraryUnavailable(saved.reason, migrationsRun);
+      }
+
+      const indexedDBHasData = saved.hasData;
       const localStorageData = this.getLocalStorageData();
       const localStorageHasData = this.hasTagDataContent(localStorageData);
       const missingPairedReplica = Boolean(
@@ -231,9 +275,7 @@ class MigrationOrchestrator {
       );
       isFreshInstall = !localStorageHasData && !indexedDBHasData;
 
-      console.log(
-        `[Orchestrator] IndexedDB ready: ${indexedDBReady}, has data: ${indexedDBHasData}`,
-      );
+      console.log(`[Orchestrator] IndexedDB has data: ${indexedDBHasData}`);
       console.log(
         `[Orchestrator] localStorage has data: ${localStorageHasData}`,
       );
@@ -245,9 +287,8 @@ class MigrationOrchestrator {
         !missingPairedReplica
       ) {
         isFreshInstall = false;
-        throw new Error(
-          "Tagify storage is unexpectedly empty after IndexedDB migration. Tagify did not reset your data, but the persisted tag database could not be found.",
-        );
+        console.error("[Orchestrator] Storage is unexpectedly empty after IndexedDB migration");
+        throw new Error(LIBRARY_MISSING_MESSAGE);
       }
 
       if (missingPairedReplica) {
@@ -262,14 +303,18 @@ class MigrationOrchestrator {
         isFreshInstall = false;
       } else if (
         indexedDBHasData &&
-        (state.migrations.storageToIndexedDB || indexedDBStatus.hasUserContent)
+        (state.migrations.storageToIndexedDB || saved.hasUserContent)
       ) {
         // Already migrated to IndexedDB - load from there
         console.log("[Orchestrator] Loading from IndexedDB (already migrated)");
-        const idbData = await indexedDBStorage.loadAll();
-        if (!idbData) throw new Error("Tagify could not read the saved library");
-        data = idbData;
+        data = saved.data;
         dataSource = "indexedDB";
+        if (options.olderCopy === "restore" && localStorageData && localStorageHasData) {
+          // Changes were saved before the user answered, so restoring would
+          // replace them. Keep them and hand the older copy over as a file.
+          olderCopyNotRestored = true;
+          this.downloadFileCopy(() => downloadOlderCopyBackup(localStorageData));
+        }
         // A missing localStorage migration flag is not permission to overwrite
         // an existing IndexedDB library with an older localStorage copy.
         if (!state.migrations.storageToIndexedDB) {
@@ -277,19 +322,32 @@ class MigrationOrchestrator {
           this.saveMigrationState(state);
         }
       } else if (localStorageData && localStorageHasData) {
-        // Have localStorage data - use it (will migrate to IndexedDB later)
-        console.log("[Orchestrator] Loading from localStorage");
-        data = localStorageData;
-        dataSource = "localStorage";
-        // The saved library was cleared after it moved to IndexedDB. The copy
-        // kept from before that move is the newest one on this device; save it
-        // again so what the user sees is what is stored, and say so.
-        restoredOlderCopy = Boolean(state.migrations.storageToIndexedDB);
+        if (state.migrations.storageToIndexedDB) {
+          // The saved library was cleared after it moved to IndexedDB (a read
+          // just confirmed it is empty). The copy kept from before that move
+          // is older than anything saved since, so the user decides.
+          if (!options.olderCopy) return this.askAboutOlderCopy(localStorageData);
+          if (options.olderCopy === "restore") {
+            console.log("[Orchestrator] Restoring the older copy the user chose");
+            data = localStorageData;
+            dataSource = "localStorage";
+            restoredOlderCopy = true;
+          } else {
+            console.log("[Orchestrator] Starting fresh; keeping the older copy as a file");
+            data = defaultTagData;
+            dataSource = "default";
+            startedFresh = true;
+          }
+        } else {
+          // Have localStorage data - use it (will migrate to IndexedDB later)
+          console.log("[Orchestrator] Loading from localStorage");
+          data = localStorageData;
+          dataSource = "localStorage";
+        }
       } else if (indexedDBHasData) {
         // Only IndexedDB has data (edge case)
         console.log("[Orchestrator] Loading from IndexedDB (no localStorage)");
-        const idbData = await indexedDBStorage.loadAll();
-        data = idbData || defaultTagData;
+        data = saved.data;
         dataSource = "indexedDB";
       } else {
         // Fresh install
@@ -325,7 +383,7 @@ class MigrationOrchestrator {
         );
         state.migrations.cleanupEmptyTracks = true;
         migrationsRun.push("cleanupEmptyTracks");
-        this.saveToLocalStorage(data);
+        this.refreshLocalCopy(data, startedFresh);
         this.saveMigrationState(state);
       }
 
@@ -351,7 +409,7 @@ class MigrationOrchestrator {
               throw new Error("Failed to remove stale empty tracks from IndexedDB");
             }
           } else {
-            this.saveToLocalStorage(data);
+            this.refreshLocalCopy(data, startedFresh);
           }
 
           migrationsRun.push("cleanupInlineEditorEmptyTracks");
@@ -388,7 +446,7 @@ class MigrationOrchestrator {
 
         state.migrations.addTrackMetadata = true;
         migrationsRun.push("addTrackMetadata");
-        this.saveToLocalStorage(data);
+        this.refreshLocalCopy(data, startedFresh);
         this.saveMigrationState(state);
       }
 
@@ -409,7 +467,7 @@ class MigrationOrchestrator {
       );
 
       // ===== PHASE 3: Migrate storage to IndexedDB =====
-      if (!state.migrations.storageToIndexedDB || restoredOlderCopy) {
+      if (!state.migrations.storageToIndexedDB || restoredOlderCopy || startedFresh) {
         console.log("[Orchestrator] Running storage migration to IndexedDB");
         onProgress?.({
           phase: "storage-migration",
@@ -419,19 +477,12 @@ class MigrationOrchestrator {
         });
 
         try {
-          // Create backup file
-          if (!isFreshInstall) {
-            this.exportBackupToFile(data);
-          }
-
-          // Ensure IndexedDB is ready
-          let idbReady = indexedDBReady;
-          if (!idbReady) {
-            idbReady = await indexedDBStorage.init();
-          }
-
-          if (!idbReady) {
-            throw new Error("IndexedDB is not available in this browser");
+          // Keep a file copy. The older copy gets its own name so it is never
+          // mistaken for the newest backup.
+          if (localStorageData && (restoredOlderCopy || startedFresh)) {
+            this.downloadFileCopy(() => downloadOlderCopyBackup(localStorageData));
+          } else if (!isFreshInstall) {
+            this.downloadFileCopy(() => downloadTagDataBackup(data));
           }
 
           // Save all data to IndexedDB
@@ -442,61 +493,56 @@ class MigrationOrchestrator {
             total: 100,
           });
 
-          const saved = await indexedDBStorage.saveAll(data);
-          if (!saved) {
-            throw new Error("Failed to write data to IndexedDB");
-          }
-
-          // Verify migration
-          const verifyCount = await indexedDBStorage.getTrackCount();
-          const expectedCount = Object.keys(data.tracks).length;
-          if (verifyCount !== expectedCount) {
-            throw new Error(
-              `Verification failed: expected ${expectedCount} tracks, got ${verifyCount}`,
+          // The read above confirmed the library holds nothing the user made;
+          // the same check runs again inside the write, so a library saved
+          // meanwhile (for example by another Tagify window) is never replaced.
+          const replaced = await indexedDBStorage.saveAll(data, "migration", { onlyIfEmpty: true });
+          if (!replaced) {
+            const latest = await this.readSavedLibrary();
+            if (latest.status !== "read" || !latest.hasUserContent) {
+              throw new Error("Failed to write data to IndexedDB");
+            }
+            console.warn("[Orchestrator] The library was saved elsewhere meanwhile; showing it");
+            data = latest.data;
+            dataSource = "indexedDB";
+            restoredOlderCopy = false;
+          } else {
+            // Verify migration
+            const verifyCount = await indexedDBStorage.getTrackCount();
+            const expectedCount = Object.keys(data.tracks).length;
+            if (verifyCount !== expectedCount) {
+              throw new Error(
+                `Verification failed: expected ${expectedCount}, got ${verifyCount}`,
+              );
+            }
+            if (!startedFresh) {
+              migrationsRun.push(restoredOlderCopy ? "restoredOlderCopy" : "storageToIndexedDB");
+            }
+            console.log(
+              `[Orchestrator] Storage migration complete: ${verifyCount} tracks`,
             );
           }
 
           state.migrations.storageToIndexedDB = true;
-          migrationsRun.push(restoredOlderCopy ? "restoredOlderCopy" : "storageToIndexedDB");
           this.saveMigrationState(state);
-          this.clearFallbackMode(); // Clear any previous fallback state
-
-          console.log(
-            `[Orchestrator] Storage migration complete: ${verifyCount} tracks`,
-          );
         } catch (indexedDBError) {
           const errorMessage =
             indexedDBError instanceof Error
               ? indexedDBError.message
               : "Unknown IndexedDB error";
           console.error(
-            "[Orchestrator] IndexedDB migration failed, falling back to localStorage:",
+            "[Orchestrator] IndexedDB migration failed; nothing will be saved until it succeeds:",
             errorMessage,
           );
-
-          // Set fallback mode
-          const existingFallback = this.getFallbackState();
-          this.setFallbackState({
-            active: true,
-            reason: errorMessage,
-            failedAt: Date.now(),
-            retryCount: (existingFallback?.retryCount || 0) + 1,
-          });
-
-          // Don't throw - continue with localStorage
-          // The app will work, just without IndexedDB benefits
-          onProgress?.({
-            phase: "storage-migration",
-            message: "Opening your saved library...",
-            current: 90,
-            total: 100,
-          });
+          return this.libraryUnavailable(errorMessage, migrationsRun);
         }
       }
 
       // ===== PHASE 4: Update version and finalize =====
       state.version = currentVersion;
       this.saveMigrationState(state);
+      // The library opened and is saved where Tagify reads it.
+      this.clearFallbackMode();
 
       onProgress?.({
         phase: "complete",
@@ -512,8 +558,6 @@ class MigrationOrchestrator {
         }`,
       );
 
-      const fallbackState = this.getFallbackState();
-
       return {
         success: true,
         dataSource: state.migrations.storageToIndexedDB
@@ -523,52 +567,113 @@ class MigrationOrchestrator {
         data,
         migrationsRun,
         trackCount: finalTrackCount,
-        fallbackMode: fallbackState?.active || false,
-        fallbackReason: fallbackState?.reason,
+        fallbackMode: false,
         restoredOlderCopy: restoredOlderCopy && migrationsRun.includes("restoredOlderCopy"),
+        ...(olderCopyNotRestored ? { olderCopyNotRestored: true } : {}),
       };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
       console.error("[Orchestrator] Migration failed:", error);
+      const errorMessage =
+        error instanceof Error && error.message === LIBRARY_MISSING_MESSAGE
+          ? LIBRARY_MISSING_MESSAGE
+          : LIBRARY_OPEN_FAILED_MESSAGE;
 
-      // Try to return whatever data we have
-      const fallbackData = this.getLocalStorageData() || defaultTagData;
-
+      // Never offer an older copy as the saved library: the page would treat
+      // it as saved and an ordinary edit could overwrite newer data.
       return {
         success: false,
         dataSource: "localStorage",
         isFreshInstall,
-        data: fallbackData,
+        data: defaultTagData,
         migrationsRun,
-        trackCount: Object.keys(fallbackData.tracks).length,
+        trackCount: 0,
         error: errorMessage,
       };
-    } finally {
-      this.isRunning = false;
     }
   }
 
-  private async getIndexedDBDataStatus(): Promise<{ hasData: boolean; hasUserContent: boolean }> {
-    const [trackCount, playlistCount, artistCount, smartPlaylists, taxonomy] = await Promise.all([
-      indexedDBStorage.getTrackCount(),
-      indexedDBStorage.getPlaylistCount(),
-      indexedDBStorage.getArtistCount(),
-      indexedDBStorage.getAllSmartPlaylists(),
-      indexedDBStorage.getTaxonomy(),
-    ]);
+  /**
+   * Reads the whole saved library in one step, retrying briefly. Returns
+   * "unavailable" when it can't be opened or read, which is never the same as
+   * an empty library.
+   */
+  private async readSavedLibrary(): Promise<SavedLibraryRead> {
+    let reason = "IndexedDB could not be opened";
+    for (const delayMs of OPEN_RETRY_DELAYS_MS) {
+      if (delayMs) await this.delay(delayMs);
+      try {
+        if (!(await indexedDBStorage.init())) {
+          // A library saved by a newer Tagify cannot be opened by retrying.
+          if (indexedDBStorage.lastOpenErrorName === "VersionError") return { status: "unavailable", reason: "VersionError" };
+          continue;
+        }
+        const data = await indexedDBStorage.loadAllStrict();
+        const hasUserContent = hasUserLibraryContent(data);
+        return {
+          status: "read",
+          data,
+          hasUserContent,
+          hasData: hasUserContent || data.taxonomy.categoryOrder.length > 0,
+        };
+      } catch (error) {
+        reason = error instanceof Error ? error.message : String(error);
+        console.warn("[Orchestrator] Could not read the saved library", error);
+      }
+    }
+    return { status: "unavailable", reason };
+  }
 
-    const hasUserContent =
-      trackCount > 0 ||
-      playlistCount > 0 ||
-      artistCount > 0 ||
-      smartPlaylists.length > 0 ||
-      (taxonomy.categoryOrder.length > 0 &&
-        JSON.stringify(taxonomy) !== JSON.stringify(defaultTagData.taxonomy));
+  /** Nothing can be saved: the page must not treat any data as the saved library. */
+  private libraryUnavailable(reason: string, migrationsRun: string[]): OrchestratorResult {
+    const previous = this.getFallbackState();
+    this.setFallbackState({
+      active: true,
+      reason,
+      failedAt: Date.now(),
+      retryCount: (previous?.retryCount || 0) + 1,
+    });
     return {
-      hasData: hasUserContent || taxonomy.categoryOrder.length > 0,
-      hasUserContent,
+      success: false,
+      dataSource: "indexedDB",
+      isFreshInstall: false,
+      data: defaultTagData,
+      migrationsRun,
+      trackCount: 0,
+      error: LIBRARY_UNAVAILABLE_MESSAGE,
+      fallbackMode: true,
+      fallbackReason: reason,
     };
+  }
+
+  /** The saved library is empty and an older copy exists: nothing is saved until the user chooses. */
+  private askAboutOlderCopy(olderCopy: TagDataStructure): OrchestratorResult {
+    setLibraryChoicePending(true);
+    const trackCount = Object.keys(olderCopy.tracks).length;
+    this.setFallbackState({
+      active: true,
+      reason: "The saved library is empty and an older copy can be restored",
+      failedAt: Date.now(),
+      retryCount: this.getFallbackState()?.retryCount || 0,
+    });
+    return {
+      success: false,
+      dataSource: "indexedDB",
+      isFreshInstall: false,
+      data: defaultTagData,
+      migrationsRun: [],
+      trackCount,
+      fallbackMode: true,
+      fallbackReason: "The saved library is empty and an older copy can be restored",
+      olderCopy: { trackCount },
+    };
+  }
+
+  private downloadFileCopy(download: () => unknown): void {
+    try {
+      download();
+    } catch (error) {
+      console.warn("[Orchestrator] Failed to export backup file:", error);
+    }
   }
 
   private hasTagDataContent(data: TagDataStructure | null): boolean {
@@ -702,51 +807,21 @@ class MigrationOrchestrator {
     return updatedData;
   }
 
-  private exportBackupToFile(data: TagDataStructure): void {
-    try {
-      const jsonData = JSON.stringify(data, null, 2);
-      const blob = new Blob([jsonData], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-
-      const filename = `tagify-backup-${
-        new Date().toISOString().split("T")[0]
-      }.json`;
-
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      console.log(`[Orchestrator] Backup exported: ${filename}`);
-    } catch (error) {
-      console.warn("[Orchestrator] Failed to export backup file:", error);
-    }
-  }
-
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
-   * Retry the IndexedDB migration specifically
+   * Opens the saved library again, for example after it couldn't be opened,
+   * or with the user's answer about restoring an older copy. The record that
+   * the library already moved is kept: forgetting it would let an older copy
+   * replace the library without asking.
    */
   async retryIndexedDBMigration(
     onProgress?: (progress: OrchestratorProgress) => void,
+    options: OrchestratorOptions = {},
   ): Promise<OrchestratorResult> {
-    const state = this.getMigrationState();
-
-    // Reset the storage migration flag to force retry
-    state.migrations.storageToIndexedDB = false;
-    this.saveMigrationState(state);
-
-    // Clear fallback mode optimistically
-    this.clearFallbackMode();
-
-    // Re-run full initialization
-    return this.initialize(onProgress);
+    return this.initialize(onProgress, options);
   }
 
   /**
@@ -771,7 +846,7 @@ class MigrationOrchestrator {
   }
 
   /**
-   * Check if we're in fallback mode (using localStorage due to IndexedDB failure)
+   * Whether the last start couldn't open the saved library, so changes aren't saved
    */
   isFallbackMode(): boolean {
     return this.getFallbackState()?.active === true;

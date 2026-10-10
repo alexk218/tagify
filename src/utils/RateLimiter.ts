@@ -1,3 +1,5 @@
+import { getSpotifyRetryAfterMs } from "./spotifyRateLimit";
+
 /**
  * Centralized rate limiter for API calls
  * Prevents runaway requests from bugs (infinite loops, re-render storms)
@@ -36,6 +38,7 @@ class RateLimiter {
   private circuitOpen: boolean = false;
   private circuitOpenedAt: number = 0;
   private consecutiveErrors: number = 0;
+  private blockedUntil = 0;
 
   constructor(config: Partial<RateLimiterConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -108,7 +111,6 @@ class RateLimiter {
    * Record a successful request
    */
   private recordSuccess(): void {
-    this.requestHistory.push({ timestamp: Date.now(), success: true });
     this.consecutiveErrors = 0;
   }
 
@@ -116,7 +118,6 @@ class RateLimiter {
    * Record a failed request
    */
   private recordError(): void {
-    this.requestHistory.push({ timestamp: Date.now(), success: false });
     this.consecutiveErrors++;
 
     if (this.consecutiveErrors >= this.config.circuitBreakerThreshold) {
@@ -134,6 +135,10 @@ class RateLimiter {
    * @param requestFn The async function to execute
    */
   async execute<T>(key: string, requestFn: () => Promise<T>): Promise<T> {
+    // Fail fast during Spotify's cooldown. Waiting queues must not release a retry storm.
+    if (Date.now() < this.blockedUntil) {
+      throw Object.assign(new Error("Spotify requests are paused"), { status: 429, retryAfterSeconds: (this.blockedUntil - Date.now()) / 1000 });
+    }
     // Check circuit breaker
     if (!this.checkCircuitBreaker()) {
       throw new Error(
@@ -161,7 +166,8 @@ class RateLimiter {
       return this.execute(key, requestFn);
     }
 
-    // Execute the request
+    // Reserve at dispatch, so concurrent pending reads count against the limit too.
+    this.requestHistory.push({ timestamp: Date.now(), success: true });
     const promise = this.executeWithTimeout(requestFn)
       .then((result) => {
         this.recordSuccess();
@@ -169,6 +175,8 @@ class RateLimiter {
         return result;
       })
       .catch((error) => {
+        const retryAfter = getSpotifyRetryAfterMs(error);
+        if (retryAfter !== null) this.blockedUntil = Math.max(this.blockedUntil, Date.now() + retryAfter);
         this.recordError();
         this.pendingRequests.delete(key);
         throw error;
@@ -182,15 +190,15 @@ class RateLimiter {
    * Execute with timeout
    */
   private async executeWithTimeout<T>(requestFn: () => Promise<T>): Promise<T> {
-    return Promise.race([
-      requestFn(),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("Request timeout")),
-          this.config.requestTimeoutMs
-        )
-      ),
-    ]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        requestFn(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("Request timeout")), this.config.requestTimeoutMs);
+        }),
+      ]);
+    } finally { if (timer) clearTimeout(timer); }
   }
 
   private delay(ms: number): Promise<void> {
@@ -230,6 +238,7 @@ class RateLimiter {
     this.circuitOpen = false;
     this.circuitOpenedAt = 0;
     this.consecutiveErrors = 0;
+    this.blockedUntil = 0;
   }
 }
 

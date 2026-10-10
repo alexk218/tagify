@@ -28,7 +28,7 @@ const result = await build({
       ? { path, namespace: "fixture" } : undefined);
     builder.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({
       contents: `export { storageService, indexedDBStorage, spotifyApiService, spotifyService,
-        flushLocalPersistence, isLocalPersistencePaused, normalizeSmartPlaylistCriteriaList }
+        flushLocalPersistence, isLocalPersistencePaused, getTagifyDatabaseName, normalizeSmartPlaylistCriteriaList }
         from ${JSON.stringify(fixture)};`, resolveDir: project,
     }));
   } }],

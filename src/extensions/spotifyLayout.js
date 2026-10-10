@@ -23,6 +23,53 @@ export function getSpotifyTracklistHeader(tracklist) {
   ) || null;
 }
 
+const TRACK_URI = /^spotify:(?:track|local):/;
+
+/**
+ * Spotify keeps each row's item URI in the React props a few levels above the
+ * row element (two levels in Spotify 1.2.x). Walking only the parent chain keeps
+ * this cheap for rows that hold no item at all.
+ */
+export function getRowItemUri(row, maxDepth = 8) {
+  const key = Object.keys(row).find((name) => name.startsWith("__reactFiber$"));
+  let fiber = key ? row[key] : null;
+  for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = fiber.return) {
+    const props = fiber.memoizedProps;
+    if (!props || typeof props !== "object") continue;
+    for (const value of [props.uri, props.item?.uri, props.track?.uri, props.value?.uri]) {
+      if (typeof value === "string" && value.startsWith("spotify:")) return value;
+    }
+  }
+  return null;
+}
+
+export function isSpotifyTrackUri(uri) {
+  return typeof uri === "string" && TRACK_URI.test(uri);
+}
+
+// Whether a grid is a track list never changes, so each grid is classified once
+// it has rendered rows. Home shelves are grids of album/playlist cards.
+const tracklistDecisions = new WeakMap();
+
+function isSpotifyTracklist(grid) {
+  const known = tracklistDecisions.get(grid);
+  if (known !== undefined) return known;
+  if (grid.classList.contains("main-trackList-indexable")) {
+    const legacy = getSpotifyTrackRows(grid).length > 0 || Boolean(getSpotifyTracklistHeader(grid));
+    if (legacy) tracklistDecisions.set(grid, true);
+    return legacy;
+  }
+  if (getSpotifyTracklistHeader(grid)) {
+    tracklistDecisions.set(grid, true);
+    return true;
+  }
+  const rows = getSpotifyTrackRows(grid).slice(0, 3);
+  if (rows.length === 0) return false;
+  const decision = rows.some((row) => isSpotifyTrackUri(getRowItemUri(row)));
+  tracklistDecisions.set(grid, decision);
+  return decision;
+}
+
 export function getSpotifyTracklists(root = document) {
   const candidates = root.querySelectorAll([
     ".main-trackList-indexable",
@@ -31,9 +78,7 @@ export function getSpotifyTracklists(root = document) {
     'main [role="grid"]',
     '#Desktop_PanelContainer_Id [role="grid"]',
   ].join(", "));
-  return Array.from(candidates).filter(
-    (grid) => getSpotifyTrackRows(grid).length > 0 || getSpotifyTracklistHeader(grid),
-  );
+  return Array.from(candidates).filter(isSpotifyTracklist);
 }
 
 export function getSpotifyRowLayout(row) {

@@ -52,7 +52,7 @@ interface InfoModalProps {
   initialSection?: string;
 }
 
-const LATEST_WHATS_NEW_VERSION = "3.0.0";
+const LATEST_WHATS_NEW_VERSION = "3.1.0";
 const WHATS_NEW_SEEN_VERSION_KEY = "tagify:info-modal:whats-new-seen-version";
 
 const hasSeenLatestWhatsNew = () => {
@@ -232,6 +232,42 @@ const InfoModal: React.FC<InfoModalProps> = ({
 
               {activeSection === "whats-new" && (
                 <div className={styles.section}>
+                  {/* TAGIFY 3.1.0 */}
+                  <div className={styles.whatsNewHeader}>
+                    <h3 className={styles.sectionTitle}>
+                      <a href={getReleaseUrl("3.1.0")} target="_blank" rel="noopener noreferrer">
+                        What's New in Tagify 3.1.0
+                      </a>
+                    </h3>
+                  </div>
+                  <p className={styles.text}>lots in here since 3.0.0, so i'm calling this 3.1!</p>
+                  <ul className={styles.compactUpdates}>
+                    {[
+                      { title: "Private notes", description: "add notes on songs, albums, artists and playlists!!", icon: faCommentDots },
+                      { title: "Undo / redo", description: "undo / redo for song edits and bulk tagging, next to settings", icon: faKeyboard },
+                      { title: "Matching songs", description: "matching copies of the same song now share tags, ratings and energy", icon: faMusic },
+                      { title: "New Mac installer", description: "installs, updates and repairs tagify + spicetify, and can block spotify auto-updates", icon: faDownload },
+                    ].map(({ title, description, icon }) => (
+                      <li key={title} className={styles.compactUpdate}>
+                        <FontAwesomeIcon icon={icon} className={styles.compactUpdateIcon} aria-hidden="true" />
+                        <div className={styles.compactUpdateCopy}>
+                          <h4 className={styles.compactUpdateTitle}>{title}</h4>
+                          <p className={styles.compactUpdateDescription}>{description}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className={styles.text}>
+                    fixed the spotify lag, plus lots of fixes for tags going missing during background updates and cloud sync.
+                  </p>
+                  <p className={styles.text}>
+                    <a href="https://www.tagify.fm" target="_blank" rel="noopener noreferrer">download the Mac installer at tagify.fm</a>
+                  </p>
+                  <details className={styles.releaseAccordion}>
+                    <summary className={styles.releaseSummary}>
+                      <span>What's New in Tagify 3.0.0</span>
+                    </summary>
+                    <div>
                   {/* TAGIFY 3.0.0 */}
                   <div className={styles.whatsNewHeader}>
                     <h3 className={styles.sectionTitle}>
@@ -397,6 +433,9 @@ const InfoModal: React.FC<InfoModalProps> = ({
                       </li>
                     ))}
                   </ul>
+
+                    </div>
+                  </details>
 
                   <details className={styles.releaseAccordion}>
                     <summary className={styles.releaseSummary}>

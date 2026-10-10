@@ -1,0 +1,362 @@
+.row {
+  align-items: center;
+  background: rgb(0 0 0 / 20%);
+  border-radius: 6px;
+  cursor: pointer;
+  display: grid;
+  gap: 6px 14px;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  list-style: none;
+  margin: 0;
+  min-width: 0;
+  padding: 10px 12px;
+  transition:
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.row:hover {
+  background: rgb(255 255 255 / 8%);
+}
+
+.rowActive,
+.rowActive:hover {
+  background: rgb(255 255 255 / 7%);
+  box-shadow: inset 0 0 0 1px rgb(30 144 255 / 55%);
+}
+
+.cover {
+  background: var(--spice-button-disabled);
+  border: 0;
+  cursor: pointer;
+  display: block;
+  height: 56px;
+  overflow: hidden;
+  padding: 0;
+  width: 56px;
+}
+
+.cover:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 55%);
+  outline-offset: 2px;
+}
+
+.coverImage {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.coverPlaceholder {
+  color: var(--spice-subtext);
+  display: grid;
+  font-size: 22px;
+  height: 100%;
+  place-items: center;
+}
+
+.albumCover {
+  border-radius: 3px;
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 12%),
+    0 4px 12px rgb(0 0 0 / 28%);
+}
+
+/* A stacked edge sets playlists apart from albums at a glance. */
+.playlistCover {
+  border-radius: 10px;
+  box-shadow:
+    -4px 4px 0 rgb(255 255 255 / 8%),
+    -8px 8px 0 rgb(255 255 255 / 4%),
+    0 4px 12px rgb(0 0 0 / 28%);
+}
+
+.artistCover {
+  border-radius: 50%;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 28%);
+}
+
+.main {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  min-width: 0;
+}
+
+.name {
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 0;
+  text-align: left;
+}
+
+.name:hover {
+  text-decoration: underline;
+}
+
+.name:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 45%);
+  outline-offset: 2px;
+  text-decoration: underline;
+}
+
+.meta {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  justify-self: stretch;
+  line-height: 1.4;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Each item leads with a separator; the first one on every line sits in the
+   clipped margin, so wrapped lines never start with a stray bullet. */
+.metaItems {
+  display: flex;
+  flex-wrap: wrap;
+  margin-left: -14px;
+}
+
+.metaItems > span::before {
+  content: "•";
+  display: inline-block;
+  opacity: 0.7;
+  text-align: center;
+  width: 14px;
+}
+
+.tags {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+  min-width: 0;
+}
+
+.tag {
+  background: rgb(0 0 0 / 30%);
+  border: 0;
+  border-radius: 12px;
+  color: var(--spice-text);
+  cursor: pointer;
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 4px 8px;
+}
+
+.tag:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.tagAccented {
+  background: color-mix(in srgb, rgb(0 0 0 / 24%) 68%, var(--tag-accent-tint) 32%);
+  box-shadow: inset 0 0 0 1px var(--tag-accent-border);
+  color: var(--tag-accent-text, var(--spice-text));
+}
+
+.tagActive {
+  background: #1e90ff;
+  box-shadow: none;
+  color: white;
+  font-weight: 700;
+}
+
+.tagActive.tagAccented {
+  background: color-mix(in srgb, var(--tag-accent-dot) 64%, black 36%);
+  color: var(--tag-accent-text);
+}
+
+.tagActive.tagAccented:hover {
+  background: color-mix(in srgb, var(--tag-accent-dot) 74%, black 26%);
+}
+
+.tagExcluded,
+.tagExcluded.tagAccented {
+  background: #b91c1c;
+  color: white;
+  text-decoration: line-through;
+}
+
+.tagExcluded:hover,
+.tagExcluded.tagAccented:hover {
+  background: #991b1b;
+}
+
+.tag:focus-visible,
+.commonTagButton:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 45%);
+  outline-offset: 1px;
+}
+
+.trackTags {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Separates the item's own tags from the ones its tracks suggest. */
+.tag + .trackTags {
+  border-left: 1px solid rgb(255 255 255 / 12%);
+  padding-left: 8px;
+}
+
+.trackTagsLabel {
+  color: var(--spice-subtext);
+  font-size: 11px;
+}
+
+.commonTag {
+  align-items: baseline;
+  background: transparent;
+  border: 1px dashed rgb(255 255 255 / 26%);
+  border-radius: 12px;
+  color: var(--spice-text);
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 12px;
+  gap: 5px;
+  line-height: 1.2;
+  max-width: 100%;
+  opacity: 0.88;
+  overflow-wrap: anywhere;
+  padding: 2px 8px;
+}
+
+.commonTagButton {
+  cursor: pointer;
+}
+
+.commonTagButton:hover {
+  background: rgb(255 255 255 / 8%);
+  opacity: 1;
+}
+
+.commonTagCount {
+  color: var(--spice-subtext);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.commonTagActive {
+  background: var(--spice-highlight, rgb(255 255 255 / 10%));
+  border-color: var(--spice-button);
+  border-style: solid;
+  opacity: 1;
+}
+
+.commonTagExcluded {
+  text-decoration: line-through;
+}
+
+.moreTags {
+  color: var(--spice-subtext);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.aside {
+  color: var(--spice-subtext);
+  display: grid;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  gap: 5px;
+  justify-items: end;
+  max-width: 220px;
+  min-width: 150px;
+  text-align: right;
+}
+
+.scores {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  min-height: 18px;
+}
+
+.rating {
+  display: inline-flex;
+  line-height: 1;
+}
+
+.energy {
+  background: rgb(0 0 0 / 30%);
+  border-radius: 4px;
+  color: var(--spice-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.progress {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.progressBar {
+  display: inline-flex;
+  width: 80px;
+}
+
+.progressText {
+  white-space: nowrap;
+}
+
+.progressComplete {
+  color: var(--spice-button, #1db954);
+  font-weight: 700;
+}
+
+.average {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.average svg {
+  color: #ffd700;
+}
+
+.status {
+  font-style: italic;
+}
+
+/* Rows follow the space Spotify gives the list, not the window size. */
+@container (width <= 560px) {
+  .row {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .cover {
+    height: 48px;
+    width: 48px;
+  }
+
+  .aside {
+    grid-column: 2;
+    justify-items: start;
+    max-width: none;
+    min-width: 0;
+    text-align: left;
+  }
+}

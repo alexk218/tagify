@@ -21,18 +21,21 @@ interface UseGlobalKeyboardShortcutsProps {
 }
 
 /**
- * Hook that LISTENS for data changes from keyboard shortcuts (in KeyboardShortcutService).
- * Translates global events (from service) into React state updates.
+ * Hook that LISTENS for changes saved outside the Tagify page: keyboard
+ * shortcuts (KeyboardShortcutService) and the controls in Spotify's views
+ * (extension.js). Translates those global events into React state updates.
  *
  * The keyboard service is initialized in extension.js at Spotify startup,
- * NOT here. This hook only listens for the custom events that the service
- * dispatches after updating localStorage, allowing React to re-render.
+ * NOT here. This hook only listens for the custom events dispatched after a
+ * change is saved, allowing React to re-render.
  *
  * Note: The service imported in extension.js (KeyboardShortcutService.ts)
  * and this hook imported in app.tsx are DIFFERENT instances (separate bundles).
  * They communicate via:
- * 1. localStorage (shared data)
- * 2. window custom events (notifications)
+ * 1. IndexedDB (the saved library)
+ * 2. window custom events carrying each saved record (null when removed).
+ *    An event without a record says nothing about the saved record, so it is
+ *    ignored rather than shown as a removal.
  */
 export function useGlobalKeyboardShortcuts({
   onShortcutTrackUpdate,
@@ -50,8 +53,12 @@ export function useGlobalKeyboardShortcuts({
       }>;
       const detail = customEvent.detail;
 
-      if (typeof detail?.trackUri === "string" && detail.trackUri.length > 0) {
-        onShortcutTrackUpdate(detail.trackUri, detail.trackData ?? null);
+      if (
+        typeof detail?.trackUri === "string" &&
+        detail.trackUri.length > 0 &&
+        detail.trackData !== undefined
+      ) {
+        onShortcutTrackUpdate(detail.trackUri, detail.trackData);
       }
     };
 
@@ -73,12 +80,10 @@ export function useGlobalKeyboardShortcuts({
 
       if (
         typeof detail?.playlistUri === "string" &&
-        detail.playlistUri.length > 0
+        detail.playlistUri.length > 0 &&
+        detail.playlistData !== undefined
       ) {
-        onShortcutPlaylistUpdate(
-          detail.playlistUri,
-          detail.playlistData ?? null,
-        );
+        onShortcutPlaylistUpdate(detail.playlistUri, detail.playlistData);
       }
     };
 
@@ -98,8 +103,12 @@ export function useGlobalKeyboardShortcuts({
       }>;
       const detail = customEvent.detail;
 
-      if (typeof detail?.artistUri === "string" && detail.artistUri.length > 0) {
-        onShortcutArtistUpdate(detail.artistUri, detail.artistData ?? null);
+      if (
+        typeof detail?.artistUri === "string" &&
+        detail.artistUri.length > 0 &&
+        detail.artistData !== undefined
+      ) {
+        onShortcutArtistUpdate(detail.artistUri, detail.artistData);
       }
     };
 

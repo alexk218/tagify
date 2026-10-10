@@ -1,10 +1,31 @@
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
+import { mergeTaxonomy } from "./tagData.taxonomyMerge";
+import { rebaseRecord } from "./tagData.rebase";
+import { isArtistEmpty, isPlaylistEmpty, isTrackEmpty } from "./tagData.helpers";
 import {
   ArtistData,
   PlaylistData,
   TagDataStructure,
+  TagTaxonomy,
   TrackData,
 } from "@/types/tagData";
+
+/**
+ * The saved record after this page removed it. Removing clears what the page
+ * knew about; anything added elsewhere in the meantime (a tag from another
+ * device, a rating from Spotify's views) is kept, and the record stays.
+ */
+function removedRecord<T extends TrackData | PlaylistData | ArtistData>(
+  before: T | undefined,
+  current: T | null,
+  isEmpty: (record: T) => boolean,
+): T | null | undefined {
+  if (!current) return undefined;
+  if (!before) return null;
+  const cleared = { ...before, rating: 0, energy: 0, tagIds: [] } as T;
+  const kept = rebaseRecord(before, cleared, current);
+  return !kept || isEmpty(kept) ? null : kept;
+}
 
 export async function persistTagDataDiff(
   previouslyPersisted: TagDataStructure | null,
@@ -73,40 +94,58 @@ export async function persistTagDataDiff(
   }
 
   if (taxonomyChanged) {
-    saved = (await indexedDBStorage.saveTaxonomy(dataToSave.taxonomy)) && saved;
+    // Apply only this page's tag changes to the saved tags, so tags created
+    // elsewhere (the extension, another device) since the last save are kept.
+    const before = previouslyPersisted.taxonomy;
+    const isEmpty = (taxonomy: TagTaxonomy) => !taxonomy.categoryOrder.length && !Object.keys(taxonomy.tagsById).length;
+    saved = (await indexedDBStorage.saveTaxonomy((current) =>
+      // A database still holding only the older tag format reads as empty here.
+      mergeTaxonomy(before, dataToSave.taxonomy, isEmpty(current) && !isEmpty(before) ? before : current))) && saved;
   }
 
   if (tracksToUpsert.size > 0) {
-    saved = (await indexedDBStorage.saveTracks(tracksToUpsert)) && saved;
+    saved = (await indexedDBStorage.saveTracks(tracksToUpsert, prevTracks)) && saved;
   }
 
   if (tracksToDelete.length > 0) {
-    const deleteResults = await Promise.all(
-      tracksToDelete.map((uri) => indexedDBStorage.deleteTrack(uri)),
-    );
-    saved = deleteResults.every(Boolean) && saved;
+    try {
+      await indexedDBStorage.patchTracks(Object.fromEntries(tracksToDelete.map((uri) => [
+        uri, (current: TrackData | null) => removedRecord(prevTracks[uri], current, isTrackEmpty),
+      ])));
+    } catch (error) {
+      console.error("Tagify: Removed songs could not be saved", error);
+      saved = false;
+    }
   }
 
   if (playlistsToUpsert.size > 0) {
-    saved = (await indexedDBStorage.savePlaylists(playlistsToUpsert)) && saved;
+    saved = (await indexedDBStorage.savePlaylists(playlistsToUpsert, prevPlaylists)) && saved;
   }
 
   if (playlistsToDelete.length > 0) {
-    const deleteResults = await Promise.all(
-      playlistsToDelete.map((uri) => indexedDBStorage.deletePlaylist(uri)),
-    );
-    saved = deleteResults.every(Boolean) && saved;
+    try {
+      await indexedDBStorage.patchEntities<PlaylistData>("playlist", Object.fromEntries(playlistsToDelete.map((uri) => [
+        uri, (current: PlaylistData | null) => removedRecord(prevPlaylists[uri], current, isPlaylistEmpty),
+      ])));
+    } catch (error) {
+      console.error("Tagify: Removed playlists could not be saved", error);
+      saved = false;
+    }
   }
 
   if (artistsToUpsert.size > 0) {
-    saved = (await indexedDBStorage.saveArtists(artistsToUpsert)) && saved;
+    saved = (await indexedDBStorage.saveArtists(artistsToUpsert, prevArtists)) && saved;
   }
 
   if (artistsToDelete.length > 0) {
-    const deleteResults = await Promise.all(
-      artistsToDelete.map((uri) => indexedDBStorage.deleteArtist(uri)),
-    );
-    saved = deleteResults.every(Boolean) && saved;
+    try {
+      await indexedDBStorage.patchEntities<ArtistData>("artist", Object.fromEntries(artistsToDelete.map((uri) => [
+        uri, (current: ArtistData | null) => removedRecord(prevArtists[uri], current, isArtistEmpty),
+      ])));
+    } catch (error) {
+      console.error("Tagify: Removed artists could not be saved", error);
+      saved = false;
+    }
   }
 
   return saved;

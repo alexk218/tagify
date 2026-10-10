@@ -1,3 +1,4 @@
+import { ArtistTrackCheckStatus, type ArtistTrackInsights } from "@/features/track-insights";
 import React, { useEffect, useMemo } from "react";
 import ReactStars from "react-rating-stars-component";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -13,20 +14,26 @@ import {
   TagFilterClause,
   TagFilterOperator,
 } from "@/utils/tagFilterGroups";
-import { formatTimestamp } from "@/utils/formatters";
+import { formatCondensedDate, formatTimestamp } from "@/utils/formatters";
 import { buildTagAccentCssVars } from "@/features/tag-data/utils/tagAccent";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
 import {
   BasicTagFilterBar,
   getBasicTagFilterOperatorStorageKey,
 } from "@/features/filter-state";
+import {
+  EntityListRow,
+  type EntityMetaItem,
+  type EntityRowTrackTag,
+} from "@/features/entity-views";
 import styles from "./TaggedArtistsList.module.css";
 
-type SortBy = "dateModified" | "name" | "followerCount" | "rating" | "energy";
+type SortBy = "dateModified" | "name" | "followerCount" | "rating" | "energy" | "trackAverage" | "annotatedCount";
 type SortOrder = "asc" | "desc";
 
 interface TaggedArtistsListProps {
   artists: Record<string, ArtistData>;
+  trackInsights?: ArtistTrackInsights;
   taxonomy: TagTaxonomy;
   includeTagClauses: TagFilterClause[];
   clauseConnectors: ("AND" | "OR")[];
@@ -44,12 +51,19 @@ interface TaggedArtistsListProps {
   onClearTagFilters: () => void;
 }
 
+const MAX_ROW_TRACK_TAGS = 3;
+
+function pluralizeTracks(count: number): string {
+  return `${count} ${count === 1 ? "track" : "tracks"}`;
+}
+
 function formatFollowers(followerCount: number): string {
   return new Intl.NumberFormat().format(followerCount);
 }
 
 const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
   artists,
+  trackInsights,
   taxonomy,
   includeTagClauses,
   clauseConnectors,
@@ -139,17 +153,20 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
       onSetTagFilterOperator(operator);
     }
   };
-  const artistEntries = useMemo(
-    () =>
-      Object.entries(artists).filter(([, artist]) => {
-        return (
-          artist.tagIds.length > 0 ||
-          artist.rating > 0 ||
-          artist.energy > 0
-        );
-      }),
-    [artists],
-  );
+  const artistEntries = useMemo(() => {
+    const entries = Object.entries(artists).filter(([uri, artist]) => artist.tagIds.length > 0 || artist.rating > 0 || artist.energy > 0 ||
+      (trackInsights?.summaries.get(uri)?.taggedTrackCount ?? 0) >= 2);
+    const included = new Set(entries.map(([uri]) => uri));
+    trackInsights?.summaries.forEach((summary, uri) => {
+      if (!included.has(uri) && summary.taggedTrackCount >= 2) entries.push([uri, {
+        ...artists[uri], name: artists[uri]?.name || summary.artistName || "Unknown Artist", rating: 0, energy: 0, tagIds: [],
+      }]);
+    });
+    return entries;
+  }, [artists, trackInsights]);
+  const effectiveTagIds = useMemo(() => new Map(artistEntries.map(([uri, artist]) => [uri,
+    Array.from(new Set([...artist.tagIds, ...(trackInsights?.summaries.get(uri)?.commonTags.map((tag) => tag.tagId) ?? [])])),
+  ])), [artistEntries, trackInsights]);
   const allRatings = useMemo(
     () =>
       new Set(
@@ -179,8 +196,8 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
       }
     >();
 
-    artistEntries.forEach(([, artist]) => {
-      artist.tagIds.forEach((tagId) => {
+    artistEntries.forEach(([uri]) => {
+      (effectiveTagIds.get(uri) ?? []).forEach((tagId) => {
         if (filters.has(tagId)) {
           return;
         }
@@ -204,7 +221,7 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
           tag.name.toLowerCase().includes(normalizedTagSearch) ||
           tag.displayPath.toLowerCase().includes(normalizedTagSearch),
       );
-  }, [artistEntries, resolvedLookup, tagSearchTerm]);
+  }, [artistEntries, effectiveTagIds, resolvedLookup, tagSearchTerm]);
 
   const filteredArtists = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -212,7 +229,7 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
     return artistEntries.filter(([artistUri, artist]) => {
       const matchesTags =
         includeTagClauses.length === 0 ||
-        evaluateTagFilterFormula(artist.tagIds, {
+        evaluateTagFilterFormula(effectiveTagIds.get(artistUri) ?? [], {
           clauses: includeTagClauses,
           connectors: clauseConnectors,
         });
@@ -236,6 +253,7 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
     });
   }, [
     artistEntries,
+    effectiveTagIds,
     clauseConnectors,
     energyMaxFilter,
     energyMinFilter,
@@ -247,8 +265,8 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
   const sortedArtists = useMemo(
     () =>
       [...filteredArtists].sort((left, right) => {
-        const [, leftData] = left;
-        const [, rightData] = right;
+        const [leftUri, leftData] = left;
+        const [rightUri, rightData] = right;
         let comparison = 0;
 
         if (sortBy === "name") {
@@ -257,6 +275,13 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
           comparison = (leftData.followerCount || 0) - (rightData.followerCount || 0);
         } else if (sortBy === "rating") {
           comparison = (leftData.rating || 0) - (rightData.rating || 0);
+        } else if (sortBy === "trackAverage") {
+          const leftAverage = trackInsights?.summaries.get(leftUri)?.ratingAverage;
+          const rightAverage = trackInsights?.summaries.get(rightUri)?.ratingAverage;
+          if (leftAverage == null || rightAverage == null) return leftAverage == null ? (rightAverage == null ? 0 : 1) : -1;
+          comparison = leftAverage - rightAverage;
+        } else if (sortBy === "annotatedCount") {
+          comparison = (trackInsights?.summaries.get(leftUri)?.taggedTrackCount ?? 0) - (trackInsights?.summaries.get(rightUri)?.taggedTrackCount ?? 0);
         } else if (sortBy === "energy") {
           comparison = (leftData.energy || 0) - (rightData.energy || 0);
         } else {
@@ -265,7 +290,7 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
 
         return sortOrder === "desc" ? -comparison : comparison;
       }),
-    [filteredArtists, sortBy, sortOrder],
+    [filteredArtists, sortBy, sortOrder, trackInsights],
   );
 
   const activeTagFilterCount = activeTagFilters.length + excludedTagFilters.length;
@@ -321,7 +346,7 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
               <span className={styles.count}>
                 {hasActiveFilters
                   ? `${sortedArtists.length}/${artistEntries.length} artists`
-                  : `${artistEntries.length} artists`}
+                  : `${artistEntries.length} ${artistEntries.length === 1 ? "artist" : "artists"}`}
               </span>
             </div>
           </div>
@@ -365,7 +390,9 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
           >
             <option value="dateModified">Last updated</option>
             <option value="name">Name</option>
-            <option value="rating">Rating</option>
+            <option value="rating">Your artist rating</option>
+            <option value="trackAverage">Average track rating</option>
+            <option value="annotatedCount">Most tracks rated/tagged</option>
             <option value="energy">Energy</option>
             <option value="followerCount">Followers</option>
           </select>
@@ -384,7 +411,7 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
           <div className={styles.filterOptionsTopRow}>
             {allRatings.size > 0 ? (
               <div className={`${styles.filterSection} ${styles.filterPrimarySection}`}>
-                <h3 className={styles.filterSectionTitle}>Rating</h3>
+                <h3 className={styles.filterSectionTitle}>Your artist rating</h3>
                 <div className={styles.ratingFilters}>
                   {Array.from(allRatings)
                     .sort((a, b) => b - a)
@@ -537,120 +564,100 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
         </div>
       ) : null}
 
-      <div className={styles.list}>
-        {sortedArtists.length === 0 ? (
-          <p className={styles.emptyState}>
-            {artistEntries.length === 0
-              ? "No tagged artists yet. Right-click a Spotify artist and choose Tag artist with Tagify."
-              : "No artists match your filters."}
-          </p>
-        ) : (
-          sortedArtists.map(([artistUri, artist]) => {
-            const resolvedTags = artist.tagIds
+      {trackInsights ? <ArtistTrackCheckStatus artist={trackInsights} /> : null}
+      {sortedArtists.length === 0 ? (
+        <p className={styles.emptyState}>
+          {artistEntries.length === 0
+            ? "No tagged artists yet. Right-click a Spotify artist and choose Tag artist with Tagify."
+            : "No artists match your filters."}
+        </p>
+      ) : (
+        <ul className={styles.list}>
+          {sortedArtists.map(([artistUri, artist]) => {
+            const ownTags = artist.tagIds
               .map((tagId) => resolvedLookup.get(tagId))
               .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag))
-              .sort(compareResolvedTagsByTaxonomyOrder);
+              .sort(compareResolvedTagsByTaxonomyOrder)
+              .map((tag) => ({
+                id: tag.id,
+                name: tag.name,
+                accentId: tag.tag.accentId ?? null,
+                title:
+                  activeTagFilters.includes(tag.id) || excludedTagFilters.includes(tag.id)
+                    ? `Remove "${tag.name}" from artist filters`
+                    : `Filter artists by "${tag.name}"`,
+              }));
+            const meta: EntityMetaItem[] = [
+              ...(artist.followerCount !== null && artist.followerCount !== undefined
+                ? [{ key: "followers", content: `${formatFollowers(artist.followerCount)} followers` }]
+                : []),
+              ...(artist.dateModified
+                ? [{
+                    key: "updated",
+                    content: `Updated ${formatCondensedDate(artist.dateModified)}`,
+                    title: `Last updated ${formatTimestamp(artist.dateModified)}`,
+                  }]
+                : []),
+            ];
+            const summary = trackInsights?.summaries.get(artistUri);
+            const partial = Boolean(trackInsights?.pendingCount);
+            const trackTags: EntityRowTrackTag[] = (summary?.commonTags ?? [])
+              .filter((tag) => !artist.tagIds.includes(tag.tagId))
+              .flatMap((tag) => {
+                const resolved = resolvedLookup.get(tag.tagId);
+                return resolved
+                  ? [{
+                      id: tag.tagId,
+                      name: resolved.name,
+                      trackCount: tag.trackCount,
+                      title: `${resolved.name} is on ${tag.trackCount} of the ${summary?.taggedTrackCount} tracks you've rated or tagged${
+                        partial ? " that have been checked" : ""
+                      }. Click to filter by this tag.`,
+                    }]
+                  : [];
+              });
 
             return (
-              <div
+              <EntityListRow
                 key={artistUri}
-                className={`${styles.artistItem} ${
-                  activeArtistUri === artistUri ? styles.artistItemActive : ""
-                }`}
-                onClick={() => onSelectArtist(artistUri)}
-              >
-                {artist.imageUrl ? (
-                  <img
-                    src={artist.imageUrl}
-                    alt={`${artist.name || "Artist"} image`}
-                    className={styles.cover}
-                  />
-                ) : (
-                  <div className={`${styles.cover} ${styles.coverPlaceholder}`}>♪</div>
-                )}
-
-                <div className={styles.artistText}>
-                  <button
-                    type="button"
-                    className={styles.artistName}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onOpenArtist(artistUri);
-                    }}
-                    title="Open artist in Spotify"
-                  >
-                    {artist.name || "Unknown Artist"}
-                  </button>
-                  <div className={styles.artistMeta}>
-                    {artist.followerCount !== null &&
-                    artist.followerCount !== undefined ? (
-                      <span>{formatFollowers(artist.followerCount)} followers</span>
-                    ) : null}
-                    {artist.rating > 0 ? (
-                      <span className={styles.artistRating} title="Rating">
-                        <ReactStars
-                          key={`${artistUri}-rating-${artist.rating}`}
-                          count={5}
-                          value={artist.rating}
-                          edit={false}
-                          size={16}
-                          isHalf={true}
-                          emptyIcon={<FontAwesomeIcon icon={faStar} />}
-                          halfIcon={<FontAwesomeIcon icon={faStarHalf} />}
-                          fullIcon={<FontAwesomeIcon icon={faStar} />}
-                          activeColor="#ffd700"
-                          color="var(--spice-button-disabled)"
-                        />
-                      </span>
-                    ) : null}
-                    {artist.energy > 0 ? (
-                      <span className={styles.artistEnergy} title="Energy">
-                        {artist.energy}
-                      </span>
-                    ) : null}
-                    {artist.dateModified ? (
-                      <span>Updated {formatTimestamp(artist.dateModified)}</span>
-                    ) : null}
-                  </div>
-                  <div className={styles.tags}>
-                    {resolvedTags.map((tag) => {
-                      const tagTitle =
-                        activeTagFilters.includes(tag.id) ||
-                        excludedTagFilters.includes(tag.id)
-                          ? `Remove "${tag.name}" from artist filters`
-                          : `Filter artists by "${tag.name}"`;
-
-                      return (
-                        <button
-                          type="button"
-                          key={tag.id}
-                          className={`${styles.tag} ${
-                            tag.tag.accentId ? styles.tagAccented : ""
-                          } ${activeTagFilters.includes(tag.id) ? styles.tagActive : ""} ${
-                            excludedTagFilters.includes(tag.id) ? styles.tagExcluded : ""
-                          }`}
-                          style={buildTagAccentCssVars(
-                            tag.tag.accentId ?? null,
-                            customAccentsById,
-                          )}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onToggleTagFilter(tag.id, tagFilterOperator);
-                          }}
-                          aria-label={tagTitle}
-                          title={tagTitle}
-                        >
-                          {tag.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
+                kind="artist"
+                entityLabel="Artist"
+                name={artist.name || "Unknown Artist"}
+                imageUrl={artist.imageUrl}
+                isActive={activeArtistUri === artistUri}
+                openTitle="Open artist in Spotify"
+                onSelect={() => onSelectArtist(artistUri)}
+                onOpen={() => onOpenArtist(artistUri)}
+                meta={meta}
+                rating={artist.rating}
+                energy={artist.energy}
+                tags={ownTags}
+                trackTags={trackTags.slice(0, MAX_ROW_TRACK_TAGS)}
+                hiddenTrackTagCount={Math.max(0, trackTags.length - MAX_ROW_TRACK_TAGS)}
+                canFilterByTrackTags
+                customAccentsById={customAccentsById}
+                activeTagFilters={activeTagFilters}
+                excludedTagFilters={excludedTagFilters}
+                onToggleTag={(tagId) => onToggleTagFilter(tagId, tagFilterOperator)}
+                progressText={summary
+                  ? `${pluralizeTracks(summary.taggedTrackCount)} rated or tagged${partial ? " so far" : ""}`
+                  : null}
+                progressTitle={summary
+                  ? `${pluralizeTracks(summary.taggedTrackCount)} by this artist rated or tagged${
+                      partial ? ", based on the tracks checked so far" : ""
+                    }`
+                  : undefined}
+                average={summary && summary.ratingAverage !== null
+                  ? {
+                      text: `Track average: ${summary.ratingAverage.toFixed(1)} · ${summary.ratedTrackCount} rated`,
+                      title: `Average of ${summary.ratedTrackCount} rated tracks; unrated tracks are excluded`,
+                    }
+                  : null}
+              />
             );
-          })
-        )}
-      </div>
+          })}
+        </ul>
+      )}
     </section>
   );
 };

@@ -90,6 +90,12 @@ export function markConfirmedMembershipBaselines(
   }
 }
 
+export function clearConfirmedMembershipBaseline(playlist: SmartPlaylistCriteria): void {
+  const existing = loadMembershipBaselines();
+  existing.delete(membershipBaselineId(playlist));
+  localStorage.setItem(SMART_PLAYLIST_MEMBERSHIP_BASELINES_KEY, JSON.stringify([...existing]));
+}
+
 export function clearConfirmedMembershipBaselines(): void {
   localStorage.removeItem(SMART_PLAYLIST_MEMBERSHIP_BASELINES_KEY);
 }

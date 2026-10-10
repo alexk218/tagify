@@ -5,50 +5,18 @@ import { COMMUNITY_ORIGIN, openCommunityUrl } from "./communityLinks";
 import { CommunityVisibilityReview } from "./CommunityPublicVisibilityReview";
 import { getDesktopSyncConfiguration, setDesktopSyncConfiguration, type DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncPairingService, type ApprovedPairing } from "@/services/sync/SyncPairingService";
+import { clearRecoveryUnavailable } from "@/services/sync/SyncInstallRecovery";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
 import { Portal } from "@/components/ui";
+// eslint-disable-next-line css-modules/no-unused-class -- shared with the sync and library-review dialogs
 import styles from "./CloudSyncModal.module.css";
 import { InitialLibraryMergeReview } from "./InitialLibraryMergeReview";
 import { communityErrorMessage, communitySyncStatusLabel } from "./communitySyncCopy";
 
-export const COMMUNITY_ONBOARDING_STORAGE_KEY = "tagify:community:onboarding:v1";
-const COMMUNITY_ONBOARDING_SESSION_SNOOZE_KEY = "tagify:community:onboarding:snoozed-session";
-const COMMUNITY_ONBOARDING_COMPLETED = "completed";
-const COMMUNITY_ONBOARDING_DECLINED = "declined";
-
-export function shouldShowCommunityOnboarding(): boolean {
-  try {
-    if (!needsCommunityOnboardingSetup()) return false;
-    const status = localStorage.getItem(COMMUNITY_ONBOARDING_STORAGE_KEY);
-    if (status === COMMUNITY_ONBOARDING_COMPLETED || status === COMMUNITY_ONBOARDING_DECLINED) return false;
-    return sessionStorage.getItem(COMMUNITY_ONBOARDING_SESSION_SNOOZE_KEY) !== "1";
-  } catch {
-    return false;
-  }
-}
-
-export function needsCommunityOnboardingSetup(): boolean {
-  try { return !getDesktopSyncConfiguration(); } catch { return false; }
-}
-
-export function snoozeCommunityOnboarding(): void {
-  try { sessionStorage.setItem(COMMUNITY_ONBOARDING_SESSION_SNOOZE_KEY, "1"); } catch { /* Storage may be unavailable in Spotify's browser shell. */ }
-}
-
-export function declineCommunityOnboarding(): void {
-  try { localStorage.setItem(COMMUNITY_ONBOARDING_STORAGE_KEY, COMMUNITY_ONBOARDING_DECLINED); } catch { /* Storage may be unavailable in Spotify's browser shell. */ }
-}
-
-export function markCommunityOnboardingDone(): void {
-  try { localStorage.setItem(COMMUNITY_ONBOARDING_STORAGE_KEY, COMMUNITY_ONBOARDING_COMPLETED); } catch { /* Storage may be unavailable in Spotify's browser shell. */ }
-}
-
 export function CommunityOnboardingModal({
   onClose,
-  launchContext = "first-run",
 }: {
   onClose: () => void;
-  launchContext?: "first-run" | "manual";
 }) {
   const [configuration, setConfiguration] = useState(() => getDesktopSyncConfiguration());
   const [pending, setPending] = useState(() => syncPairingService.getPending());
@@ -65,12 +33,6 @@ export function CommunityOnboardingModal({
 
   const close = () => {
     if (pending || approvedPairing) syncPairingService.cancelPending();
-    if (launchContext === "first-run") snoozeCommunityOnboarding();
-    onClose();
-  };
-
-  const decline = () => {
-    declineCommunityOnboarding();
     onClose();
   };
 
@@ -96,6 +58,11 @@ export function CommunityOnboardingModal({
       document.documentElement.style.overflow = htmlOverflow;
       document.body.style.overflow = bodyOverflow;
     };
+  }, []);
+
+  useEffect(() => {
+    // Opening the connection screen re-enables automatic reconnection checks on the next start.
+    if (!getDesktopSyncConfiguration()) clearRecoveryUnavailable();
   }, []);
 
   useEffect(() => {
@@ -186,16 +153,9 @@ export function CommunityOnboardingModal({
             <p>Back up your library and choose which tags appear on your public profile.</p>
           </div>
           <div className={styles.actions}>
-            {launchContext === "first-run" ? (
-              <button type="button" onClick={close} className={styles.secondary}>Not now</button>
-            ) : (
-              <button type="button" onClick={close} className={styles.secondary}>Cancel</button>
-            )}
+            <button type="button" onClick={close} className={styles.secondary}>Cancel</button>
             <button type="button" onClick={() => void begin()} disabled={busy} className={styles.primary}><Link2 size={16} /> {busy ? "Connecting…" : "Connect"}</button>
           </div>
-          {launchContext === "first-run" ? (
-            <button type="button" onClick={decline} className={styles.quietAction}>Don't ask again</button>
-          ) : null}
         </> : null}
 
         {!configuration && pending ? <>
@@ -230,7 +190,6 @@ export function CommunityOnboardingModal({
           {showingMergeReview && mergePreview ? <InitialLibraryMergeReview review={mergePreview} onCommit={(resolutions) => activeSyncRuntime().commitInitialMerge(resolutions)} onDownloadBackup={() => activeSyncRuntime().downloadInitialMergeBackup()} /> : null}
           {!showingMergeReview ? <CommunityVisibilityReview connected={Boolean(configuration)} onReviewStateChange={setVisibilityReviewed} onSaved={(policy) => {
             if (policy.reviewedAt) {
-              markCommunityOnboardingDone();
               setFinished(true);
             }
           }} /> : null}

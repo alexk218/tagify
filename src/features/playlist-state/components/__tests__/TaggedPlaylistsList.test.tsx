@@ -191,12 +191,15 @@ function renderList(
   return props;
 }
 
-function StatefulPlaylistList({ entityType }: { entityType: "album" | "playlist" }) {
+function StatefulPlaylistList({ entityType, library = playlists }: {
+  entityType: "album" | "playlist";
+  library?: Record<string, PlaylistData>;
+}) {
   const filters = useFilterState(entityType === "album" ? "albums" : "playlists");
 
   return (
     <TaggedPlaylistsList
-      playlists={playlists}
+      playlists={library}
       tracks={tracks}
       entityType={entityType}
       taxonomy={taxonomy}
@@ -219,9 +222,7 @@ function StatefulPlaylistList({ entityType }: { entityType: "album" | "playlist"
 }
 
 function getRow(name: string): HTMLElement {
-  const row = screen.getByRole("button", { name }).closest<HTMLElement>(
-    '[class*="playlistItem"]',
-  );
+  const row = screen.getByRole("button", { name }).closest<HTMLElement>("li");
   if (!row) {
     throw new Error(`No row for ${name}`);
   }
@@ -229,9 +230,9 @@ function getRow(name: string): HTMLElement {
 }
 
 function rowNames(): string[] {
-  return Array.from(document.querySelectorAll('[class*="playlistName"]')).map(
-    (element) => element.textContent || "",
-  );
+  return screen
+    .queryAllByTitle(/^Open (album|playlist) in Spotify$/)
+    .map((element) => element.textContent || "");
 }
 
 async function openFilters() {
@@ -262,7 +263,7 @@ describe("TaggedPlaylistsList", () => {
     renderList({ entityType: "album" });
 
     expect(within(getRow("Album D")).getByText("Artist D")).toBeInTheDocument();
-    expect(within(getRow("Album D")).getByText("4.3 avg")).toBeInTheDocument();
+    expect(within(getRow("Album D")).getByText("Track average: 4.3 · 2 rated")).toBeInTheDocument();
   });
 
   it("hides albums with just one rated or tagged track until asked", async () => {
@@ -301,9 +302,9 @@ describe("TaggedPlaylistsList", () => {
     showSingleTrackAlbums();
     renderList({ entityType: "album" });
 
-    expect(within(getRow("Album A")).queryByText(/avg/)).not.toBeInTheDocument();
-    expect(within(getRow("Album E")).queryByText(/avg/)).not.toBeInTheDocument();
-    expect(within(getRow("Album D")).getByText("4.3 avg")).toBeInTheDocument();
+    expect(within(getRow("Album A")).queryByText(/Track average:/)).not.toBeInTheDocument();
+    expect(within(getRow("Album E")).queryByText(/Track average:/)).not.toBeInTheDocument();
+    expect(within(getRow("Album D")).getByText("Track average: 4.3 · 2 rated")).toBeInTheDocument();
   });
 
   it("shows how many of each album's tracks are rated or tagged", () => {
@@ -333,22 +334,28 @@ describe("TaggedPlaylistsList", () => {
     ]);
   });
 
-  it("shows common track tags beside album tags and filters by them", async () => {
-    const props = renderList({
-      includeTagClauses: [{ tagIds: ["house"], excludedTagIds: [], operator: "OR" }],
-      activeTagFilters: ["house"],
-    });
-    const user = userEvent.setup();
+  it("shows common track tags as context without album filter controls", async () => {
+    const props = renderList();
     const albumD = within(getRow("Album D"));
+    const commonTags = albumD.getByLabelText("Common tags on your tracks");
 
-    const house = albumD.getByTitle(/House is on 2 of the 3 tracks you've rated or tagged/);
-    expect(house).toHaveTextContent("House");
-    expect(albumD.queryByText("From tracks")).not.toBeInTheDocument();
+    expect(albumD.getByText("From tracks")).toBeInTheDocument();
+    expect(within(commonTags).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(commonTags).getByTitle(/House is on 2 of the 3 tracks/)).toHaveTextContent("House");
 
-    await user.click(house);
-    expect(props.onToggleTagFilter).toHaveBeenCalledWith("house", "OR");
-    expect(props.onCycleTagFilter).not.toHaveBeenCalled();
+    const user = await openFilters();
+    await user.click(screen.getByRole("button", { name: 'Include "House"' }));
+    expect(props.onCycleTagFilter).toHaveBeenCalledWith("house", "OR");
+    expect(props.onToggleTagFilter).not.toHaveBeenCalled();
     expect(props.onSelectPlaylist).not.toHaveBeenCalled();
+  });
+
+  it("only offers tags assigned directly to albums in the filter panel", async () => {
+    await openFiltersAfterRender({ playlists: {} });
+    expect(screen.getByText("From tracks", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: 'Include "House"' })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: 'Include "Chill"' })).not.toBeInTheDocument();
+    expect(screen.getByText("No album tags")).toBeInTheDocument();
   });
 
   it("turns row tags on and off without excluding them", async () => {
@@ -358,7 +365,7 @@ describe("TaggedPlaylistsList", () => {
     await user.click(
       within(getRow("Album A")).getByRole("button", { name: 'Filter albums by "House"' }),
     );
-    expect(rowNames()).toEqual(["Album A", "Album D"]);
+    expect(rowNames()).toEqual(["Album A"]);
 
     await user.click(
       within(getRow("Album A")).getByRole("button", {
@@ -372,7 +379,12 @@ describe("TaggedPlaylistsList", () => {
   });
 
   it("keeps Match All when row tags start the filter", async () => {
-    render(<StatefulPlaylistList entityType="album" />);
+    render(<StatefulPlaylistList entityType="album" library={{
+      ...playlists,
+      "spotify:album:album-a": {
+        ...playlists["spotify:album:album-a"], tagIds: ["house", "chill"],
+      },
+    }} />);
     const user = await openFilters();
 
     await user.click(screen.getByRole("button", { name: "Match All" }));
@@ -380,10 +392,10 @@ describe("TaggedPlaylistsList", () => {
       within(getRow("Album A")).getByRole("button", { name: 'Filter albums by "House"' }),
     );
     await user.click(
-      within(getRow("Album D")).getByRole("button", { name: 'Filter albums by "Chill"' }),
+      within(getRow("Album A")).getByRole("button", { name: 'Filter albums by "Chill"' }),
     );
 
-    expect(rowNames()).toEqual(["Album D"]);
+    expect(rowNames()).toEqual(["Album A"]);
     expect(screen.getByRole("button", { name: "Match All" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -405,8 +417,8 @@ describe("TaggedPlaylistsList", () => {
 
     expect(albumD.getByText("From tracks")).toBeInTheDocument();
     expect(
-      within(albumD.getByLabelText("Common tags on your tracks")).getAllByRole("button"),
-    ).toHaveLength(1);
+      within(albumD.getByLabelText("Common tags on your tracks")).queryByRole("button"),
+    ).not.toBeInTheDocument();
   });
 
   it("neither shows nor filters by common tags from a single tagged track", async () => {
@@ -421,11 +433,11 @@ describe("TaggedPlaylistsList", () => {
     await user.click(screen.getByRole("button", { name: 'Include "Chill"' }));
 
     expect(rowNames()).toContain("Album C");
-    expect(rowNames()).toContain("Album D");
+    expect(rowNames()).not.toContain("Album D");
     expect(rowNames()).not.toContain("Album F");
   });
 
-  it("shows at most four common track tags in a row", () => {
+  it("shows at most three common track tags in a row and counts the rest", () => {
     const tagIds = Array.from({ length: 6 }, (_, index) => `tag-${index}`);
     const manyTagTaxonomy: TagTaxonomy = {
       categoryOrder: ["genre"],
@@ -470,9 +482,9 @@ describe("TaggedPlaylistsList", () => {
       },
     });
 
-    expect(
-      within(screen.getByLabelText("Common tags on your tracks")).getAllByRole("button"),
-    ).toHaveLength(4);
+    const commonTags = screen.getByLabelText("Common tags on your tracks");
+    expect(commonTags.querySelectorAll('[class*="commonTag_"]')).toHaveLength(3);
+    expect(within(commonTags).getByTitle(/see every tag from its tracks/)).toHaveTextContent("+3");
   });
 
   it("shows a locally cached track album cover on an album listed from its tracks", () => {
@@ -523,7 +535,7 @@ describe("TaggedPlaylistsList", () => {
     await user.selectOptions(screen.getByLabelText("Sort albums by"), "trackAverage");
 
     expect(rowNames().slice(0, 2)).toEqual(["Album D", "Album E"]);
-    expect(within(getRow("Album E")).getByText("3.6 avg")).toBeInTheDocument();
+    expect(within(getRow("Album E")).getByText("Track average: 3.6 · 2 rated")).toBeInTheDocument();
   });
 
   it("sorts by progress, with albums of unknown length last", async () => {
@@ -630,11 +642,11 @@ describe("TaggedPlaylistsList", () => {
     expect(screen.queryByText("Album B")).not.toBeInTheDocument();
   });
 
-  it("explains that album tag filters include tags common on tracks", async () => {
+  it("explains that only tags added to albums affect album filters", async () => {
     await openFiltersAfterRender();
 
     expect(
-      screen.getByText("Matches album tags and tags common on your tracks from each album."),
+      screen.getByText("Matches tags you've added to albums. Tags shown under From tracks don't affect album filters."),
     ).toBeInTheDocument();
   });
 
@@ -656,12 +668,12 @@ describe("TaggedPlaylistsList", () => {
 
     await user.click(screen.getByRole("button", { name: 'Include "House"' }));
     expect(screen.getByText("Album A")).toBeInTheDocument();
-    expect(screen.getByText("Album D")).toBeInTheDocument();
+    expect(screen.queryByText("Album D")).not.toBeInTheDocument();
     expect(screen.queryByText("Album B")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: 'Exclude "House"' }));
     expect(screen.queryByText("Album A")).not.toBeInTheDocument();
-    expect(screen.queryByText("Album D")).not.toBeInTheDocument();
+    expect(screen.getByText("Album D")).toBeInTheDocument();
     expect(screen.getByText("Album B")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: 'Remove "House" filter' }));
@@ -670,7 +682,12 @@ describe("TaggedPlaylistsList", () => {
   });
 
   it("supports Match Any/All and removable applied album filters", async () => {
-    render(<StatefulPlaylistList entityType="album" />);
+    render(<StatefulPlaylistList entityType="album" library={{
+      ...playlists,
+      "spotify:album:album-b": {
+        ...playlists["spotify:album:album-b"], tagIds: ["house", "chill"],
+      },
+    }} />);
     const user = await openFilters();
 
     expect(screen.queryByRole("button", { name: /complex/i })).not.toBeInTheDocument();
@@ -680,12 +697,14 @@ describe("TaggedPlaylistsList", () => {
 
     expect(screen.queryByText("Album A")).not.toBeInTheDocument();
     expect(screen.queryByText("Album C")).not.toBeInTheDocument();
-    expect(screen.getByText("Album D")).toBeInTheDocument();
+    expect(screen.getByText("Album B")).toBeInTheDocument();
+    expect(screen.queryByText("Album D")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Match Any" }));
     expect(screen.getByText("Album A")).toBeInTheDocument();
     expect(screen.getByText("Album C")).toBeInTheDocument();
-    expect(screen.getByText("Album D")).toBeInTheDocument();
+    expect(screen.getByText("Album B")).toBeInTheDocument();
+    expect(screen.queryByText("Album D")).not.toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: 'Remove included filter "House"' }),
@@ -718,3 +737,67 @@ async function openFiltersAfterRender(
   renderList(overrides);
   return openFilters();
 }
+
+it("sorts most annotated tracks by count instead of completion percentage", async () => {
+  const many = Array.from({ length: 5 }, (_, index) => [`many-${index}`, { rating: 4, energy: 0, bpm: null, tagIds: [], albumUri: "spotify:album:many" }]);
+  const few = Array.from({ length: 2 }, (_, index) => [`few-${index}`, { rating: 5, energy: 0, bpm: null, tagIds: [], albumUri: "spotify:album:few" }]);
+  renderList({ entityType: "album", playlists: {
+    "spotify:album:many": { name: "Five of Twenty", rating: 0, energy: 0, tagIds: [], trackCount: 20 },
+    "spotify:album:few": { name: "Two of Two", rating: 0, energy: 0, tagIds: [], trackCount: 2 },
+  }, tracks: Object.fromEntries([...many, ...few]) });
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "Sort albums by" }), "progress");
+  expect(rowNames()[0]).toBe("Two of Two");
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "Sort albums by" }), "annotatedCount");
+  expect(rowNames()[0]).toBe("Five of Twenty");
+});
+
+it("selects a row from the keyboard without opening Spotify", async () => {
+  const props = renderList({ activePlaylistUri: "spotify:album:album-b" });
+  const showAlbumA = screen.getByRole("button", { name: "Show Album A details" });
+  expect(showAlbumA).toHaveAttribute("aria-pressed", "false");
+  expect(screen.getByRole("button", { name: "Show Album B details" })).toHaveAttribute("aria-pressed", "true");
+
+  showAlbumA.focus();
+  await userEvent.keyboard("{Enter}");
+
+  expect(props.onSelectPlaylist).toHaveBeenCalledTimes(1);
+  expect(props.onSelectPlaylist).toHaveBeenCalledWith("spotify:album:album-a");
+  expect(props.onOpenPlaylist).not.toHaveBeenCalled();
+});
+
+it("shows a playlist's checked tracks beside its own rating", () => {
+  renderList({
+    entityType: "playlist",
+    playlistTrackInsights: {
+      "spotify:playlist:playlist-a": {
+        status: "loaded",
+        totalTrackCount: 40,
+        listedTrackCount: 42,
+        summary: {
+          albumName: null, artistName: null, imageUrl: null, lastTaggedAt: 1,
+          taggedTrackCount: 6, ratedTrackCount: 5, ratingAverage: 4.4, energyTrackCount: 0, energyAverage: null,
+          commonTags: [{ tagId: "house", trackCount: 4, coverage: 0.67 }],
+        },
+      },
+    },
+  });
+  const row = within(getRow("Playlist A"));
+
+  expect(row.getByText("42 tracks")).toBeInTheDocument();
+  // Repeated songs count once, so the checked total can differ from the listed one.
+  expect(row.getByText("6/40 distinct tracks")).toBeInTheDocument();
+  expect(row.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "6");
+  expect(row.getByText("Track average: 4.4 · 5 rated")).toBeInTheDocument();
+  expect(row.getByRole("img", { name: "Your playlist rating: 3 stars" })).toBeInTheDocument();
+  expect(
+    within(row.getByLabelText("Common tags on your tracks")).getByRole("button", { name: "House 4" }),
+  ).toBeInTheDocument();
+});
+
+it("says when a playlist's tracks are still being checked or couldn't be", () => {
+  renderList({
+    entityType: "playlist",
+    playlistTrackInsights: { "spotify:playlist:playlist-a": { status: "loading" } },
+  });
+  expect(within(getRow("Playlist A")).getByText("Checking tracks…")).toBeInTheDocument();
+});

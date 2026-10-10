@@ -15,6 +15,8 @@ const ACCOUNT_DRAFT_PREFIX = "tagify:sync:durable-local:";
 const PREFERENCE_KEYS = [
   "tagify:extensionSettings",
   "tagify:keyboardShortcutSettings",
+  "tagify:tagCombinations",
+  "tagify:automaticTagRules",
   "tagify:autoFileBackupFrequency",
   "tagify:trackListSortBy",
   "tagify:trackListSortOrder",

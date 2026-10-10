@@ -361,3 +361,42 @@ describe("normalizeSmartPlaylistCriteriaList", () => {
     ]);
   });
 });
+
+describe("details saved by a newer Tagify", () => {
+  it("keeps fields this version doesn't know while still checking the ones it does", () => {
+    const result = normalizeTagDataStructure({
+      schemaVersion: TAG_DATA_SCHEMA_VERSION,
+      taxonomy: { categoryOrder: [], categoriesById: {}, subcategoriesById: {}, tagsById: {}, customAccentsById: {} },
+      tracks: {
+        "spotify:track:1": {
+          uri: "spotify:track:other", rating: "5", energy: 4, bpm: 120, tagIds: ["a", "a"], dateModified: 77,
+          recordingGroupId: "group-without-identity", tags: [{ categoryId: "c", subcategoryId: "s", tagId: "t" }],
+          mood: "calm", lyricsSync: { offsetMs: 120 },
+        },
+      },
+      playlists: { "spotify:playlist:1": { rating: 3, energy: 0, tagIds: [], coverColor: "#123456" } },
+      artists: { "spotify:artist:1": { rating: 2, energy: 0, tagIds: [], hometown: "Leeds" } },
+      smartPlaylists: [{
+        id: "smart-1", playlistId: "p1", playlistName: "Calm", isActive: true, createdAt: 1, lastSyncAt: 0,
+        smartPlaylistTrackUris: [], sortOrder: "energy",
+        source: { recipeId: "r1", revision: 2, channel: "beta" },
+        criteria: {
+          includeTagClauses: [], clauseConnectors: [], ratingFilters: [5], energyMinFilter: null, energyMaxFilter: null,
+          bpmMinFilter: null, bpmMaxFilter: null, durationMaxFilter: 300, activeTagFilters: ["legacy"],
+        },
+      }],
+    });
+
+    expect(result.tracks["spotify:track:1"]).toEqual({
+      rating: 0, energy: 4, bpm: 120, tagIds: ["a"], dateModified: 77, mood: "calm", lyricsSync: { offsetMs: 120 },
+    });
+    expect(result.playlists["spotify:playlist:1"]).toMatchObject({ coverColor: "#123456" });
+    expect(result.artists["spotify:artist:1"]).toMatchObject({ hometown: "Leeds" });
+    expect(result.smartPlaylists?.[0]).toMatchObject({
+      sortOrder: "energy",
+      source: { recipeId: "r1", revision: 2, channel: "beta" },
+      criteria: { durationMaxFilter: 300, ratingFilters: [5] },
+    });
+    expect(result.smartPlaylists?.[0].criteria).not.toHaveProperty("activeTagFilters");
+  });
+});

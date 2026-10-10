@@ -1,3 +1,7 @@
+import { trackEditHistory, type EditSession } from "@/services/TrackEditHistory";
+import { expandRecordingEdits } from "@/features/recording-reuse/utils/recordingReuse";
+import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
+import { flushLocalPersistence, getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
 import { Dispatch, MutableRefObject, SetStateAction, useCallback, useRef } from "react";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { spotifyService } from "@/services/SpotifyService";
@@ -7,15 +11,15 @@ import {
   TagTaxonomy,
   TrackData,
 } from "@/types/tagData";
-import { buildValidTagIdSet } from "@/utils/tagTaxonomy";
-import { applyBatchTagUpdatesToData } from "../utils/tagData.batchUpdates";
 import { dispatchTagDataUpdatedEvent } from "../utils/tagData.events";
 import {
   findTagNameInTaxonomy,
-  keepArtistsWithValidTags,
-  keepPlaylistsWithValidTags,
-  keepTracksWithValidTags,
+  isArtistEmpty,
+  isPlaylistEmpty,
+  isTrackEmpty,
+  withoutRemovedTags,
 } from "../utils/tagData.helpers";
+import { mergeTaxonomy } from "../utils/tagData.taxonomyMerge";
 import {
   commitTrackMutation,
   createInitialTrackData,
@@ -30,6 +34,8 @@ import type { TrackMetadata, UseTagDataOptions } from "../model/useTagData.types
 
 interface UseTagDataTrackActionsOptions {
   tagData: TagDataStructure;
+  /** Shows the saved library without undoing edits that are not saved yet. */
+  refreshPersistedTagData?: () => Promise<void>;
   setTagData: Dispatch<SetStateAction<TagDataStructure>>;
   latestTagDataRef: MutableRefObject<TagDataStructure>;
   onSyncTrack: UseTagDataOptions["onSyncTrack"];
@@ -39,8 +45,16 @@ interface UseTagDataTrackActionsOptions {
 
 const TRACK_SYNC_DELAY_MS = 100;
 
+/** An edit can't start while Undo, Redo, or a bulk save is finishing; say so instead of ignoring it. */
+function isHistoryBusy(): boolean {
+  if (!trackEditHistory.getSnapshot().busy) return false;
+  Spicetify.showNotification("Tagify is still finishing your last change. Try that again in a moment.", true);
+  return true;
+}
+
 export function useTagDataTrackActions({
   tagData,
+  refreshPersistedTagData,
   setTagData,
   latestTagDataRef,
   onSyncTrack,
@@ -48,7 +62,11 @@ export function useTagDataTrackActions({
   emitUserTrackAddedEvent,
 }: UseTagDataTrackActionsOptions) {
   const commitDataSnapshot = useCallback(
-    (nextData: TagDataStructure): void => {
+    (nextData: TagDataStructure, session: EditSession | null = null): void => {
+      const current = latestTagDataRef.current.tracks;
+      const edits = Object.fromEntries(Object.entries(nextData.tracks).filter(([uri, track]) => track !== current[uri]));
+      nextData = { ...nextData, tracks: { ...nextData.tracks, ...expandRecordingEdits(current, edits) } as Record<string, TrackData> };
+      trackEditHistory.record(session, current, nextData.tracks, "saved");
       latestTagDataRef.current = nextData;
       setTagData(nextData);
     },
@@ -56,12 +74,17 @@ export function useTagDataTrackActions({
   );
 
   const syncTrackAfterDelay = useCallback(
-    (trackUri: string, trackData: TrackData | null) => {
+    (trackUri: string) => {
+      const account = getTagifyDatabaseName();
       setTimeout(() => {
-        onSyncTrack?.(trackUri, trackData);
+        if (account !== getTagifyDatabaseName()) return;
+        const group = latestTagDataRef.current.tracks[trackUri]?.recordingGroupId;
+        if (group && onSyncMultipleTracks) {
+          void onSyncMultipleTracks(Object.fromEntries(Object.entries(latestTagDataRef.current.tracks).filter(([, track]) => track.recordingGroupId === group)));
+        } else onSyncTrack?.(trackUri, latestTagDataRef.current.tracks[trackUri] || null);
       }, TRACK_SYNC_DELAY_MS);
     },
-    [onSyncTrack],
+    [onSyncTrack, onSyncMultipleTracks, latestTagDataRef],
   );
 
   const getTrackMetadata = useCallback(
@@ -196,17 +219,22 @@ export function useTagDataTrackActions({
     [commitDataSnapshot, createTrackData, getTrackMetadata, latestTagDataRef],
   );
 
+  /**
+   * Saves an edited tag setup. `base` is the setup the edit started from, so
+   * tags created elsewhere since then are kept. Only tags the user removed
+   * are taken off songs, playlists, and artists.
+   */
   const replaceTaxonomy = useCallback(
-    (newTaxonomy: TagTaxonomy) => {
-      const validTagIds = buildValidTagIdSet(newTaxonomy);
+    (newTaxonomy: TagTaxonomy, removedTagIds: string[] = [], base?: TagTaxonomy) => {
+      const removed = new Set(removedTagIds);
 
       setTagData((currentData) => {
         const nextData = {
           ...currentData,
-          taxonomy: newTaxonomy,
-          tracks: keepTracksWithValidTags(currentData.tracks, validTagIds),
-          playlists: keepPlaylistsWithValidTags(currentData.playlists, validTagIds),
-          artists: keepArtistsWithValidTags(currentData.artists, validTagIds),
+          taxonomy: base ? mergeTaxonomy(base, newTaxonomy, currentData.taxonomy) : newTaxonomy,
+          tracks: withoutRemovedTags(currentData.tracks, removed, isTrackEmpty),
+          playlists: withoutRemovedTags(currentData.playlists, removed, isPlaylistEmpty),
+          artists: withoutRemovedTags(currentData.artists, removed, isArtistEmpty),
         };
 
         latestTagDataRef.current = nextData;
@@ -218,27 +246,31 @@ export function useTagDataTrackActions({
 
   const applyBatchTagUpdates = useCallback(
     async (updates: BatchTagUpdate[]) => {
-      const now = Date.now();
+      const databaseName = getTagifyDatabaseName();
+      await flushLocalPersistence();
       const currentData = latestTagDataRef.current;
-      const result = applyBatchTagUpdatesToData(currentData, updates, now);
-      const finalTrackDataMap = result.finalTrackDataMap;
-      commitDataSnapshot(result.nextData);
+      const finalTrackDataMap = await indexedDBStorage.applyBulkTagUpdates(updates, databaseName);
+      if (refreshPersistedTagData) await refreshPersistedTagData();
+      else commitDataSnapshot(await indexedDBStorage.loadAllStrict());
       const addedUris = Object.keys(finalTrackDataMap).filter((uri) =>
         !currentData.tracks[uri] && finalTrackDataMap[uri] !== null,
       );
-      if (addedUris.length) emitUserTrackAddedEvent(addedUris);
+      if (addedUris.length && !updates.some(update => update.automaticRuleIds?.length)) emitUserTrackAddedEvent(addedUris);
 
       dispatchTagDataUpdatedEvent("batchUpdate");
 
       setTimeout(() => {
-        onSyncMultipleTracks?.(finalTrackDataMap);
+        if (databaseName !== getTagifyDatabaseName()) return;
+        // Undo or another edit may have happened since this batch was saved.
+        onSyncMultipleTracks?.(Object.fromEntries(Object.keys(finalTrackDataMap).map(uri => [uri, latestTagDataRef.current.tracks[uri] || null])));
       }, TRACK_SYNC_DELAY_MS);
     },
-    [commitDataSnapshot, emitUserTrackAddedEvent, latestTagDataRef, onSyncMultipleTracks],
+    [refreshPersistedTagData, commitDataSnapshot, emitUserTrackAddedEvent, latestTagDataRef, onSyncMultipleTracks],
   );
 
   const setBpm = useCallback(
-    async (trackUri: string, bpm: number | null) => {
+    async (trackUri: string, bpm: number | null, session = trackEditHistory.capture("single", [trackUri])) => {
+      if (session && isHistoryBusy()) return;
       if (!latestTagDataRef.current.tracks[trackUri]) {
         Spicetify.showNotification("Try tagging the track first!", true);
         return;
@@ -253,20 +285,22 @@ export function useTagDataTrackActions({
       }
 
       const now = Date.now();
-      const { nextData, finalTrackData } = commitTrackMutation(
+      const { nextData } = commitTrackMutation(
         currentData,
         trackUri,
         withBpm(trackData, bpm, now),
       );
 
-      commitDataSnapshot(nextData);
-      syncTrackAfterDelay(trackUri, finalTrackData);
+      commitDataSnapshot(nextData, session);
+      syncTrackAfterDelay(trackUri);
     },
     [commitDataSnapshot, ensureTrackData, latestTagDataRef, syncTrackAfterDelay],
   );
 
   const setCamelotKey = useCallback(
     async (trackUri: string, camelotKey: string | null) => {
+      const session = trackEditHistory.capture("single", [trackUri]);
+      if (session && isHistoryBusy()) return;
       if (!latestTagDataRef.current.tracks[trackUri]) {
         Spicetify.showNotification("Try tagging the track first!", true);
         return;
@@ -281,24 +315,26 @@ export function useTagDataTrackActions({
       }
 
       const now = Date.now();
-      const { nextData, finalTrackData } = commitTrackMutation(
+      const { nextData } = commitTrackMutation(
         currentData,
         trackUri,
         withCamelotKey(trackData, camelotKey, now),
       );
 
-      commitDataSnapshot(nextData);
-      syncTrackAfterDelay(trackUri, finalTrackData);
+      commitDataSnapshot(nextData, session);
+      syncTrackAfterDelay(trackUri);
     },
     [commitDataSnapshot, ensureTrackData, latestTagDataRef, syncTrackAfterDelay],
   );
 
   const updateBpm = useCallback(
     async (trackUri: string): Promise<number | null> => {
+      const session = trackEditHistory.capture("single", [trackUri]);
+      if (session && isHistoryBusy()) return null;
       try {
         const bpm = await spotifyApiService.fetchBpm(trackUri);
         if (bpm !== null) {
-          await setBpm(trackUri, bpm);
+          await setBpm(trackUri, bpm, session);
         }
         return bpm;
       } catch (error) {
@@ -315,6 +351,8 @@ export function useTagDataTrackActions({
       tagId: string,
       metadata?: TrackMetadata,
     ) => {
+      const session = trackEditHistory.capture("single", [trackUri]);
+      if (session && isHistoryBusy()) return;
       const createdTrack = await ensureTrackData(trackUri, metadata);
       const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
@@ -330,8 +368,8 @@ export function useTagDataTrackActions({
         withToggledTrackTag(trackData, tagId, now),
       );
 
-      commitDataSnapshot(nextData);
-      syncTrackAfterDelay(trackUri, finalTrackData);
+      commitDataSnapshot(nextData, session);
+      syncTrackAfterDelay(trackUri);
 
       if (createdTrack && finalTrackData !== null) {
         emitUserTrackAddedEvent([trackUri]);
@@ -352,6 +390,8 @@ export function useTagDataTrackActions({
       rating: number,
       metadata?: TrackMetadata,
     ) => {
+      const session = trackEditHistory.capture("single", [trackUri]);
+      if (session && isHistoryBusy()) return;
       const createdTrack = await ensureTrackData(trackUri, metadata);
       const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
@@ -367,8 +407,8 @@ export function useTagDataTrackActions({
         withRating(trackData, rating, now),
       );
 
-      commitDataSnapshot(nextData);
-      syncTrackAfterDelay(trackUri, finalTrackData);
+      commitDataSnapshot(nextData, session);
+      syncTrackAfterDelay(trackUri);
 
       if (createdTrack && finalTrackData !== null) {
         emitUserTrackAddedEvent([trackUri]);
@@ -389,6 +429,8 @@ export function useTagDataTrackActions({
       energy: number,
       metadata?: TrackMetadata,
     ) => {
+      const session = trackEditHistory.capture("single", [trackUri]);
+      if (session && isHistoryBusy()) return;
       const createdTrack = await ensureTrackData(trackUri, metadata);
       const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
@@ -404,8 +446,8 @@ export function useTagDataTrackActions({
         withEnergy(trackData, energy, now),
       );
 
-      commitDataSnapshot(nextData);
-      syncTrackAfterDelay(trackUri, finalTrackData);
+      commitDataSnapshot(nextData, session);
+      syncTrackAfterDelay(trackUri);
 
       if (createdTrack && finalTrackData !== null) {
         emitUserTrackAddedEvent([trackUri]);

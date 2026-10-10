@@ -1,0 +1,191 @@
+.card {
+  background: var(--spice-card);
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 8px;
+  box-shadow: 0 12px 26px rgb(0 0 0 / 18%);
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.header {
+  align-items: center;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+}
+
+.cover {
+  background: var(--spice-button-disabled);
+  border: 0;
+  cursor: pointer;
+  display: block;
+  height: 96px;
+  overflow: hidden;
+  padding: 0;
+  transition:
+    filter 0.16s ease,
+    transform 0.16s ease;
+  width: 96px;
+}
+
+.cover:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.coverImage {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.coverPlaceholder {
+  color: var(--spice-subtext);
+  display: grid;
+  font-size: 32px;
+  height: 100%;
+  place-items: center;
+}
+
+.albumCover {
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 12%),
+    0 6px 16px rgb(0 0 0 / 28%);
+}
+
+/* A stacked edge sets playlists apart from albums at a glance. */
+.playlistCover {
+  border-radius: 12px;
+  box-shadow:
+    -5px 5px 0 rgb(255 255 255 / 8%),
+    -10px 10px 0 rgb(255 255 255 / 4%),
+    0 6px 16px rgb(0 0 0 / 28%);
+}
+
+.artistCover {
+  border-radius: 50%;
+  box-shadow: 0 6px 16px rgb(0 0 0 / 28%);
+}
+
+.titleBlock {
+  min-width: 0;
+}
+
+.eyebrow {
+  color: var(--spice-subtext);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
+
+.titleButton {
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font: inherit;
+  overflow-wrap: anywhere;
+  padding: 0;
+  text-align: left;
+}
+
+.titleButton:hover {
+  text-decoration: underline;
+}
+
+.titleButton:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 45%);
+  outline-offset: 2px;
+  text-decoration: underline;
+}
+
+.meta {
+  color: var(--spice-subtext);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Each item leads with a separator; the first one on every line sits in the
+   clipped margin, so wrapped lines never start with a stray bullet. */
+.metaItems {
+  display: flex;
+  flex-wrap: wrap;
+  margin-left: -16px;
+}
+
+.metaItems > span::before {
+  content: "•";
+  display: inline-block;
+  opacity: 0.7;
+  text-align: center;
+  width: 16px;
+}
+
+.description {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--spice-subtext);
+  display: -webkit-box;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+  max-width: 72ch;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  align-items: center;
+  align-self: start;
+  display: flex;
+  gap: 8px;
+}
+
+.iconButton {
+  align-items: center;
+  background: rgb(0 0 0 / 24%);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 7px;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease;
+  width: 30px;
+}
+
+.iconButton:hover,
+.iconButton:focus-visible {
+  background: rgb(255 255 255 / 10%);
+  color: var(--spice-text);
+}
+
+@media (width <= 860px) {
+  .header {
+    grid-template-columns: 72px minmax(0, 1fr) auto;
+  }
+
+  .cover {
+    height: 72px;
+    width: 72px;
+  }
+}

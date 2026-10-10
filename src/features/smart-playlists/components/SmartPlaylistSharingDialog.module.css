@@ -57,6 +57,10 @@
   padding: 4px 24px 20px;
 }
 
+.body h3 {
+  overflow-wrap: anywhere;
+}
+
 .body p {
   margin: 12px 0;
 }
@@ -70,6 +74,7 @@
 
 .card,
 .shareCard {
+  overflow-wrap: anywhere;
   margin-top: 14px;
   padding: 16px;
   background: rgb(0 0 0 / 15%);
@@ -160,6 +165,11 @@
   font-weight: 600;
 }
 
+.dialog button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .dialog button:hover:not(:disabled) {
   background: #414141;
 }
@@ -168,11 +178,6 @@
   color: #17131f;
   background: #b6a5ff;
   border-color: #b6a5ff;
-}
-
-.dialog button:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .dialog :focus-visible {
@@ -226,6 +231,7 @@
 @media (width <= 540px) {
   .overlay { padding: 10px; }
   .dialog { max-height: calc(100dvh - 20px); }
+
   .header,
   .footer { padding: 16px; }
   .body { padding: 0 16px 16px; }

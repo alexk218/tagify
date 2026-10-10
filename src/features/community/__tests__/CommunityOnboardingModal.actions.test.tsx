@@ -17,38 +17,18 @@ describe("CommunityOnboardingModal actions", () => {
 
   afterEach(() => { delete window.TagifySync; });
 
-  it("keeps the compact first-run setup and automatic-onboarding dismissal choices", () => {
-    render(<CommunityOnboardingModal onClose={vi.fn()} />);
+  it("lets users cancel setup without adding a reminder", () => {
+    const onClose = vi.fn();
+    render(<CommunityOnboardingModal onClose={onClose} />);
 
     expect(screen.getByRole("heading", { name: "Connect Tagify to Community" })).toBeInTheDocument();
-    expect(screen.getByText("Back up your library and choose which tags appear on your public profile.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Not now" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Don't ask again" }).className).toContain("quietAction");
-    expect(screen.queryByRole("button", { name: "Get started" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("list", { name: "Community setup progress" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Private sync first")).not.toBeInTheDocument();
-    expect(screen.queryByText("Review before publishing")).not.toBeInTheDocument();
-    expect(screen.queryByText("One account")).not.toBeInTheDocument();
-  });
-
-  it("uses only Cancel when setup was opened manually", () => {
-    const onClose = vi.fn();
-    render(
-      <CommunityOnboardingModal
-        onClose={onClose}
-        launchContext="manual"
-      />,
-    );
-
     expect(screen.queryByRole("button", { name: "Not now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Don't ask again" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledTimes(1);
-    expect(
-      sessionStorage.getItem("tagify:community:onboarding:snoozed-session"),
-    ).toBeNull();
+    expect(sessionStorage.getItem("tagify:community:onboarding:snoozed-session")).toBeNull();
+    expect(localStorage.getItem("tagify:community:onboarding:v1")).toBeNull();
   });
 
   it("does not offer a redundant Finish later action after connecting", () => {
@@ -65,7 +45,7 @@ describe("CommunityOnboardingModal actions", () => {
       profile: { handle: "alex", displayName: "Alex" },
     });
 
-    render(<CommunityOnboardingModal onClose={vi.fn()} launchContext="manual" />);
+    render(<CommunityOnboardingModal onClose={vi.fn()} />);
 
     expect(screen.getByText("Connected as Alex")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sync now" })).toBeInTheDocument();
@@ -112,7 +92,7 @@ describe("CommunityOnboardingModal actions", () => {
       downloadInitialMergeBackup: vi.fn(),
     } as unknown as NonNullable<typeof window.TagifySync>;
 
-    render(<CommunityOnboardingModal onClose={vi.fn()} launchContext="manual" />);
+    render(<CommunityOnboardingModal onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Combine libraries" }));
     expect(screen.getByRole("heading", { name: "Combine your Tagify libraries" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Combining libraries…" })).toBeDisabled();

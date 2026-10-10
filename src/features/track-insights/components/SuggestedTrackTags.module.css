@@ -1,0 +1,110 @@
+.suggestions {
+  border-top: 1px solid rgb(255 255 255 / 6%);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 10px;
+}
+
+.header {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.heading {
+  color: var(--spice-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.help {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tagGroup {
+  align-items: stretch;
+  background: rgb(255 255 255 / 6%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  color: var(--spice-text);
+  display: inline-flex;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.accented {
+  background: color-mix(in srgb, rgb(0 0 0 / 24%) 72%, var(--tag-accent-tint) 28%);
+  border-color: var(--tag-accent-border, rgb(255 255 255 / 12%));
+  color: var(--tag-accent-text, var(--spice-text));
+}
+
+.suggestions .tagGroup button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 12px;
+  gap: 6px;
+  justify-content: center;
+  line-height: 1.2;
+  margin: 0;
+  min-height: 26px;
+  text-decoration: none;
+}
+
+.tagGroup .add {
+  min-width: 0;
+  padding: 3px 10px;
+}
+
+.name {
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.count {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.action {
+  align-items: center;
+  color: var(--spice-subtext);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.tagGroup button:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 45%);
+  outline-offset: -2px;
+}
+
+.tagGroup button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 12%);
+  color: var(--spice-text);
+}
+
+.tagGroup button:hover:not(:disabled) .action {
+  color: var(--spice-text);
+}
+
+/* Added suggestions stay visible as confirmation but step back. */
+.tagGroup .add:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

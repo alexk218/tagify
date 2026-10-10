@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const { build } = createRequire(createRequire(require.resolve("vitest")).resolve("vite"))("esbuild");
 const project = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const fixture = resolve(project, "scripts/tests/fixtures/smart-playlist-rating.ts");
-const boundaries = /services\/(KeyboardShortcutService|storage\/StorageService|sync\/SyncLocalState|sync\/SyncInstallRecovery|sync\/SyncRuntime|SmartPlaylistSyncService)$|smart-playlists\/utils\/smartPlaylist.storage$|extensions\/WelcomeModal$/;
+const boundaries = /services\/(KeyboardShortcutService|storage\/StorageService|storage\/IndexedDBStorageService|sync\/SyncLocalState|sync\/SyncInstallRecovery|sync\/SyncRuntime|SmartPlaylistSyncService)$|smart-playlists\/utils\/smartPlaylist.storage$|extensions\/WelcomeModal$/;
 const result = await build({ entryPoints: [fixture], bundle: true, write: false, format: "iife", tsconfig: resolve(project, "tsconfig.json"),
   plugins: [{ name: "isolated-boundaries", setup(builder) {
     builder.onResolve({ filter: boundaries }, ({ path }) => ({ path, namespace: "fixture" }));

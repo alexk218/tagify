@@ -28,7 +28,7 @@ interface MultiTrackDetailsProps {
   onLockTrack: (uri: string | null) => void;
   multiTrackDraftTags: DraftTagState;
   onSetMultiTrackDraftTags: (draftTags: DraftTagState) => void;
-  onApplyBatchTagUpdates: (updates: BatchTagUpdate[]) => void;
+  onApplyBatchTagUpdates: (updates: BatchTagUpdate[]) => void | Promise<void>;
   onFindCommonTagsFromDraft: (draftTags: DraftTagState) => TrackTag[];
   onFindCommonStarRatingFromDraft: (
     draftTags: DraftTagState
@@ -69,6 +69,7 @@ const MultiTrackDetails: React.FC<MultiTrackDetailsProps> = ({
   onCalculateBatchChanges,
 }) => {
   const {
+    isSaving,
     hasUnsavedChanges,
     currentRating,
     currentEnergy,
@@ -223,15 +224,15 @@ const MultiTrackDetails: React.FC<MultiTrackDetailsProps> = ({
               <button
                 className={styles.saveButton}
                 onClick={handleSaveChanges}
-                disabled={!hasUnsavedChanges}
+                disabled={!hasUnsavedChanges || isSaving}
                 title={`Save Changes (${isMac ? "⌘⇧S" : "Ctrl+Shift+S"})`}
               >
-                Save Changes
+                {isSaving ? "Saving…" : "Save Changes"}
               </button>
               <button
                 className={styles.discardButton}
                 onClick={handleCancelChanges}
-                disabled={!hasUnsavedChanges}
+                disabled={!hasUnsavedChanges || isSaving}
               >
                 Discard
               </button>
@@ -272,7 +273,7 @@ const MultiTrackDetails: React.FC<MultiTrackDetailsProps> = ({
                   halfIcon={<FontAwesomeIcon icon={faStarHalf} />}
                   fullIcon={<FontAwesomeIcon icon={faStar} />}
                   activeColor="#ffd700"
-                  color="var(--spice-button-disabled)"
+                  color="var(--tagify-rating-control-muted, var(--spice-button-disabled))"
                 />
               </div>
               <button
@@ -302,6 +303,7 @@ const MultiTrackDetails: React.FC<MultiTrackDetailsProps> = ({
               <input
                 key={`energy-${lockedTrackUri || "bulk"}`}
                 type="range"
+                aria-label="Energy"
                 min="1"
                 max="10"
                 value={currentEnergy || 5}
@@ -456,7 +458,7 @@ const MultiTrackDetails: React.FC<MultiTrackDetailsProps> = ({
                         halfIcon={<FontAwesomeIcon icon={faStarHalf} />}
                         fullIcon={<FontAwesomeIcon icon={faStar} />}
                         activeColor="#ffd700"
-                        color="var(--spice-button-disabled)"
+                        color="var(--tagify-rating-control-muted, var(--spice-button-disabled))"
                       />
                     </div>
                   )}

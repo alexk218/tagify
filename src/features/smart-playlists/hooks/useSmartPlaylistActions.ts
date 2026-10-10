@@ -1,7 +1,9 @@
+import { getTagifyDatabaseName, flushLocalPersistence } from "@/services/sync/SyncLocalState";
+import { storageService } from "@/services/storage/StorageService";
 import { useCallback } from "react";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { smartPlaylistSyncService } from "@/services/SmartPlaylistSyncService";
-import { clearConfirmedMembershipBaselines } from "@/features/smart-playlists/utils/smartPlaylist.storage";
+import { clearConfirmedMembershipBaseline, updateSmartPlaylistsInStorage } from "@/features/smart-playlists/utils/smartPlaylist.storage";
 import {
   showSmartPlaylistSyncErrorNotification,
   showSmartPlaylistSyncSuccessNotification,
@@ -11,6 +13,7 @@ import {
   downloadSmartPlaylistRecipeBundle,
 } from "@/features/smart-playlists/utils/smartPlaylist.recipes";
 import {
+  downloadPersonalSmartPlaylistBackup,
   mergeImportedSmartPlaylists,
   prepareSmartPlaylistImport,
   SmartPlaylistImportSummary,
@@ -30,7 +33,6 @@ interface UseSmartPlaylistActionsOptions {
 export function useSmartPlaylistActions({
   smartPlaylists,
   updateSmartPlaylistsImmediate,
-  replaceSmartPlaylists,
   refreshSmartPlaylists,
 }: UseSmartPlaylistActionsOptions) {
   const createSmartPlaylist = useCallback(
@@ -90,10 +92,11 @@ export function useSmartPlaylistActions({
     [refreshSmartPlaylists],
   );
 
-  const exportSmartPlaylists = useCallback(async (taxonomy: TagTaxonomy, selected?: SmartPlaylistCriteria[]) => {
+  const exportSmartPlaylists = useCallback(async (taxonomy: TagTaxonomy, selected?: SmartPlaylistCriteria[], personalBackup = false) => {
     try {
-      downloadSmartPlaylistRecipeBundle(await createSmartPlaylistRecipeBundle(selected ?? smartPlaylists, taxonomy));
-      Spicetify.showNotification("Smart playlist setups saved to Downloads");
+      if (personalBackup) downloadPersonalSmartPlaylistBackup(selected ?? smartPlaylists);
+      else downloadSmartPlaylistRecipeBundle(await createSmartPlaylistRecipeBundle(selected ?? smartPlaylists, taxonomy));
+      Spicetify.showNotification(personalBackup ? "Smart Playlist backup saved to Downloads" : "Smart playlist setups saved to Downloads");
     } catch (error) {
       console.error("Smart playlist export failed", error);
       throw error;
@@ -104,6 +107,15 @@ export function useSmartPlaylistActions({
     async (
       backupData: SmartPlaylistCriteria[],
     ): Promise<SmartPlaylistImportSummary> => {
+      const account = getTagifyDatabaseName();
+      const checkAccount = () => { if (getTagifyDatabaseName() !== account) throw new Error("Your Spotify account changed. Return to the account where you started restoring this backup."); };
+      await flushLocalPersistence();
+      const library = await storageService.loadAllStrict();
+      checkAccount();
+      if (backupData.some((playlist) => playlist.criteria.includeTagClauses.some((clause) =>
+        [...clause.tagIds, ...clause.excludedTagIds].some((id) => !library.taxonomy.tagsById[id])))) {
+        throw new Error("This backup uses tags that aren’t in your library. Import your tag backup first, then restore these Smart Playlists.");
+      }
       let playlistsToImport: SmartPlaylistCriteria[];
       let summary: SmartPlaylistImportSummary;
       try {
@@ -136,11 +148,13 @@ export function useSmartPlaylistActions({
           verificationUnavailable: true,
         };
       }
-      await replaceSmartPlaylists(mergeImportedSmartPlaylists(smartPlaylists, playlistsToImport));
-      clearConfirmedMembershipBaselines();
+      checkAccount();
+      const saved = await updateSmartPlaylistsInStorage((current) => { checkAccount(); return mergeImportedSmartPlaylists(current, playlistsToImport); });
+      playlistsToImport.forEach(clearConfirmedMembershipBaseline);
+      window.dispatchEvent(new CustomEvent("tagify:smartPlaylistsUpdated", { detail: { playlists: saved } }));
       return summary;
     },
-    [replaceSmartPlaylists, smartPlaylists],
+    [],
   );
 
   return {

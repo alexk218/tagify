@@ -96,6 +96,9 @@ export type PlaylistTag = string;
 export type ArtistTag = string;
 
 export interface TrackData {
+  recordingIdentity?: RecordingIdentity;
+  recordingGroupId?: string;
+  recordingReuseDisabled?: boolean;
   rating: number;
   energy: number;
   bpm: number | null;
@@ -113,6 +116,13 @@ export interface TrackData {
   albumBackfillAttempts?: number;
 }
 
+export interface RecordingIdentity {
+  isrc: string;
+  artistIds: string[];
+  durationMs: number;
+  name: string;
+}
+
 export interface AlbumTrackTagCoverage {
   tagId: string;
   trackCount: number;
@@ -122,6 +132,8 @@ export interface AlbumTrackTagCoverage {
 
 /** What the user's tagged tracks say about one album. Derived, never saved. */
 export interface AlbumTrackSummary {
+  /** Confirmed listed tracks plus saved tracks Spotify no longer lists. */
+  totalTrackCount?: number;
   /** Tracks from the album with a rating, energy, or tag. */
   taggedTrackCount: number;
   ratedTrackCount: number;
@@ -200,6 +212,8 @@ export type BatchTrackAlbumDetails = Partial<
 >;
 
 export interface BatchTagUpdate {
+  /** Automatic enrichment preserves Last Updated order and records which rules Undo pauses. */
+  automaticRuleIds?: string[];
   trackUri: string;
   toAdd: TrackTag[];
   toRemove: TrackTag[];
@@ -207,6 +221,8 @@ export interface BatchTagUpdate {
   newEnergy?: number;
   /** Album details for tracks that do not have them yet; existing values win. */
   albumDetails?: BatchTrackAlbumDetails;
+  /** Known display details only fill missing values; existing metadata wins. */
+  trackDetails?: Pick<TrackData, "name" | "artists">;
 }
 
 export interface LegacyTrackTag {

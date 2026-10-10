@@ -11,6 +11,7 @@ describe("SpotifyUpdateHelpModal", () => {
 
   beforeEach(() => {
     writeText.mockClear();
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Macintosh");
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText },
@@ -20,7 +21,6 @@ describe("SpotifyUpdateHelpModal", () => {
   it("opens from the control bar update-protection icon", async () => {
     render(
       <DataManager
-        lastSaved={null}
         onExportRekordbox={vi.fn()}
         onExportTagData={vi.fn()}
         onImportTagData={vi.fn()}
@@ -58,6 +58,35 @@ describe("SpotifyUpdateHelpModal", () => {
       expect(writeText).toHaveBeenCalledWith(BLOCK_SPOTIFY_UPDATES_COMMAND);
     });
     expect(await screen.findByText("Copied!")).toBeInTheDocument();
+  });
+
+  it("offers the Windows installer without any terminal commands", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    render(<SpotifyUpdateHelpModal onClose={vi.fn()} />);
+
+    expect(screen.getByRole("link", { name: "Get the Windows installer" }))
+      .toHaveAttribute("href", "https://github.com/alexk218/tagify-installer/releases/latest");
+    expect(screen.getByText(/lets you block automatic Spotify updates/)).toHaveTextContent(/checks for Tagify and Spicetify updates/);
+    expect(screen.queryByRole("button", { name: "Copy Spotify update blocking command" })).not.toBeInTheDocument();
+    expect(document.querySelector("code")).toBeNull();
+  });
+
+  it("offers Mac installer guidance alongside the Terminal command", () => {
+    render(<SpotifyUpdateHelpModal onClose={vi.fn()} />);
+
+    expect(screen.getByRole("link", { name: "Visit tagify.fm" }))
+      .toHaveAttribute("href", "https://tagify.fm");
+    expect(screen.getByText("Or run once in Terminal")).toBeInTheDocument();
+    expect(screen.getByText(BLOCK_SPOTIFY_UPDATES_COMMAND)).toBeInTheDocument();
+  });
+
+  it("keeps Linux guidance free of unsupported commands and installers", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Linux");
+    render(<SpotifyUpdateHelpModal onClose={vi.fn()} />);
+
+    expect(screen.getByText(/through the package manager/)).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(document.querySelector("code")).toBeNull();
   });
 
   it("closes with Escape", () => {

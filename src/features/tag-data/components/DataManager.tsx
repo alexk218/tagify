@@ -26,7 +26,7 @@ interface DataManagerProps {
   onExportRekordbox: () => void;
   onResetTagifyData: () => Promise<void>;
   onRetryMigration: () => Promise<OrchestratorResult>;
-  lastSaved: Date | null;
+  historyControls?: React.ReactNode;
 }
 
 const SHOW_SUPPORT_BUTTONS_KEY = "tagify:showSupportButtons";
@@ -39,7 +39,7 @@ const DataManager: React.FC<DataManagerProps> = ({
   onExportRekordbox,
   onResetTagifyData,
   onRetryMigration,
-  lastSaved,
+  historyControls,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -206,11 +206,7 @@ const DataManager: React.FC<DataManagerProps> = ({
         style={{ display: "none" }}
       />
 
-      {lastSaved && (
-        <div className={styles.saveStatus}>
-          ✓ Last saved: {lastSaved.toLocaleString()}
-        </div>
-      )}
+      <div className={styles.editControls}>{historyControls}</div>
       <button
         className={styles.settingsButton}
         onClick={() => setShowMainSettings(true)}

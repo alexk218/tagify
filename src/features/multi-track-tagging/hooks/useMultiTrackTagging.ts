@@ -1,3 +1,4 @@
+import { trackEditHistory, draftTracks } from "@/services/TrackEditHistory";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SpotifyTrack } from "@/types/SpotifyTypes";
 import { BatchTagUpdate, TrackTag } from "@/types/tagData";
@@ -32,7 +33,7 @@ export function useMultiTrackTagging({ tagData }: UseMultiTrackTaggingOptions) {
   const draftSelectionKeyRef = useRef<string | null>(null);
 
   const multiTrackUriSelectionKey = useMemo(
-    () => JSON.stringify(multiTagTracks.map((track) => track.uri)),
+    () => JSON.stringify([...new Set(multiTagTracks.map((track) => track.uri))].sort()),
     [multiTagTracks],
   );
 
@@ -71,6 +72,10 @@ export function useMultiTrackTagging({ tagData }: UseMultiTrackTaggingOptions) {
     );
   }, [isMultiTagging, multiTrackUriSelectionKey, multiTrackUris, tagData.tracks]);
 
+  const recordDraft = useCallback((before: DraftTagState, after: DraftTagState) => {
+    trackEditHistory.record(trackEditHistory.capture("bulk", multiTagTracks.map(track => track.uri)), draftTracks(before), draftTracks(after), "draft");
+  }, [multiTagTracks]);
+
   const findCommonTagsFromDraft = useCallback(
     (draftTags: DraftTagState): TrackTag[] => findCommonTagsFromDraftState(draftTags),
     [],
@@ -90,6 +95,7 @@ export function useMultiTrackTagging({ tagData }: UseMultiTrackTaggingOptions) {
 
   const toggleTagMultiTrackDraft = useCallback(
     (tagId: string) => {
+      if (trackEditHistory.getSnapshot().busy) return;
       if (!isMultiTagging) {
         console.warn("toggleTag called when not in multi-tagging mode");
         return;
@@ -100,9 +106,10 @@ export function useMultiTrackTagging({ tagData }: UseMultiTrackTaggingOptions) {
         ? toggleTagForTrackDraft(currentDraft, lockedMultiTrackUri, tagId)
         : toggleTagForAllTracksDraft(currentDraft, multiTagTracks, tagId);
 
+      recordDraft(currentDraft, nextDraft);
       setMultiTrackDraftTags(nextDraft);
     },
-    [isMultiTagging, lockedMultiTrackUri, multiTagTracks, multiTrackDraftTags],
+    [isMultiTagging, lockedMultiTrackUri, multiTagTracks, multiTrackDraftTags, recordDraft],
   );
 
   const calculateBatchChanges = useCallback(
@@ -117,52 +124,56 @@ export function useMultiTrackTagging({ tagData }: UseMultiTrackTaggingOptions) {
 
   const toggleTagForSpecificTrackDraft = useCallback(
     (trackUri: string, tagId: string) => {
+      if (trackEditHistory.getSnapshot().busy) return;
       if (!multiTrackDraftTags) {
         return;
       }
 
-      setMultiTrackDraftTags(
-        toggleTagForTrackDraft(multiTrackDraftTags, trackUri, tagId),
-      );
+      const next = toggleTagForTrackDraft(multiTrackDraftTags, trackUri, tagId);
+      recordDraft(multiTrackDraftTags ?? {}, next);
+      setMultiTrackDraftTags(next);
     },
-    [multiTrackDraftTags],
+    [multiTrackDraftTags, recordDraft],
   );
 
   const toggleCommonTagDraft = useCallback(
     (tagId: string) => {
+      if (trackEditHistory.getSnapshot().busy) return;
       if (!isMultiTagging || !multiTrackDraftTags) {
         console.warn("toggleCommonTag called when not in multi-tagging mode");
         return;
       }
 
-      setMultiTrackDraftTags(
-        toggleTagForAllTracksDraft(multiTrackDraftTags, multiTagTracks, tagId),
-      );
+      const next = toggleTagForAllTracksDraft(multiTrackDraftTags, multiTagTracks, tagId);
+      recordDraft(multiTrackDraftTags ?? {}, next);
+      setMultiTrackDraftTags(next);
     },
-    [isMultiTagging, multiTagTracks, multiTrackDraftTags],
+    [isMultiTagging, multiTagTracks, multiTrackDraftTags, recordDraft],
   );
 
   const toggleStarRatingDraft = useCallback(
     (rating: number) => {
+      if (trackEditHistory.getSnapshot().busy) return;
       if (!isMultiTagging) {
         console.warn("toggleStarRating called when not in multi-tagging mode");
         return;
       }
 
-      setMultiTrackDraftTags(
-        toggleStarRatingDraftState(
+      const next = toggleStarRatingDraftState(
           multiTrackDraftTags ?? {},
           multiTagTracks,
           rating,
           lockedMultiTrackUri,
-        ),
-      );
+        );
+      recordDraft(multiTrackDraftTags ?? {}, next);
+      setMultiTrackDraftTags(next);
     },
-    [isMultiTagging, lockedMultiTrackUri, multiTagTracks, multiTrackDraftTags],
+    [isMultiTagging, lockedMultiTrackUri, multiTagTracks, multiTrackDraftTags, recordDraft],
   );
 
   const toggleEnergyRatingDraft = useCallback(
     (energy: number) => {
+      if (trackEditHistory.getSnapshot().busy) return;
       if (!isMultiTagging || !multiTrackDraftTags) {
         console.warn(
           "toggleEnergyRating called when not in multi-tagging mode",
@@ -170,19 +181,20 @@ export function useMultiTrackTagging({ tagData }: UseMultiTrackTaggingOptions) {
         return;
       }
 
-      setMultiTrackDraftTags(
-        toggleEnergyRatingDraftState(
+      const next = toggleEnergyRatingDraftState(
           multiTrackDraftTags,
           multiTagTracks,
           energy,
           lockedMultiTrackUri,
-        ),
-      );
+        );
+      recordDraft(multiTrackDraftTags ?? {}, next);
+      setMultiTrackDraftTags(next);
     },
-    [isMultiTagging, lockedMultiTrackUri, multiTagTracks, multiTrackDraftTags],
+    [isMultiTagging, lockedMultiTrackUri, multiTagTracks, multiTrackDraftTags, recordDraft],
   );
 
   const cancelMultiTagging = () => {
+    trackEditHistory.discardDraft();
     setMultiTagTracks([]);
     setIsMultiTagging(false);
     setLockedMultiTrackUri(null);
@@ -214,7 +226,8 @@ export function useMultiTrackTagging({ tagData }: UseMultiTrackTaggingOptions) {
     setIsMultiTagging,
     setMultiTagTracks,
     setLockedMultiTrackUri,
-    setMultiTrackDraftTags,
+    setMultiTrackDraftTags: (draft: DraftTagState) => { trackEditHistory.discardDraft(); setMultiTrackDraftTags(draft); },
+    replaceMultiTrackDraft: setMultiTrackDraftTags,
     toggleTagMultiTrackDraft,
     toggleStarRatingDraft,
     toggleEnergyRatingDraft,

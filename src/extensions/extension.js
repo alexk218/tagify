@@ -1,7 +1,20 @@
+import { buildCategoryTree } from "../utils/tagTaxonomy";
+import { createQuickTagSearch } from "./inlineEditor.quickTags";
+import { flushLocalPersistence } from "../services/sync/SyncLocalState";
 /* global Spicetify */
 import { keyboardShortcutService } from "../services/KeyboardShortcutService";
 import { storageService } from "../services/storage/StorageService";
-import { getTagifyDatabaseName } from "../services/sync/SyncLocalState";
+import {
+  dispatchTagDataUpdatedEvent,
+  isUnshownTagDataUpdate,
+} from "../features/tag-data/utils/tagData.events";
+import {
+  announceSavedTracks,
+  assertEditsAllowed,
+  LibraryUnavailableError,
+  readSavedLibrary,
+  saveTrackEdits,
+} from "./extensionEdits";
 import { restoreDesktopSyncConfiguration } from "../services/sync/SyncInstallRecovery";
 import { syncRuntime } from "../services/sync/SyncRuntime";
 import { smartPlaylistSyncService } from "../services/SmartPlaylistSyncService";
@@ -10,11 +23,8 @@ import { welcomeModal } from "./WelcomeModal";
 import { createBulkTagHistoryLocation } from "./contextMenu.navigation";
 import {
   addRecentTag,
-  createUpdatedTrack,
   getRatingUpdateForSelection,
   getTagIndicatorStatus,
-  isTrackAnnotationEmpty,
-  toggleTagIdForSelection,
 } from "./inlineEditor.logic";
 import {
   createEnergyRatingRow,
@@ -36,15 +46,39 @@ import {
   resolveExtensionTagFilterLabel,
 } from "./extensionTagLookup";
 import {
+  getRowItemUri,
   getSpotifyPlayerAnchor,
   getSpotifyRowLayout,
   getSpotifyTracklistHeader,
   getSpotifyTracklists,
   getSpotifyTrackRows,
   insertSpotifyColumn,
-  SPOTIFY_TRACK_HEADER_SELECTOR,
-  SPOTIFY_TRACK_ROW_SELECTOR,
 } from "./spotifyLayout";
+
+// Rows whose item could not be found, keyed by the row index they showed then.
+const rowUriMisses = new WeakMap();
+
+/** Bounded fallback search through a row's React data for a Spotify URI. */
+function findUriInObject(root, maxDepth = 6) {
+  const seen = new Set();
+  const visit = (value, depth) => {
+    if (!value || typeof value !== "object" || depth > maxDepth || seen.has(value)) return null;
+    if (value instanceof Node) return null;
+    seen.add(value);
+    if (typeof value.uri === "string" && value.uri.startsWith("spotify:")) return value.uri;
+    const children = Array.isArray(value) ? value : Object.keys(value).map((key) => value[key]);
+    for (const child of children) {
+      const found = visit(child, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  };
+  try {
+    return visit(root, 0);
+  } catch {
+    return null;
+  }
+}
 
 (async () => {
   while (!Spicetify?.Platform) {
@@ -64,13 +98,14 @@ import {
 
   const APP_NAME = "tagify";
 
-  const TAG_DATA_KEY = "tagify:tagData";
   const PLAYLIST_CACHE_KEY = "tagify:playlistCache";
   const PLAYLIST_SETTINGS_KEY = "tagify:playlistSettings";
   const EXTENSION_SETTINGS_KEY = "tagify:extensionSettings";
   const SETTINGS_CHANGED_EVENT = "tagify:settingsChanged";
   const DATA_UPDATED_EVENT = "tagify:dataUpdated";
   const SMART_PLAYLIST_SYNC_EVENT = "tagify:trackChanged";
+  const PLAYLIST_CHANGED_EVENT = "tagify:playlistChanged";
+  const ARTIST_CHANGED_EVENT = "tagify:artistChanged";
   const SMART_PLAYLISTS_UPDATED_EVENT = "tagify:smartPlaylistsUpdated";
   let smartPlaylistCache = [];
   void loadSmartPlaylistsFromStorage().then((playlists) => {
@@ -117,6 +152,12 @@ import {
 
   // Shared state
   const state = {
+    // Whether the saved library could be read. While it can't, edits are
+    // refused instead of being based on an empty or outdated library.
+    libraryAvailable: false,
+    // Bumped by every library read and saved edit, so an older read never
+    // replaces what a newer one already shows.
+    libraryVersion: 0,
     taggedTracks: {},
     taggedPlaylists: {},
     taggedArtists: {},
@@ -266,48 +307,7 @@ import {
         return [];
       }
 
-      const categoryOrder = Array.isArray(taxonomy.categoryOrder)
-        ? taxonomy.categoryOrder
-        : [];
-      const categoriesById =
-        taxonomy.categoriesById && typeof taxonomy.categoriesById === "object"
-          ? taxonomy.categoriesById
-          : {};
-      const subcategoriesById =
-        taxonomy.subcategoriesById &&
-        typeof taxonomy.subcategoriesById === "object"
-          ? taxonomy.subcategoriesById
-          : {};
-      const tagsById =
-        taxonomy.tagsById && typeof taxonomy.tagsById === "object"
-          ? taxonomy.tagsById
-          : {};
-
-      return categoryOrder
-        .map((categoryId) => categoriesById[categoryId])
-        .filter(Boolean)
-        .map((category) => ({
-          id: category.id,
-          name: category.name,
-          subcategories: (Array.isArray(category.subcategoryIds)
-            ? category.subcategoryIds
-            : []
-          )
-            .map((subcategoryId) => subcategoriesById[subcategoryId])
-            .filter(Boolean)
-            .map((subcategory) => ({
-              id: subcategory.id,
-              name: subcategory.name,
-              tags: (Array.isArray(subcategory.tagIds) ? subcategory.tagIds : [])
-                .map((tagId) => tagsById[tagId])
-                .filter(Boolean)
-                .map((tag) => ({
-                  id: tag.id,
-                  name: tag.name,
-                  accentId: tag.accentId ?? null,
-                })),
-            })),
-        }));
+      return buildCategoryTree(taxonomy);
     },
 
     normalizeTrackForExtension(trackData, tagLookup) {
@@ -413,15 +413,6 @@ import {
         ]),
       );
 
-      if (
-        Object.keys(tracks).length === 0 &&
-        Object.keys(playlists).length === 0 &&
-        Object.keys(artists).length === 0 &&
-        categories.length === 0
-      ) {
-        return null;
-      }
-
       return {
         tracks,
         playlists,
@@ -517,159 +508,62 @@ import {
     },
 
     /**
-     * Load tagged tracks from storage (IndexedDB or localStorage fallback)
-     * @returns {boolean} whether data was successfully loaded
+     * Reads the saved library for Spotify's views. A failed read keeps what
+     * is shown and marks the library unavailable; it never falls back to an
+     * empty or outdated copy.
+     * @returns {Promise<boolean>} whether this read is now shown
      */
     async loadTaggedTracks() {
+      const version = ++state.libraryVersion;
       try {
-        // Try IndexedDB first (new storage)
-        const idbData = await this.loadFromIndexedDB();
-        const normalizedIdbData = this.normalizeLoadedTagData(idbData);
-        if (normalizedIdbData) {
-          state.taggedTracks = normalizedIdbData.tracks;
-          state.taggedPlaylists = normalizedIdbData.playlists;
-          state.taggedArtists = normalizedIdbData.artists;
-          state.tagCategories = normalizedIdbData.categories;
-          state.tagLookup = normalizedIdbData.tagLookup;
-          state.customTagAccents = normalizedIdbData.customTagAccents;
-          return true;
-        }
-
-        // Fallback to localStorage (legacy or during migration)
-        const savedData = localStorage.getItem(TAG_DATA_KEY);
-        if (savedData) {
-          const normalizedLocalData = this.normalizeLoadedTagData(
-            JSON.parse(savedData),
-          );
-          if (normalizedLocalData) {
-            state.taggedTracks = normalizedLocalData.tracks;
-            state.taggedPlaylists = normalizedLocalData.playlists;
-            state.taggedArtists = normalizedLocalData.artists;
-            state.tagCategories = normalizedLocalData.categories;
-            state.tagLookup = normalizedLocalData.tagLookup;
-            state.customTagAccents = normalizedLocalData.customTagAccents;
-            return true;
-          }
-        }
+        const library = this.normalizeLoadedTagData(await readSavedLibrary());
+        state.libraryAvailable = true;
+        // A newer read or a saved edit already updated what is shown.
+        if (version !== state.libraryVersion) return false;
+        state.taggedTracks = library.tracks;
+        state.taggedPlaylists = library.playlists;
+        state.taggedArtists = library.artists;
+        state.tagCategories = library.categories;
+        state.tagLookup = library.tagLookup;
+        state.customTagAccents = library.customTagAccents;
+        return true;
       } catch (error) {
-        console.error("Tagify: Error loading data", error);
+        if (!(error instanceof LibraryUnavailableError)) {
+          console.error("Tagify: Could not show the saved library", error);
+        }
+        if (version === state.libraryVersion) state.libraryAvailable = false;
+        return false;
       }
-      return false;
+    },
+
+    /** Reads saved tags and folders again, without the rest of the library. */
+    async loadTaxonomy() {
+      const taxonomy = await storageService.getTaxonomy();
+      state.libraryVersion += 1;
+      state.tagCategories = this.buildCategoryTreeFromTaxonomy(taxonomy);
+      state.tagLookup = buildExtensionTagLookup(state.tagCategories, taxonomy);
+      state.customTagAccents =
+        taxonomy?.customAccentsById && typeof taxonomy.customAccentsById === "object"
+          ? taxonomy.customAccentsById
+          : {};
     },
 
     /**
-     * Load data from IndexedDB
-     * @returns {Promise<Object|null>} The tag data or null
+     * Shows records that were just saved (null when removed). Edits made in
+     * this bundle announce their saved records, so they are shown without
+     * reading the whole library again.
      */
-    async loadFromIndexedDB() {
-      return new Promise((resolve) => {
-        try {
-          // Do not pin a lower DB version here.
-          // The app currently uses versioned schema upgrades (e.g. v2), and
-          // opening with a lower version throws VersionError and breaks reads.
-          const request = indexedDB.open(getTagifyDatabaseName());
-
-          request.onerror = () => resolve(null);
-
-          request.onsuccess = (event) => {
-            const db = event.target.result;
-
-            try {
-              const storeNames = ["tracks", "categories"];
-              if (db.objectStoreNames.contains("playlists")) {
-                storeNames.push("playlists");
-              }
-              if (db.objectStoreNames.contains("artists")) {
-                storeNames.push("artists");
-              }
-              const transaction = db.transaction(storeNames, "readonly");
-              const trackStore = transaction.objectStore("tracks");
-              const playlistStore = db.objectStoreNames.contains("playlists")
-                ? transaction.objectStore("playlists")
-                : null;
-              const artistStore = db.objectStoreNames.contains("artists")
-                ? transaction.objectStore("artists")
-                : null;
-              const categoryStore = transaction.objectStore("categories");
-
-              const tracks = {};
-              const playlists = {};
-              const artists = {};
-              let categories = [];
-              let taxonomy = null;
-
-              const trackRequest = trackStore.getAll();
-              const playlistRequest = playlistStore?.getAll();
-              const artistRequest = artistStore?.getAll();
-              const categoryRequest = categoryStore.get("categories");
-              const taxonomyRequest = categoryStore.get("taxonomy");
-
-              trackRequest.onsuccess = () => {
-                for (const record of trackRequest.result || []) {
-                  const { uri, ...trackData } = record;
-                  tracks[uri] = trackData;
-                }
-              };
-
-              if (playlistRequest) {
-                playlistRequest.onsuccess = () => {
-                  for (const record of playlistRequest.result || []) {
-                    const { uri, ...playlistData } = record;
-                    playlists[uri] = playlistData;
-                  }
-                };
-              }
-
-              if (artistRequest) {
-                artistRequest.onsuccess = () => {
-                  for (const record of artistRequest.result || []) {
-                    const { uri, ...artistData } = record;
-                    artists[uri] = artistData;
-                  }
-                };
-              }
-
-              categoryRequest.onsuccess = () => {
-                categories = categoryRequest.result?.data || [];
-              };
-
-              taxonomyRequest.onsuccess = () => {
-                taxonomy = taxonomyRequest.result?.data || null;
-              };
-
-              transaction.oncomplete = () => {
-                db.close();
-                if (
-                  Object.keys(tracks).length > 0 ||
-                  Object.keys(playlists).length > 0 ||
-                  Object.keys(artists).length > 0 ||
-                  categories.length > 0 ||
-                  taxonomy
-                ) {
-                  resolve({ tracks, playlists, artists, categories, taxonomy });
-                } else {
-                  resolve(null);
-                }
-              };
-
-              transaction.onerror = () => {
-                db.close();
-                resolve(null);
-              };
-            } catch {
-              db.close();
-              resolve(null);
-            }
-          };
-
-          request.onupgradeneeded = () => {
-            // DB doesn't exist yet, will be created by main app
-            resolve(null);
-          };
-        } catch {
-          resolve(null);
-        }
-      });
+    showSavedRecords({ tracks = {}, playlists = {}, artists = {} }) {
+      state.libraryVersion += 1;
+      const show = (shown, records, normalize) => {
+        Object.entries(records).forEach(([uri, record]) => {
+          if (record === null) delete shown[uri];
+          else shown[uri] = normalize.call(this, record, state.tagLookup);
+        });
+      };
+      show(state.taggedTracks, tracks, this.normalizeTrackForExtension);
+      show(state.taggedPlaylists, playlists, this.normalizePlaylistForExtension);
+      show(state.taggedArtists, artists, this.normalizeArtistForExtension);
     },
 
     getTrackTagIds(track) {
@@ -682,67 +576,23 @@ import {
         .filter((tagId) => typeof tagId === "string");
     },
 
-    async saveInlineTrackUpdates(trackUris, changesOrFactory) {
+    /**
+     * Applies one edit (see extensionEdits) to each song's current saved
+     * record and announces the saved results, which are then shown. Tags and
+     * other changes saved elsewhere in the meantime are kept. The edit never
+     * waits for the whole library to be read again.
+     * @returns {Promise<Object>} the saved songs by URI (null when removed)
+     */
+    async saveInlineTrackUpdates(trackUris, edit) {
+      // Edits change only the named values on each saved record, so they
+      // don't depend on this view having loaded; refresh the view meanwhile.
+      if (!state.libraryAvailable) libraryRefresh.schedule(0);
       const uniqueTrackUris = [...new Set(trackUris)].filter(Boolean);
-      if (uniqueTrackUris.length === 0) {
-        return {};
-      }
-
-      const now = Date.now();
-      const nextTracks = Object.fromEntries(
-        uniqueTrackUris.map((trackUri) => {
-          const currentTrack = state.taggedTracks[trackUri];
-          const normalizedCurrentTrack = {
-            ...currentTrack,
-            tagIds: this.getTrackTagIds(currentTrack),
-          };
-          const changes =
-            typeof changesOrFactory === "function"
-              ? changesOrFactory(normalizedCurrentTrack, trackUri)
-              : changesOrFactory;
-
-          const updatedTrack = createUpdatedTrack(
-            normalizedCurrentTrack,
-            changes,
-            now,
-          );
-
-          return [
-            trackUri,
-            isTrackAnnotationEmpty(updatedTrack) ? null : updatedTrack,
-          ];
-        }),
-      );
-
-      const saved = await storageService.saveTrackChanges(
-        new Map(Object.entries(nextTracks)),
-      );
-      if (!saved) throw new Error("Unable to save Tagify track data");
-
-      Object.entries(nextTracks).forEach(([trackUri, trackData]) => {
-        if (trackData === null) {
-          delete state.taggedTracks[trackUri];
-        } else {
-          state.taggedTracks[trackUri] = this.normalizeTrackForExtension(
-            trackData,
-            state.tagLookup,
-          );
-        }
+      const saved = await saveTrackEdits(uniqueTrackUris, edit, {
+        undoable: uniqueTrackUris.length > 1,
       });
-      window.dispatchEvent(
-        new CustomEvent(DATA_UPDATED_EVENT, {
-          detail: { type: "save", trackUris: uniqueTrackUris, origin: "local", batchId: crypto.randomUUID() },
-        }),
-      );
-      Object.entries(nextTracks).forEach(([trackUri, trackData]) => {
-        window.dispatchEvent(
-          new CustomEvent(SMART_PLAYLIST_SYNC_EVENT, {
-            detail: { trackUri, trackData },
-          }),
-        );
-      });
-
-      return nextTracks;
+      announceSavedTracks(saved);
+      return saved;
     },
 
     /**
@@ -1085,58 +935,16 @@ import {
      * @returns {string|null} The track URI
      */
     getTracklistTrackUri(tracklistElement) {
-      let values = Object.values(tracklistElement);
-      if (!values) {
-        Logger.error("Error: Could not get tracklist element");
-        return null;
-      }
-
-      try {
-        const findUri = (obj, depth = 0, path = "values[0]") => {
-          if (depth > 10) return null;
-
-          if (obj && typeof obj === "object") {
-            if (
-              obj.uri &&
-              typeof obj.uri === "string" &&
-              obj.uri.startsWith("spotify:")
-            ) {
-              Logger.debug("🔍 FOUND URI at path:", path + ".uri");
-              Logger.debug("🔍 URI value:", obj.uri);
-              return { uri: obj.uri, path: path + ".uri" };
-            }
-
-            // Check arrays
-            if (Array.isArray(obj)) {
-              for (let i = 0; i < obj.length; i++) {
-                const result = findUri(obj[i], depth + 1, `${path}[${i}]`);
-                if (result) return result;
-              }
-            } else {
-              // Check object properties
-              for (let key in obj) {
-                if (Object.prototype.hasOwnProperty.call(obj, key)) {
-                  const result = findUri(obj[key], depth + 1, `${path}.${key}`);
-                  if (result) return result;
-                }
-              }
-            }
-          }
-          return null;
-        };
-
-        const result = findUri(values[0]);
-        if (result) {
-          Logger.debug("✅ Use this path:", result.path);
-          return result.uri;
-        }
-      } catch (error) {
-        Logger.error("Error in getTracklistTrackUri:", error);
-        return null;
-      }
-
-      Logger.warn("Warning: Could not extract URI from element");
-      return null;
+      const uri = getRowItemUri(tracklistElement, 12);
+      if (uri) return uri;
+      // Spotify recycles virtualized rows, so a miss is remembered only until the
+      // row shows another item. Without this, rows that hold no item (such as
+      // cards on Home) were searched exhaustively on every page update.
+      const rowKey = tracklistElement.getAttribute("aria-rowindex") ?? "";
+      if (rowUriMisses.get(tracklistElement) === rowKey) return null;
+      const found = findUriInObject(Object.values(tracklistElement)[0]);
+      if (!found) rowUriMisses.set(tracklistElement, rowKey);
+      return found;
     },
 
     extractLocalFileUri(element) {
@@ -1455,6 +1263,14 @@ import {
     },
   };
 
+  // Explains in plain language why an edit wasn't saved.
+  const showEditError = (error, message) => {
+    Spicetify.showNotification(
+      error instanceof LibraryUnavailableError ? error.message : message,
+      true,
+    );
+  };
+
   const inlineEditor = {
     ratingEditPending: false,
 
@@ -1597,7 +1413,7 @@ import {
             );
           } catch (error) {
             console.error("Tagify: Unable to save inline rating", error);
-            Spicetify.showNotification("Tagify couldn't save that rating", true);
+            showEditError(error, "Tagify couldn't save that rating");
             return false;
           }
         },
@@ -1625,7 +1441,7 @@ import {
             );
           } catch (error) {
             console.error("Tagify: Unable to save inline energy", error);
-            Spicetify.showNotification("Tagify couldn't save that energy", true);
+            showEditError(error, "Tagify couldn't save that energy");
           }
         },
         onOpenEnergy: (anchor) => this.showMenuForElement(trackUri, anchor, "energy"),
@@ -1717,7 +1533,7 @@ import {
             this.refreshTracks(scope.trackUris);
           } catch (error) {
             console.error("Tagify: Unable to save inline edit", error);
-            Spicetify.showNotification("Tagify couldn't save that change", true);
+            showEditError(error, "Tagify couldn't save that change");
           }
         };
         menu.appendChild(button);
@@ -1783,7 +1599,7 @@ import {
             );
           } catch (error) {
             console.error("Tagify: Unable to save inline rating", error);
-            Spicetify.showNotification("Tagify couldn't save that rating", true);
+            showEditError(error, "Tagify couldn't save that rating");
             throw error;
           }
         },
@@ -1811,7 +1627,7 @@ import {
             );
           } catch (error) {
             console.error("Tagify: Unable to save inline edit", error);
-            Spicetify.showNotification("Tagify couldn't save that change", true);
+            showEditError(error, "Tagify couldn't save that change");
             throw error;
           }
         },
@@ -1866,27 +1682,15 @@ import {
         });
       };
       const tagAction = async (tagId, tagName) => {
-        const currentTagIdsByTrack = scope.trackUris.map((uri) =>
-          utils.getTrackTagIds(state.taggedTracks[uri]),
-        );
-        const nextTagIdsByTrack = toggleTagIdForSelection(
-          currentTagIdsByTrack,
-          tagId,
-        );
-        const shouldRemove = currentTagIdsByTrack.every((tagIds) =>
-          tagIds.includes(tagId),
-        );
-        const nextTagIdsByUri = new Map(
-          scope.trackUris.map((uri, index) => [
-            uri,
-            nextTagIdsByTrack[index],
-          ]),
-        );
+        // The button shows whether every selected song has this tag; that
+        // decides between removing and adding just this one tag.
+        const shouldRemove = getTagSelectionState(tagId) === "all";
 
         state.recentTagIds = addRecentTag(state.recentTagIds, tagId);
-        await utils.saveInlineTrackUpdates(scope.trackUris, (_, uri) => ({
-          tagIds: nextTagIdsByUri.get(uri),
-        }));
+        await utils.saveInlineTrackUpdates(
+          scope.trackUris,
+          shouldRemove ? { removeTagIds: [tagId] } : { addTagIds: [tagId] },
+        );
         refreshTagButtons(tagId);
         const actionVerb = shouldRemove ? "Removed" : "Added";
         const preposition = shouldRemove ? "from" : "to";
@@ -1895,6 +1699,39 @@ import {
           `${actionVerb} ${tagName} ${preposition}`,
         );
       };
+      menu.appendChild(createQuickTagSearch({
+        categories: state.tagCategories,
+        getCategories: () => state.tagCategories,
+        onApply: async (tagId, tagName) => {
+          // Enter adds an existing tag; it never removes a tag already applied.
+          if (getTagSelectionState(tagId) !== "all") await tagAction(tagId, tagName);
+          this.refreshTracks(scope.trackUris);
+        },
+        onCreate: async (name, parentId) => {
+          assertEditsAllowed();
+          await flushLocalPersistence();
+          const tag = await storageService.createQuickTag(name, parentId);
+          try {
+            await utils.loadTaxonomy();
+          } catch (error) {
+            console.error("Tagify: Could not show the new tag yet", error);
+            libraryRefresh.schedule(0);
+          }
+          dispatchTagDataUpdatedEvent("save");
+          return tag;
+        },
+      }));
+      if (scope.isBulk) {
+        action("Undo last bulk change", async () => {
+          await flushLocalPersistence();
+          const entry = await storageService.getLatestBulkUndo();
+          if (!entry) { Spicetify.showNotification("There are no bulk changes to undo."); return; }
+          const result = await storageService.undoBulkTagUpdate(entry.id);
+          announceSavedTracks(result.changes, "batchUpdate");
+          Spicetify.showNotification(`Undid changes to ${Object.keys(result.changes).length} ${Object.keys(result.changes).length === 1 ? "track" : "tracks"}.${result.skippedFields ? " Kept later edits." : ""}`);
+          this.closeMenu();
+        });
+      }
       const recentTags = state.recentTagIds
         .map((tagId) => state.tagLookup.get(tagId))
         .filter(Boolean);
@@ -1957,7 +1794,7 @@ import {
                   this.refreshTracks(scope.trackUris);
                 } catch (error) {
                   console.error("Tagify: Unable to save inline tag", error);
-                  Spicetify.showNotification("Tagify couldn't save that tag", true);
+                  showEditError(error, "Tagify couldn't save that tag");
                 }
               };
               subcategoryDetails.appendChild(tagButton);
@@ -1998,18 +1835,17 @@ import {
     },
   };
 
-  const tracklistMutationSelector = [
-    ".main-trackList-indexable",
-    '[role="grid"]',
-    SPOTIFY_TRACK_ROW_SELECTOR,
-    SPOTIFY_TRACK_HEADER_SELECTOR,
-  ].join(", ");
+  // Cheap selectors only: the main observer sees every element Spotify adds
+  // anywhere, so precise (:has-based) matching waits for the coalesced update.
+  const tracklistMutationSelector = '.main-trackList-indexable, [role="grid"], [role="row"]';
 
   // Tracklist indicator feature - adds 'Tagify' column to tracklists
   const tracklistEnhancer = {
     tracklistObservers: new Set(),
     observedTracklists: new Map(),
     observerReconnectTimeout: null,
+    pendingUpdateFrame: null,
+    pendingObserveNew: false,
     columnRestorers: new Map(),
     originalColumnCounts: new Map(),
     updateInterval: null,
@@ -2144,10 +1980,7 @@ import {
             (node.matches(tracklistMutationSelector) || node.querySelector(tracklistMutationSelector)),
           ),
         );
-        if (addedTracklistContent) {
-          this.updateTracklists();
-          getSpotifyTracklists().forEach((tracklist) => this.observeTracklist(tracklist));
-        }
+        if (addedTracklistContent) this.scheduleTracklistUpdate({ observeNew: true });
       });
 
       // Start observing the whole document
@@ -2163,11 +1996,28 @@ import {
     observeTracklist(tracklist) {
       if (this.observedTracklists.has(tracklist)) return;
       const observer = new MutationObserver(() => {
-        if (state.activeExtensions.tracklistEnhancer) this.updateTracklists();
+        if (state.activeExtensions.tracklistEnhancer) this.scheduleTracklistUpdate();
       });
       observer.observe(tracklist, { childList: true, subtree: true });
       this.observedTracklists.set(tracklist, observer);
       this.tracklistObservers.add(observer);
+    },
+
+    /**
+     * Coalesces bursts of DOM changes (scrolling, hovering, page loads) into
+     * one tracklist update per animation frame.
+     */
+    scheduleTracklistUpdate({ observeNew = false } = {}) {
+      this.pendingObserveNew ||= observeNew;
+      if (this.pendingUpdateFrame) return;
+      this.pendingUpdateFrame = requestAnimationFrame(() => {
+        this.pendingUpdateFrame = null;
+        const observeNewTracklists = this.pendingObserveNew;
+        this.pendingObserveNew = false;
+        if (!state.activeExtensions.tracklistEnhancer) return;
+        this.updateTracklists();
+        if (observeNewTracklists) getSpotifyTracklists().forEach((tracklist) => this.observeTracklist(tracklist));
+      });
     },
 
     /**
@@ -2561,6 +2411,9 @@ import {
     disable() {
       clearTimeout(this.observerReconnectTimeout);
       this.observerReconnectTimeout = null;
+      if (this.pendingUpdateFrame) cancelAnimationFrame(this.pendingUpdateFrame);
+      this.pendingUpdateFrame = null;
+      this.pendingObserveNew = false;
       // Clear the smart update interval
       if (this.smartUpdateInterval) {
         clearTimeout(this.smartUpdateInterval);
@@ -4073,9 +3926,53 @@ import {
     },
   };
 
+  const refreshLibraryViews = () => {
+    if (state.activeExtensions.tracklistEnhancer) {
+      tracklistEnhancer.updateTracklists();
+    }
+    inlineEditor.refreshAll();
+    if (state.activeExtensions.playbarEnhancer) {
+      playbarEnhancer.updateNowPlayingWidget();
+    }
+    smartPlaylistIndicatorEnhancer.scheduleUpdate();
+    artistProfileIndicatorEnhancer.scheduleUpdate();
+  };
+
+  // Changes saved elsewhere (the Tagify page, sync, Smart Playlists) mark
+  // the shown library stale. It is read again once, shortly after the latest
+  // change, with at most one read at a time; edits never wait for it.
+  const libraryRefresh = {
+    timer: null,
+    running: false,
+    stale: false,
+    schedule(delay = 200) {
+      this.stale = true;
+      if (this.timer || this.running) return;
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        void this.run();
+      }, delay);
+    },
+    async run() {
+      this.running = true;
+      this.stale = false;
+      try {
+        if (await utils.loadTaggedTracks()) {
+          refreshLibraryViews();
+        } else if (state.libraryAvailable) {
+          // Saved edits were shown during the read; read once more.
+          this.stale = true;
+        }
+      } finally {
+        this.running = false;
+        if (this.stale) this.schedule();
+      }
+    },
+  };
+
   // Main initialization
   const initialize = async () => {
-    await utils.loadTaggedTracks(); // todo: await does nothing? why ?
+    await utils.loadTaggedTracks();
     settingsUtils.loadExtensionSettings();
     settingsUtils.subscribe();
 
@@ -4086,21 +3983,30 @@ import {
     smartPlaylistIndicatorEnhancer.initialize();
     artistProfileIndicatorEnhancer.initialize();
 
-    const dataUpdateListener = async () => {
-      await utils.loadTaggedTracks(); // todo ?
-      // Refresh any UI that depends on tagged tracks
-      if (state.activeExtensions.tracklistEnhancer) {
-        tracklistEnhancer.updateTracklists();
-      }
-      inlineEditor.refreshAll();
-      if (state.activeExtensions.playbarEnhancer) {
-        playbarEnhancer.updateNowPlayingWidget();
-      }
+    window.addEventListener(DATA_UPDATED_EVENT, (event) => {
+      // Saves from this bundle are already shown from their saved records.
+      if (isUnshownTagDataUpdate(event.detail)) libraryRefresh.schedule();
+    });
+    window.addEventListener(SMART_PLAYLIST_SYNC_EVENT, (event) => {
+      const { trackUri, trackData } = event.detail || {};
+      if (typeof trackUri !== "string" || trackData === undefined) return;
+      utils.showSavedRecords({ tracks: { [trackUri]: trackData } });
+      inlineEditor.refreshTracks([trackUri]);
       smartPlaylistIndicatorEnhancer.scheduleUpdate();
       artistProfileIndicatorEnhancer.scheduleUpdate();
-    };
-
-    window.addEventListener(DATA_UPDATED_EVENT, dataUpdateListener);
+    });
+    window.addEventListener(PLAYLIST_CHANGED_EVENT, (event) => {
+      const { playlistUri, playlistData } = event.detail || {};
+      if (typeof playlistUri !== "string" || playlistData === undefined) return;
+      utils.showSavedRecords({ playlists: { [playlistUri]: playlistData } });
+      smartPlaylistIndicatorEnhancer.scheduleUpdate();
+    });
+    window.addEventListener(ARTIST_CHANGED_EVENT, (event) => {
+      const { artistUri, artistData } = event.detail || {};
+      if (typeof artistUri !== "string" || artistData === undefined) return;
+      utils.showSavedRecords({ artists: { [artistUri]: artistData } });
+      artistProfileIndicatorEnhancer.scheduleUpdate();
+    });
     window.addEventListener(SMART_PLAYLISTS_UPDATED_EVENT, (event) => {
       if (Array.isArray(event.detail?.playlists)) {
         smartPlaylistCache = event.detail.playlists;

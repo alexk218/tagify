@@ -399,27 +399,13 @@
   height: 32px; /* Match the clear button height */
 }
 
-.star {
-  background: transparent;
-  border: none;
-  color: var(--spice-button-disabled);
-  font-size: 24px;
-  cursor: pointer;
-  padding: 0;
-  transition: color 0.2s ease;
-}
-
-.star:hover {
-  color: #ffd700;
-}
-
 .energySlider {
   grid-column: 2;
   justify-self: center;
   width: 200px;
   height: 4px;
   appearance: none;
-  background: var(--spice-button-disabled);
+  background: var(--tagify-rating-control-muted, var(--spice-button-disabled));
   border-radius: 2px;
   outline: none;
 
@@ -438,7 +424,7 @@
 
 /* Styles for when energy is not set */
 .energySliderUnset::-webkit-slider-thumb {
-  background: var(--spice-button-disabled);
+  background: var(--tagify-rating-control-muted, var(--spice-button-disabled));
   border: 1px solid var(--spice-subtext);
 }
 

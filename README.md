@@ -48,7 +48,7 @@ Select multiple tracks and apply tags in bulk.
 
 ### Prerequisites
 
-You'll need **Spicetify** installed on your computer.
+You'll need the **Spotify desktop app**, opened and signed in at least once. The full Mac installer sets up Spicetify for you; the terminal and manual options need Spicetify installed first.
 
 ➡️ **[Complete Spicetify Installation Guide](SPICETIFY_INSTALLATION.md)**
 
@@ -64,7 +64,19 @@ Open **Powershell** and run this command:
 iwr -useb "https://raw.githubusercontent.com/alexk218/tagify/main/install.ps1" | iex
 ```
 
-### macOS/Linux
+### macOS — full installer
+
+1. Download [Tagify.pkg](scripts/install/Tagify.pkg) and open it. It places **Tagify Installer** in Applications and opens it.
+2. Click **Install Tagify**. The installer sets up Spicetify, installs the latest stable Tagify, and applies it to Spotify.
+3. Click **Open Spotify**, then choose Tagify.
+
+Run the installer again whenever you want to update or repair Tagify. Your saved tags, themes, and other apps stay in place. Requires macOS 12 or later; supports Intel and Apple Silicon.
+
+**Block Spotify updates** is checked by default, because Spotify updates can remove Tagify from Spotify. Your saved tags stay safe. Uncheck it before installing to allow automatic Spotify updates again; after a Spotify update, run the installer to restore Tagify.
+
+An unsigned development build may require **Open Anyway** in System Settings → Privacy & Security after the first launch attempt. Public distribution should use the signed, notarized build. See the [Mac installer build guide](scripts/install/macos/BUILD.md).
+
+### macOS/Linux — terminal option
 
 Open **Terminal** and run:
 

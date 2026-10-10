@@ -145,6 +145,7 @@ describe("SpotifyApiService entity metadata", () => {
         uri: "spotify:track:t1",
         name: "Track 1",
         artists: "Low Orbit, Guest",
+        artistsData: [],
         discNumber: 1,
         trackNumber: 1,
       });
@@ -181,10 +182,36 @@ describe("SpotifyApiService entity metadata", () => {
           uri: "spotify:track:web",
           name: "Web Track",
           artists: "Low Orbit",
+          artistsData: [],
           discNumber: 1,
           trackNumber: 1,
         },
       ]);
+    });
+
+    it("keeps stable artist identities from album pages", async () => {
+      vi.mocked(Spicetify.GraphQL.Request).mockResolvedValue(albumUnion({ tracksV2: {
+        totalCount: 1, items: [{ track: { uri: "spotify:track:one", artists: { items: [
+          { uri: "spotify:artist:one", profile: { name: "Same Name" } },
+          { uri: "spotify:artist:two", profile: { name: "Same Name" } },
+        ] } } }],
+      } }) as any);
+      const tracks = await spotifyApiService.getAlbumTracks("spotify:album:album-2");
+      expect(tracks?.[0].artistsData).toEqual([
+        { uri: "spotify:artist:one", name: "Same Name" },
+        { uri: "spotify:artist:two", name: "Same Name" },
+      ]);
+    });
+
+    it("never confirms a partial album when a later page fails", async () => {
+      vi.mocked(Spicetify.GraphQL.Request)
+        .mockResolvedValueOnce(albumUnion({ tracksV2: { totalCount: 51, items: Array.from({ length: 50 }, (_, i) => ({ track: { uri: `spotify:track:${i}` } })) } }) as any)
+        .mockRejectedValueOnce(new Error("offline"));
+      vi.mocked(globalThis.fetch)
+        .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ uri: "spotify:track:one" }], next: "next-page" }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(null, { status: 503 }));
+      (Spicetify.Platform as any).AuthorizationAPI = { getState: () => ({ token: { accessToken: "test-token" } }) };
+      await expect(spotifyApiService.getAlbumTracks("spotify:album:album-2")).resolves.toBeNull();
     });
 
     it("adds up disc lengths and never mistakes a full page of tracks for the length", async () => {

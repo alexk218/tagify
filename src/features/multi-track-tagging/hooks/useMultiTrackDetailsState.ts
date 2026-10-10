@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { BatchTagUpdate } from "@/types/tagData";
 import { DraftTagState } from "@/features/multi-track-tagging/model/useMultiTrackTagging.types";
 import {
@@ -19,7 +19,7 @@ interface UseMultiTrackDetailsStateOptions {
   multiTrackDraftTags: DraftTagState;
   lockedTrackUri: string | null;
   onSetMultiTrackDraftTags: (draftTags: DraftTagState) => void;
-  onApplyBatchTagUpdates: (updates: BatchTagUpdate[]) => void;
+  onApplyBatchTagUpdates: (updates: BatchTagUpdate[]) => void | Promise<void>;
   onCalculateBatchChanges: (
     tracks: Array<{ uri: string }>,
     originalTrackDataMap: DraftTagState,
@@ -44,6 +44,7 @@ export function useMultiTrackDetailsState({
   onFindCommonEnergyRatingFromDraft,
   onCancelTagging,
 }: UseMultiTrackDetailsStateOptions) {
+  const [isSaving, setIsSaving] = useState(false);
   const hasUnsavedChanges = useMemo(
     () => hasDraftChanges(tracks, trackDataMap, multiTrackDraftTags),
     [tracks, trackDataMap, multiTrackDraftTags],
@@ -105,7 +106,8 @@ export function useMultiTrackDetailsState({
     onSetMultiTrackDraftTags(createResetDraftState(tracks, trackDataMap));
   }, [onSetMultiTrackDraftTags, trackDataMap, tracks]);
 
-  const handleSaveChanges = useCallback(() => {
+  const handleSaveChanges = useCallback(async () => {
+    if (isSaving) return;
     const changes = onCalculateBatchChanges(
       tracks,
       trackDataMap,
@@ -117,9 +119,16 @@ export function useMultiTrackDetailsState({
       return;
     }
 
-    onApplyBatchTagUpdates(changes);
-    Spicetify.showNotification(`Saved changes to ${changes.length} tracks`);
+    setIsSaving(true);
+    try {
+      await onApplyBatchTagUpdates(changes);
+      Spicetify.showNotification(`Saved changes to ${changes.length} tracks. You can undo this bulk change in Tagify.`);
+    } catch (error) {
+      console.error("Tagify: bulk save failed", error);
+      Spicetify.showNotification("Tagify couldn't save your bulk changes. Your draft is still here; please try again.", true);
+    } finally { setIsSaving(false); }
   }, [
+    isSaving,
     multiTrackDraftTags,
     onApplyBatchTagUpdates,
     onCalculateBatchChanges,
@@ -145,6 +154,7 @@ export function useMultiTrackDetailsState({
   }, [hasUnsavedChanges, onCancelTagging, resetDraftToOriginal]);
 
   return {
+    isSaving,
     hasUnsavedChanges,
     currentRating,
     currentEnergy,

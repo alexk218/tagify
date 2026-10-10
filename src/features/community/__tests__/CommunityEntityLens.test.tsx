@@ -2,6 +2,7 @@ import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommunityEntityLens } from "../CommunityEntityLens";
+import { clearCommunityEntityCache } from "../communityEntityCache";
 
 const entity = {
   entity: { provider: "spotify", kind: "track", providerId: "1eyzqe2QqGZUmfcPZtrIyt" },
@@ -26,6 +27,7 @@ const entity = {
 afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
+  clearCommunityEntityCache();
 });
 
 describe("CommunityEntityLens", () => {
@@ -77,15 +79,8 @@ describe("CommunityEntityLens", () => {
     expect(screen.queryByText("Community perspectives")).not.toBeInTheDocument();
   });
 
-  it("uses the Cloud Sync session to identify the current contributor", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      Response.json({
-        entity: {
-          ...entity,
-          contributors: [{ ...entity.contributors[0], isOwn: true }],
-        },
-      }),
-    );
+  it("reads the public page without credentials, even while Cloud Sync is connected", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json({ entity }));
     localStorage.setItem(
       "tagify:sync:configuration",
       JSON.stringify({
@@ -98,16 +93,27 @@ describe("CommunityEntityLens", () => {
         accessToken: "supabase-access-token",
         refreshToken: "supabase-refresh-token",
         expiresAt: 9999999999,
-        profile: { id: "profile-a", handle: "mira", displayName: "Mira" },
       }),
     );
 
     render(<CommunityEntityLens entityUri="spotify:track:1eyzqe2QqGZUmfcPZtrIyt" />);
 
-    expect(await screen.findByText("You")).toBeInTheDocument();
+    expect(await screen.findByText("Mira")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://community.tagify.fm/api/v2/entities/track/1eyzqe2QqGZUmfcPZtrIyt",
-      { headers: { authorization: "Bearer supabase-access-token" } },
+      "https://community.tagify.fm/api/v2/public-entities/track/1eyzqe2QqGZUmfcPZtrIyt",
     );
+  });
+
+  it("shares one request between views of the same song", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json({ entity }));
+
+    render(<>
+      <CommunityEntityLens entityUri="spotify:track:1eyzqe2QqGZUmfcPZtrIyt" />
+      <CommunityEntityLens entityUri="spotify:track:1eyzqe2QqGZUmfcPZtrIyt" />
+    </>);
+
+    expect(await screen.findAllByText("Community perspectives")).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

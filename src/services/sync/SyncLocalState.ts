@@ -2,7 +2,7 @@ import type { SyncEntityRefV1 } from "@tagify/sync-contracts";
 import type { ArtistData, PlaylistData, TagTaxonomy, TrackData } from "@/types/tagData";
 import { normalizeCamelotKey } from "@/utils/camelotKey";
 
-export const TAGIFY_DATABASE_VERSION = 10;
+export const TAGIFY_DATABASE_VERSION = 12;
 export const SYNC_STORES = {
   OUTBOX: "sync-outbox",
   STATE: "sync-state",
@@ -10,6 +10,7 @@ export const SYNC_STORES = {
   TOMBSTONES: "sync-tombstones",
   APP_STATE: "sync-app-state",
   RECOVERY_CHECKPOINT: "sync-recovery-checkpoint",
+  PRIVATE_NOTES: "private-notes",
 } as const;
 export const SYNC_OUTBOX_CHANGED_EVENT = "tagify:syncOutboxChanged";
 /** Local-file tracks have no outbox intent; this asks sync to back them up. */
@@ -19,7 +20,13 @@ const ACCOUNT_KEY = "tagify:sync:account-id";
 const CONFIG_KEY = "tagify:sync:configuration";
 const DISCONNECTED_PROVENANCE_KEY = "tagify:sync:disconnected-provenance";
 const notifyingTransactions = new WeakSet<IDBTransaction>();
-const localPersistenceFlushers = new Set<() => Promise<void>>();
+
+// The Tagify page and the background extension are separate bundles, each
+// with its own copy of this module. Sync runs in the extension, so the
+// registry of unsaved-edit flushers must be shared through the window.
+function localPersistenceFlushers(): Set<() => Promise<void>> {
+  return (window.__tagifyLocalPersistenceFlushers ??= new Set());
+}
 
 export function setLocalPersistencePaused(paused: boolean): void {
   window.__tagifyLocalPersistencePaused = paused;
@@ -31,12 +38,12 @@ export function isLocalPersistencePaused(): boolean {
 }
 
 export function registerLocalPersistenceFlusher(flusher: () => Promise<void>): () => void {
-  localPersistenceFlushers.add(flusher);
-  return () => localPersistenceFlushers.delete(flusher);
+  localPersistenceFlushers().add(flusher);
+  return () => { localPersistenceFlushers().delete(flusher); };
 }
 
 export async function flushLocalPersistence(): Promise<void> {
-  await Promise.all([...localPersistenceFlushers].map((flusher) => flusher()));
+  await Promise.all([...localPersistenceFlushers()].map((flusher) => flusher()));
 }
 
 export type SyncableEntityData = TrackData | PlaylistData | ArtistData;
@@ -123,17 +130,31 @@ export interface ReplicaManifest {
 
 export type LocalReplicaClassification = "fresh-default" | "meaningful-unlinked" | "initialized-replica";
 
+export type SyncAnnotationField = "rating" | "energy" | "bpm" | "key";
+export const SYNC_ANNOTATION_FIELDS: readonly SyncAnnotationField[] = ["rating", "energy", "bpm", "key"];
+
+/** An item's annotation in the form Community stores. */
+export interface SyncAnnotationValues {
+  rating: number | null; energy: number | null; bpm: number | null; key: string | null; tagIds: string[];
+}
+
 export interface EntityReplaceIntent {
   id: string;
   batchId: string;
   createdAt: number;
   type: "entity.replace";
   entity: SyncEntityRefV1;
-  desired: {
-    rating: number | null; energy: number | null; bpm: number | null; key: string | null; tagIds: string[];
+  desired: SyncAnnotationValues & {
     /** Tagify's own first-saved and last-changed times (ISO), so a restore keeps Last Updated order. */
     createdAt?: string; modifiedAt?: string;
   };
+  /**
+   * The annotation just before this edit. Only fields and tags that differ
+   * from it count as this device's change, so a queued edit never reverts
+   * what another device changed meanwhile. Intents queued by older versions
+   * have no base and send the whole annotation.
+   */
+  base?: SyncAnnotationValues;
 }
 
 export interface EntityDeleteIntent {
@@ -142,7 +163,12 @@ export interface EntityDeleteIntent {
   createdAt: number;
   type: "entity.delete";
   entity: SyncEntityRefV1;
+  /** The annotation before it was removed; see EntityReplaceIntent.base. */
+  base?: SyncAnnotationValues;
 }
+
+/** The fields and tags this device changed, or "all" when an older intent has no base. */
+export type EntityEdits = { fields: SyncAnnotationField[]; tagIds: string[] } | "all";
 
 export interface TaxonomyReplaceIntent {
   id: string;
@@ -260,43 +286,119 @@ export function entityFromUri(uri: string, storageKind: "track" | "playlist" | "
   return { provider: "spotify", kind, providerId: match[2] };
 }
 
-export function createEntityReplaceIntent(uri: string, storageKind: "track" | "playlist" | "artist", data: SyncableEntityData, batchId = crypto.randomUUID()): EntityReplaceIntent | null {
-  const entity = entityFromUri(uri, storageKind);
-  if (!entity) return null;
+export const EMPTY_SYNC_ANNOTATION: Readonly<SyncAnnotationValues> = Object.freeze({ rating: null, energy: null, bpm: null, key: null, tagIds: [] });
+
+/** The Community form of a saved record; a missing record has no annotation. */
+export function syncAnnotationValues(data: SyncableEntityData | null | undefined, storageKind: "track" | "playlist" | "artist"): SyncAnnotationValues {
+  if (!data) return { ...EMPTY_SYNC_ANNOTATION, tagIds: [] };
   const track = storageKind === "track" ? data as TrackData : null;
   return {
-    id: crypto.randomUUID(), batchId, createdAt: Date.now(), type: "entity.replace", entity,
-    desired: {
-      rating: normalizeSyncRating(data.rating),
-      energy: normalizeSyncEnergy(data.energy),
-      bpm: normalizeSyncBpm(track?.bpm),
-      key: normalizeSyncKey(track?.camelotKey),
-      tagIds: [...new Set(data.tagIds)].filter(isSyncSafeId).sort(),
-      ...syncTimestamps(data),
-    },
+    rating: normalizeSyncRating(data.rating),
+    energy: normalizeSyncEnergy(data.energy),
+    bpm: normalizeSyncBpm(track?.bpm),
+    key: normalizeSyncKey(track?.camelotKey),
+    tagIds: [...new Set(data.tagIds ?? [])].filter(isSyncSafeId).sort(),
   };
 }
 
-export function makeEntityReplaceIntent(uri: string, storageKind: "track" | "playlist" | "artist", data: SyncableEntityData, batchId = crypto.randomUUID()): EntityReplaceIntent | null {
-  return isSyncCaptureEnabled()
-    ? createEntityReplaceIntent(uri, storageKind, data, batchId)
-    : null;
+/**
+ * Shows a record from the cloud copy without losing what only the device
+ * holds. Community stores normalized values, so wherever the device's own
+ * value normalizes to the cloud value the device keeps its original (exact
+ * rating, BPM, key spelling, tags Community cannot store). The device's dates
+ * stay too, so Last Updated order does not change.
+ */
+export function preserveDeviceAnnotation<T extends SyncableEntityData>(incoming: T, device: T, storageKind: "track" | "playlist" | "artist"): T {
+  const next = { ...incoming };
+  if (device.dateCreated !== undefined) next.dateCreated = device.dateCreated;
+  if (device.dateModified !== undefined) next.dateModified = device.dateModified;
+  if (normalizeSyncRating(device.rating) === normalizeSyncRating(next.rating)) next.rating = device.rating;
+  if (normalizeSyncEnergy(device.energy) === normalizeSyncEnergy(next.energy)) next.energy = device.energy;
+  if (storageKind === "track") {
+    const deviceTrack = device as TrackData;
+    const nextTrack = next as TrackData;
+    if (normalizeSyncBpm(deviceTrack.bpm) === normalizeSyncBpm(nextTrack.bpm)) nextTrack.bpm = deviceTrack.bpm;
+    if (normalizeSyncKey(deviceTrack.camelotKey) === normalizeSyncKey(nextTrack.camelotKey)) nextTrack.camelotKey = deviceTrack.camelotKey;
+  }
+  const deviceTags = device.tagIds ?? [];
+  const cloudTags = new Set(next.tagIds ?? []);
+  const deviceSynced = new Set(deviceTags.filter(isSyncSafeId));
+  if (deviceSynced.size === cloudTags.size && [...deviceSynced].every((tagId) => cloudTags.has(tagId))) {
+    next.tagIds = [...deviceTags];
+  } else {
+    next.tagIds = [...cloudTags, ...new Set(deviceTags.filter((tagId) => !isSyncSafeId(tagId)))];
+  }
+  return next;
 }
 
-export function createEntityDeleteIntent(uri: string, storageKind: "track" | "playlist" | "artist", batchId = crypto.randomUUID()): EntityDeleteIntent | null {
+/**
+ * Pass `previous` (the saved record before this write, or null when there was
+ * none) so only this edit's changes are sent. Leaving it out sends the whole
+ * annotation, as older versions did.
+ */
+export function createEntityReplaceIntent(uri: string, storageKind: "track" | "playlist" | "artist", data: SyncableEntityData, batchId: string = crypto.randomUUID(), previous?: SyncableEntityData | null): EntityReplaceIntent | null {
   const entity = entityFromUri(uri, storageKind);
-  return entity ? { id: crypto.randomUUID(), batchId, createdAt: Date.now(), type: "entity.delete", entity } : null;
+  if (!entity) return null;
+  return {
+    id: crypto.randomUUID(), batchId, createdAt: Date.now(), type: "entity.replace", entity,
+    desired: { ...syncAnnotationValues(data, storageKind), ...syncTimestamps(data) },
+    ...(previous === undefined ? {} : { base: syncAnnotationValues(previous, storageKind) }),
+  };
 }
 
-export function makeEntityDeleteIntent(uri: string, storageKind: "track" | "playlist" | "artist", batchId = crypto.randomUUID()): EntityDeleteIntent | null {
+export function makeEntityReplaceIntent(uri: string, storageKind: "track" | "playlist" | "artist", data: SyncableEntityData, batchId: string = crypto.randomUUID(), previous?: SyncableEntityData | null): EntityReplaceIntent | null {
   return isSyncCaptureEnabled()
-    ? createEntityDeleteIntent(uri, storageKind, batchId)
+    ? createEntityReplaceIntent(uri, storageKind, data, batchId, previous)
     : null;
+}
+
+export function createEntityDeleteIntent(uri: string, storageKind: "track" | "playlist" | "artist", batchId: string = crypto.randomUUID(), previous?: SyncableEntityData | null): EntityDeleteIntent | null {
+  const entity = entityFromUri(uri, storageKind);
+  return entity ? {
+    id: crypto.randomUUID(), batchId, createdAt: Date.now(), type: "entity.delete", entity,
+    ...(previous === undefined ? {} : { base: syncAnnotationValues(previous, storageKind) }),
+  } : null;
+}
+
+export function makeEntityDeleteIntent(uri: string, storageKind: "track" | "playlist" | "artist", batchId: string = crypto.randomUUID(), previous?: SyncableEntityData | null): EntityDeleteIntent | null {
+  return isSyncCaptureEnabled()
+    ? createEntityDeleteIntent(uri, storageKind, batchId, previous)
+    : null;
+}
+
+/**
+ * What this device changed on one item across its queued intents (oldest
+ * first). Each intent contributes the difference between its base and its
+ * result; one intent without a base makes the whole annotation this device's.
+ */
+export function entityEdits(intents: ReadonlyArray<EntityReplaceIntent | EntityDeleteIntent>): EntityEdits {
+  const fields = new Set<SyncAnnotationField>();
+  const tagIds = new Set<string>();
+  for (const intent of intents) {
+    if (!intent.base) return "all";
+    const after: SyncAnnotationValues = intent.type === "entity.replace" ? intent.desired : EMPTY_SYNC_ANNOTATION;
+    for (const field of SYNC_ANNOTATION_FIELDS) if (intent.base[field] !== after[field]) fields.add(field);
+    const before = new Set(intent.base.tagIds);
+    const next = new Set(after.tagIds);
+    for (const tagId of [...before, ...next]) if (before.has(tagId) !== next.has(tagId)) tagIds.add(tagId);
+  }
+  return { fields: [...fields], tagIds: [...tagIds].sort() };
+}
+
+export function editsInclude(edits: EntityEdits, change: { field?: SyncAnnotationField; tagId?: string }): boolean {
+  if (edits === "all") return true;
+  if (change.field) return edits.fields.includes(change.field);
+  return change.tagId !== undefined && edits.tagIds.includes(change.tagId);
+}
+
+export function hasEntityEdits(edits: EntityEdits): boolean {
+  return edits === "all" || edits.fields.length > 0 || edits.tagIds.length > 0;
 }
 
 declare global {
   interface Window {
     __tagifyLocalPersistencePaused?: boolean;
+    __tagifyLocalPersistenceFlushers?: Set<() => Promise<void>>;
   }
 }
 
@@ -330,6 +432,7 @@ export function appendIntent(transaction: IDBTransaction, intent: LocalSyncInten
 }
 
 export function ensureSyncStores(db: IDBDatabase): void {
+  if (!db.objectStoreNames.contains(SYNC_STORES.PRIVATE_NOTES)) db.createObjectStore(SYNC_STORES.PRIVATE_NOTES, { keyPath: "uri" });
   if (!db.objectStoreNames.contains(SYNC_STORES.OUTBOX)) {
     const outbox = db.createObjectStore(SYNC_STORES.OUTBOX, { keyPath: "id" });
     outbox.createIndex("by-created-at", "createdAt", { unique: false });

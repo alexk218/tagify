@@ -1,13 +1,15 @@
 import React from "react";
 import styles from "./MigrationResultModal.module.css";
 import { Portal } from "@/components/ui";
-import { OrchestratorResult } from "@/services/MigrationOrchestrator";
+import type { OrchestratorOptions, OrchestratorResult } from "@/services/MigrationOrchestrator";
 
 interface MigrationResultModalProps {
   result: OrchestratorResult;
   onClose: () => void;
-  onRetry?: () => Promise<OrchestratorResult>;
+  onRetry?: (options?: OrchestratorOptions) => Promise<OrchestratorResult>;
 }
+
+type OlderCopyChoice = NonNullable<OrchestratorOptions["olderCopy"]>;
 
 const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
   result,
@@ -15,6 +17,7 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
   onRetry,
 }) => {
   const [isRetrying, setIsRetrying] = React.useState(false);
+  const [olderCopyChoice, setOlderCopyChoice] = React.useState<OlderCopyChoice | null>(null);
 
   const handleRetry = async () => {
     if (!onRetry) return;
@@ -29,6 +32,20 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
     }
   };
 
+  const chooseOlderCopy = async (choice: OlderCopyChoice) => {
+    if (!onRetry || olderCopyChoice) return;
+    setOlderCopyChoice(choice);
+    try {
+      const newResult = await onRetry({ olderCopy: choice });
+      // A restored copy stays open to explain how to get later changes back.
+      if (newResult.success && !newResult.fallbackMode && !newResult.restoredOlderCopy && !newResult.olderCopyNotRestored) {
+        onClose();
+      }
+    } finally {
+      setOlderCopyChoice(null);
+    }
+  };
+
   const didStorageMigration =
     result.migrationsRun.includes("storageToIndexedDB");
   const isInFallbackMode = result.fallbackMode;
@@ -38,30 +55,125 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
     <Portal>
       <div className={styles.overlay} onClick={onClose}>
         <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-          {showErrorState ? (
+          {result.olderCopy ? (
             <>
               <div className={styles.header}>
                 <span className={styles.errorIcon}>⚠️</span>
-                <h2 className={styles.title}>
-                  {result.success
-                    ? "Library update not finished"
-                    : "Couldn't finish updating your library"}
-                </h2>
+                <h2 className={styles.title}>Your library on this device is empty</h2>
               </div>
 
               <div className={styles.content}>
                 <p className={styles.description}>
-                  {result.success
-                    ? "You can keep using Tagify. Your library is still saved the same way for now, so very large libraries may need more space."
-                    : "Tagify couldn't finish opening your library. Your saved data has not been intentionally removed."}
+                  This usually happens after a Spotify update. Tagify kept an older copy of your
+                  library on this device. Changes you make aren&apos;t saved until you choose what to do.
+                </p>
+
+                <div className={styles.statsGrid}>
+                  <div className={styles.stat}>
+                    <span className={styles.statValue}>
+                      {result.olderCopy.trackCount.toLocaleString()}
+                    </span>
+                    <span className={styles.statLabel}>Tracks in the older copy</span>
+                  </div>
+                </div>
+
+                <div className={styles.fallbackInfo}>
+                  <h3>Your choices</h3>
+                  <ul>
+                    <li>
+                      Restore the older copy to bring back these tracks and tags. Then import your
+                      newest backup file to get later changes back.
+                    </li>
+                    <li>
+                      Start fresh with an empty library. The older copy is saved to your Downloads
+                      folder as a tagify-older-copy file.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className={styles.footer}>
+                {onRetry ? (
+                  <>
+                    <button
+                      className={styles.secondaryButton}
+                      onClick={() => void chooseOlderCopy("start-fresh")}
+                      disabled={olderCopyChoice !== null}
+                    >
+                      {olderCopyChoice === "start-fresh" ? "Starting fresh..." : "Start fresh"}
+                    </button>
+                    <button
+                      className={styles.primaryButton}
+                      onClick={() => void chooseOlderCopy("restore")}
+                      disabled={olderCopyChoice !== null}
+                    >
+                      {olderCopyChoice === "restore" ? "Restoring..." : "Restore older copy"}
+                    </button>
+                  </>
+                ) : (
+                  <button className={styles.primaryButton} onClick={onClose}>
+                    Close
+                  </button>
+                )}
+              </div>
+            </>
+          ) : showErrorState && result.fallbackReason === "VersionError" ? (
+            <>
+              {/* The browser refuses to open a library saved by a newer Tagify
+                  with older code, so retrying here can never succeed. */}
+              <div className={styles.header}>
+                <span className={styles.errorIcon}>⚠️</span>
+                <h2 className={styles.title}>Your library was saved by a newer Tagify</h2>
+              </div>
+
+              <div className={styles.content}>
+                <p className={styles.description}>
+                  This version of Tagify can&apos;t open it, so changes you make now won&apos;t be saved. Nothing has been lost: your tags are still on this device.
                 </p>
 
                 <div className={styles.fallbackInfo}>
                   <h3>What you can do</h3>
                   <ul>
-                    <li>Download a Tagify backup before making more changes</li>
+                    <li>Install the latest Tagify release, then restart Spotify</li>
+                    <li>If you were testing a newer Tagify, reinstall that version instead</li>
+                  </ul>
+                </div>
+
+                <p className={styles.helpText}>
+                  Do not clear Spotify&apos;s saved data while this is unresolved.
+                </p>
+              </div>
+
+              <div className={styles.footer}>
+                <button className={styles.primaryButton} onClick={onClose}>
+                  Close
+                </button>
+              </div>
+            </>
+          ) : showErrorState ? (
+            <>
+              <div className={styles.header}>
+                <span className={styles.errorIcon}>⚠️</span>
+                <h2 className={styles.title}>
+                  {isInFallbackMode
+                    ? "Tagify can't save changes right now"
+                    : "Couldn't open your library"}
+                </h2>
+              </div>
+
+              <div className={styles.content}>
+                <p className={styles.description}>
+                  {isInFallbackMode
+                    ? "Tagify couldn't open your saved library on this device, so changes you make now won't be saved. Your saved tags haven't been removed."
+                    : "Tagify couldn't finish opening your library. Your saved tags haven't been removed."}
+                </p>
+
+                <div className={styles.fallbackInfo}>
+                  <h3>What you can do</h3>
+                  <ul>
+                    <li>Choose Try again. Restarting Spotify can also help.</li>
                     <li>Check that this device has enough free space</li>
-                    <li>Try again from Settings, or contact support if it keeps happening</li>
+                    <li>If it keeps happening, import your newest Tagify backup file or contact support</li>
                   </ul>
                 </div>
 
@@ -85,6 +197,35 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
                 </button>
               </div>
             </>
+          ) : result.olderCopyNotRestored ? (
+            <>
+              <div className={styles.header}>
+                <span className={styles.errorIcon}>⚠️</span>
+                <h2 className={styles.title}>Your newer changes were kept</h2>
+              </div>
+
+              <div className={styles.content}>
+                <p className={styles.description}>
+                  Changes were saved on this device before you chose, so Tagify kept them instead of
+                  replacing them with the older copy. The older copy was saved to your Downloads folder
+                  as a tagify-older-copy file.
+                </p>
+
+                <div className={styles.fallbackInfo}>
+                  <h3>Bring back the older copy</h3>
+                  <ul>
+                    <li>Choose Import in Tagify and select the tagify-older-copy file</li>
+                    <li>Tagify saves a copy of your current library to Downloads before importing</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className={styles.footer}>
+                <button className={styles.primaryButton} onClick={onClose}>
+                  Got it
+                </button>
+              </div>
+            </>
           ) : result.restoredOlderCopy ? (
             <>
               <div className={styles.header}>
@@ -95,7 +236,8 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
               <div className={styles.content}>
                 <p className={styles.description}>
                   Your saved library on this device was cleared, usually by a Spotify update. Tagify
-                  restored the older copy it kept on this device and saved it to your Downloads folder.
+                  restored the older copy it kept on this device and also saved it to your Downloads
+                  folder as a tagify-older-copy file.
                 </p>
 
                 <div className={styles.statsGrid}>
@@ -110,7 +252,10 @@ const MigrationResultModal: React.FC<MigrationResultModalProps> = ({
                 <div className={styles.fallbackInfo}>
                   <h3>Get your latest changes back</h3>
                   <ul>
-                    <li>Look in your Downloads folder for the newest file named tagify-auto-backup or tagify-backup</li>
+                    <li>
+                      In your Downloads folder, find the newest file named tagify-auto-backup or
+                      tagify-backup. Skip tagify-older-copy files: they hold the copy just restored.
+                    </li>
                     <li>Choose Import in Tagify and select that file</li>
                     <li>If you use Cloud Sync, reconnect it to restore your library from Community</li>
                   </ul>

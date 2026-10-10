@@ -1,3 +1,4 @@
+import { normalizePrivateNotesBackup, type PrivateNotesBackup } from "@/services/sync/PrivateNotes";
 import packageJson from "@/package";
 import { defaultTagData } from "@/constants/defaultTagData";
 import type { TagDataStructure } from "@/types/tagData";
@@ -14,6 +15,14 @@ export const TAG_DATA_AUTO_FILE_BACKUP_METADATA_KEY =
 export const TAG_DATA_AUTO_FILE_BACKUP_FREQUENCY_KEY =
   "tagify:autoFileBackupFrequency";
 export const DEFAULT_AUTO_FILE_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/**
+ * Changes made after the latest file are saved again when Tagify goes quiet,
+ * at most this many times per chosen backup period, so the newest edits reach
+ * a file without a download for every change.
+ */
+export const TRAILING_FILE_BACKUPS_PER_INTERVAL = 4;
+// Keep a download's file available long enough for Spotify to finish saving it.
+const DOWNLOAD_URL_LIFETIME_MS = 60_000;
 export const TAGIFY_BACKUP_EXPORT_VERSION = packageJson.version;
 
 export interface CommunityBackupStateV2 {
@@ -25,9 +34,10 @@ export interface CommunityBackupStateV2 {
 /** Saved filters, playlist rules, and preferences. Older backups omit it. */
 export type BackupAppState = Partial<Record<"filter-formulas" | "playlist-rules" | "preferences", unknown>>;
 
-export type TagifyBackupEnvelope = TagifyBackupEnvelopeV2<TagDataStructure> & { appState?: BackupAppState };
+export type TagifyBackupEnvelope = TagifyBackupEnvelopeV2<TagDataStructure> & { appState?: BackupAppState; privateNotes?: PrivateNotesBackup };
 
 export interface CompleteBackupContents {
+  privateNotes?: PrivateNotesBackup;
   community?: CommunityBackupStateV2;
   appState?: BackupAppState;
 }
@@ -197,6 +207,7 @@ export function buildTagifyBackupEnvelopeV2(
   },
   now = new Date(),
   appState?: BackupAppState,
+  privateNotes?: PrivateNotesBackup,
 ): TagifyBackupEnvelope {
   return {
     format: "tagify-backup",
@@ -206,6 +217,7 @@ export function buildTagifyBackupEnvelopeV2(
     tagData,
     community,
     ...(appState ? { appState } : {}),
+    ...(privateNotes ? { privateNotes } : {}),
   };
 }
 
@@ -221,15 +233,23 @@ function downloadJsonBackupFile(
   anchor.href = url;
   anchor.download = filename;
   document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-
-  URL.revokeObjectURL(url);
+  try {
+    anchor.click();
+  } finally {
+    document.body.removeChild(anchor);
+    // Revoking right away can cancel a download that hasn't started yet.
+    setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_LIFETIME_MS);
+  }
 }
 
 function getDatedBackupFilename(prefix: string, now = new Date()): string {
   const timestamp = now.toISOString().replace(/[:.]/g, "-");
   return `${prefix}-${timestamp}.json`;
+}
+
+/** Identifies a backup's contents; the export time alone never makes a file "changed". */
+function backupContentChecksum(envelope: TagifyBackupEnvelope): string {
+  return hashString(JSON.stringify({ ...envelope, exportedAt: undefined }));
 }
 
 function hashString(value: string): string {
@@ -318,9 +338,19 @@ export function downloadTagDataBackup(
   contents: CompleteBackupContents = {},
 ): void {
   downloadJsonBackupFile(
-    buildTagifyBackupEnvelopeV2(backupData, contents.community, new Date(), contents.appState),
+    buildTagifyBackupEnvelopeV2(backupData, contents.community, new Date(), contents.appState, contents.privateNotes),
     `tagify-backup-${new Date().toISOString().split("T")[0]}.json`,
   );
+}
+
+/**
+ * Saves the older copy of the library kept on this device. Its name keeps it
+ * from being mistaken for the newest backup when choosing a file to import.
+ */
+export function downloadOlderCopyBackup(olderCopy: TagDataStructure, now = new Date()): string {
+  const filename = getDatedBackupFilename("tagify-older-copy", now);
+  downloadJsonBackupFile(buildTagifyBackupEnvelopeV2(olderCopy, undefined, now), filename);
+  return filename;
 }
 
 /**
@@ -333,49 +363,118 @@ export function downloadSafetyTagDataBackup(
   reason: "before-import" | "before-reset",
   now = new Date(),
 ): boolean {
-  if (!hasBackupWorthyData(backupData)) return false;
+  if (!hasBackupWorthyData(backupData) && !Object.values(contents.privateNotes || {}).some(note => note.text || note.conflictText)) return false;
   downloadJsonBackupFile(
-    buildTagifyBackupEnvelopeV2(backupData, contents.community, now, contents.appState),
+    buildTagifyBackupEnvelopeV2(backupData, contents.community, now, contents.appState, contents.privateNotes),
     getDatedBackupFilename(`tagify-${reason}`, now),
   );
   return true;
 }
 
+type AutomaticFileBackupOptions = {
+  frequency?: AutoFileBackupFrequency;
+  intervalMs?: number;
+  now?: number;
+} & CompleteBackupContents;
+
+/**
+ * Saves an automatic backup file when the library changed since the latest
+ * file and the chosen backup period has passed. Called at startup and after
+ * saves.
+ */
 export function maybeDownloadAutomaticTagDataFileBackup(
   backupData: TagDataStructure,
-  options: {
-    frequency?: AutoFileBackupFrequency;
-    intervalMs?: number;
-    now?: number;
-  } & CompleteBackupContents = {},
+  options: AutomaticFileBackupOptions = {},
+): AutomaticFileBackupResult {
+  return createAutomaticFileBackup(backupData, options, regularBackupGapMs);
+}
+
+/**
+ * Saves changes made after the latest automatic file. Call it when Tagify is
+ * hidden, closed, or idle: the period throttle captures the library at the
+ * first save of each period, so later edits would otherwise wait for a
+ * later session. Throttled to a fraction of the chosen period.
+ */
+export function maybeDownloadTrailingTagDataFileBackup(
+  backupData: TagDataStructure,
+  options: AutomaticFileBackupOptions = {},
+): AutomaticFileBackupResult {
+  return createAutomaticFileBackup(backupData, options, trailingBackupGapMs);
+}
+
+const regularBackupGapMs = (intervalMs: number) => intervalMs;
+const trailingBackupGapMs = (intervalMs: number) => intervalMs / TRAILING_FILE_BACKUPS_PER_INTERVAL;
+
+/**
+ * Why no automatic file is due, decided from two small saved settings only:
+ * the chosen frequency and when the latest file was saved. Null when a file
+ * may be due and the library is worth reading.
+ */
+function automaticBackupNotDueReason(
+  intervalMs: number | null,
+  now: number,
+  minimumGapMs: (intervalMs: number) => number,
+): "disabled" | "too-soon" | null {
+  if (intervalMs === null) return "disabled";
+  const previous = readAutoFileBackupMetadata();
+  return previous && now - previous.lastBackedUpAt < minimumGapMs(intervalMs) ? "too-soon" : null;
+}
+
+/**
+ * Cheap check for callers that run after every save: true when automatic
+ * backups are on and the chosen period has passed since the latest file.
+ * Reads no library data, so only call `maybeDownloadAutomaticTagDataFileBackup`
+ * (which reads and serializes the whole library) when this returns true. It
+ * may still skip an unchanged or empty library.
+ */
+export function isAutomaticFileBackupDue(now = Date.now(), frequency = readAutoFileBackupFrequency()): boolean {
+  return automaticBackupNotDueReason(getAutoFileBackupFrequencyIntervalMs(frequency), now, regularBackupGapMs) === null;
+}
+
+/** Like `isAutomaticFileBackupDue`, for `maybeDownloadTrailingTagDataFileBackup`. */
+export function isTrailingFileBackupDue(now = Date.now(), frequency = readAutoFileBackupFrequency()): boolean {
+  return automaticBackupNotDueReason(getAutoFileBackupFrequencyIntervalMs(frequency), now, trailingBackupGapMs) === null;
+}
+
+/**
+ * When a trailing backup may next be saved, or null when one may be saved
+ * now (or automatic backups are off, which the backup call reports).
+ */
+export function getTrailingFileBackupDueAt(frequency = readAutoFileBackupFrequency()): number | null {
+  const intervalMs = getAutoFileBackupFrequencyIntervalMs(frequency);
+  const previous = readAutoFileBackupMetadata();
+  if (intervalMs === null || !previous) return null;
+  return previous.lastBackedUpAt + trailingBackupGapMs(intervalMs);
+}
+
+function createAutomaticFileBackup(
+  backupData: TagDataStructure,
+  options: AutomaticFileBackupOptions,
+  minimumGapMs: (intervalMs: number) => number,
 ): AutomaticFileBackupResult {
   const frequency = options.frequency ?? readAutoFileBackupFrequency();
   const intervalMs =
     options.intervalMs ?? getAutoFileBackupFrequencyIntervalMs(frequency);
+  const now = options.now ?? Date.now();
 
-  if (intervalMs === null) {
-    return { status: "skipped", reason: "disabled" };
+  // Decide from the saved schedule first; serializing a large library on
+  // every save would make tagging lag.
+  const notDue = automaticBackupNotDueReason(intervalMs, now, minimumGapMs);
+  if (notDue) {
+    return { status: "skipped", reason: notDue };
   }
 
-  if (!hasBackupWorthyData(backupData)) {
+  if (!hasBackupWorthyData(backupData) && !Object.values(options.privateNotes || {}).some(note => note.text || note.conflictText)) {
     return { status: "skipped", reason: "empty-data" };
   }
 
-  const now = options.now ?? Date.now();
   const previousMetadata = readAutoFileBackupMetadata();
-  const backupEnvelope = buildTagifyBackupEnvelopeV2(backupData, options.community, new Date(now), options.appState);
+  const backupEnvelope = buildTagifyBackupEnvelopeV2(backupData, options.community, new Date(now), options.appState, options.privateNotes);
   const serializedBackup = JSON.stringify(backupEnvelope);
-  const checksum = hashString(serializedBackup);
+  const checksum = backupContentChecksum(backupEnvelope);
 
   if (previousMetadata?.checksum === checksum) {
     return { status: "skipped", reason: "unchanged" };
-  }
-
-  if (
-    previousMetadata &&
-    now - previousMetadata.lastBackedUpAt < intervalMs
-  ) {
-    return { status: "skipped", reason: "too-soon" };
   }
 
   try {
@@ -407,4 +506,9 @@ export function maybeDownloadAutomaticTagDataFileBackup(
       error: error instanceof Error ? error.message : "Unknown backup error",
     };
   }
+}
+
+export function extractPrivateNotesFromBackup(backupData: unknown): PrivateNotesBackup | null {
+  if (!isRecord(backupData) || backupData.format !== "tagify-backup" || !("privateNotes" in backupData)) return null;
+  return normalizePrivateNotesBackup(backupData.privateNotes);
 }

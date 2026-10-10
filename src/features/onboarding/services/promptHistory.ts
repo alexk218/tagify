@@ -1,10 +1,14 @@
-import { getUsageAccountDigest } from "@/features/discovery-survey/services/tagifyUsage";
+import { getUsageAccountDigest, pauseUsageRequestsAfter, usageRequestsPausedUntil } from "@/features/discovery-survey/services/tagifyUsage";
 
 export const MOBILE_TAGGING_INTRO_KEY = "tagify:smart-playlists:mobile-tagging-intro:v1";
 export const LEGACY_SURVEY_KEY = "tagify:discoverySurvey";
 export const LEGACY_PROMPT_OWNER_KEY = "tagify:prompt-history:legacy-owner:v1";
 const HISTORY_PREFIX = "tagify:prompt-history:v1:";
+/** Set once Community has confirmed both dismissals; nothing further can change. */
+const COMPLETE_PREFIX = "tagify:prompt-history:v1:complete:";
 const USAGE_URL = "https://community.tagify.fm/api/v1/tagify-usage";
+const RETRY_DELAYS_MS = [5_000, 30_000, 120_000] as const;
+const EXHAUSTED_RETRY_DELAY_MS = 60 * 60_000;
 
 export interface PromptHistory {
   mobileTaggingIntroSeen: boolean;
@@ -29,6 +33,17 @@ function readHistory(accountDigest: string): PromptHistory {
 function saveHistory(accountDigest: string, history: PromptHistory): void {
   try { localStorage.setItem(`${HISTORY_PREFIX}${accountDigest}`, JSON.stringify(history)); }
   catch { /* Session flags still prevent repeat prompts when local storage is unavailable. */ }
+}
+function isComplete(history: Partial<PromptHistory>): boolean {
+  return history.mobileTaggingIntroSeen === true && history.discoverySurveyDismissed === true;
+}
+function isConfirmedComplete(accountDigest: string): boolean {
+  try { return localStorage.getItem(`${COMPLETE_PREFIX}${accountDigest}`) === "1" && isComplete(readHistory(accountDigest)); }
+  catch { return false; }
+}
+function markConfirmedComplete(accountDigest: string): void {
+  try { localStorage.setItem(`${COMPLETE_PREFIX}${accountDigest}`, "1"); }
+  catch { /* A missing marker only causes one more confirmation request. */ }
 }
 
 /** Import unscoped flags into one account only, never into every subsequent login. */
@@ -60,6 +75,7 @@ export class PromptHistoryStore {
   private lastSyncedAt = new Map<string, number>();
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private retries = 0;
+  private nextAttemptAt = 0;
   private version = "";
   private unresolvedDismissals: PromptHistory = { ...emptyHistory };
 
@@ -78,22 +94,30 @@ export class PromptHistoryStore {
   start(appVersion: string): () => void {
     this.version = appVersion;
     if (this.active++ === 0) {
-      window.addEventListener("online", this.resume);
-      document.addEventListener("visibilitychange", this.resume);
+      window.addEventListener("online", this.resumeOnline);
+      document.addEventListener("visibilitychange", this.resumeVisible);
       void this.refresh();
     }
     return () => {
       if (--this.active > 0) return;
-      window.removeEventListener("online", this.resume);
-      document.removeEventListener("visibilitychange", this.resume);
+      window.removeEventListener("online", this.resumeOnline);
+      document.removeEventListener("visibilitychange", this.resumeVisible);
       if (this.retryTimer) clearTimeout(this.retryTimer);
       this.retryTimer = undefined;
     };
   }
 
-  private resume = (): void => {
+  private resumeOnline = (): void => {
     if (document.visibilityState === "hidden") return;
     this.retries = 0;
+    this.nextAttemptAt = 0;
+    void this.refresh();
+  };
+
+  // Showing Spotify again checks for dismissals from other devices, but never
+  // restarts a failed request's back-off.
+  private resumeVisible = (): void => {
+    if (document.visibilityState === "hidden" || this.retryTimer || Date.now() < this.nextAttemptAt) return;
     void this.refresh();
   };
 
@@ -112,6 +136,10 @@ export class PromptHistoryStore {
       saveHistory(accountDigest, history);
       this.publish({ ...history, accountDigest, ready: false });
     }
+    if (isConfirmedComplete(accountDigest)) {
+      if (!this.snapshot.ready && this.snapshot.accountDigest === accountDigest) this.publish({ ...this.snapshot, ready: true });
+      return;
+    }
     if (this.snapshot.ready && Date.now() - (this.lastSyncedAt.get(accountDigest) ?? 0) < 5 * 60_000) return;
     await this.sync(accountDigest);
   }
@@ -122,25 +150,29 @@ export class PromptHistoryStore {
       this.unresolvedDismissals = mergeHistory(this.unresolvedDismissals, { [prompt]: true });
       return;
     }
-    this.lastSyncedAt.delete(accountDigest);
     const history = mergeHistory(this.snapshot, { [prompt]: true });
     saveHistory(accountDigest, history);
     this.publish({ ...this.snapshot, ...history });
+    if (isConfirmedComplete(accountDigest)) return;
+    this.lastSyncedAt.delete(accountDigest);
     void this.sync(accountDigest);
   }
 
   private scheduleRetry(): void {
-    if (!this.active || this.retryTimer || this.retries >= 3) return;
+    const delay = RETRY_DELAYS_MS[this.retries] ?? EXHAUSTED_RETRY_DELAY_MS;
+    this.nextAttemptAt = Math.max(Date.now() + delay, usageRequestsPausedUntil());
+    if (!this.active || this.retryTimer || this.retries >= RETRY_DELAYS_MS.length) return;
+    this.retries++;
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined;
       void this.refresh();
-    }, [5_000, 30_000, 120_000][this.retries++]);
+    }, this.nextAttemptAt - Date.now());
   }
 
   private sync(accountDigest: string): Promise<void> {
     const existing = this.requests.get(accountDigest);
     if (existing) { this.reruns.add(accountDigest); return existing; }
-    if (!navigator.onLine) { this.scheduleRetry(); return Promise.resolve(); }
+    if (!navigator.onLine || usageRequestsPausedUntil()) { this.scheduleRetry(); return Promise.resolve(); }
     const current = this.snapshot.accountDigest === accountDigest ? this.snapshot : readHistory(accountDigest);
     const promptHistory = Object.fromEntries(Object.entries(emptyHistory)
       .filter(([key]) => current[key as keyof PromptHistory]).map(([key]) => [key, true]));
@@ -151,7 +183,10 @@ export class PromptHistoryStore {
           body: JSON.stringify({ accountDigest, appVersion: this.version, promptHistory }),
           signal: AbortSignal.timeout(10_000), keepalive: true,
         });
-        if (!response.ok) throw new Error("Prompt history unavailable");
+        if (!response.ok) {
+          pauseUsageRequestsAfter(response);
+          throw new Error("Prompt history unavailable");
+        }
         const body = await response.json();
         const recovered = body?.promptHistory;
         if (typeof recovered?.mobileTaggingIntroSeen !== "boolean" || typeof recovered?.discoverySurveyDismissed !== "boolean") throw new Error("Prompt history unavailable");
@@ -160,7 +195,10 @@ export class PromptHistoryStore {
         saveHistory(accountDigest, history);
         if (this.snapshot.accountDigest === accountDigest) this.publish({ ...history, accountDigest, ready: true });
         this.lastSyncedAt.set(accountDigest, Date.now());
+        // Dismissals only ever turn on, so once Community holds both there is nothing left to sync.
+        if (isComplete(history) && isComplete(recovered)) markConfirmedComplete(accountDigest);
         this.retries = 0;
+        this.nextAttemptAt = 0;
       } catch {
         // Optional automatic prompts wait until history is known; Help stays available.
         this.scheduleRetry();

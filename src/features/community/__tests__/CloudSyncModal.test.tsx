@@ -180,6 +180,33 @@ describe("CloudSyncModal revoked device recovery", () => {
     expect(screen.queryByText(/Smart Playlists protected/)).not.toBeInTheDocument();
   });
 
+  it("asks which saved settings to keep and explains what is not backed up yet", async () => {
+    const resolveSettingsChoice = vi.fn().mockResolvedValue(undefined);
+    let needsChoice = ["smart-playlists"];
+    window.TagifySync = {
+      getStatus: () => "idle",
+      getInitialMergePreview: () => null,
+      getBackupHealth: () => ({
+        lastBackupAt: null, annotations: 12, taxonomyNodes: 4, appStateDocuments: 3, protectedDomains: ["smart-playlists"],
+        notBackedUp: ["preferences"], needsChoice, retrying: ["local-files"], deviceOnlyChanges: 2,
+      }),
+      resolveSettingsChoice: async (...args: unknown[]) => { await resolveSettingsChoice(...args); needsChoice = []; },
+    } as unknown as NonNullable<typeof window.TagifySync>;
+
+    render(<CloudSyncModal onClose={vi.fn()} />);
+
+    expect(screen.getByText("Choose which saved settings to keep")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Your saved settings changed on another device too" })).toHaveTextContent("Smart Playlists");
+    expect(screen.getByText(/Preferences is too large to back up to Community/)).toBeInTheDocument();
+    expect(screen.getByText(/Local files haven't backed up yet/)).toBeInTheDocument();
+    expect(screen.getByText(/2 items have values Community can't save/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep this device's" }));
+    await waitFor(() => expect(resolveSettingsChoice).toHaveBeenCalledWith("smart-playlists", "device"));
+    await waitFor(() => expect(screen.queryByRole("group", { name: "Your saved settings changed on another device too" })).not.toBeInTheDocument());
+    expect(screen.queryByText("Choose which saved settings to keep")).not.toBeInTheDocument();
+  });
+
   it("keeps library choices and shows a failed combine instead of silently restarting review", async () => {
     let status = "merge-required";
     const review = {

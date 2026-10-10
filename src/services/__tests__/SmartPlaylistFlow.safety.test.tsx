@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { storageService } from "@/services/storage/StorageService";
-import { SmartPlaylistSyncService } from "@/services/SmartPlaylistSyncService";
+import { SmartPlaylistSyncService, smartPlaylistSyncService } from "@/services/SmartPlaylistSyncService";
 import SmartPlaylistTagChoices from "@/features/smart-playlists/components/SmartPlaylistTagChoices";
 import { spotifyService } from "@/services/SpotifyService";
 import { findDisplayTagName } from "@/utils/tagTaxonomy";
@@ -34,7 +34,11 @@ const rated = { rating: 5, energy: 0, bpm: null, tagIds: [], dateModified: 10 };
 function playlist(overrides: Partial<SmartPlaylistCriteria> = {}): SmartPlaylistCriteria {
   return { id: "five", playlistId: "spotify-playlist", playlistName: "Five stars", criteria, isActive: true, createdAt: 1, lastSyncAt: 1, smartPlaylistTrackUris: [], ...overrides };
 }
-const runtime = syncRuntime as any;
+const runtime = syncRuntime as unknown as {
+  pull(config: typeof configuration): Promise<void>;
+  request(config: typeof configuration, path: string, body?: unknown): Promise<unknown>;
+  downloadSnapshot(config: typeof configuration, protocolVersion: number): Promise<unknown>;
+};
 
 describe("smart playlist safety across storage, Community and Spotify", () => {
   beforeEach(async () => {
@@ -120,7 +124,7 @@ describe("smart playlist safety across storage, Community and Spotify", () => {
     const p = playlist({ smartPlaylistTrackUris: [localUri] });
     await seed(p, { [localUri]: rated });
     spotifyMembership([localUri, localUri]);
-    const api = Spicetify.Platform.PlaylistAPI as any;
+    const api = Spicetify.Platform.PlaylistAPI as unknown as Record<"getContents" | "remove", ReturnType<typeof vi.fn>>;
     api.getContents = vi.fn().mockResolvedValue({ items: [{ uri: localUri, uid: "first" }, { uri: localUri, uid: "duplicate" }] });
     api.remove = vi.fn().mockResolvedValue(undefined);
     vi.mocked(spotifyApiService.getAllTrackUrisInPlaylistStrict).mockResolvedValueOnce([localUri, localUri]).mockResolvedValue([localUri]);
@@ -204,6 +208,8 @@ describe("smart playlist safety across storage, Community and Spotify", () => {
     fireEvent.click(await screen.findByRole("radio", { name: label }));
     fireEvent.click(screen.getByRole("button", { name: "Save tags" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // The dialog closes as soon as the choice is saved; let the playlist check that follows finish.
+    await smartPlaylistSyncService.syncTracks({});
     expect((await indexedDBStorage.loadAllStrict()).tracks[spotifyUri].tagIds).toEqual([tagIds[1]]);
     expect((await indexedDBStorage.getAllSmartPlaylists())[0].pendingTagChoices).toEqual([]);
     expect(members()).toEqual([spotifyUri]);
@@ -214,7 +220,8 @@ describe("smart playlist safety across storage, Community and Spotify", () => {
     const p = playlist({ pendingTagChoices: [spotifyUri], smartPlaylistTrackUris: [spotifyUri], criteria: { ...criteria, includeTagClauses: [{ tagIds, excludedTagIds: [], operator: "OR" }] } });
     await seed(p);
     const members = spotifyMembership([spotifyUri]);
-    vi.mocked(storageService.saveTracks).mockResolvedValueOnce(false);
+    vi.spyOn(indexedDBStorage, "patchTracks").mockRejectedValueOnce(new Error("write failed"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const service = new SmartPlaylistSyncService();
     await expect(service.resolveTagChoice(p.playlistId, spotifyUri, { add: [tagIds[0]], remove: [] })).rejects.toThrow("could not be saved");
     expect((await indexedDBStorage.getAllSmartPlaylists())[0].pendingTagChoices).toEqual([spotifyUri]);

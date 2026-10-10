@@ -25,6 +25,7 @@ import {
 } from "@/utils/tagTaxonomy";
 import { formatTagFilterFormula } from "@/utils/tagFilterGroups";
 import {
+  parsePersonalSmartPlaylistBackup,
   SmartPlaylistImportSummary,
   SpotifyPlaylistReference,
 } from "@/features/smart-playlists/utils/smartPlaylist.import";
@@ -60,7 +61,7 @@ interface SmartPlaylistModalProps {
   onEditPlaylist: (playlist: SmartPlaylistCriteria) => void;
   onUpdateSmartPlaylists: (value: React.SetStateAction<SmartPlaylistCriteria[]>) => Promise<void>;
   onSyncPlaylist: (playlist: SmartPlaylistCriteria) => Promise<void>;
-  onExportSmartPlaylists: (selected?: SmartPlaylistCriteria[]) => Promise<void> | void;
+  onExportSmartPlaylists: (selected?: SmartPlaylistCriteria[], personalBackup?: boolean) => Promise<void> | void;
   onImportSmartPlaylists: (
     data: unknown,
     selections?: SmartPlaylistRecipeSelection[],
@@ -85,7 +86,8 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
   onClose,
 }) => {
   const mainDialog = useRef<HTMLDivElement>(null);
-  const [sharing, setSharing] = useState<{ mode: "share" } | { mode: "import"; bundle: SmartPlaylistRecipeBundle } | { mode: "create"; setup: SmartPlaylistCriteria } | null>(null);
+  const [sharing, setSharing] = useState<{ mode: "share" } | { mode: "restore"; playlists: SmartPlaylistCriteria[] } | { mode: "import"; bundle: SmartPlaylistRecipeBundle } | { mode: "create"; setup: SmartPlaylistCriteria; useExisting?: boolean } | null>(null);
+  const [backingUp, setBackingUp] = useState(false);
   const [importError, setImportError] = useState("");
   const [readingFile, setReadingFile] = useState(false);
   const [syncingPlaylists, setSyncingPlaylists] = useState<Set<string>>(
@@ -95,10 +97,6 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     Record<string, number>
   >({});
   const [isLoadingCounts, setIsLoadingCounts] = useState(false);
-  const [availableSpotifyPlaylists, setAvailableSpotifyPlaylists] = useState<
-    SpotifyPlaylistReference[]
-  >([]);
-  const [selectedBindings, setSelectedBindings] = useState<Record<string, string>>({});
   const promptHistory = usePromptHistory();
   const [manualMobileTaggingIntro, setManualMobileTaggingIntro] = useState(false);
   const [introDismissed, setIntroDismissed] = useState(false);
@@ -129,6 +127,18 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
   };
 
   const handleExportClick = () => setSharing({ mode: "share" });
+  const handleBackupClick = async () => {
+    if (backingUp) return;
+    setBackingUp(true);
+    try {
+      await onExportSmartPlaylists(smartPlaylists, true);
+    } catch (error) {
+      console.error("Smart Playlist backup failed", error);
+      Spicetify.showNotification("Your Smart Playlists couldn’t be backed up. Please try again.", true);
+    } finally {
+      setBackingUp(false);
+    }
+  };
   const handleImportClick = () => fileInputRef.current?.click();
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -136,13 +146,17 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     if (!file) return;
     setImportError("");
     if (file.size > SMART_PLAYLIST_SHARE_MAX_BYTES) {
-      setImportError("This file is too large. Ask the sender to share fewer setups at a time."); return;
+      setImportError("This file is too large. Choose a backup or share with fewer Smart Playlists."); return;
     }
     setReadingFile(true);
     const reader = new FileReader();
     reader.onload = () => {
-      try { setSharing({ mode: "import", bundle: parseSmartPlaylistShare(String(reader.result)) }); }
-      catch (error) { setImportError(error instanceof Error ? error.message : "This file couldn’t be read. Choose the original share file from Tagify."); }
+      try {
+        const content = String(reader.result);
+        const backup = parsePersonalSmartPlaylistBackup(JSON.parse(content));
+        setSharing(backup ? { mode: "restore", playlists: backup } : { mode: "import", bundle: parseSmartPlaylistShare(content) });
+      }
+      catch (error) { setImportError(error instanceof SyntaxError ? "This file couldn’t be read. Choose the original backup or share file from Tagify." : error instanceof Error ? error.message : "This file couldn’t be read. Choose the original backup or share file from Tagify."); }
       finally { setReadingFile(false); }
     };
     reader.onerror = () => { setReadingFile(false); setImportError("This file couldn’t be opened. Choose it again, or ask the sender for a new copy."); };
@@ -215,7 +229,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
           try {
             const playlistUri = `spotify:playlist:${playlist.playlistId}`;
             const metadata = await (
-              Spicetify.Platform.PlaylistAPI as any
+              Spicetify.Platform.PlaylistAPI as { getMetadata: (uri: string) => Promise<{ name?: string }> }
             ).getMetadata(playlistUri);
 
             if (metadata?.name && metadata.name !== playlist.playlistName) {
@@ -285,16 +299,6 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     const refresh = () => { void fetchCounts(); };
     window.addEventListener("tagify:dataUpdated", refresh);
     return () => { active = false; window.removeEventListener("tagify:dataUpdated", refresh); };
-  }, [smartPlaylists]);
-
-  useEffect(() => {
-    if (!smartPlaylists.length) return;
-    void spotifyApiService
-      .getAllUserPlaylistReferencesStrict()
-      .then(setAvailableSpotifyPlaylists)
-      .catch((error) =>
-        console.warn("Could not load Spotify playlists for recipe binding", error),
-      );
   }, [smartPlaylists]);
 
   const toggleSmartPlaylistActive = async (playlistId: string) => {
@@ -495,9 +499,9 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
   };
 
   if (sharing) return <SmartPlaylistSharingDialog mode={sharing.mode} taxonomy={taxonomy} playlists={smartPlaylists} tracks={tracks}
-    bundle={sharing.mode === "import" ? sharing.bundle : undefined} setup={sharing.mode === "create" ? sharing.setup : undefined}
-    onShare={(selected) => onExportSmartPlaylists(selected)} onImport={onImportSmartPlaylists}
-    onCreate={onBindRecipe ? async (setup) => { await onBindRecipe(setup); setSharing(null); } : undefined} onClose={() => setSharing(null)} />;
+    bundle={sharing.mode === "import" ? sharing.bundle : undefined} backup={sharing.mode === "restore" ? sharing.playlists : undefined} useExisting={sharing.mode === "create" && !!sharing.useExisting} setup={sharing.mode === "create" ? sharing.setup : undefined}
+    onShare={onExportSmartPlaylists} onImport={onImportSmartPlaylists}
+    onCreate={onBindRecipe ? async (setup, existingPlaylist) => { if (existingPlaylist) await onBindRecipe(setup, existingPlaylist); else await onBindRecipe(setup); setSharing(null); } : undefined} onClose={() => setSharing(null)} />;
 
   return (
     <>
@@ -559,10 +563,19 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                 </button>
 
                 <button
+                  className={`${styles.headerButton} ${styles.exportButton}`}
+                  onClick={() => void handleBackupClick()}
+                  disabled={backingUp}
+                  title="Save all your Smart Playlists to reconnect them later"
+                >
+                  {backingUp ? "Saving…" : "Backup"}
+                </button>
+
+                <button
                   className={`${styles.headerButton} ${styles.importButton}`}
                   onClick={handleImportClick}
                   disabled={readingFile}
-                  title="Add smart playlist setups that someone shared with you"
+                  title="Restore your Smart Playlists or add shared setups"
                 >
                   <FontAwesomeIcon
                     icon={faArrowUpRightFromSquare}
@@ -832,42 +845,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                               >
                                 Create Spotify Playlist
                               </button>
-                              {!playlist.source && availableSpotifyPlaylists.length > 0 ? (
-                                <>
-                                  <select
-                                    className={styles.sortSelect}
-                                    aria-label={`Spotify playlist for ${playlist.playlistName}`}
-                                    value={selectedBindings[playlist.id ?? playlist.playlistName] ?? ""}
-                                    onChange={(event) =>
-                                      setSelectedBindings((current) => ({
-                                        ...current,
-                                        [playlist.id ?? playlist.playlistName]: event.target.value,
-                                      }))
-                                    }
-                                  >
-                                    <option value="">Choose existing playlist</option>
-                                    {availableSpotifyPlaylists.map((candidate) => (
-                                      <option key={candidate.playlistId} value={candidate.playlistId}>
-                                        {candidate.playlistName}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <button
-                                    className={styles.actionButton}
-                                    disabled={!selectedBindings[playlist.id ?? playlist.playlistName]}
-                                    onClick={() => {
-                                      const selected = availableSpotifyPlaylists.find(
-                                        (candidate) =>
-                                          candidate.playlistId ===
-                                          selectedBindings[playlist.id ?? playlist.playlistName],
-                                      );
-                                      if (selected) void onBindRecipe(playlist, selected);
-                                    }}
-                                  >
-                                    Connect Existing
-                                  </button>
-                                </>
-                              ) : null}
+                              <button className={styles.actionButton} onClick={() => setSharing({ mode: "create", setup: playlist, useExisting: true })}>Use Existing Playlist</button>
                             </>
                           ) : null}
                           <button

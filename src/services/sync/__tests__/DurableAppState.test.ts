@@ -117,3 +117,17 @@ describe("durable cloud app-state boundary", () => {
       .toEqual({ account: "account-b" });
   });
 });
+
+
+it("includes automatic rules in private backups and restores them without public metadata caches", async () => {
+  const { readLocalDurableAppState, restoreLocalDurableAppState } = await import("../DurableAppState");
+  const rules = [{ id: "rule", name: "Short", enabled: false, scopes: [], conditions: [{ field: "length", max: 180 }], tagIds: ["short"], otherwiseTagIds: [] }];
+  localStorage.setItem("tagify:automaticTagRules", JSON.stringify(rules));
+  localStorage.setItem("tagify:publicTrackRuleFacts:v1", JSON.stringify({ private: 123 }));
+  const state = readLocalDurableAppState();
+  expect((state.preferences as Record<string, unknown>)["tagify:automaticTagRules"]).toEqual(rules);
+  expect((state.preferences as Record<string, unknown>)["tagify:publicTrackRuleFacts:v1"]).toBeUndefined();
+  localStorage.removeItem("tagify:automaticTagRules");
+  await restoreLocalDurableAppState(state);
+  expect(JSON.parse(localStorage.getItem("tagify:automaticTagRules")!)).toEqual(rules);
+});

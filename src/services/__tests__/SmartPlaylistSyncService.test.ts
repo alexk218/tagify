@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   storage: {
     isReady: vi.fn(() => true),
     getTracks: vi.fn(),
-    saveTracks: vi.fn(),
+    getTaxonomy: vi.fn(),
     loadAllStrict: vi.fn(),
   },
   spotifyApi: {
@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
     playlists: [] as SmartPlaylistCriteria[],
     getAllSmartPlaylists: vi.fn(),
     saveSmartPlaylists: vi.fn(),
+    patchTracks: vi.fn(),
   },
 }));
 
@@ -53,6 +54,7 @@ vi.mock("@/services/SpotifyService", () => ({
 vi.mock("@/services/sync/SyncLocalState", () => ({
   isLocalPersistencePaused: mocks.isLocalPersistencePaused,
   flushLocalPersistence: mocks.flushLocalPersistence,
+  getTagifyDatabaseName: () => "tagify-db",
 }));
 
 const criteria = {
@@ -93,6 +95,14 @@ function track(overrides: Partial<TrackData> = {}): TrackData {
   };
 }
 
+/** Songs saved by the service, in the order of its saves. */
+async function writtenTracks(): Promise<Record<string, TrackData | null>> {
+  const results = await Promise.allSettled(
+    mocks.indexed.patchTracks.mock.results.map((result) => result.value),
+  );
+  return Object.assign({}, ...results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []));
+}
+
 function savePlaylists(playlists: SmartPlaylistCriteria[]): void {
   mocks.indexed.playlists = playlists;
 }
@@ -107,6 +117,28 @@ function confirmMembershipBaseline(...playlists: SmartPlaylistCriteria[]): void 
 }
 
 describe("SmartPlaylistSyncService", () => {
+  it("does not add another confirmed release when a matching copy is already a member", async () => {
+    const a = `spotify:track:${"a".repeat(22)}`, b = `spotify:track:${"b".repeat(22)}`;
+    const recordingIdentity = { isrc: "USABC2400001", artistIds: ["c".repeat(22)], durationMs: 180000, name: "Song" };
+    const data = track({ rating: 5, energy: 6, tagIds: ["house"], recordingGroupId: "same", recordingIdentity });
+    savePlaylists([playlist({ smartPlaylistTrackUris: [a] })]);
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks: { [a]: data, [b]: data } });
+    await new SmartPlaylistSyncService().syncTracks({ [a]: data, [b]: data });
+    expect(mocks.spotifyApi.addTrackToSpotifyPlaylist).not.toHaveBeenCalled();
+    expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([a]);
+  });
+
+  it("adds one confirmed copy when a linked batch starts with no playlist members", async () => {
+    const a = `spotify:track:${"a".repeat(22)}`, b = `spotify:track:${"b".repeat(22)}`;
+    const recordingIdentity = { isrc: "USABC2400001", artistIds: ["c".repeat(22)], durationMs: 180000, name: "Song" };
+    const data = track({ rating: 5, energy: 6, tagIds: ["house"], recordingGroupId: "same", recordingIdentity });
+    savePlaylists([playlist()]);
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks: { [a]: data, [b]: data } });
+    await new SmartPlaylistSyncService().syncTracks({ [a]: data, [b]: data });
+    expect(mocks.spotifyApi.addTrackToSpotifyPlaylist).toHaveBeenCalledTimes(1);
+    expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([a]);
+  });
+
   it("keeps failed additions out of membership and explains that local edits are saved", async () => {
     const service = new SmartPlaylistSyncService();
     savePlaylists([playlist()]);
@@ -131,7 +163,20 @@ describe("SmartPlaylistSyncService", () => {
     });
     mocks.storage.isReady.mockReturnValue(true);
     mocks.storage.getTracks.mockResolvedValue(new Map());
-    mocks.storage.saveTracks.mockResolvedValue(true);
+    mocks.storage.getTaxonomy.mockResolvedValue({});
+    // Changes each song from the saved library, like the real storage.
+    mocks.indexed.patchTracks.mockImplementation(async (changes: Record<string, (current: TrackData | null) => TrackData | null | undefined>) => {
+      const { tracks } = await mocks.storage.loadAllStrict();
+      const saved: Record<string, TrackData | null> = {};
+      for (const [uri, change] of Object.entries(changes)) {
+        const next = change(tracks[uri] ? { ...tracks[uri] } : null);
+        if (next === undefined) continue;
+        saved[uri] = next;
+        if (next) tracks[uri] = next;
+        else delete tracks[uri];
+      }
+      return saved;
+    });
     mocks.storage.loadAllStrict.mockResolvedValue({
       schemaVersion: 1,
       taxonomy: {},
@@ -167,7 +212,7 @@ describe("SmartPlaylistSyncService", () => {
 
     await service.syncTrack("spotify:track:member", track());
 
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
+    expect(await writtenTracks()).toEqual({});
     expect(mocks.spotifyApi.removeTrackFromPlaylist).not.toHaveBeenCalled();
   });
 
@@ -269,7 +314,7 @@ describe("SmartPlaylistSyncService", () => {
     expect(spotifyMembers).toEqual([keptUri]);
     expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([keptUri]);
     expect(data.tracks[keptUri]).toMatchObject({ rating: 5, dateCreated: 30, dateModified: 40 });
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
+    expect(await writtenTracks()).toEqual({});
     expect(mocks.spotifyApi.addTrackToSpotifyPlaylist).not.toHaveBeenCalled();
     expect(Spicetify.showNotification).toHaveBeenCalledWith(
       "“House” removed 1 song with no saved Tagify details. If this was unexpected, restore your tags and ratings from a backup.",
@@ -300,7 +345,7 @@ describe("SmartPlaylistSyncService", () => {
     expect(retried.removedCount).toBe(1);
     expect(mocks.spotifyApi.removeTrackFromPlaylist).toHaveBeenCalledTimes(2);
     expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([]);
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
+    expect(await writtenTracks()).toEqual({});
     expect(Spicetify.showNotification).toHaveBeenCalledTimes(1);
   });
 
@@ -318,7 +363,7 @@ describe("SmartPlaylistSyncService", () => {
 
     expect(mocks.spotifyApi.removeTrackFromPlaylist).toHaveBeenCalledWith(trackUri, "playlist-1");
     expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([]);
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
+    expect(await writtenTracks()).toEqual({});
     expect(mocks.spotifyApi.addTrackToSpotifyPlaylist).not.toHaveBeenCalled();
   });
 
@@ -353,11 +398,8 @@ describe("SmartPlaylistSyncService", () => {
 
     await service.reconcileAll();
 
-    const savedTracks = mocks.storage.saveTracks.mock.calls[0][0] as Map<
-      string,
-      TrackData
-    >;
-    expect(savedTracks.get("spotify:track:member")).toMatchObject({
+    const savedTracks = await writtenTracks();
+    expect(savedTracks["spotify:track:member"]).toMatchObject({
       rating: 3,
       tagIds: ["techno"],
     });
@@ -384,11 +426,8 @@ describe("SmartPlaylistSyncService", () => {
 
     await service.reconcileAll();
 
-    const savedTracks = mocks.storage.saveTracks.mock.calls[0][0] as Map<
-      string,
-      TrackData
-    >;
-    expect(savedTracks.get("spotify:track:member")?.rating).toBe(2);
+    const savedTracks = await writtenTracks();
+    expect(savedTracks["spotify:track:member"]?.rating).toBe(2);
   });
 
   it("does not persist when new-addition criteria resolve to the original values", async () => {
@@ -430,7 +469,7 @@ describe("SmartPlaylistSyncService", () => {
 
     await service.reconcileAll();
 
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
+    expect(await writtenTracks()).toEqual({});
   });
 
   it("continues adding matching local tracks outbound", async () => {
@@ -471,7 +510,7 @@ describe("SmartPlaylistSyncService", () => {
     const summary = await service.reconcileAll();
 
     expect(summary.metadataUpdatedCount).toBe(0);
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
+    expect(await writtenTracks()).toEqual({});
     expect(mocks.spotifyApi.removeTrackFromPlaylist).not.toHaveBeenCalled();
     const persisted = mocks.indexed.playlists;
     expect(persisted[0].smartPlaylistTrackUris).toEqual([
@@ -495,8 +534,7 @@ describe("SmartPlaylistSyncService", () => {
     const summary = await service.reconcileAll();
 
     expect(summary.metadataUpdatedCount).toBe(0);
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
+    expect(await writtenTracks()).toEqual({});
     expect(mocks.spotify.getTrack).not.toHaveBeenCalled();
     expect(mocks.spotifyApi.removeTrackFromPlaylist).not.toHaveBeenCalled();
 
@@ -508,7 +546,7 @@ describe("SmartPlaylistSyncService", () => {
     const next = await service.reconcileAll();
     expect(next.removedCount).toBe(2);
     expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([]);
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
+    expect(await writtenTracks()).toEqual({});
     expect(Spicetify.showNotification).toHaveBeenCalledWith(
       "“House” removed 2 songs with no saved Tagify details. If this was unexpected, restore your tags and ratings from a backup.",
       false,
@@ -527,11 +565,8 @@ describe("SmartPlaylistSyncService", () => {
 
     await service.reconcileAll();
 
-    const savedTracks = mocks.storage.saveTracks.mock.calls[0][0] as Map<
-      string,
-      TrackData
-    >;
-    expect(savedTracks.get("spotify:track:new")).toMatchObject({
+    const savedTracks = await writtenTracks();
+    expect(savedTracks["spotify:track:new"]).toMatchObject({
       name: "Track",
       artists: "Artist",
       bpm: 126,
@@ -601,11 +636,8 @@ describe("SmartPlaylistSyncService", () => {
 
     const summary = await service.reconcileAll();
 
-    const savedTracks = mocks.storage.saveTracks.mock.calls[0][0] as Map<
-      string,
-      TrackData
-    >;
-    expect(savedTracks.get("spotify:track:new")).toMatchObject({
+    const savedTracks = await writtenTracks();
+    expect(savedTracks["spotify:track:new"]).toMatchObject({
       rating: 3,
       energy: 8,
       bpm: 91,
@@ -638,11 +670,8 @@ describe("SmartPlaylistSyncService", () => {
 
     await service.reconcileAll();
 
-    const savedTracks = mocks.storage.saveTracks.mock.calls[0][0] as Map<
-      string,
-      TrackData
-    >;
-    expect(savedTracks.get("spotify:local:Artist:Album:Track:180")).toMatchObject({
+    const savedTracks = await writtenTracks();
+    expect(savedTracks["spotify:local:Artist:Album:Track:180"]).toMatchObject({
       name: "Track",
       artists: "Artist",
       rating: 5,
@@ -669,11 +698,8 @@ describe("SmartPlaylistSyncService", () => {
 
     await service.reconcileAll();
 
-    const savedTracks = mocks.storage.saveTracks.mock.calls[0][0] as Map<
-      string,
-      TrackData
-    >;
-    expect(savedTracks.get("spotify:track:unavailable")).toMatchObject({
+    const savedTracks = await writtenTracks();
+    expect(savedTracks["spotify:track:unavailable"]).toMatchObject({
       rating: 5,
       energy: 4,
       bpm: null,
@@ -697,7 +723,7 @@ describe("SmartPlaylistSyncService", () => {
     expect(
       mocks.spotifyApi.getAllTrackUrisInPlaylistStrict,
     ).not.toHaveBeenCalled();
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
+    expect(await writtenTracks()).toEqual({});
     expect(Spicetify.showNotification).not.toHaveBeenCalled();
   });
 
@@ -714,11 +740,12 @@ describe("SmartPlaylistSyncService", () => {
     mocks.storage.getTracks.mockResolvedValue(
       new Map([["spotify:track:new", track()]]),
     );
-    mocks.storage.saveTracks.mockResolvedValue(false);
+    mocks.indexed.patchTracks.mockRejectedValue(new Error("write failed"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const service = new SmartPlaylistSyncService();
 
     await expect(service.reconcileAll()).rejects.toThrow(
-      "Failed to persist smart-playlist track criteria",
+      "Smart Playlist changes to your songs could not be saved. Please try again.",
     );
 
     expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([
@@ -782,7 +809,7 @@ describe("SmartPlaylistSyncService", () => {
     expect(
       mocks.spotifyApi.getAllTrackUrisInPlaylistStrict,
     ).not.toHaveBeenCalled();
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
+    expect(await writtenTracks()).toEqual({});
   });
 
   it("does not advance cached membership after a Spotify fetch failure", async () => {
@@ -871,7 +898,7 @@ describe("SmartPlaylistSyncService", () => {
 
       expect(result).toBe("spotify-result");
       expect(originalAdd).toHaveBeenCalledTimes(1);
-      expect(mocks.storage.saveTracks).toHaveBeenCalled();
+      expect(await writtenTracks()).toHaveProperty(["spotify:track:desktop"]);
 
       const callsAfterImmediateAdd =
         mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mock.calls.length;
@@ -903,7 +930,7 @@ describe("SmartPlaylistSyncService", () => {
 
     expect(desktopPlatform.PlaylistAPI.add).toBe(wrappedAdd);
     expect(originalAdd).toHaveBeenCalledTimes(1);
-    expect(mocks.storage.saveTracks).not.toHaveBeenCalled();
+    expect(await writtenTracks()).toEqual({});
     service.stopBackgroundReconciliation();
   });
 
@@ -1007,7 +1034,8 @@ describe("SmartPlaylistSyncService", () => {
       expect(vi.getTimerCount()).toBe(0);
     });
 
-    it("does not rewrite unchanged playlists, timestamps or broadcast updates", async () => {
+    it("does not rewrite already confirmed unchanged playlists, timestamps or broadcast updates", async () => {
+      confirmMembershipBaseline(playlist());
       const updated = vi.fn();
       window.addEventListener("tagify:smartPlaylistsUpdated", updated);
       try {
@@ -1039,7 +1067,7 @@ describe("SmartPlaylistSyncService", () => {
       service.startBackgroundReconciliation();
       await desktopPlatform.PlaylistAPI.add("spotify:playlist:playlist-1", ["spotify:track:desktop"]);
       await settle();
-      expect(mocks.storage.saveTracks).toHaveBeenCalled();
+      expect(await writtenTracks()).toHaveProperty(["spotify:track:desktop"]);
       expect(vi.getTimerCount()).toBe(0);
     });
 
@@ -1051,7 +1079,7 @@ describe("SmartPlaylistSyncService", () => {
       mocks.storage.getTracks.mockResolvedValue(new Map([["spotify:track:new", track()]]));
       setVisibility("visible");
       await settle();
-      expect(mocks.storage.saveTracks).toHaveBeenCalled();
+      expect(await writtenTracks()).toHaveProperty(["spotify:track:new"]);
       expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual(["spotify:track:new"]);
       expect(mocks.spotifyApi.getAllTrackUrisInPlaylistStrict).toHaveBeenCalledTimes(2);
     });

@@ -1,6 +1,7 @@
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
+import { savePrivateNote } from "../PrivateNotes";
 import { getTagifyDatabaseName } from "../SyncLocalState";
 import { PENDING_PAIRING_STORAGE_KEY, syncPairingService } from "../SyncPairingService";
 
@@ -105,4 +106,16 @@ describe("smart playlists across Community pairing", () => {
       { id: "five-stars", playlistId: smartPlaylist.playlistId },
     ]);
   });
+  it("keeps notes through first connection, disconnect, local editing, and reconnect", async () => {
+    const uri = "spotify:track:aaaaaaaaaaaaaaaaaaaaaa";
+    await savePrivateNote(uri, "Before connecting", "");
+    await connect();
+    expect((await indexedDBStorage.getPrivateNotes())[0].text).toBe("Before connecting");
+    await syncPairingService.unlinkLocal();
+    expect((await indexedDBStorage.getPrivateNotes())[0].text).toBe("Before connecting");
+    await savePrivateNote(uri, "Edited while disconnected", "Before connecting");
+    await connect();
+    expect((await indexedDBStorage.getPrivateNotes())[0]).toMatchObject({ text: "Edited while disconnected", dirty: true });
+  });
+
 });

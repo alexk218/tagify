@@ -1,8 +1,6 @@
+import { TrackInsightStats, type PlaylistTrackInsights } from "@/features/track-insights";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, ListPlus, RefreshCw, X } from "lucide-react";
-import ReactStars from "react-rating-stars-component";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faStar, faStarHalf } from "@fortawesome/free-solid-svg-icons";
+import { ExternalLink, ListPlus, RefreshCw } from "lucide-react";
 import {
   AlbumTrackSummary,
   BatchTagUpdate,
@@ -15,11 +13,13 @@ import {
   compareResolvedTagsByTaxonomyOrder,
 } from "@/utils/tagTaxonomy";
 import { formatCondensedDate, formatTimestamp } from "@/utils/formatters";
+import type { PlaylistMetadata, TrackMetadata } from "@/features/tag-data";
 import {
-  buildTagAccentCssVars,
-  type PlaylistMetadata,
-  type TrackMetadata,
-} from "@/features/tag-data";
+  EntityDetailsCard,
+  EntityIconButton,
+  EntityOwnValues,
+  type EntityMetaItem,
+} from "@/features/entity-views";
 import { CommunityEntityLens, getCommunityEntityUrl } from "@/features/community";
 import { useAlbumTrackTotals } from "../hooks/useAlbumTrackTotals";
 import { albumTrackTotalsStore } from "../services/albumTrackTotals";
@@ -33,12 +33,15 @@ interface PlaylistDetailsProps {
   playlistData?: PlaylistData;
   playlistMetadata?: PlaylistMetadata | null;
   albumTrackSummary?: AlbumTrackSummary;
+  playlistTrackInsights?: PlaylistTrackInsights;
+  onRefreshTrackInsights?: () => void;
   tracks: Record<string, TrackData>;
   taxonomy: TagTaxonomy;
   activeTagFilters: string[];
   excludedTagFilters: string[];
   onSetRating: (rating: number) => void;
   onSetEnergy: (energy: number) => void;
+  onAddTag: (tagId: string) => void;
   onRemoveTag: (tagId: string) => void;
   onToggleTagIncludeOff: (tagId: string) => void;
   onOpenPlaylist: (playlistUri: string) => void;
@@ -67,12 +70,15 @@ const PlaylistDetails: React.FC<PlaylistDetailsProps> = ({
   playlistData,
   playlistMetadata,
   albumTrackSummary,
+  playlistTrackInsights,
+  onRefreshTrackInsights,
   tracks,
   taxonomy,
   activeTagFilters,
   excludedTagFilters,
   onSetRating,
   onSetEnergy,
+  onAddTag,
   onRemoveTag,
   onToggleTagIncludeOff,
   onOpenPlaylist,
@@ -112,13 +118,13 @@ const PlaylistDetails: React.FC<PlaylistDetailsProps> = ({
   const description =
     playlistData?.description ?? playlistMetadata?.description ?? null;
   const releaseYear = isAlbum ? getReleaseYear(description) : null;
-  const knownTrackCount = playlistMetadata?.trackCount ?? playlistData?.trackCount ?? null;
+  const knownTrackCount = (!isAlbum ? playlistTrackInsights?.listedTrackCount : undefined) ?? playlistMetadata?.trackCount ?? playlistData?.trackCount ?? null;
   const albumUrisToLookUp = useMemo(
     () => (isAlbum && !isTrackTotal(knownTrackCount) ? [playlistUri] : NO_ALBUMS_TO_LOOK_UP),
     [isAlbum, knownTrackCount, playlistUri],
   );
   const albumTrackTotals = useAlbumTrackTotals(albumUrisToLookUp);
-  const trackCount = isTrackTotal(knownTrackCount)
+  const trackCount = (!isAlbum && knownTrackCount === 0) ? 0 : isTrackTotal(knownTrackCount)
     ? knownTrackCount
     : isAlbum
       ? (albumTrackTotals[playlistUri] ?? null)
@@ -151,34 +157,6 @@ const PlaylistDetails: React.FC<PlaylistDetailsProps> = ({
     setIsApplyDialogOpen(false);
   }, [playlistUri]);
 
-  const handleOpenPlaylist = () => {
-    onOpenPlaylist(playlistUri);
-  };
-
-  const handleOpenPlaylistKeyDown = (
-    event: React.KeyboardEvent<HTMLElement>,
-  ) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      handleOpenPlaylist();
-    }
-  };
-
-  const handleEnergyInput = (event: React.ChangeEvent<HTMLInputElement>) => {
-    onSetEnergy(parseInt(event.target.value, 10));
-  };
-
-  const handleEnergyClick = (event: React.MouseEvent<HTMLInputElement>) => {
-    const sliderElement = event.currentTarget;
-    const rect = sliderElement.getBoundingClientRect();
-    const clickPosition = event.clientX - rect.left;
-    const sliderWidth = rect.width;
-    const percentage = clickPosition / sliderWidth;
-    const energyValue = Math.max(1, Math.min(10, Math.round(1 + percentage * 9)));
-
-    onSetEnergy(energyValue);
-  };
-
   const dateTitle = [
     playlistData?.dateCreated
       ? `First tagged ${formatTimestamp(playlistData.dateCreated)}`
@@ -190,73 +168,41 @@ const PlaylistDetails: React.FC<PlaylistDetailsProps> = ({
     .filter(Boolean)
     .join("\n");
 
+  const meta: EntityMetaItem[] = [
+    ...(ownerName ? [{ key: "owner", content: ownerName }] : []),
+    ...(releaseYear ? [{ key: "year", content: releaseYear }] : []),
+    ...(trackCount !== null
+      ? [{ key: "tracks", content: `${trackCount} ${trackCount === 1 ? "track" : "tracks"}` }]
+      : []),
+    ...(playlistData?.dateModified
+      ? [{
+          key: "updated",
+          content: `Updated ${formatCondensedDate(playlistData.dateModified)}`,
+          title: dateTitle,
+        }]
+      : []),
+  ];
+  // Community links appear only once the album has perspectives to show.
+  const communityLinkUrl =
+    communityUrl && communityAvailability?.entityUri === playlistUri && communityAvailability.hasPerspectives
+      ? communityUrl
+      : null;
+
   return (
-    <section className={styles.container}>
-      <div className={styles.header}>
-        {imageUrl ? (
-          <img
-            src={imageUrl}
-            alt={`${displayName} cover`}
-            className={`${styles.cover} ${
-              isAlbum ? styles.albumCover : styles.playlistCover
-            } ${styles.clickableCover}`}
-            onClick={handleOpenPlaylist}
-            onKeyDown={handleOpenPlaylistKeyDown}
-            role="button"
-            tabIndex={0}
-            title={`Open ${entityLabelLower} in Spotify`}
-          />
-        ) : (
-          <div
-            className={`${styles.cover} ${styles.coverPlaceholder} ${
-              isAlbum ? styles.albumCover : styles.playlistCover
-            } ${styles.clickableCover}`}
-            onClick={handleOpenPlaylist}
-            onKeyDown={handleOpenPlaylistKeyDown}
-            role="button"
-            tabIndex={0}
-            title={`Open ${entityLabelLower} in Spotify`}
-          >
-            ♪
-          </div>
-        )}
-
-        <div className={styles.titleBlock}>
-          <p className={styles.eyebrow}>{entityLabel}</p>
-          <h2
-            className={`${styles.title} ${styles.clickableTitle}`}
-            onClick={handleOpenPlaylist}
-            onKeyDown={handleOpenPlaylistKeyDown}
-            role="button"
-            tabIndex={0}
-            title={`Open ${entityLabelLower} in Spotify`}
-          >
-            {displayName}
-          </h2>
-          <p className={styles.meta}>
-            {ownerName ? <span>{ownerName}</span> : null}
-            {releaseYear ? <span>{releaseYear}</span> : null}
-            {trackCount !== null ? (
-              <span>
-                {trackCount} {trackCount === 1 ? "track" : "tracks"}
-              </span>
-            ) : null}
-            {playlistData?.dateModified ? (
-              <span title={dateTitle}>
-                Updated {formatCondensedDate(playlistData.dateModified)}
-              </span>
-            ) : null}
-          </p>
-          {!isAlbum && description ? (
-            <p className={styles.description}>{description}</p>
-          ) : null}
-        </div>
-
-        <div className={styles.actions}>
-          {communityUrl && communityAvailability?.entityUri === playlistUri && communityAvailability.hasPerspectives ? (
+    <EntityDetailsCard
+      kind={isAlbum ? "album" : "playlist"}
+      name={displayName}
+      imageUrl={imageUrl}
+      meta={meta}
+      description={!isAlbum ? description : null}
+      openTitle={`Open ${entityLabelLower} in Spotify`}
+      onOpen={() => onOpenPlaylist(playlistUri)}
+      actions={communityLinkUrl || !isAlbum ? (
+        <>
+          {communityLinkUrl ? (
             <a
               className={communityLinkStyles.communityLink}
-              href={communityUrl}
+              href={communityLinkUrl}
               target="_blank"
               rel="noopener noreferrer"
               title="Open this album in Tagify Community"
@@ -266,158 +212,46 @@ const PlaylistDetails: React.FC<PlaylistDetailsProps> = ({
             </a>
           ) : null}
           {!isAlbum ? (
-            <button
-              className={styles.iconButton}
+            <EntityIconButton
+              label="Refresh playlist details from Spotify"
               onClick={() => onRefreshMetadata(playlistUri)}
-              title="Refresh playlist details from Spotify"
-              aria-label="Refresh playlist details from Spotify"
             >
               <RefreshCw size={14} aria-hidden="true" />
-            </button>
+            </EntityIconButton>
           ) : null}
-        </div>
-      </div>
-
-      <div className={styles.ownValues}>
-        <div className={styles.controlsRow}>
-          <div className={styles.controlSection}>
-            <label className={styles.label}>
-              {entityLabel} rating
-              {rating > 0 ? <span className={styles.ratingValue}>{rating}</span> : null}
-            </label>
-            <div className={styles.ratingContainer}>
-              <div className={styles.stars} key={`playlist-stars-${rating}`}>
-                <ReactStars
-                  count={5}
-                  value={rating}
-                  onChange={(newRating: number) => onSetRating(newRating)}
-                  size={24}
-                  isHalf={true}
-                  emptyIcon={<FontAwesomeIcon icon={faStar} />}
-                  halfIcon={<FontAwesomeIcon icon={faStarHalf} />}
-                  fullIcon={<FontAwesomeIcon icon={faStar} />}
-                  activeColor="#ffd700"
-                  color="var(--spice-button-disabled)"
-                />
-              </div>
-
-              {rating > 0 ? (
-                <button
-                  className={styles.clearButton}
-                  onClick={() => onSetRating(0)}
-                  aria-label={`Clear ${entityLabelLower} rating`}
-                >
-                  Clear
-                </button>
-              ) : null}
-            </div>
-          </div>
-
-          <div className={styles.controlSection}>
-            <label className={styles.label}>
-              {entityLabel} energy
-              {energy > 0 ? <span className={styles.energyValue}>{energy}</span> : null}
-            </label>
-            <div className={styles.energyContainer}>
-              <input
-                type="range"
-                min="1"
-                max="10"
-                value={energy || 5}
-                data-is-set={energy > 0 ? "true" : "false"}
-                className={`${styles.energySlider} ${
-                  energy === 0 ? styles.energySliderUnset : ""
-                }`}
-                onChange={handleEnergyInput}
-                onClick={handleEnergyClick}
-                onDoubleClick={() => onSetEnergy(0)}
-                aria-label={`${entityLabel} energy`}
-              />
-              {energy > 0 ? (
-                <button
-                  className={styles.clearButton}
-                  onClick={() => onSetEnergy(0)}
-                  aria-label={`Clear ${entityLabelLower} energy`}
-                >
-                  Clear
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-
-        <div className={styles.tagsRow}>
-          <span className={styles.rowLabel}>{entityLabel} tags</span>
-          {sortedTags.length > 0 ? (
-            <div className={styles.tags} aria-label={`${entityLabel} tags`}>
-              {sortedTags.map((tag) => {
-                const isActive = activeTagFilters.includes(tag.id);
-                const isExcluded = excludedTagFilters.includes(tag.id);
-
-                return (
-                  <span
-                    key={tag.id}
-                    className={`${styles.tag} ${
-                      tag.tag.accentId ? styles.tagAccented : ""
-                    } ${isActive ? styles.tagActive : ""} ${
-                      isExcluded ? styles.tagExcluded : ""
-                    }`}
-                    style={buildTagAccentCssVars(
-                      tag.tag.accentId ?? null,
-                      customAccentsById,
-                    )}
-                  >
-                    <button
-                      className={styles.tagLabelButton}
-                      onClick={() => onToggleTagIncludeOff(tag.id)}
-                      aria-label={
-                        isActive || isExcluded
-                          ? `Remove "${tag.name}" filter`
-                          : `Include "${tag.name}"`
-                      }
-                      title={
-                        isActive || isExcluded
-                          ? `Remove "${tag.name}" from ${entityLabelLower} filters`
-                          : `Filter ${entityLabelLower}s by "${tag.name}"`
-                      }
-                    >
-                      {tag.name}
-                    </button>
-                    <button
-                      className={styles.removeTag}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onRemoveTag(tag.id);
-                      }}
-                      title={`Remove "${tag.name}" from this ${entityLabelLower}`}
-                      aria-label={`Remove "${tag.name}" from this ${entityLabelLower}`}
-                    >
-                      <X size={12} aria-hidden="true" />
-                    </button>
-                  </span>
-                );
-              })}
-            </div>
-          ) : (
-            <span className={styles.noTags}>None yet. Choose tags below.</span>
-          )}
-
-          {canApplyToTracks ? (
-            <button
-              className={styles.applyButton}
-              onClick={() => setIsApplyDialogOpen(true)}
-              title={`Copy this ${entityLabelLower}'s tags, rating, and energy to its tracks`}
-            >
-              <ListPlus size={15} aria-hidden="true" />
-              <span>Apply to tracks…</span>
-            </button>
-          ) : null}
-        </div>
-      </div>
+        </>
+      ) : null}
+    >
+      <EntityOwnValues
+        uri={playlistUri}
+        entityLabel={entityLabel}
+        rating={rating}
+        energy={energy}
+        onSetRating={onSetRating}
+        onSetEnergy={onSetEnergy}
+        tags={sortedTags}
+        customAccentsById={customAccentsById}
+        activeTagFilters={activeTagFilters}
+        excludedTagFilters={excludedTagFilters}
+        onToggleTagFilter={onToggleTagIncludeOff}
+        onRemoveTag={onRemoveTag}
+        tagsAction={canApplyToTracks ? (
+          <button
+            type="button"
+            className={styles.applyButton}
+            onClick={() => setIsApplyDialogOpen(true)}
+            title={`Copy this ${entityLabelLower}'s tags, rating, and energy to its tracks`}
+          >
+            <ListPlus size={15} aria-hidden="true" />
+            <span>Apply to tracks…</span>
+          </button>
+        ) : null}
+      />
 
       {isAlbum ? (
         <AlbumTrackInsights
           albumUri={playlistUri}
+          taxonomy={taxonomy}
           tracks={tracks}
           onTagTrack={onTagTrack}
           onRateTrack={(trackUri, rating, track) =>
@@ -432,12 +266,20 @@ const PlaylistDetails: React.FC<PlaylistDetailsProps> = ({
           totalTrackCount={trackCount}
           resolvedLookup={resolvedLookup}
           customAccentsById={customAccentsById}
-          activeTagFilters={activeTagFilters}
-          excludedTagFilters={excludedTagFilters}
-          onToggleTagIncludeOff={onToggleTagIncludeOff}
+          appliedTagIds={playlistData?.tagIds}
+          onAddTag={onAddTag}
         />
-      ) : null}
-
+      ) : (
+        <TrackInsightStats
+          summary={playlistTrackInsights?.summary}
+          playlist={playlistTrackInsights}
+          onRefresh={onRefreshTrackInsights}
+          taxonomy={taxonomy}
+          appliedTagIds={playlistData?.tagIds}
+          onAddTag={onAddTag}
+          entityLabel="playlist"
+        />
+      )}
       {isAlbum ? <CommunityEntityLens entityUri={playlistUri} onAvailabilityChange={handleCommunityAvailability} /> : null}
 
       {isApplyDialogOpen ? (
@@ -462,7 +304,7 @@ const PlaylistDetails: React.FC<PlaylistDetailsProps> = ({
           onClose={() => setIsApplyDialogOpen(false)}
         />
       ) : null}
-    </section>
+    </EntityDetailsCard>
   );
 };
 

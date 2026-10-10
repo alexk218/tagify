@@ -1,4 +1,5 @@
 .container {
+  container-type: inline-size;
   background: var(--spice-card);
   border-radius: 8px;
   padding: 16px;
@@ -179,6 +180,7 @@
 .trackItemRating {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 /* Rating filters */
@@ -1057,6 +1059,8 @@
 .trackItemTextInfo {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .actionButton {
@@ -1566,6 +1570,28 @@
 }
 
 @media (width <= 768px) {
+  .filterControlsGrid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "left" "center" "right";
+  }
+
+  .filterControlsCenterGrid {
+    justify-self: start;
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+
+  .filterControlsRightGrid {
+    justify-self: stretch;
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .searchBox {
+    min-width: 0;
+    max-width: none;
+  }
+
   .header {
     flex-direction: column;
     align-items: stretch;
@@ -1585,5 +1611,49 @@
     width: 100%;
     justify-content: center;
     display: flex;
+  }
+}
+
+@container (width <= 600px) {
+  .filterControlsGrid {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .filterControlsLeftGrid {
+    flex: 1 1 auto;
+  }
+
+  .filterControlsCenterGrid {
+    flex-wrap: wrap;
+  }
+
+  .filterControlsRightGrid {
+    width: 100%;
+    margin-right: 0;
+    justify-content: flex-start;
+  }
+
+  .searchBox {
+    max-width: none;
+    min-width: 0;
+  }
+
+  .title {
+    white-space: nowrap;
+  }
+
+  .trackItemInfo {
+    gap: 8px;
+  }
+
+  .trackItemFixedMeta {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .trackItemTimestampsInline {
+    flex-basis: 100%;
+    margin-left: 0;
   }
 }

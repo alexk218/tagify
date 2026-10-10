@@ -1,0 +1,57 @@
+import React from "react";
+import { IDBFactory } from "fake-indexeddb";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { PrivateNote } from "../PrivateNote";
+import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
+import { mergeRemotePrivateNotes } from "@/services/sync/PrivateNotes";
+const uri = `spotify:artist:${"a".repeat(22)}`;
+beforeEach(async () => { indexedDBStorage.resetConnection(); vi.stubGlobal("indexedDB", new IDBFactory()); await indexedDBStorage.init(); });
+afterEach(() => { indexedDBStorage.resetConnection(); localStorage.clear(); vi.unstubAllGlobals(); });
+it("keeps an unsaved draft after navigation, saves on request, and shows a concurrent copy before replacement", async () => {
+  let page = render(<PrivateNote uri={uri} />);
+  fireEvent.click(screen.getByText(/^Private note/));
+  await waitFor(() => expect(screen.getByLabelText("Private note")).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("Private note"), { target: { value: "Private artist memory" } });
+  page.unmount();
+  page = render(<PrivateNote uri={uri} />); fireEvent.click(screen.getByText(/^Private note/));
+  await waitFor(() => expect(screen.getByLabelText("Private note")).toHaveValue("Private artist memory"));
+  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save note" })).toBeDisabled());
+  await mergeRemotePrivateNotes([{ uri, text: "Other device memory", revision: 1, updatedAt: "2026-10-08T00:00:00Z" }]);
+  await waitFor(() => expect(screen.getByLabelText("Other saved note")).toHaveValue("Other device memory"));
+  expect(screen.getByLabelText("Private note")).toHaveValue("Private artist memory");
+  fireEvent.click(screen.getByRole("button", { name: "Use other saved note" }));
+  await waitFor(() => expect(screen.getByLabelText("Private note")).toHaveValue("Other device memory"));
+});
+it("shows a compact inline editor without a disclosure, saves on blur, and preserves track ordering", async () => {
+  const track = `spotify:track:${"b".repeat(22)}`;
+  await indexedDBStorage.saveTrack(track, { rating: 4, energy: 6, bpm: null, tagIds: [], dateModified: 50 });
+  render(<PrivateNote uri={track} inline />);
+  await waitFor(() => expect(screen.getByLabelText("Private note")).toBeEnabled());
+  expect(document.querySelector("details")).toBeNull();
+  expect(screen.queryByText("Only you")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Private note")).toHaveAttribute("rows", "1");
+  const longText = "A long memory. ".repeat(200);
+  fireEvent.change(screen.getByLabelText("Private note"), { target: { value: longText } });
+  fireEvent.blur(screen.getByLabelText("Private note"));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"));
+  expect((await indexedDBStorage.getPrivateNote(track))!.text).toBe(longText);
+  expect((await indexedDBStorage.getTrack(track))!.dateModified).toBe(50);
+  expect(screen.getByLabelText("Private note").style.height).toBe("32px");
+});
+
+it("keeps an inline draft after a failed blur save and makes retry available", async () => {
+  render(<PrivateNote uri={uri} inline />);
+  await waitFor(() => expect(screen.getByLabelText("Private note")).toBeEnabled());
+  const failure = vi.spyOn(indexedDBStorage, "mutatePrivateNotes").mockRejectedValueOnce(new Error("Your note couldn't be saved. Try again."));
+  fireEvent.change(screen.getByLabelText("Private note"), { target: { value: "Keep this draft" } });
+  fireEvent.blur(screen.getByLabelText("Private note"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("couldn't be saved");
+  expect(screen.getByLabelText("Private note")).toHaveValue("Keep this draft");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save note" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"));
+  expect((await indexedDBStorage.getPrivateNote(uri))!.text).toBe("Keep this draft");
+  failure.mockRestore();
+});

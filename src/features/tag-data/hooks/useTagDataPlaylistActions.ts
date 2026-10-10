@@ -77,49 +77,63 @@ export function useTagDataPlaylistActions({
     [],
   );
 
+  // Looking up details can take a moment; the library is read again after
+  // the lookup so edits made meanwhile are kept, and a playlist created by an
+  // overlapping edit is not created twice.
   const getOrCreatePlaylistData = useCallback(
     async (
       playlistUriOrId: string,
       providedMetadata?: PlaylistMetadata,
     ): Promise<{ playlistUri: string; currentData: TagDataStructure }> => {
       const playlistUri = normalizePlaylistUri(playlistUriOrId);
+      const existingPlaylist = latestTagDataRef.current.playlists[playlistUri];
+      const needsMetadata = !existingPlaylist || needsPlaylistMetadataHydration(playlistUri, existingPlaylist);
+      const metadata = needsMetadata ? providedMetadata || (await getPlaylistMetadata(playlistUri)) : null;
       const now = Date.now();
       const currentData = latestTagDataRef.current;
-      const existingPlaylist = currentData.playlists[playlistUri];
+      const latest = currentData.playlists[playlistUri];
 
-      if (!existingPlaylist) {
-        const metadata = providedMetadata || (await getPlaylistMetadata(playlistUri));
+      if (!latest) {
         const nextData: TagDataStructure = {
           ...currentData,
-          playlists: {
-            ...currentData.playlists,
-            [playlistUri]: createInitialPlaylistData(now, metadata),
-          },
+          playlists: { ...currentData.playlists, [playlistUri]: createInitialPlaylistData(now, metadata ?? undefined) },
         };
-
         commitDataSnapshot(nextData);
         return { playlistUri, currentData: nextData };
       }
 
-      if (needsPlaylistMetadataHydration(playlistUri, existingPlaylist)) {
-        const metadata = providedMetadata || (await getPlaylistMetadata(playlistUri));
-        if (metadata) {
-          const nextData: TagDataStructure = {
-            ...currentData,
-            playlists: {
-              ...currentData.playlists,
-              [playlistUri]: withPlaylistMetadata(existingPlaylist, metadata, now),
-            },
-          };
-
-          commitDataSnapshot(nextData);
-          return { playlistUri, currentData: nextData };
-        }
+      if (metadata && needsPlaylistMetadataHydration(playlistUri, latest)) {
+        const nextData: TagDataStructure = {
+          ...currentData,
+          playlists: { ...currentData.playlists, [playlistUri]: withPlaylistMetadata(latest, metadata, now) },
+        };
+        commitDataSnapshot(nextData);
+        return { playlistUri, currentData: nextData };
       }
 
       return { playlistUri, currentData };
     },
     [commitDataSnapshot, getPlaylistMetadata, latestTagDataRef],
+  );
+
+  // Suggestions use already displayed metadata and only add; repeated clicks are harmless.
+  const addTagPlaylist = useCallback(
+    (playlistUriOrId: string, tagId: string, metadata?: PlaylistMetadata) => {
+      const currentData = latestTagDataRef.current;
+      if (!buildValidTagIdSet(currentData.taxonomy).has(tagId)) return;
+      const uri = normalizePlaylistUri(playlistUriOrId);
+      const existing = currentData.playlists[uri];
+      if (existing?.tagIds.includes(tagId)) return;
+      const now = Date.now();
+      const entity = existing ?? createInitialPlaylistData(now, metadata);
+      const { nextData } = commitPlaylistMutation(currentData, uri, {
+        ...entity,
+        tagIds: [...entity.tagIds, tagId],
+        dateModified: now,
+      });
+      commitDataSnapshot(nextData);
+    },
+    [commitDataSnapshot, latestTagDataRef],
   );
 
   const toggleTagPlaylist = useCallback(
@@ -128,10 +142,11 @@ export function useTagDataPlaylistActions({
       tagId: string,
       metadata?: PlaylistMetadata,
     ) => {
-      const { playlistUri, currentData } = await getOrCreatePlaylistData(
+      const { playlistUri } = await getOrCreatePlaylistData(
         playlistUriOrId,
         metadata,
       );
+      const currentData = latestTagDataRef.current;
       const playlistData = currentData.playlists[playlistUri];
 
       if (!playlistData) {
@@ -153,9 +168,9 @@ export function useTagDataPlaylistActions({
   const refreshPlaylistMetadata = useCallback(
     async (playlistUriOrId: string): Promise<PlaylistData | null> => {
       const playlistUri = normalizePlaylistUri(playlistUriOrId);
+      const metadata = await getPlaylistMetadata(playlistUri);
       const currentData = latestTagDataRef.current;
       const playlistData = currentData.playlists[playlistUri];
-      const metadata = await getPlaylistMetadata(playlistUri);
 
       if (!playlistData || !metadata) {
         return playlistData || null;
@@ -183,10 +198,11 @@ export function useTagDataPlaylistActions({
       rating: number,
       metadata?: PlaylistMetadata,
     ) => {
-      const { playlistUri, currentData } = await getOrCreatePlaylistData(
+      const { playlistUri } = await getOrCreatePlaylistData(
         playlistUriOrId,
         metadata,
       );
+      const currentData = latestTagDataRef.current;
       const playlistData = currentData.playlists[playlistUri];
 
       if (!playlistData) {
@@ -211,10 +227,11 @@ export function useTagDataPlaylistActions({
       energy: number,
       metadata?: PlaylistMetadata,
     ) => {
-      const { playlistUri, currentData } = await getOrCreatePlaylistData(
+      const { playlistUri } = await getOrCreatePlaylistData(
         playlistUriOrId,
         metadata,
       );
+      const currentData = latestTagDataRef.current;
       const playlistData = currentData.playlists[playlistUri];
 
       if (!playlistData) {
@@ -256,6 +273,7 @@ export function useTagDataPlaylistActions({
   );
 
   return {
+    addTagPlaylist,
     toggleTagPlaylist,
     setPlaylistRating,
     setPlaylistEnergy,

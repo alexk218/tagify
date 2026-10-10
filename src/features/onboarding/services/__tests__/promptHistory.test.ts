@@ -114,4 +114,46 @@ describe("account prompt history", () => {
     expect(store.getSnapshot().accountDigest).toBe(b);
   });
 
+  it("stops syncing once Community has confirmed both dismissals, even after a restart", async () => {
+    const both = { mobileTaggingIntroSeen: true, discoverySurveyDismissed: true };
+    const request = vi.fn(async () => response(both));
+    const { store } = start(undefined, request);
+    await waitFor(() => expect(store.getSnapshot().ready).toBe(true));
+    expect(request).toHaveBeenCalledTimes(1);
+
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 24 * 60 * 60_000);
+    await store.refresh();
+    store.markSeen("mobileTaggingIntroSeen");
+    document.dispatchEvent(new Event("visibilitychange"));
+    const restarted = start(undefined, request).store;
+    await waitFor(() => expect(restarted.getSnapshot()).toEqual({ accountDigest: a, ready: true, ...both }));
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps syncing while Community has not confirmed a dismissal", async () => {
+    const request = vi.fn(async () => response({ mobileTaggingIntroSeen: true, discoverySurveyDismissed: false }));
+    const { store } = start(undefined, request);
+    await waitFor(() => expect(store.getSnapshot().ready).toBe(true));
+    store.markSeen("discoverySurveyDismissed");
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  });
+
+  it("honors a rate limit and does not restart retries when Spotify is shown again", async () => {
+    vi.useFakeTimers();
+    try {
+      const request = vi.fn(async () => new Response(JSON.stringify({ recorded: false }), { status: 429, headers: { "Retry-After": "600" } }));
+      const { store } = start(undefined, request);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request).toHaveBeenCalledTimes(1);
+      for (let index = 0; index < 5; index++) document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(599_000);
+      expect(request).toHaveBeenCalledTimes(1);
+      request.mockImplementation(async () => response());
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(store.getSnapshot().ready).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

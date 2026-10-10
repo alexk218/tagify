@@ -199,9 +199,11 @@ export async function runMetadataBackfill({ batchDelayMs = 1000, maxTracksPerRun
 
     await Promise.all(
       batch.map(async ([uri]) => {
+        // Lookups can take seconds while the user keeps tagging. Only the
+        // details filled here are saved; tags and ratings are never touched.
+        const currentTrack = { ...tagData.tracks[uri] };
         try {
           let updated = false;
-          const currentTrack = tagData.tracks[uri];
 
           if ((!currentTrack.name || !currentTrack.artists || !currentTrack.albumUri || !currentTrack.albumName || !currentTrack.albumImageUrl) && (currentTrack.albumBackfillAttempts || 0) < MAX_BACKFILL_ATTEMPTS) {
             const info = await spotifyService.getTrack(uri);
@@ -291,7 +293,6 @@ export async function runMetadataBackfill({ batchDelayMs = 1000, maxTracksPerRun
             updatedTracks.set(uri, { ...currentTrack });
           }
         } catch (error) {
-          const currentTrack = tagData.tracks[uri];
           const currentAttempts = currentTrack.backfillAttempts || 0;
           currentTrack.backfillAttempts = currentAttempts + 1;
           updatedCount += 1;
@@ -305,7 +306,7 @@ export async function runMetadataBackfill({ batchDelayMs = 1000, maxTracksPerRun
     );
 
     if (updatedTracks.size > 0) {
-      await storageService.saveTracks(updatedTracks);
+      await storageService.saveTracks(updatedTracks, tagData.tracks, { keepConcurrentChanges: true });
     }
     onProgress?.({ processed: Math.min(index + BATCH_SIZE, tracksToBackfill.length), total: tracksToBackfill.length, updated: updatedCount, remaining });
     if (batchDelayMs > 0 && index + BATCH_SIZE < tracksToBackfill.length) {
@@ -340,7 +341,7 @@ export async function runMetadataBackfill({ batchDelayMs = 1000, maxTracksPerRun
     );
 
     if (updatedPlaylists.size > 0) {
-      await storageService.savePlaylists(updatedPlaylists);
+      await storageService.savePlaylists(updatedPlaylists, tagData.playlists, { keepConcurrentChanges: true });
     }
   }
 
@@ -365,7 +366,7 @@ export async function runMetadataBackfill({ batchDelayMs = 1000, maxTracksPerRun
     );
 
     if (updatedArtists.size > 0) {
-      await storageService.saveArtists(updatedArtists);
+      await storageService.saveArtists(updatedArtists, tagData.artists, { keepConcurrentChanges: true });
     }
   }
 

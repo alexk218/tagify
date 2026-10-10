@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import styles from "./UpdateBanner.module.css";
 import { UpdateInfo } from "@/services/VersionCheckerService";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -12,6 +12,12 @@ import {
   faCopy,
 } from "@fortawesome/free-solid-svg-icons";
 import { faGithub } from "@fortawesome/free-brands-svg-icons";
+
+import {
+  findMacInstallerDownload,
+  INSTALLER_RELEASES_API,
+  INSTALLER_RELEASES_URL,
+} from "../utils/installerDownloads";
 
 interface UpdateBannerProps {
   updateInfo: UpdateInfo;
@@ -48,25 +54,68 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
 }) => {
   const currentOS = detectOS();
   const isMac = currentOS === "mac";
+  const hasInstaller = currentOS !== "linux";
   const defaultUpdateTab: UpdateTab = isMac
-    ? "manual-install"
-    : "have-installer";
+    ? "need-installer"
+    : hasInstaller ? "have-installer" : "manual-install";
   const [expandedSection, setExpandedSection] = useState<ExpandedSection>(null);
   const [activeTab, setActiveTab] = useState<UpdateTab>(defaultUpdateTab);
   const [isAnimating, setIsAnimating] = useState(false);
   const [copiedCommand, setCopiedCommand] = useState(false);
 
+  const [macInstallerUrl, setMacInstallerUrl] = useState<string | null>(null);
+  const [findingMacInstaller, setFindingMacInstaller] = useState(false);
+  const [macInstallerFailed, setMacInstallerFailed] = useState(false);
+  const showMacDownload = isMac && expandedSection === "update" && activeTab === "need-installer";
+
+  useEffect(() => {
+    if (!showMacDownload || macInstallerUrl) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    setFindingMacInstaller(true);
+    setMacInstallerFailed(false);
+
+    const findDownload = async () => {
+      try {
+        const response = await fetch(INSTALLER_RELEASES_API, { signal: controller.signal });
+        if (!response.ok) throw new Error("Installer releases unavailable");
+        const url = findMacInstallerDownload(await response.json());
+        if (!url) throw new Error("No stable Mac installer found");
+        if (!cancelled) setMacInstallerUrl(url);
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Could not find the Mac installer:", error);
+          setMacInstallerFailed(true);
+        }
+      } finally {
+        clearTimeout(timeout);
+        if (!cancelled) setFindingMacInstaller(false);
+      }
+    };
+    void findDownload();
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [showMacDownload, macInstallerUrl]);
+
   const handleDownloadInstaller = () => {
     window.open(
-      "https://github.com/alexk218/tagify-installer/releases/latest",
-      "_blank"
+      isMac ? INSTALLER_RELEASES_URL : `${INSTALLER_RELEASES_URL}/latest`,
+      "_blank",
+      "noopener,noreferrer"
     );
   };
 
   const handleDirectDownload = () => {
     window.open(
-      "https://github.com/alexk218/tagify-installer/releases/latest/download/TagifyInstaller.exe",
-      "_blank"
+      isMac
+        ? macInstallerUrl ?? INSTALLER_RELEASES_URL
+        : `${INSTALLER_RELEASES_URL}/latest/download/TagifyInstaller.exe`,
+      "_blank",
+      "noopener,noreferrer"
     );
   };
 
@@ -133,7 +182,9 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
               )}
             </div>
             <p className={styles.subtitle}>
-              New features and improvements are ready for you.
+              {isMac
+                ? "Use the Mac installer to update Tagify and Spicetify easily."
+                : "New features and improvements are ready for you."}
             </p>
           </div>
 
@@ -207,7 +258,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
         {expandedSection === "update" && (
           <div className={styles.expandedContent}>
             <div className={styles.tabContainer}>
-              {!isMac && (
+              {hasInstaller && (
                 <>
                   <button
                     className={`${styles.tab} ${
@@ -247,8 +298,10 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
               {activeTab === "have-installer" ? (
                 <div className={styles.tabPanel}>
                   <p className={styles.instructionText}>
-                    Open <strong>TagifyInstaller</strong> on your computer and
-                    click the <strong>"Update Tagify"</strong> button.
+                    Open <strong>{isMac ? "Tagify Installer" : "TagifyInstaller"}</strong> on your computer and
+                    {isMac
+                      ? " choose the update shown for your setup."
+                      : <> click the <strong>"Update Tagify"</strong> button.</>}
                   </p>
                   <div className={styles.helpText}>
                     <FontAwesomeIcon
@@ -262,17 +315,20 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
               ) : activeTab === "need-installer" ? (
                 <div className={styles.tabPanel}>
                   <p className={styles.instructionText}>
-                    Download <strong>TagifyInstaller</strong> to easily update
+                    Download <strong>{isMac ? "Tagify Installer for Mac" : "TagifyInstaller"}</strong> to easily update
                     <strong> Spicetify & Tagify</strong> now and in the future.
                   </p>
                   <div className={styles.downloadButtons}>
                     <button
                       className={styles.primaryButton}
                       onClick={handleDirectDownload}
-                      title="Direct download of TagifyInstaller.exe"
+                      disabled={isMac && findingMacInstaller}
+                      title={isMac ? "Download the Mac installer" : "Direct download of TagifyInstaller.exe"}
                     >
                       <FontAwesomeIcon icon={faDownload} />
-                      Download Installer
+                      {isMac
+                        ? findingMacInstaller ? "Finding Mac installer…" : macInstallerFailed ? "View Mac downloads" : "Download Mac Installer"
+                        : "Download Installer"}
                     </button>
                     <button
                       className={styles.secondaryButton}
@@ -283,6 +339,12 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                       View on GitHub
                     </button>
                   </div>
+                  {isMac && macInstallerFailed && (
+                    <p className={styles.helpText} role="status">
+                      We couldn&apos;t find the Mac download right now. View the
+                      downloads on GitHub or try again later.
+                    </p>
+                  )}
                 </div>
               ) : activeTab === "manual-install" ? (
                 <div className={styles.tabPanel}>

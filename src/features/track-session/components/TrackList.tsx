@@ -1,3 +1,4 @@
+import { connectExistingSmartPlaylist } from "@/features/smart-playlists";
 import React, {
   useCallback,
   useDeferredValue,
@@ -59,6 +60,9 @@ import {
 } from "@/features/track-session/model/trackList.types";
 import { buildTagAccentCssVars } from "@/features/tag-data";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
+import { collapseRecordingEntries, recordingDisplayKeys } from "@/features/recording-reuse/utils/recordingLibrary";
+import { usePrivateNotePreviews } from "@/features/private-notes/hooks/usePrivateNotePreviews";
+import { PrivateNotePreview, PrivateNotePreviewError } from "@/features/private-notes/components/PrivateNotePreview";
 
 const CAMELOT_KEY_LINE_A = Array.from(
   { length: 12 },
@@ -176,7 +180,7 @@ interface TrackListProps {
   smartPlaylists: SmartPlaylistCriteria[];
   onSetSmartPlaylists: (value: React.SetStateAction<SmartPlaylistCriteria[]>) => Promise<void>;
   onSyncPlaylist: (playlist: SmartPlaylistCriteria) => Promise<void>;
-  onExportSmartPlaylists: (taxonomy: TagTaxonomy, selected?: SmartPlaylistCriteria[]) => Promise<void> | void;
+  onExportSmartPlaylists: (taxonomy: TagTaxonomy, selected?: SmartPlaylistCriteria[], personalBackup?: boolean) => Promise<void> | void;
   onImportSmartPlaylists: (
     data: unknown,
     selections?: SmartPlaylistRecipeSelection[],
@@ -301,7 +305,9 @@ const TrackList: React.FC<TrackListProps> = ({
     return tagName.toLowerCase().includes(tagSearchTerm.toLowerCase());
   };
 
-  const filteredTracks = useMemo(
+  const recordingKeys = useMemo(() => recordingDisplayKeys(deferredTracks), [deferredTracks]);
+  const uniqueTrackCount = useMemo(() => collapseRecordingEntries(trackEntries, recordingKeys).length, [trackEntries, recordingKeys]);
+  const matchingTracks = useMemo(
     () =>
       filterTrackEntries(trackEntries, trackInfo, {
         includeTagClauses,
@@ -329,14 +335,26 @@ const TrackList: React.FC<TrackListProps> = ({
     ],
   );
 
-  const allSortedTracks = useMemo(
-    () => sortTrackEntries(filteredTracks, trackInfo, { sortBy, sortOrder }),
-    [filteredTracks, trackInfo, sortBy, sortOrder],
+  const filteredTracks = useMemo(
+    () => collapseRecordingEntries(sortTrackEntries(matchingTracks, trackInfo, { sortBy, sortOrder }), recordingKeys),
+    [matchingTracks, trackInfo, sortBy, sortOrder, recordingKeys],
   );
+  const allSortedTracks = filteredTracks;
   const sortedTracksVisible = useMemo(
     () => allSortedTracks.slice(0, displayCount),
     [allSortedTracks, displayCount],
   );
+  const visibleNoteUris = useMemo(() => {
+    const members = new Map<string, string[]>();
+    for (const [uri] of trackEntries) {
+      const key = recordingKeys.get(uri) || uri;
+      const copies = members.get(key) || [];
+      copies.push(uri);
+      members.set(key, copies);
+    }
+    return new Map(sortedTracksVisible.map(([uri]) => [uri, members.get(recordingKeys.get(uri) || uri) || [uri]]));
+  }, [trackEntries, recordingKeys, sortedTracksVisible]);
+  const notePreviews = usePrivateNotePreviews([...visibleNoteUris.values()].flat());
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -782,8 +800,12 @@ const TrackList: React.FC<TrackListProps> = ({
       playlist: SmartPlaylistCriteria,
       existingPlaylist?: SpotifyPlaylistReference,
     ) => {
+      if (existingPlaylist) {
+        if (!playlist.id) throw new Error("Open this saved setup again before connecting its playlist.");
+        await connectExistingSmartPlaylist(playlist.id, existingPlaylist);
+        return;
+      }
       if (playlist.source) {
-        if (existingPlaylist) throw new Error("Shared setups create a new Spotify playlist so your existing playlists stay unchanged.");
         if (!playlist.id) throw new Error("Open this saved setup again before creating its playlist.");
         const created = await createSharedSmartPlaylist(playlist.id);
         Spicetify.Platform.History.push(`/playlist/${created.playlistId}`);
@@ -791,7 +813,6 @@ const TrackList: React.FC<TrackListProps> = ({
       }
       const matchingTrackUris = collectMatchingTrackUris(tracks, playlist.criteria);
       const playlistId =
-        existingPlaylist?.playlistId ??
         (await onCreatePlaylist(
           matchingTrackUris,
           playlist.playlistName,
@@ -803,10 +824,10 @@ const TrackList: React.FC<TrackListProps> = ({
       const bound = {
         ...playlist,
         playlistId,
-        playlistName: existingPlaylist?.playlistName ?? playlist.playlistName,
+        playlistName: playlist.playlistName,
         isActive: true,
         lastSyncAt: 0,
-        smartPlaylistTrackUris: existingPlaylist ? [] : matchingTrackUris,
+        smartPlaylistTrackUris: matchingTrackUris,
         pendingTagChoices: [],
         updatedAt: Date.now(),
       };
@@ -815,7 +836,7 @@ const TrackList: React.FC<TrackListProps> = ({
           candidate.id === playlist.id ? bound : candidate,
         ));
         await onSyncPlaylist(bound);
-        if (!existingPlaylist && !matchingTrackUris.some((uri) => uri.startsWith("spotify:local:"))) {
+        if (!matchingTrackUris.some((uri) => uri.startsWith("spotify:local:"))) {
           Spicetify.Platform.History.push(`/playlist/${playlistId}`);
         }
       } catch (error) {
@@ -937,9 +958,9 @@ const TrackList: React.FC<TrackListProps> = ({
               <span className={styles.trackCount}>
                 {activeFilterCount > 0 || searchTerm.trim() !== ""
                   ? `${filteredTracks.length}/${
-                      Object.keys(deferredTracks).length
+                      uniqueTrackCount
                     } tracks`
-                  : `${Object.keys(deferredTracks).length} tracks`}
+                  : `${uniqueTrackCount} tracks`}
               </span>
               {editingSmartPlaylist && (
                 <span
@@ -1744,6 +1765,7 @@ const TrackList: React.FC<TrackListProps> = ({
       )}
 
       {/* TRACK LIST */}
+      {notePreviews.error && <PrivateNotePreviewError onRetry={notePreviews.retry} />}
       <div className={styles.trackList}>
         {sortedTracksVisible.length === 0 ? (
           <p className={styles.noTracks}>
@@ -1758,7 +1780,7 @@ const TrackList: React.FC<TrackListProps> = ({
             // Handle case when info isn't available yet (especially for local files)
             const isLocalFile = uri.startsWith("spotify:local:");
 
-            const isActiveTrack = activeTrackUri === uri;
+            const isActiveTrack = activeTrackUri === uri || (!!activeTrackUri && !!recordingKeys.get(uri) && recordingKeys.get(uri) === recordingKeys.get(activeTrackUri));
 
             // If no info and not a local file, skip this track
             if (!info && !isLocalFile) return null;
@@ -1903,7 +1925,7 @@ const TrackList: React.FC<TrackListProps> = ({
                             halfIcon={<FontAwesomeIcon icon={faStarHalf} />}
                             fullIcon={<FontAwesomeIcon icon={faStar} />}
                             activeColor="#ffd700"
-                            color="var(--spice-button-disabled)"
+                            color="var(--tagify-rating-control-muted, var(--spice-button-disabled))"
                           />
                         </div>
                       )}
@@ -2000,6 +2022,9 @@ const TrackList: React.FC<TrackListProps> = ({
                       <span className={styles.noTags}>No tags</span>
                     </div>
                   )}
+                  {(visibleNoteUris.get(uri) || [uri]).map(noteUri => (
+                    <PrivateNotePreview key={noteUri} text={notePreviews.texts[noteUri]} trackName={displayInfo.name} onOpen={() => onTagTrack(noteUri)} />
+                  ))}
                 </div>
               </div>
             );
@@ -2050,7 +2075,7 @@ const TrackList: React.FC<TrackListProps> = ({
           onEditPlaylist={handleEditSmartPlaylist}
           onUpdateSmartPlaylists={onSetSmartPlaylists}
           onSyncPlaylist={onSyncPlaylist}
-          onExportSmartPlaylists={(selected) => onExportSmartPlaylists(taxonomy, selected)}
+          onExportSmartPlaylists={(selected, personalBackup) => onExportSmartPlaylists(taxonomy, selected, personalBackup)}
           onImportSmartPlaylists={onImportSmartPlaylists}
           onBindRecipe={handleBindSmartPlaylistRecipe}
           onClose={() => setShowSmartPlaylistModal(false)}

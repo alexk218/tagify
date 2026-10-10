@@ -4,11 +4,14 @@ import { openCommunityUrl } from "./communityLinks";
 import { fetchCommunityProfile } from "./communityDevice";
 import { getDesktopSyncConfiguration, setDesktopSyncConfiguration, type DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncPairingService, type ApprovedPairing } from "@/services/sync/SyncPairingService";
+import { clearRecoveryUnavailable } from "@/services/sync/SyncInstallRecovery";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
 import { CommunityVisibilityReview } from "./CommunityPublicVisibilityReview";
 import { Portal } from "@/components/ui";
 import { InitialLibraryMergeReview } from "./InitialLibraryMergeReview";
-import { communityErrorMessage, communitySyncStatusLabel } from "./communitySyncCopy";
+import { backupNotices, communityErrorMessage, communitySyncStatusLabel, savedSettingsLabel } from "./communitySyncCopy";
+import type { DurableAppStateDomain } from "@tagify/sync-contracts";
+// eslint-disable-next-line css-modules/no-unused-class -- shared with the onboarding and library-review dialogs
 import styles from "./CloudSyncModal.module.css";
 
 const COMMUNITY_URL = "https://community.tagify.fm";
@@ -27,6 +30,8 @@ export function CloudSyncModal({ onClose }: { onClose: () => void }) {
   const [requiresReload, setRequiresReload] = useState(false);
   const [visibilityReviewed, setVisibilityReviewed] = useState<boolean | null>(null);
   const syncing = status === "syncing";
+  const settingsChoices = backupHealth?.needsChoice ?? [];
+  const smartPlaylistsDeviceOnly = backupHealth?.notBackedUp?.includes("smart-playlists") ?? false;
   const showingMergeReview = Boolean(mergePreview && (status === "merge-required" || status === "syncing" || status === "error"));
 
   useEffect(() => {
@@ -40,6 +45,11 @@ export function CloudSyncModal({ onClose }: { onClose: () => void }) {
     window.addEventListener("tagify:syncStatus", handleStatus);
     handleStatus(new CustomEvent("tagify:syncStatus", { detail: { status: activeSyncRuntime().getStatus() } }));
     return () => window.removeEventListener("tagify:syncStatus", handleStatus);
+  }, []);
+
+  useEffect(() => {
+    // Opening the connection screen re-enables automatic reconnection checks on the next start.
+    if (!getDesktopSyncConfiguration()) clearRecoveryUnavailable();
   }, []);
 
   useEffect(() => {
@@ -103,6 +113,17 @@ export function CloudSyncModal({ onClose }: { onClose: () => void }) {
     setBusy(false);
   };
 
+  const keepSettings = async (domain: DurableAppStateDomain, keep: "device" | "cloud") => {
+    setBusy(true); setError("");
+    try {
+      await activeSyncRuntime().resolveSettingsChoice(domain, keep);
+      setBackupHealth(activeSyncRuntime().getBackupHealth());
+    } catch (nextError) {
+      setError(communityErrorMessage(nextError, "Couldn't save your choice. Please try again."));
+    }
+    setBusy(false);
+  };
+
   const close = () => {
     if (pending || approvedPairing) syncPairingService.cancelPending();
     onClose();
@@ -143,7 +164,7 @@ export function CloudSyncModal({ onClose }: { onClose: () => void }) {
             <button type="button" className={styles.secondary} disabled={busy} onClick={() => void keepLocalOnly()}>Keep data on this device only</button>
           </div>
         </> : configuration ? <>
-          <div className={styles.connected}><CheckCircle2 /><div><strong>Connected</strong><span>{communitySyncStatusLabel(status, visibilityReviewed)}</span></div></div>
+          <div className={styles.connected}><CheckCircle2 /><div><strong>Connected</strong><span>{communitySyncStatusLabel(status, visibilityReviewed, settingsChoices.length > 0)}</span></div></div>
           <div className={styles.accountCard}>
             <UserCircle2 size={18} />
             <div>
@@ -152,7 +173,18 @@ export function CloudSyncModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
           <p>Tagify is syncing this desktop library directly to Community.</p>
-          {backupHealth ? <p><strong>Latest cloud backup:</strong> {backupHealth.lastBackupAt ? new Date(backupHealth.lastBackupAt).toLocaleString() : "Waiting for the first successful backup"} · {backupHealth.annotations.toLocaleString()} tagged items · {backupHealth.taxonomyNodes.toLocaleString()} tags and groups · {backupHealth.appStateDocuments > 0 ? "Smart Playlists protected" : "Smart Playlists pending"}</p> : null}
+          {backupHealth ? <p><strong>Latest cloud backup:</strong> {backupHealth.lastBackupAt ? new Date(backupHealth.lastBackupAt).toLocaleString() : "Waiting for the first successful backup"} · {backupHealth.annotations.toLocaleString()} tagged items · {backupHealth.taxonomyNodes.toLocaleString()} tags and groups · {smartPlaylistsDeviceOnly ? "Smart Playlists saved on this device only" : backupHealth.appStateDocuments > 0 ? "Smart Playlists protected" : "Smart Playlists pending"}</p> : null}
+          {settingsChoices.length ? <div className={styles.choice} role="group" aria-labelledby="cloud-sync-settings-choice">
+            <div><strong id="cloud-sync-settings-choice">Your saved settings changed on another device too</strong><span>Choose which copy to keep. The other copy is replaced on your devices.</span></div>
+            {settingsChoices.map((domain) => <div className={styles.choiceRow} key={domain}>
+              <span>{savedSettingsLabel(domain)}</span>
+              <div className={styles.choiceActions}>
+                <button type="button" disabled={busy} onClick={() => void keepSettings(domain, "device")}>Keep this device's</button>
+                <button type="button" disabled={busy} onClick={() => void keepSettings(domain, "cloud")}>Use the other device's</button>
+              </div>
+            </div>)}
+          </div> : null}
+          {backupNotices(backupHealth).map((notice) => <div className={styles.warning} key={notice}><ShieldAlert /><span>{notice}</span></div>)}
           {!showingMergeReview ? <CommunityVisibilityReview connected={Boolean(configuration)} onReviewStateChange={setVisibilityReviewed} /> : null}
           {requiresReload ? <div className={styles.warning}><ShieldAlert /><span>Reload Spotify to finish switching accounts. Your library from the previous account will stay on this device.</span></div> : null}
           {status === "snapshot-required" ? <div className={styles.warning}><ShieldAlert /><span>Your changes are still on this device. Try Sync now again. If it keeps stopping, download a Tagify backup and contact support.</span></div> : null}

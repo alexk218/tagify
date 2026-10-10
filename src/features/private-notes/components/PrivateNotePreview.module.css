@@ -1,0 +1,60 @@
+.preview {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  border-radius: 3px;
+  padding: 2px 0;
+  background: transparent;
+  color: var(--spice-subtext);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+
+.preview svg {
+  flex-shrink: 0;
+}
+
+.text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.preview {
+  cursor: pointer;
+}
+
+button.preview:hover {
+  color: var(--spice-text);
+}
+
+button.preview:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 3px;
+}
+
+.error {
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.error button {
+  border: 0;
+  background: transparent;
+  color: var(--spice-text);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.error button:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}

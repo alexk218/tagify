@@ -31,6 +31,13 @@ describe("DataManager", () => {
     delete window.TagifySync;
   });
 
+  it("replaces the last-saved status with editing controls beside Settings", () => {
+    render(<DataManager onExportTagData={vi.fn()} onImportTagData={vi.fn()} onExportRekordbox={vi.fn()} onResetTagifyData={vi.fn()} onRetryMigration={vi.fn()} historyControls={<button>Undo</button>} />);
+    expect(screen.queryByText(/Last saved/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Undo" }).parentElement!.nextElementSibling).toBe(screen.getByRole("button", { name: "Settings" }));
+  });
+
   it("passes taxonomy backups through to the importer", async () => {
     const onImportTagData = vi.fn().mockResolvedValue(undefined);
     const { container } = render(
@@ -40,7 +47,6 @@ describe("DataManager", () => {
         onExportRekordbox={vi.fn()}
         onResetTagifyData={vi.fn().mockResolvedValue(undefined)}
         onRetryMigration={vi.fn()}
-        lastSaved={null}
       />,
     );
 
@@ -73,7 +79,6 @@ describe("DataManager", () => {
         onExportRekordbox={vi.fn()}
         onResetTagifyData={vi.fn().mockResolvedValue(undefined)}
         onRetryMigration={vi.fn()}
-        lastSaved={null}
       />,
     );
 
@@ -107,7 +112,6 @@ describe("DataManager", () => {
         onExportRekordbox={vi.fn()}
         onResetTagifyData={vi.fn().mockResolvedValue(undefined)}
         onRetryMigration={vi.fn()}
-        lastSaved={null}
       />,
     );
 

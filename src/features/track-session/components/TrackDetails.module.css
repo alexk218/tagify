@@ -207,29 +207,6 @@
   gap: 6px;
 }
 
-.metadataGenres {
-  margin-top: 6px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.genreTags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-}
-
-.genreTag {
-  background: rgb(0 0 0 / 20%);
-  color: var(--spice-text);
-  border-radius: 12px;
-  padding: 2px 8px;
-  font-size: 10px;
-  font-weight: 500;
-}
-
 .label {
   font-size: 14px;
   font-weight: 600;
@@ -264,26 +241,12 @@
   display: flex;
 }
 
-.star {
-  background: transparent;
-  border: none;
-  color: var(--spice-button-disabled);
-  font-size: 24px;
-  cursor: pointer;
-  padding: 0;
-  transition: color 0.2s ease;
-}
-
-.star:hover {
-  color: #ffd700;
-}
-
 .energySlider {
   width: 100%;
   max-width: 250px;
   height: 4px;
   appearance: none;
-  background: var(--spice-button-disabled);
+  background: var(--tagify-rating-control-muted, var(--spice-button-disabled));
   border-radius: 2px;
   outline: none;
 }
@@ -299,7 +262,7 @@
 
 /* Styles for when energy is not set */
 .energySliderUnset::-webkit-slider-thumb {
-  background: var(--spice-button-disabled);
+  background: var(--tagify-rating-control-muted, var(--spice-button-disabled));
   border: 1px solid var(--spice-subtext);
 }
 
@@ -466,41 +429,6 @@
 }
 
 /* Playlists section */
-
-.sectionTitle {
-  font-size: 14px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--spice-text);
-}
-
-.playlistList {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.playlistItem {
-  display: inline-flex;
-  background: rgb(0 0 0 / 20%);
-  padding: 4px 8px;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  font-size: 12px;
-  color: var(--spice-text);
-  max-width: fit-content;
-}
-
-.playlistItem:hover {
-  background: rgb(255 255 255 / 10%);
-}
-
-.playlistName {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 .albumSection {
   display: flex;
@@ -805,3 +733,5 @@
     transform: rotate(360deg);
   }
 }
+
+@media (max-width: 760px) { .contentLayout { flex-wrap: wrap; gap: 20px; } .trackInfoContainer { max-width: none; flex-basis: 100%; padding-right: 72px; } .controlsContainer { max-width: none; min-width: 0; flex-basis: 100%; } }

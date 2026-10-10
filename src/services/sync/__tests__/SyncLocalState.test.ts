@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendIntent,
   classifyLocalReplica,
@@ -35,10 +36,13 @@ import { storageService } from "@/services/storage/StorageService";
 describe("desktop sync storage boundary", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.stubGlobal("indexedDB", new IDBFactory());
     syncPairingService.cancelPending();
     localStorage.clear();
     setLocalPersistencePaused(false);
   });
+
+  afterEach(() => { vi.unstubAllGlobals(); });
 
   it("accepts only Spotify entities covered by the private contract", () => {
     expect(entityFromUri("spotify:track:4uLU6hMCjMI75M1A2tKUQC", "track")).toEqual({ provider: "spotify", kind: "track", providerId: "4uLU6hMCjMI75M1A2tKUQC" });
@@ -274,7 +278,7 @@ describe("desktop sync storage boundary", () => {
 
     ensureSyncStores(db);
 
-    expect(TAGIFY_DATABASE_VERSION).toBe(10);
+    expect(TAGIFY_DATABASE_VERSION).toBe(12);
     expect([...Object.values(SYNC_STORES)].every((store) => stores.has(store))).toBe(true);
     expect(indexes.get(SYNC_STORES.OUTBOX)).toEqual(["by-created-at", "by-entity"]);
   });

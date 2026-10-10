@@ -18,7 +18,7 @@ export function applyBatchTagUpdatesToData(
     tracks: { ...currentData.tracks },
   };
 
-  updates.forEach(({ trackUri, toAdd, toRemove, newRating, newEnergy, albumDetails }) => {
+  updates.forEach(({ trackUri, toAdd, toRemove, newRating, newEnergy, albumDetails, trackDetails, automaticRuleIds }) => {
     const existingTrack: TrackData = nextData.tracks[trackUri] || {
       rating: 0,
       energy: 0,
@@ -60,6 +60,8 @@ export function applyBatchTagUpdatesToData(
         : undefined;
     const updatedTrackData: TrackData = {
       ...existingTrack,
+      ...(!existingTrack.name && trackDetails?.name ? { name: trackDetails.name } : {}),
+      ...(!existingTrack.artists && trackDetails?.artists ? { artists: trackDetails.artists } : {}),
       ...(sameAlbumDetails?.albumUri && !existingTrack.albumUri
         ? { albumUri: sameAlbumDetails.albumUri }
         : {}),
@@ -72,7 +74,7 @@ export function applyBatchTagUpdatesToData(
       tagIds: trackTags,
       rating,
       energy,
-      dateModified: now,
+      dateModified: automaticRuleIds?.length ? existingTrack.dateModified : now,
       dateCreated: existingTrack.dateCreated || now,
     };
 

@@ -309,6 +309,7 @@
 }
 
 .searchInput {
+  box-sizing: border-box;
   width: 100%;
   height: 32px;
   border: 1px solid var(--spice-button-disabled);
@@ -678,13 +679,13 @@
   cursor: pointer;
 }
 
-.actionButton:hover:not(:disabled) {
-  background: rgb(255 255 255 / 8%);
-}
-
 .actionButton:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.actionButton:hover:not(:disabled) {
+  background: rgb(255 255 255 / 8%);
 }
 
 .removeTrackingButton {

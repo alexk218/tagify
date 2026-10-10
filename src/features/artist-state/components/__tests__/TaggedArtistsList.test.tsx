@@ -210,9 +210,7 @@ describe("TaggedArtistsList", () => {
   it("turns artist row tags on and off without excluding them", async () => {
     render(<StatefulArtistList />);
     const user = userEvent.setup();
-    const betaRow = screen.getByText("Beta Band").closest<HTMLElement>(
-      '[class*="artistItem"]',
-    );
+    const betaRow = screen.getByText("Beta Band").closest<HTMLElement>("li");
     expect(betaRow).not.toBeNull();
 
     await user.click(
@@ -265,7 +263,7 @@ describe("TaggedArtistsList", () => {
 
     const artistItem = screen
       .getByText("DJ Alpha")
-      .closest('[class*="artistItem"]') as HTMLElement | null;
+      .closest("li") as HTMLElement | null;
 
     expect(artistItem).toBeTruthy();
     if (!artistItem) {
@@ -304,3 +302,47 @@ async function openFiltersAfterRender(
   renderList(overrides);
   return openFilters();
 }
+
+it("shows derived artists and keeps their own scores separate while sorting annotated counts", async () => {
+  const summary = (name: string, count: number, average: number) => ({
+    artistName: name, albumName: null, imageUrl: null, taggedTrackCount: count,
+    ratedTrackCount: count, ratingAverage: average, energyTrackCount: 0, energyAverage: null, commonTags: [], lastTaggedAt: 123,
+  });
+  renderList({ trackInsights: {
+    summaries: new Map([["spotify:artist:new-a", summary("Small Album Artist", 3, 5)], ["spotify:artist:new-b", summary("Many Tracks Artist", 20, 3)]]),
+    pendingCount: 0, isChecking: false, blockedUntil: 0, retry: vi.fn(),
+  } });
+  expect(screen.getByText("Small Album Artist")).toBeInTheDocument();
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "Sort artists by" }), "annotatedCount");
+  const names = screen.getAllByTitle("Open artist in Spotify").map((node) => node.textContent);
+  expect(names.slice(0, 2)).toEqual(["Many Tracks Artist", "Small Album Artist"]);
+});
+
+it("includes common track tags in artist filters without creating artist annotations", async () => {
+  const onToggleTagFilter = vi.fn();
+  renderList({ artists: {}, includeTagClauses: [{ tagIds: ["house"], excludedTagIds: [], operator: "OR" }], activeTagFilters: ["house"], onToggleTagFilter, trackInsights: {
+    summaries: new Map([["spotify:artist:derived", { artistName: "Derived Artist", albumName: null, imageUrl: null,
+      taggedTrackCount: 4, ratedTrackCount: 4, ratingAverage: 4, energyTrackCount: 0, energyAverage: null,
+      commonTags: [{ tagId: "house", trackCount: 3, coverage: 0.75 }], lastTaggedAt: 123 }]]),
+    pendingCount: 0, isChecking: false, blockedUntil: 0, retry: vi.fn(),
+  } });
+  expect(screen.getByText("Derived Artist")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "House 3" }));
+  expect(onToggleTagFilter).toHaveBeenCalledWith("house", "OR");
+});
+
+it("summarizes an artist's tracks in its row while some tracks are unchecked", () => {
+  const retry = vi.fn();
+  renderList({ trackInsights: {
+    summaries: new Map([["spotify:artist:alpha", { artistName: "DJ Alpha", albumName: null, imageUrl: null,
+      taggedTrackCount: 4, ratedTrackCount: 3, ratingAverage: 4, energyTrackCount: 0, energyAverage: null,
+      commonTags: [], lastTaggedAt: 123 }]]),
+    pendingCount: 12, isChecking: false, blockedUntil: 0, retry,
+  } });
+  const row = within(screen.getByText("DJ Alpha").closest("li")!);
+
+  expect(row.getByText("4 tracks rated or tagged so far")).toBeInTheDocument();
+  expect(row.getByText("Track average: 4.0 · 3 rated")).toBeInTheDocument();
+  expect(screen.getByText("12 of your tracks haven't been checked for artists yet.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Check more tracks" })).toBeEnabled();
+});

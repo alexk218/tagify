@@ -28,6 +28,12 @@ export interface LocalFileBackupShadow {
   /** Community revision these entries match; -1 when it must be read again. */
   revision: number;
   entries: LocalFileEntries;
+  /**
+   * The latest revision Community saw this device read. A revision written by
+   * this device is not read back until a confirming read, and Community only
+   * removes old deletion records once every device has read past them.
+   */
+  readRevision?: number;
 }
 
 export const LOCAL_FILE_BACKUP_SHADOW_KEY = "local-file-backup";

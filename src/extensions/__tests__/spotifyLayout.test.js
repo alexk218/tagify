@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  getRowItemUri,
   getSpotifyPlayerAnchor,
   getSpotifyRowLayout,
   getSpotifyTracklistHeader,
@@ -96,4 +97,45 @@ describe("Spotify playbar insertion", () => {
     document.querySelector('[data-testid="now-playing-widget"]').insertAdjacentHTML("beforeend", '<div class="hashedInfo"><a href="/track/song">Song</a></div>');
     expect(getSpotifyPlayerAnchor()).toBe(document.querySelector(".hashedInfo"));
   });
+
+  it("ignores Home shelves of album and playlist cards", () => {
+    tracklist("modern");
+    const shelf = document.createElement("div");
+    shelf.setAttribute("role", "grid");
+    shelf.innerHTML = [1, 2, 3].map((index) =>
+      `<div role="row"><div role="gridcell" aria-colindex="1">Card</div><div role="gridcell" aria-colindex="2">${index}</div></div>`).join("");
+    shelf.querySelectorAll('[role="row"]').forEach((row, index) => fiberWithProps(row, { uri: `spotify:album:${index}` }));
+    document.getElementById("main-view").append(shelf);
+    expect(getSpotifyTracklists()).not.toContain(shelf);
+    expect(getSpotifyTracklists()).toHaveLength(1);
+  });
+
+  it("finds header-less track lists by the tracks their rows hold", () => {
+    document.body.innerHTML = '<main id="main-view"><div role="grid"></div></main>';
+    const grid = document.querySelector('[role="grid"]');
+    grid.innerHTML = '<div role="row"><div role="gridcell" aria-colindex="1">1</div><div role="gridcell" aria-colindex="2">Song</div></div>';
+    fiberWithProps(grid.querySelector('[role="row"]'), { uri: "spotify:track:abc" });
+    expect(getSpotifyTracklists()).toEqual([grid]);
+  });
+
+  it("reads a row's item from its nearest React props without searching the whole tree", () => {
+    const row = document.createElement("div");
+    fiberWithProps(row, { uri: "spotify:track:near" }, 2);
+    expect(getRowItemUri(row)).toBe("spotify:track:near");
+    const deep = document.createElement("div");
+    fiberWithProps(deep, { uri: "spotify:track:far" }, 20);
+    expect(getRowItemUri(deep)).toBeNull();
+  });
 });
+
+function fiberWithProps(element, props, depth = 2) {
+  let fiber = { memoizedProps: props, return: null };
+  for (let level = 0; level < depth; level++) fiber = { memoizedProps: { children: null }, return: fiber };
+  // Walk order: the element's own fiber first, then its parents.
+  const chain = [];
+  for (let node = fiber; node; node = node.return) chain.push(node);
+  chain.reverse();
+  for (let index = chain.length - 1; index > 0; index--) chain[index].return = chain[index - 1];
+  chain[0].return = null;
+  element["__reactFiber$test"] = chain[chain.length - 1];
+}

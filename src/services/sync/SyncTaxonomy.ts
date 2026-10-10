@@ -87,3 +87,23 @@ export function taxonomyFromShadowRecord(shadow: Pick<TaxonomyShadowRecord, "nod
     collections: Object.values(shadow.collections).filter((collection) => !collection.deleted),
   });
 }
+
+/**
+ * A fresh cloud copy that still marks as deleted the items the previous copy
+ * had, so an item removed on another device is never mistaken for one
+ * Community has never had and sent again.
+ */
+export function keepTaxonomyTombstones(fresh: TaxonomyShadowRecord, previous: TaxonomyShadowRecord | undefined): TaxonomyShadowRecord {
+  if (!previous) return fresh;
+  const removed = <T extends { deleted: boolean }>(current: Record<string, T>, before: Record<string, T> = {}) => ({
+    ...Object.fromEntries(Object.entries(before).map(([id, item]) => [id, { ...item, deleted: true }])),
+    ...current,
+  });
+  return {
+    ...fresh,
+    nodes: removed(fresh.nodes, previous.nodes),
+    colors: removed(fresh.colors, previous.colors),
+    collections: removed(fresh.collections, previous.collections),
+    parentRevisions: { ...previous.parentRevisions, ...fresh.parentRevisions },
+  };
+}

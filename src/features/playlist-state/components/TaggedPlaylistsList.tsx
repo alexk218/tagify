@@ -1,8 +1,9 @@
+import type { PlaylistTrackInsights } from "@/features/track-insights";
+import { useAlbumMembership, useAlbumTrackListLookups } from "../hooks/useAlbumTracks";
 import React, { useCallback, useEffect, useMemo } from "react";
 import ReactStars from "react-rating-stars-component";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faStar, faStarHalf } from "@fortawesome/free-solid-svg-icons";
-import { Star } from "lucide-react";
 import {
   AlbumTrackSummary,
   PlaylistData,
@@ -22,6 +23,11 @@ import {
 } from "@/utils/tagFilterGroups";
 import { formatCondensedDate, formatTimestamp } from "@/utils/formatters";
 import { buildTagAccentCssVars } from "@/features/tag-data";
+import {
+  EntityListRow,
+  type EntityMetaItem,
+  type EntityRowTrackTag,
+} from "@/features/entity-views";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
 import {
   BasicTagFilterBar,
@@ -31,6 +37,7 @@ import {
   buildAlbumTrackSummaries,
   formatTrackAverage,
   getAlbumProgress,
+  type AlbumProgress,
 } from "../utils/albumTrackSummary";
 import {
   useAlbumTrackTotalLookups,
@@ -45,6 +52,7 @@ type SortBy =
   | "trackCount"
   | "rating"
   | "trackAverage"
+  | "annotatedCount"
   | "progress"
   | "energy";
 type SortOrder = "asc" | "desc";
@@ -54,25 +62,29 @@ const SORT_OPTIONS: Record<PlaylistEntityType, Array<{ value: SortBy; label: str
   album: [
     { value: "dateModified", label: "Last updated" },
     { value: "name", label: "Name" },
-    { value: "rating", label: "Album rating" },
+    { value: "rating", label: "Your album rating" },
     { value: "trackAverage", label: "Average track rating" },
     { value: "progress", label: "Progress" },
+    { value: "annotatedCount", label: "Most tracks rated/tagged" },
     { value: "energy", label: "Album energy" },
   ],
   playlist: [
     { value: "dateModified", label: "Last updated" },
     { value: "name", label: "Name" },
-    { value: "rating", label: "Rating" },
+    { value: "rating", label: "Your playlist rating" },
     { value: "energy", label: "Energy" },
     { value: "trackCount", label: "Track count" },
+    { value: "trackAverage", label: "Average track rating" },
+    { value: "annotatedCount", label: "Most tracks rated/tagged" },
   ],
 };
-const MAX_ROW_COMMON_TAGS = 4;
+const MAX_ROW_TRACK_TAGS = 3;
 
 interface TaggedPlaylistsListProps {
   playlists: Record<string, PlaylistData>;
   tracks: Record<string, TrackData>;
   albumTrackSummaries?: Map<string, AlbumTrackSummary>;
+  playlistTrackInsights?: Readonly<Record<string, PlaylistTrackInsights>>;
   entityType: PlaylistEntityType;
   taxonomy: TagTaxonomy;
   includeTagClauses: TagFilterClause[];
@@ -105,6 +117,7 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
   playlists,
   tracks,
   albumTrackSummaries,
+  playlistTrackInsights,
   entityType,
   taxonomy,
   includeTagClauses,
@@ -210,12 +223,17 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
       onSetTagFilterOperator(operator);
     }
   };
+  const membership = useAlbumMembership();
   const resolvedAlbumTrackSummaries = useMemo(
     () =>
       isAlbumList
-        ? albumTrackSummaries || buildAlbumTrackSummaries(tracks, taxonomy)
+        ? albumTrackSummaries || buildAlbumTrackSummaries(tracks, taxonomy, membership)
         : NO_SUMMARIES,
-    [albumTrackSummaries, isAlbumList, taxonomy, tracks],
+    [albumTrackSummaries, isAlbumList, taxonomy, tracks, membership],
+  );
+  const entityTrackSummaries = useMemo(() => isAlbumList ? resolvedAlbumTrackSummaries
+    : new Map(Object.entries(playlistTrackInsights ?? {}).flatMap(([uri, state]) => state.summary ? [[uri, state.summary]] : [])),
+    [isAlbumList, resolvedAlbumTrackSummaries, playlistTrackInsights],
   );
   const allPlaylistEntries = useMemo(() => {
     const entries = Object.entries(playlists).filter(
@@ -297,14 +315,14 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
           Array.from(
             new Set([
               ...playlist.tagIds,
-              ...(resolvedAlbumTrackSummaries
-                .get(playlistUri)
-                ?.commonTags.map((tag) => tag.tagId) || []),
+              ...(!isAlbumList
+                ? entityTrackSummaries.get(playlistUri)?.commonTags.map((tag) => tag.tagId) || []
+                : []),
             ]),
           ),
         ]),
       ),
-    [playlistEntries, resolvedAlbumTrackSummaries],
+    [playlistEntries, entityTrackSummaries, isAlbumList],
   );
   const allRatings = useMemo(
     () =>
@@ -402,12 +420,12 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
   const albumTrackTotals = useKnownAlbumTrackTotals();
   const getTrackTotal = useCallback(
     (playlistUri: string, playlist: PlaylistData): number | null =>
-      isTrackTotal(playlist.trackCount)
+      resolvedAlbumTrackSummaries.get(playlistUri)?.totalTrackCount ?? (isTrackTotal(playlist.trackCount)
         ? playlist.trackCount
         : isAlbumList
           ? (albumTrackTotals[playlistUri] ?? null)
-          : null,
-    [albumTrackTotals, isAlbumList],
+          : null),
+    [albumTrackTotals, isAlbumList, resolvedAlbumTrackSummaries],
   );
 
   const sortedPlaylists = useMemo(
@@ -420,20 +438,24 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
         if (sortBy === "name") {
           comparison = (leftData.name || "").localeCompare(rightData.name || "");
         } else if (sortBy === "trackCount") {
-          comparison = (leftData.trackCount || 0) - (rightData.trackCount || 0);
+          comparison = (playlistTrackInsights?.[leftUri]?.listedTrackCount ?? leftData.trackCount ?? 0) - (playlistTrackInsights?.[rightUri]?.listedTrackCount ?? rightData.trackCount ?? 0);
         } else if (sortBy === "rating") {
           comparison = (leftData.rating || 0) - (rightData.rating || 0);
         } else if (sortBy === "trackAverage") {
-          comparison =
-            (resolvedAlbumTrackSummaries.get(leftUri)?.ratingAverage ?? -1) -
-            (resolvedAlbumTrackSummaries.get(rightUri)?.ratingAverage ?? -1);
+          const leftAverage = entityTrackSummaries.get(leftUri)?.ratingAverage;
+          const rightAverage = entityTrackSummaries.get(rightUri)?.ratingAverage;
+          if (leftAverage == null || rightAverage == null) return leftAverage == null ? (rightAverage == null ? 0 : 1) : -1;
+          comparison = leftAverage - rightAverage;
+        } else if (sortBy === "annotatedCount") {
+          comparison = (entityTrackSummaries.get(leftUri)?.taggedTrackCount ?? 0) -
+            (entityTrackSummaries.get(rightUri)?.taggedTrackCount ?? 0);
         } else if (sortBy === "progress") {
           const leftProgress = getAlbumProgress(
-            resolvedAlbumTrackSummaries.get(leftUri)?.taggedTrackCount || 0,
+            entityTrackSummaries.get(leftUri)?.taggedTrackCount || 0,
             getTrackTotal(leftUri, leftData),
           );
           const rightProgress = getAlbumProgress(
-            resolvedAlbumTrackSummaries.get(rightUri)?.taggedTrackCount || 0,
+            entityTrackSummaries.get(rightUri)?.taggedTrackCount || 0,
             getTrackTotal(rightUri, rightData),
           );
           comparison =
@@ -452,20 +474,25 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
       filteredPlaylists,
       getLastUpdated,
       getTrackTotal,
-      resolvedAlbumTrackSummaries,
+      entityTrackSummaries,
+      playlistTrackInsights,
       sortBy,
       sortOrder,
     ],
   );
+  const albumUrisToLoad = useMemo(() => isAlbumList
+    ? [...new Set([...(activePlaylistUri ? [activePlaylistUri] : []), ...sortedPlaylists.map(([uri]) => uri), ...allPlaylistEntries.map(([uri]) => uri)])]
+    : [], [activePlaylistUri, sortedPlaylists, allPlaylistEntries, isAlbumList]);
+  useAlbumTrackListLookups(albumUrisToLoad);
   // Ask for missing album lengths in the order the albums are shown.
   const albumUrisToLookUp = useMemo(
     () =>
       isAlbumList
         ? sortedPlaylists
-            .filter(([, playlist]) => !isTrackTotal(playlist.trackCount))
+            .filter(([uri, playlist]) => !isTrackTotal(playlist.trackCount) && !membership[uri])
             .map(([albumUri]) => albumUri)
         : [],
-    [isAlbumList, sortedPlaylists],
+    [isAlbumList, sortedPlaylists, membership],
   );
   useAlbumTrackTotalLookups(albumUrisToLookUp);
 
@@ -712,7 +739,7 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
           </div>
           {isAlbumList ? (
             <p className={styles.filterHint}>
-              Matches album tags and tags common on your tracks from each album.
+              Matches tags you've added to albums. Tags shown under From tracks don't affect album filters.
             </p>
           ) : null}
 
@@ -765,244 +792,152 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
         </div>
       ) : null}
 
-      <div className={styles.list}>
-        {sortedPlaylists.length === 0 ? (
-          <p className={styles.emptyState}>
-            {playlistEntries.length === 0
-              ? isAlbumList
-                ? "No albums yet. Rate or tag an album, or two of its tracks, to see it here."
-                : "No tagged or rated playlists yet."
-              : `No ${entityLabelPluralLower} match your filters.`}
-            {hiddenSingleTrackAlbumCount > 0 ? (
-              <>
-                {" "}
-                Albums with just one rated or tagged track are hidden.{" "}
-                <button
-                  type="button"
-                  className={styles.emptyStateAction}
-                  onClick={() => setShowSingleTrackAlbums(true)}
-                >
-                  Show them
-                </button>
-              </>
-            ) : null}
-          </p>
-        ) : (
-          sortedPlaylists.map(([playlistUri, playlist]) => {
-            const resolvedTags = playlist.tagIds
+      {sortedPlaylists.length === 0 ? (
+        <p className={styles.emptyState}>
+          {playlistEntries.length === 0
+            ? isAlbumList
+              ? "No albums yet. Rate or tag an album, or two of its tracks, to see it here."
+              : "No tagged or rated playlists yet."
+            : `No ${entityLabelPluralLower} match your filters.`}
+          {hiddenSingleTrackAlbumCount > 0 ? (
+            <>
+              {" "}
+              Albums with just one rated or tagged track are hidden.{" "}
+              <button
+                type="button"
+                className={styles.emptyStateAction}
+                onClick={() => setShowSingleTrackAlbums(true)}
+              >
+                Show them
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : (
+        <ul className={styles.list}>
+          {sortedPlaylists.map(([playlistUri, playlist]) => {
+            const ownTags = playlist.tagIds
               .map((tagId) => resolvedLookup.get(tagId))
               .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag))
-              .sort(compareResolvedTagsByTaxonomyOrder);
-            const albumTrackSummary = resolvedAlbumTrackSummaries.get(playlistUri);
-            const trackTotal = getTrackTotal(playlistUri, playlist);
-            const progress = getAlbumProgress(
-              albumTrackSummary?.taggedTrackCount || 0,
-              trackTotal,
-            );
-            const commonTrackTags = (albumTrackSummary?.commonTags || [])
+              .sort(compareResolvedTagsByTaxonomyOrder)
+              .map((tag) => ({
+                id: tag.id,
+                name: tag.name,
+                accentId: tag.tag.accentId ?? null,
+                title: getRowTagTitle(tag.name, tag.id),
+              }));
+            const lastUpdated = getLastUpdated(playlistUri, playlist);
+            const playlistInsights = !isAlbumList ? playlistTrackInsights?.[playlistUri] : undefined;
+            const listedTrackCount = playlistInsights?.listedTrackCount ?? playlist.trackCount;
+            const meta: EntityMetaItem[] = [
+              ...(playlist.ownerName ? [{ key: "owner", content: playlist.ownerName }] : []),
+              ...(!isAlbumList && listedTrackCount !== null && listedTrackCount !== undefined
+                ? [{ key: "tracks", content: pluralizeTracks(listedTrackCount) }]
+                : []),
+              ...(lastUpdated > 0
+                ? [{
+                    key: "updated",
+                    content: `Updated ${formatCondensedDate(lastUpdated)}`,
+                    title: `Last updated ${formatTimestamp(lastUpdated)}`,
+                  }]
+                : []),
+            ];
+            const trackSummary = isAlbumList
+              ? resolvedAlbumTrackSummaries.get(playlistUri)
+              : playlistInsights?.summary;
+            const trackTags: EntityRowTrackTag[] = (trackSummary?.commonTags || [])
               .filter((tag) => !playlist.tagIds.includes(tag.tagId))
               .flatMap((tag) => {
                 const resolved = resolvedLookup.get(tag.tagId);
-                return resolved ? [{ ...tag, resolved }] : [];
-              })
-              .slice(0, MAX_ROW_COMMON_TAGS);
-            const lastUpdated = getLastUpdated(playlistUri, playlist);
-            // While an album's length is still unknown, say what was counted
-            // rather than "4 tracks", which reads like the album's length.
-            const progressText =
-              progress.totalTrackCount !== null
-                ? `${progress.taggedTrackCount}/${pluralizeTracks(progress.totalTrackCount)}`
-                : progress.taggedTrackCount > 0
-                  ? `${progress.taggedTrackCount} rated or tagged`
-                  : null;
+                if (!resolved) return [];
+                const coverage = isAlbumList
+                  ? `${resolved.name} is on ${tag.trackCount} of the ${pluralizeTracks(
+                      trackSummary?.taggedTrackCount || 0,
+                    )} you've rated or tagged from this album.`
+                  : `${resolved.name} is on ${tag.trackCount} of the ${
+                      trackSummary?.taggedTrackCount || 0
+                    } tracks you've rated or tagged. Click to filter by this tag.`;
+                return [{ id: tag.tagId, name: resolved.name, trackCount: tag.trackCount, title: coverage }];
+              });
+            const average =
+              trackSummary && trackSummary.ratingAverage !== null
+                ? {
+                    text: `Track average: ${formatTrackAverage(trackSummary.ratingAverage)} · ${trackSummary.ratedTrackCount} rated`,
+                    title: `Average rating of ${pluralizeTracks(trackSummary.ratedTrackCount)} you've rated`,
+                  }
+                : null;
+
+            let progress: AlbumProgress | null = null;
+            let progressText: string | null = null;
+            let progressTitle: string | undefined;
+            let status: string | null = null;
+            if (isAlbumList) {
+              progress = getAlbumProgress(trackSummary?.taggedTrackCount || 0, getTrackTotal(playlistUri, playlist));
+              // While an album's length is still unknown, say what was counted
+              // rather than "4 tracks", which reads like the album's length.
+              progressText =
+                progress.totalTrackCount !== null
+                  ? `${progress.taggedTrackCount}/${pluralizeTracks(progress.totalTrackCount)}`
+                  : progress.taggedTrackCount > 0
+                    ? `${progress.taggedTrackCount} rated or tagged`
+                    : null;
+              progressTitle = `${
+                progress.totalTrackCount === null
+                  ? pluralizeTracks(progress.taggedTrackCount)
+                  : `${progress.taggedTrackCount} of ${pluralizeTracks(progress.totalTrackCount)}`
+              } rated or tagged`;
+            } else if (trackSummary && playlistInsights?.totalTrackCount) {
+              const total = playlistInsights.totalTrackCount;
+              progress = getAlbumProgress(trackSummary.taggedTrackCount, total);
+              // Repeated songs count once, so say so when the totals differ.
+              progressText = `${progress.taggedTrackCount}/${total} ${
+                total === listedTrackCount ? "tracks" : "distinct tracks"
+              }`;
+              progressTitle = `${progress.taggedTrackCount} of ${total} distinct tracks rated or tagged`;
+            } else if (!trackSummary && playlistInsights?.status === "loading") {
+              status = "Checking tracks…";
+            } else if (!trackSummary && playlistInsights?.status === "failed") {
+              status = "Couldn't check tracks";
+            }
 
             return (
-              <div
+              <EntityListRow
                 key={playlistUri}
-                className={`${styles.playlistItem} ${
-                  isAlbumList ? styles.albumItem : ""
-                } ${activePlaylistUri === playlistUri ? styles.playlistItemActive : ""}`}
-                onClick={() => onSelectPlaylist(playlistUri)}
-              >
-                {playlist.imageUrl ? (
-                  <img
-                    src={playlist.imageUrl}
-                    alt={`${playlist.name || entityLabel} cover`}
-                    className={`${styles.cover} ${
-                      isAlbumList ? styles.albumCover : styles.playlistCover
-                    }`}
+                kind={isAlbumList ? "album" : "playlist"}
+                entityLabel={entityLabel}
+                name={playlist.name || `Unknown ${entityLabel}`}
+                imageUrl={playlist.imageUrl}
+                isActive={activePlaylistUri === playlistUri}
+                openTitle={`Open ${entityLabelLower} in Spotify`}
+                onSelect={() => onSelectPlaylist(playlistUri)}
+                onOpen={() => onOpenPlaylist(playlistUri)}
+                meta={meta}
+                rating={playlist.rating}
+                energy={playlist.energy}
+                tags={ownTags}
+                trackTags={trackTags.slice(0, MAX_ROW_TRACK_TAGS)}
+                hiddenTrackTagCount={Math.max(0, trackTags.length - MAX_ROW_TRACK_TAGS)}
+                canFilterByTrackTags={!isAlbumList}
+                customAccentsById={customAccentsById}
+                activeTagFilters={activeTagFilters}
+                excludedTagFilters={excludedTagFilters}
+                onToggleTag={(tagId) => onToggleTagFilter(tagId, tagFilterOperator)}
+                progressBar={progress?.ratio != null ? (
+                  <AlbumProgressBar
+                    progress={progress}
+                    label={`${playlist.name || entityLabel} progress`}
                   />
-                ) : (
-                  <div
-                    className={`${styles.cover} ${styles.coverPlaceholder} ${
-                      isAlbumList ? styles.albumCover : styles.playlistCover
-                    }`}
-                  >
-                    ♪
-                  </div>
-                )}
-
-                <div className={styles.playlistText}>
-                  <button
-                    type="button"
-                    className={styles.playlistName}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onOpenPlaylist(playlistUri);
-                    }}
-                    title={`Open ${entityLabelLower} in Spotify`}
-                  >
-                    {playlist.name || `Unknown ${entityLabel}`}
-                  </button>
-                  <div className={styles.playlistMeta}>
-                    {playlist.ownerName ? (
-                      <span className={styles.ownerName}>{playlist.ownerName}</span>
-                    ) : null}
-                    {!isAlbumList &&
-                    playlist.trackCount !== null &&
-                    playlist.trackCount !== undefined ? (
-                      <span>{pluralizeTracks(playlist.trackCount)}</span>
-                    ) : null}
-                    {playlist.rating > 0 ? (
-                      <span
-                        className={styles.playlistRating}
-                        title={`${entityLabel} rating: ${playlist.rating}`}
-                        aria-label={`${entityLabel} rating: ${playlist.rating} stars`}
-                      >
-                        <ReactStars
-                          key={`${playlistUri}-rating-${playlist.rating}`}
-                          count={5}
-                          value={playlist.rating}
-                          edit={false}
-                          size={15}
-                          isHalf={true}
-                          emptyIcon={<FontAwesomeIcon icon={faStar} />}
-                          halfIcon={<FontAwesomeIcon icon={faStarHalf} />}
-                          fullIcon={<FontAwesomeIcon icon={faStar} />}
-                          activeColor="#ffd700"
-                          color="var(--spice-button-disabled)"
-                        />
-                      </span>
-                    ) : null}
-                    {playlist.energy > 0 ? (
-                      <span
-                        className={styles.playlistEnergy}
-                        title={`${entityLabel} energy: ${playlist.energy}`}
-                      >
-                        {playlist.energy}
-                      </span>
-                    ) : null}
-                    {lastUpdated > 0 ? (
-                      <span
-                        className={styles.updated}
-                        title={`Last updated ${formatTimestamp(lastUpdated)}`}
-                      >
-                        Updated {formatCondensedDate(lastUpdated)}
-                      </span>
-                    ) : null}
-                  </div>
-                  {resolvedTags.length > 0 || commonTrackTags.length > 0 ? (
-                    <div className={styles.tags}>
-                      {resolvedTags.map((tag) => (
-                        <button
-                          type="button"
-                          key={tag.id}
-                          className={`${styles.tag} ${
-                            tag.tag.accentId ? styles.tagAccented : ""
-                          } ${activeTagFilters.includes(tag.id) ? styles.tagActive : ""} ${
-                            excludedTagFilters.includes(tag.id) ? styles.tagExcluded : ""
-                          }`}
-                          style={buildTagAccentCssVars(
-                            tag.tag.accentId ?? null,
-                            customAccentsById,
-                          )}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onToggleTagFilter(tag.id, tagFilterOperator);
-                          }}
-                          aria-label={getRowTagTitle(tag.name, tag.id)}
-                          title={getRowTagTitle(tag.name, tag.id)}
-                        >
-                          {tag.name}
-                        </button>
-                      ))}
-                      {commonTrackTags.length > 0 ? (
-                        <span
-                          className={styles.commonTags}
-                          aria-label="Common tags on your tracks"
-                        >
-                          {resolvedTags.length > 0 ? (
-                            <span className={styles.commonTagsLabel}>From tracks</span>
-                          ) : null}
-                          {commonTrackTags.map(({ tagId, trackCount, resolved }) => (
-                            <button
-                              type="button"
-                              key={tagId}
-                              className={`${styles.commonTag} ${
-                                activeTagFilters.includes(tagId) ? styles.tagActive : ""
-                              } ${excludedTagFilters.includes(tagId) ? styles.tagExcluded : ""}`}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onToggleTagFilter(tagId, tagFilterOperator);
-                              }}
-                              aria-label={getRowTagTitle(resolved.name, tagId)}
-                              title={`${resolved.name} is on ${trackCount} of the ${pluralizeTracks(
-                                albumTrackSummary?.taggedTrackCount || 0,
-                              )} you've rated or tagged from this album. ${getRowTagTitle(
-                                resolved.name,
-                                tagId,
-                              )}.`}
-                            >
-                              {resolved.name}
-                            </button>
-                          ))}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-
-                {isAlbumList ? (
-                  <div
-                    className={styles.trackStats}
-                    title={`${
-                      progress.totalTrackCount === null
-                        ? pluralizeTracks(progress.taggedTrackCount)
-                        : `${progress.taggedTrackCount} of ${pluralizeTracks(progress.totalTrackCount)}`
-                    } rated or tagged`}
-                  >
-                    {progressText ? (
-                      <span
-                        className={`${styles.progressText} ${
-                          progress.isComplete ? styles.progressComplete : ""
-                        }`}
-                      >
-                        {progressText}
-                      </span>
-                    ) : null}
-                    <AlbumProgressBar
-                      progress={progress}
-                      label={`${playlist.name || "Album"} progress`}
-                    />
-                    {albumTrackSummary?.ratingAverage !== null &&
-                    albumTrackSummary?.ratingAverage !== undefined ? (
-                      <span
-                        className={styles.trackAverage}
-                        title={`Average rating of ${pluralizeTracks(
-                          albumTrackSummary.ratedTrackCount,
-                        )} you've rated`}
-                      >
-                        <Star size={11} fill="currentColor" aria-hidden="true" />
-                        {formatTrackAverage(albumTrackSummary.ratingAverage)} avg
-                      </span>
-                    ) : null}
-                  </div>
                 ) : null}
-              </div>
+                progressText={progressText}
+                progressTitle={progressTitle}
+                isProgressComplete={progress?.isComplete}
+                average={average}
+                status={status}
+              />
             );
-          })
-        )}
-      </div>
+          })}
+        </ul>
+      )}
     </section>
   );
 };

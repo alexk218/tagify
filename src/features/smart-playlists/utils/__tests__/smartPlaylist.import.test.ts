@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SmartPlaylistCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
-import { mergeImportedSmartPlaylists, prepareSmartPlaylistImport } from "../smartPlaylist.import";
+import { mergeImportedSmartPlaylists, parsePersonalSmartPlaylistBackup, prepareSmartPlaylistImport } from "../smartPlaylist.import";
 
 function importedPlaylist(
   overrides: Partial<SmartPlaylistCriteria> = {},
@@ -103,3 +103,23 @@ describe("mergeImportedSmartPlaylists", () => {
   });
 });
 
+
+describe("personal backup compatibility", () => {
+  it("accepts old playlist arrays and current personal backups while retaining disabled sync", () => {
+    const original = importedPlaylist({ isActive: false });
+    expect(parsePersonalSmartPlaylistBackup([original])?.[0]).toMatchObject({ playlistId: original.playlistId, isActive: false });
+    expect(parsePersonalSmartPlaylistBackup({ format: "tagify-smart-playlist-backup", version: 1, playlists: [original] })?.[0]).toMatchObject(original);
+  });
+  it("keeps shared files separate and rejects partial personal backups without dropping rules", () => {
+    expect(parsePersonalSmartPlaylistBackup({ format: "tagify-smart-playlist-recipes" })).toBeNull();
+    expect(() => parsePersonalSmartPlaylistBackup([importedPlaylist(), { playlistName: "Broken" }])).toThrow();
+    expect(() => parsePersonalSmartPlaylistBackup([{ ...importedPlaylist(), criteria: { ...importedPlaylist().criteria, includeTagClauses: "broken" } }])).toThrow("filters");
+    expect(() => parsePersonalSmartPlaylistBackup({ format: "tagify-smart-playlist-backup", version: 2, playlists: [] })).toThrow("newer Tagify");
+  });
+  it("replaces the saved rule for a reconnected Spotify playlist instead of duplicating its tracking", () => {
+    const previous = importedPlaylist({ id: "newer-id", playlistId: "same-spotify" });
+    const restored = importedPlaylist({ id: "older-id", playlistId: "same-spotify", isActive: false });
+    expect(mergeImportedSmartPlaylists([previous], [restored])).toEqual([restored]);
+    expect(mergeImportedSmartPlaylists([], [previous, restored])).toEqual([restored]);
+  });
+});

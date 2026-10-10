@@ -1,7 +1,12 @@
 import { TagDataStructure } from "@/types/tagData";
 import { indexedDBStorage } from "./IndexedDBStorageService";
 import { defaultTagData } from "@/constants/defaultTagData";
-import { normalizeTagDataStructure } from "@/features/tag-data/utils/tagData.schema";
+import {
+  hasCustomTaxonomy,
+  hasUserLibraryContent,
+  isSupportedTagDataBackup,
+  normalizeTagDataStructure,
+} from "@/features/tag-data/utils/tagData.schema";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 
 const TAG_DATA_KEY = "tagify:tagData";
@@ -107,35 +112,77 @@ class StorageMigrationService {
     );
   }
 
+  /**
+   * What the saved library holds. `initialized` is false when it couldn't be
+   * opened or read; that is never the same as an empty library.
+   */
   private async summarizeIndexedDB(): Promise<IndexedDBSummary> {
-    const initialized = await indexedDBStorage.init();
-    if (!initialized) {
+    const unreadable: IndexedDBSummary = {
+      initialized: false,
+      trackCount: 0,
+      categoryCount: 0,
+      hasData: false,
+      hasUserContent: false,
+    };
+    try {
+      if (!(await indexedDBStorage.init())) return unreadable;
+
+      const [trackCount, playlistCount, artistCount, smartPlaylists, taxonomy] = await Promise.all([
+        indexedDBStorage.getTrackCount(),
+        indexedDBStorage.getPlaylistCount(),
+        indexedDBStorage.getArtistCount(),
+        indexedDBStorage.getAllSmartPlaylists(),
+        indexedDBStorage.getTaxonomy(),
+      ]);
+      const categoryCount = taxonomy.categoryOrder.length;
+      const hasUserContent = trackCount > 0 || playlistCount > 0 || artistCount > 0 ||
+        smartPlaylists.length > 0 || hasCustomTaxonomy(taxonomy);
+
       return {
-        initialized: false,
-        trackCount: 0,
-        categoryCount: 0,
-        hasData: false,
-        hasUserContent: false,
+        initialized: true,
+        trackCount,
+        categoryCount,
+        hasData: hasUserContent || categoryCount > 0,
+        hasUserContent,
       };
+    } catch (error) {
+      console.error("StorageMigration: Could not read the saved library", error);
+      return unreadable;
     }
+  }
 
-    const [trackCount, playlistCount, artistCount, smartPlaylists, taxonomy] = await Promise.all([
-      indexedDBStorage.getTrackCount(),
-      indexedDBStorage.getPlaylistCount(),
-      indexedDBStorage.getArtistCount(),
-      indexedDBStorage.getAllSmartPlaylists(),
-      indexedDBStorage.getTaxonomy(),
-    ]);
-    const categoryCount = taxonomy.categoryOrder.length;
-    const hasUserContent = trackCount > 0 || playlistCount > 0 || artistCount > 0 ||
-      smartPlaylists.length > 0;
-
+  private completedFromExisting(existing: IndexedDBSummary, startedAt: number): MigrationResult {
+    const completedAt = Date.now();
+    this.saveMigrationState({
+      status: "completed",
+      completedAt,
+      startedAt,
+      trackCount: existing.trackCount,
+      categoryCount: existing.categoryCount,
+    });
     return {
-      initialized: true,
-      trackCount,
-      categoryCount,
-      hasData: hasUserContent || categoryCount > 0,
-      hasUserContent,
+      success: true,
+      status: "completed",
+      tracksMigrated: existing.trackCount,
+      categoriesMigrated: existing.categoryCount,
+      backupCreated: false,
+      startedAt,
+      completedAt,
+      durationMs: completedAt - startedAt,
+    };
+  }
+
+  private failedWithoutChanges(error: string, startedAt: number): MigrationResult {
+    return {
+      success: false,
+      status: "failed",
+      tracksMigrated: 0,
+      categoriesMigrated: 0,
+      error,
+      backupCreated: false,
+      startedAt,
+      completedAt: Date.now(),
+      durationMs: Date.now() - startedAt,
     };
   }
 
@@ -276,24 +323,19 @@ class StorageMigrationService {
       };
     }
 
-    // An older localStorage backup is not a migration source once a real
-    // IndexedDB library exists. This also covers lost migration flags after
-    // replacing the app files and libraries containing only Smart Playlists.
+    // A library that can't be opened or read might hold everything the user
+    // made. Never treat it as empty, and write nothing until it can be read.
     const existing = await this.summarizeIndexedDB();
-    if (existing.initialized && (
-      (state.status === "not-started" && existing.hasUserContent) ||
-      getDesktopSyncConfiguration()
-    )) {
-      const completedAt = Date.now();
-      this.saveMigrationState({
-        status: "completed", completedAt, startedAt,
-        trackCount: existing.trackCount, categoryCount: existing.categoryCount,
-      });
-      return {
-        success: true, status: "completed", tracksMigrated: existing.trackCount,
-        categoriesMigrated: existing.categoryCount, backupCreated: false,
-        startedAt, completedAt, durationMs: completedAt - startedAt,
-      };
+    if (!existing.initialized) {
+      return this.failedWithoutChanges("Failed to initialize IndexedDB", startedAt);
+    }
+
+    // An older localStorage backup is not a migration source once a real
+    // IndexedDB library exists, whatever an earlier attempt recorded. This
+    // also covers lost migration flags after replacing the app files and
+    // libraries containing only Smart Playlists or the user's own tags.
+    if (existing.hasUserContent || getDesktopSyncConfiguration()) {
+      return this.completedFromExisting(existing, startedAt);
     }
 
     // The orchestrator migration flag makes IndexedDB canonical. The retained
@@ -301,119 +343,32 @@ class StorageMigrationService {
     // again after a database loss. A paired empty replica is intentionally left
     // empty so Cloud Sync can require an explicit restore confirmation.
     if (this.hasOrchestratorIndexedDBMigration()) {
-      const indexedDBSummary = await this.summarizeIndexedDB();
-      if (!indexedDBSummary.initialized) {
-        return {
-          success: false,
-          status: "failed",
-          tracksMigrated: 0,
-          categoriesMigrated: 0,
-          error: "Failed to initialize IndexedDB",
-          backupCreated: false,
-          startedAt,
-          completedAt: Date.now(),
-          durationMs: Date.now() - startedAt,
-        };
+      if (existing.hasData) {
+        return this.completedFromExisting(existing, state.startedAt || startedAt);
       }
 
-      if (indexedDBSummary.hasData || getDesktopSyncConfiguration()) {
-        const completedAt = Date.now();
-        this.saveMigrationState({
-          status: "completed",
-          completedAt,
-          startedAt: state.startedAt || startedAt,
-          trackCount: indexedDBSummary.trackCount,
-          categoryCount: indexedDBSummary.categoryCount,
-        });
-        return {
-          success: true,
-          status: "completed",
-          tracksMigrated: indexedDBSummary.trackCount,
-          categoriesMigrated: indexedDBSummary.categoryCount,
-          backupCreated: false,
-          startedAt: state.startedAt || startedAt,
-          completedAt,
-          durationMs: completedAt - startedAt,
-        };
-      }
-
-      return {
-        success: false,
-        status: "failed",
-        tracksMigrated: 0,
-        categoriesMigrated: 0,
-        error:
-          "IndexedDB migration was previously marked complete, but the database is now empty. Tagify did not overwrite the database with defaults or stale localStorage data.",
-        backupCreated: false,
+      return this.failedWithoutChanges(
+        "IndexedDB migration was previously marked complete, but the database is now empty. Tagify did not overwrite the database with defaults or stale localStorage data.",
         startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
+      );
     }
 
     // Check if there's anything to migrate
     const localData = this.getLocalStorageData();
+    const normalizedLocalData = isSupportedTagDataBackup(localData)
+      ? normalizeTagDataStructure(localData)
+      : null;
 
-    if (!localData || Object.keys(localData.tracks).length === 0) {
-      const indexedDBSummary = await this.summarizeIndexedDB();
-
-      if (!indexedDBSummary.initialized) {
-        return {
-          success: false,
-          status: "failed",
-          tracksMigrated: 0,
-          categoriesMigrated: 0,
-          error: "Failed to initialize IndexedDB",
-          backupCreated: false,
-          backupFilename: undefined,
-          startedAt,
-          completedAt: Date.now(),
-          durationMs: Date.now() - startedAt,
-        };
+    if (!normalizedLocalData || !hasUserLibraryContent(normalizedLocalData)) {
+      if (existing.hasData) {
+        return this.completedFromExisting(existing, state.startedAt || startedAt);
       }
 
-      if (indexedDBSummary.hasData) {
-        const completedAt = Date.now();
-
-        this.saveMigrationState({
-          status: "completed",
-          completedAt,
-          startedAt: state.startedAt || startedAt,
-          trackCount: indexedDBSummary.trackCount,
-          categoryCount: indexedDBSummary.categoryCount,
-        });
-
-        return {
-          success: true,
-          status: "completed",
-          tracksMigrated: indexedDBSummary.trackCount,
-          categoriesMigrated: indexedDBSummary.categoryCount,
-          backupCreated: false,
-          backupFilename: undefined,
-          startedAt: state.startedAt || startedAt,
-          completedAt,
-          durationMs: completedAt - startedAt,
-        };
+      // Fresh install - save default data to IndexedDB, but only into a
+      // library confirmed empty in the same step.
+      if (!(await indexedDBStorage.saveAll(defaultTagData, "migration", { onlyIfEmpty: true }))) {
+        return this.adoptConcurrentLibrary(startedAt, "Tagify could not save its starting tags");
       }
-
-      if (this.hasOrchestratorIndexedDBMigration()) {
-        return {
-          success: false,
-          status: "failed",
-          tracksMigrated: 0,
-          categoriesMigrated: 0,
-          error:
-            "IndexedDB migration was previously marked complete, but the database is now empty. Tagify did not overwrite the database with defaults.",
-          backupCreated: false,
-          backupFilename: undefined,
-          startedAt,
-          completedAt: Date.now(),
-          durationMs: Date.now() - startedAt,
-        };
-      }
-
-      // Fresh install - save default data to IndexedDB
-      await indexedDBStorage.saveAll(defaultTagData);
 
       this.saveMigrationState({
         status: "completed",
@@ -436,7 +391,6 @@ class StorageMigrationService {
       };
     }
 
-    const normalizedLocalData = normalizeTagDataStructure(localData);
     const trackCount = Object.keys(normalizedLocalData.tracks).length;
     const categoryCount = normalizedLocalData.taxonomy.categoryOrder.length;
     onProgress?.("Creating backup...", 0);
@@ -485,11 +439,16 @@ class StorageMigrationService {
 
     onProgress?.(`Saving ${trackCount} songs...`, 20);
 
-    // Step 4: Save all data to IndexedDB
+    // Step 4: Save all data to IndexedDB, only into a library confirmed
+    // empty in the same step. Another Tagify window may have moved it first.
     try {
-      const saved = await indexedDBStorage.saveAll(normalizedLocalData);
+      const saved = await indexedDBStorage.saveAll(normalizedLocalData, "migration", { onlyIfEmpty: true });
 
       if (!saved) {
+        const latest = await this.summarizeIndexedDB();
+        if (latest.initialized && latest.hasUserContent) {
+          return this.completedFromExisting(latest, startedAt);
+        }
         throw new Error("saveAll returned false");
       }
 
@@ -505,9 +464,11 @@ class StorageMigrationService {
         );
       }
 
-      if (verifyTaxonomy.categoryOrder.length !== localData.taxonomy.categoryOrder.length) {
+      // Compare with the normalized copy: an older copy stores categories in
+      // a different shape and has no taxonomy of its own.
+      if (verifyTaxonomy.categoryOrder.length !== categoryCount) {
         throw new Error(
-          `Category count mismatch: expected ${localData.taxonomy.categoryOrder.length}, got ${verifyTaxonomy.categoryOrder.length}`
+          `Category count mismatch: expected ${categoryCount}, got ${verifyTaxonomy.categoryOrder.length}`
         );
       }
 
@@ -565,6 +526,16 @@ class StorageMigrationService {
   }
 
   /**
+   * After a refused replacement, adopt a library another Tagify window saved
+   * meanwhile; otherwise report the failure without changing anything.
+   */
+  private async adoptConcurrentLibrary(startedAt: number, error: string): Promise<MigrationResult> {
+    const latest = await this.summarizeIndexedDB();
+    if (latest.initialized && latest.hasData) return this.completedFromExisting(latest, startedAt);
+    return this.failedWithoutChanges(error, startedAt);
+  }
+
+  /**
    * Get diagnostic information about storage state
    */
   async getDiagnostics(): Promise<{
@@ -584,7 +555,7 @@ class StorageMigrationService {
 
     // localStorage diagnostics
     const localData = this.getLocalStorageData();
-    const localTrackCount = localData
+    const localTrackCount = localData?.tracks && typeof localData.tracks === "object"
       ? Object.keys(localData.tracks).length
       : 0;
     const localRaw = localStorage.getItem(TAG_DATA_KEY) || "";

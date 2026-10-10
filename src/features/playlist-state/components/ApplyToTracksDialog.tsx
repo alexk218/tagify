@@ -46,6 +46,7 @@ const ApplyToTracksDialog: React.FC<ApplyToTracksDialogProps> = ({
   const dialogRef = useRef<HTMLDivElement>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [trackUris, setTrackUris] = useState<string[]>([]);
+  const applyingRef = useRef(false);
   const [isApplying, setIsApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [choices, setChoices] = useState<PlaylistTrackApplyChoices>({
@@ -120,10 +121,11 @@ const ApplyToTracksDialog: React.FC<ApplyToTracksDialogProps> = ({
   };
 
   const apply = async () => {
-    if (updates.length === 0) {
+    if (updates.length === 0 || applyingRef.current) {
       return;
     }
 
+    applyingRef.current = true;
     setIsApplying(true);
     setApplyError(null);
     try {
@@ -132,6 +134,7 @@ const ApplyToTracksDialog: React.FC<ApplyToTracksDialogProps> = ({
       onClose();
     } catch {
       setApplyError("The tracks couldn't be updated. Please try again.");
+      applyingRef.current = false;
       setIsApplying(false);
     }
   };
@@ -265,8 +268,8 @@ const ApplyToTracksDialog: React.FC<ApplyToTracksDialogProps> = ({
                           <>
                             {entityLabel} tags
                             <span className={styles.tagNames}>
-                              {tagNames.map((tagName) => (
-                                <span key={tagName} className={styles.tagName}>
+                              {tagNames.map((tagName, index) => (
+                                <span key={values.tagIds[index]} className={styles.tagName}>
                                   {tagName}
                                 </span>
                               ))}
@@ -286,7 +289,7 @@ const ApplyToTracksDialog: React.FC<ApplyToTracksDialogProps> = ({
                                 halfIcon={<FontAwesomeIcon icon={faStarHalf} />}
                                 fullIcon={<FontAwesomeIcon icon={faStar} />}
                                 activeColor="#ffd700"
-                                color="var(--spice-button-disabled)"
+                                color="var(--tagify-rating-control-muted, var(--spice-button-disabled))"
                               />
                             </span>
                           </>

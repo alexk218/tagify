@@ -3,7 +3,7 @@
  *
  * Manages keyboard shortcuts for rating tracks OUTSIDE of React lifecycle.
  * This allows shortcuts to work even when the Tagify app is not mounted.
- * Does this by reading/writing through storageService (IndexedDB-backed state).
+ * Does this by changing saved records in IndexedDB (see extensionEdits).
  * And emits global events - listened by useGlobalKeyboardShortcuts (which runs INSIDE of React).
  *
  * This is a service (and not a hook) because shortcuts must:
@@ -12,19 +12,24 @@
  *
  * KeyboardShortcutService exists to make things happen.
  * useGlobalKeyboardShortcuts exists to tell React that something happened.
+ *
+ * Every shortcut changes the current saved record inside one storage
+ * transaction (see extensionEdits), so it never replaces tags or other edits
+ * saved by the Tagify page, sync, or background lookups in the meantime.
  */
-import {
-  ArtistData,
-  PlaylistData,
-  TagDataStructure,
-  TrackData,
-} from "@/types/tagData";
-import { storageService } from "@/services/storage";
-import { defaultTagData } from "@/constants/defaultTagData";
+import { ArtistData, PlaylistData, TrackData } from "@/types/tagData";
 import { audioFeaturesService } from "@/services/AudioFeaturesService";
+import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
+import { getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
+import { dispatchTagDataUpdatedEvent } from "@/features/tag-data/utils/tagData.events";
+import {
+  announceSavedTracks,
+  getEditErrorMessage,
+  saveEntityEdit,
+  saveTrackEdits,
+  type AnnotationEdit,
+} from "@/extensions/extensionEdits";
 
-const DATA_UPDATED_EVENT = "tagify:dataUpdated";
-const SMART_PLAYLIST_SYNC_EVENT = "tagify:trackChanged";
 const PLAYLIST_CHANGED_EVENT = "tagify:playlistChanged";
 const ARTIST_CHANGED_EVENT = "tagify:artistChanged";
 const LOCK_STATE_KEY = "tagify:lockState";
@@ -67,8 +72,6 @@ class KeyboardShortcutService {
   private isInitialized = false;
   private boundHandler: ((event: KeyboardEvent) => void) | null = null;
   private boundSettingsHandler: ((event: Event) => void) | null = null;
-  private tagDataCache: TagDataStructure | null = null;
-  private cacheLoadPromise: Promise<void> | null = null;
   private audioFeaturesBackfillInFlight = new Set<string>();
 
   private getShortcutTarget(): ShortcutTarget {
@@ -147,10 +150,6 @@ class KeyboardShortcutService {
       return;
     }
 
-    // Load initial cache from IndexedDB
-    await this.loadCache();
-    this.listenForDataUpdates();
-
     // when you pass a method as a callback, it loses its 'this' context
     // so we use 'bind(this)' -> creates a new function where 'this' is the value that we're passing to it ('this' in this case!)
     // Now `this` inside handleKeyPress will always be your KeyboardShortcutService instance
@@ -207,33 +206,6 @@ class KeyboardShortcutService {
     return { enabled: true }; // default to enabled
   }
 
-  private async loadCache(): Promise<void> {
-    if (this.cacheLoadPromise) {
-      return this.cacheLoadPromise;
-    }
-
-    this.cacheLoadPromise = (async () => {
-      try {
-        if (!storageService.isReady()) {
-          await storageService.initialize();
-        }
-        this.tagDataCache = await storageService.loadAll();
-      } catch (error) {
-        console.error("KeyboardShortcutService: Failed to load cache", error);
-        this.tagDataCache = defaultTagData;
-      }
-    })();
-
-    await this.cacheLoadPromise;
-    this.cacheLoadPromise = null;
-  }
-
-  private listenForDataUpdates(): void {
-    window.addEventListener(DATA_UPDATED_EVENT, async () => {
-      await this.loadCache();
-    });
-  }
-
   // clean up.. unused for now
   destroy(): void {
     if (this.boundHandler) {
@@ -247,7 +219,6 @@ class KeyboardShortcutService {
       );
       this.boundSettingsHandler = null;
     }
-    this.tagDataCache = null;
     this.isInitialized = false;
   }
 
@@ -257,187 +228,6 @@ class KeyboardShortcutService {
       return trackData?.uri || null;
     } catch {
       return null;
-    }
-  }
-
-  // read tag data from in-memory cache hydrated from storageService
-  private getTagData(): TagDataStructure | null {
-    return this.tagDataCache;
-  }
-
-  private async persistTrackChange(
-    trackUri: string,
-    trackData: TrackData | null
-  ): Promise<boolean> {
-    try {
-      if (trackData === null) {
-        return await storageService.deleteTrack(trackUri);
-      }
-      return await storageService.saveTrack(trackUri, trackData);
-    } catch (error) {
-      console.error("Tagify: Error saving track to IndexedDB", error);
-      return false;
-    }
-  }
-
-  private async persistPlaylistChange(
-    playlistUri: string,
-    playlistData: PlaylistData | null
-  ): Promise<boolean> {
-    try {
-      if (playlistData === null) {
-        return await storageService.deletePlaylist(playlistUri);
-      }
-      return await storageService.savePlaylist(playlistUri, playlistData);
-    } catch (error) {
-      console.error("Tagify: Error saving playlist to IndexedDB", error);
-      return false;
-    }
-  }
-
-  private async persistArtistChange(
-    artistUri: string,
-    artistData: ArtistData | null
-  ): Promise<boolean> {
-    try {
-      if (artistData === null) {
-        return await storageService.deleteArtist(artistUri);
-      }
-      return await storageService.saveArtist(artistUri, artistData);
-    } catch (error) {
-      console.error("Tagify: Error saving artist to IndexedDB", error);
-      return false;
-    }
-  }
-
-  private createTrackShell(trackUri: string): TrackData {
-    const metadata = this.getTargetTrackMetadata();
-    const now = Date.now();
-
-    // Save immediately with bpm:null; BPM is fetched in background.
-    const trackData: TrackData = {
-      rating: 0,
-      energy: 0,
-      bpm: null,
-      camelotKey: null,
-      tagIds: [],
-      dateCreated: now,
-      dateModified: now,
-      name: metadata?.name,
-      artists: metadata?.artists,
-    };
-
-    const tagData = this.getTagData();
-    if (tagData) {
-      tagData.tracks[trackUri] = trackData;
-    }
-
-    void this.backfillAudioFeatures(trackUri);
-
-    return trackData;
-  }
-
-  private createPlaylistShell(
-    playlistUri: string,
-    metadata?: ShortcutPlaylistMetadata | null
-  ): PlaylistData {
-    const now = Date.now();
-    const playlistData: PlaylistData = {
-      rating: 0,
-      energy: 0,
-      tagIds: [],
-      dateCreated: now,
-      dateModified: now,
-      name: metadata?.name,
-      ownerName: metadata?.ownerName ?? null,
-      imageUrl: metadata?.imageUrl ?? null,
-      description: metadata?.description ?? null,
-      trackCount: metadata?.trackCount ?? null,
-      snapshotId: metadata?.snapshotId ?? null,
-    };
-
-    const tagData = this.getTagData();
-    if (tagData) {
-      tagData.playlists[playlistUri] = playlistData;
-    }
-
-    return playlistData;
-  }
-
-  private createArtistShell(
-    artistUri: string,
-    metadata?: ShortcutArtistMetadata | null
-  ): ArtistData {
-    const now = Date.now();
-    const artistData: ArtistData = {
-      rating: 0,
-      energy: 0,
-      tagIds: [],
-      dateCreated: now,
-      dateModified: now,
-      name: metadata?.name,
-      imageUrl: metadata?.imageUrl ?? null,
-      followerCount: metadata?.followerCount ?? null,
-      genres: metadata?.genres || [],
-    };
-
-    const tagData = this.getTagData();
-    if (tagData) {
-      tagData.artists[artistUri] = artistData;
-    }
-
-    return artistData;
-  }
-
-  private async backfillAudioFeatures(trackUri: string): Promise<void> {
-    if (trackUri.startsWith("spotify:local:")) {
-      return;
-    }
-
-    if (this.audioFeaturesBackfillInFlight.has(trackUri)) {
-      return;
-    }
-    this.audioFeaturesBackfillInFlight.add(trackUri);
-
-    try {
-      const tagData = this.getTagData();
-      const track = tagData?.tracks[trackUri];
-      if (!track) {
-        return;
-      }
-
-      const features = await audioFeaturesService.getAudioFeaturesFromUri(
-        trackUri
-      );
-      const bpm = features?.bpm ?? null;
-      const camelotKey = features?.camelotKey ?? null;
-
-      if (bpm === null && camelotKey === null) {
-        return;
-      }
-
-      const latestTagData = this.getTagData();
-      const latestTrack = latestTagData?.tracks[trackUri];
-      if (!latestTrack) {
-        return;
-      }
-
-      if (latestTrack.bpm === null && bpm !== null) {
-        latestTrack.bpm = bpm;
-      }
-      if (!latestTrack.camelotKey && camelotKey !== null) {
-        latestTrack.camelotKey = camelotKey;
-      }
-
-      const finalTrackData = { ...latestTrack };
-      const saved = await this.persistTrackChange(trackUri, finalTrackData);
-      if (saved) {
-        this.notifyDataUpdated(trackUri, finalTrackData);
-      }
-    } catch (error) {
-      console.error("Error backfilling audio features:", error);
-    } finally {
-      this.audioFeaturesBackfillInFlight.delete(trackUri);
     }
   }
 
@@ -482,264 +272,106 @@ class KeyboardShortcutService {
     }
   }
 
-  // dispatch event AFTER LOCALSTORAGE HAS BEEN WRITTEN. notify React components that data has changed
-  private notifyDataUpdated(
-    trackUri: string = "",
-    trackData: TrackData | null = null
-  ): void {
-    //
-    window.dispatchEvent(
-      new CustomEvent(DATA_UPDATED_EVENT, {
-        detail: { type: "keyboardShortcut", timestamp: Date.now() },
-      })
-    );
-    window.dispatchEvent(
-      new CustomEvent(SMART_PLAYLIST_SYNC_EVENT, {
-        detail: { trackUri, trackData, timestamp: Date.now() },
-      })
-    );
-  }
-
-  private notifyPlaylistUpdated(
-    playlistUri: string,
-    playlistData: PlaylistData | null
-  ): void {
-    window.dispatchEvent(
-      new CustomEvent(DATA_UPDATED_EVENT, {
-        detail: { type: "keyboardShortcut", timestamp: Date.now() },
-      })
-    );
-    window.dispatchEvent(
-      new CustomEvent(PLAYLIST_CHANGED_EVENT, {
-        detail: { playlistUri, playlistData, timestamp: Date.now() },
-      })
-    );
-  }
-
-  private notifyArtistUpdated(
-    artistUri: string,
-    artistData: ArtistData | null
-  ): void {
-    window.dispatchEvent(
-      new CustomEvent(DATA_UPDATED_EVENT, {
-        detail: { type: "keyboardShortcut", timestamp: Date.now() },
-      })
-    );
-    window.dispatchEvent(
-      new CustomEvent(ARTIST_CHANGED_EVENT, {
-        detail: { artistUri, artistData, timestamp: Date.now() },
-      })
-    );
-  }
-
-  private async setRating(trackUri: string, rating: number): Promise<void> {
-    const tagData = this.getTagData();
-    if (!tagData) {
+  /** Changes the star rating or energy of a song from its saved record. */
+  private async editTrack(trackUri: string, edit: AnnotationEdit): Promise<void> {
+    let created = false;
+    let saved: Record<string, TrackData | null>;
+    try {
+      saved = await saveTrackEdits([trackUri], edit, {
+        details: () => {
+          created = true;
+          const metadata = this.getTargetTrackMetadata();
+          return { name: metadata?.name, artists: metadata?.artists };
+        },
+      });
+    } catch (error) {
+      console.error("Tagify: Could not save the keyboard shortcut change", error);
+      Spicetify.showNotification(getEditErrorMessage(error), true);
       return;
     }
 
-    const now = Date.now();
-
-    // Ensure track exists
-    if (!tagData.tracks[trackUri]) {
-      this.createTrackShell(trackUri);
-    }
-
-    const trackData = tagData.tracks[trackUri];
-    let finalTrackData: TrackData | null = null;
-
-    // Check if clearing the rating would make the track empty
-    if (rating === 0 && trackData.energy === 0 && trackData.tagIds.length === 0) {
-      // Remove track entirely
-      delete tagData.tracks[trackUri];
-    } else {
-      trackData.rating = rating;
-      trackData.dateModified = now;
-      if (!trackData.dateCreated) {
-        trackData.dateCreated = now;
-      }
-      finalTrackData = { ...trackData };
-    }
-
-    const saved = await this.persistTrackChange(trackUri, finalTrackData);
-    if (saved) {
-      this.notifyDataUpdated(trackUri, finalTrackData);
-    }
+    announceSavedTracks(saved);
+    // New songs are saved right away; their tempo and key are looked up after.
+    if (created && saved[trackUri]) void this.backfillAudioFeatures(trackUri);
   }
 
-  private async setEnergy(trackUri: string, energy: number): Promise<void> {
-    const tagData = this.getTagData();
-    if (!tagData) {
+  /**
+   * Fills in a song's tempo and key when they are still missing. Ratings,
+   * tags, values changed in the meantime, and Last Updated stay as saved.
+   */
+  private async backfillAudioFeatures(trackUri: string): Promise<void> {
+    if (trackUri.startsWith("spotify:local:") || this.audioFeaturesBackfillInFlight.has(trackUri)) {
       return;
     }
+    this.audioFeaturesBackfillInFlight.add(trackUri);
 
-    const now = Date.now();
+    try {
+      const expectedDatabaseName = getTagifyDatabaseName();
+      const features = await audioFeaturesService.getAudioFeaturesFromUri(trackUri);
+      const bpm = features?.bpm ?? null;
+      const camelotKey = features?.camelotKey ?? null;
+      if (bpm === null && camelotKey === null) return;
 
-    // Ensure track exists
-    if (!tagData.tracks[trackUri]) {
-      this.createTrackShell(trackUri);
-    }
-
-    const trackData = tagData.tracks[trackUri];
-    let finalTrackData: TrackData | null = null;
-
-    // Check if clearing the energy would make the track empty
-    if (energy === 0 && trackData.rating === 0 && trackData.tagIds.length === 0) {
-      // Remove track entirely
-      delete tagData.tracks[trackUri];
-    } else {
-      trackData.energy = energy;
-      trackData.dateModified = now;
-      if (!trackData.dateCreated) {
-        trackData.dateCreated = now;
-      }
-      finalTrackData = { ...trackData };
-    }
-
-    const saved = await this.persistTrackChange(trackUri, finalTrackData);
-    if (saved) {
-      this.notifyDataUpdated(trackUri, finalTrackData);
+      const saved = await indexedDBStorage.patchTracks({
+        [trackUri]: (current) => {
+          if (!current) return undefined;
+          const fillBpm = bpm !== null && (current.bpm === null || current.bpm === undefined);
+          const fillKey = camelotKey !== null && !current.camelotKey;
+          if (!fillBpm && !fillKey) return undefined;
+          return {
+            ...current,
+            ...(fillBpm ? { bpm } : {}),
+            ...(fillKey ? { camelotKey } : {}),
+          };
+        },
+      }, { expectedDatabaseName });
+      announceSavedTracks(saved);
+    } catch (error) {
+      console.error("Tagify: Could not fill in the song's tempo and key", error);
+    } finally {
+      this.audioFeaturesBackfillInFlight.delete(trackUri);
     }
   }
 
-  private async setPlaylistRating(
-    playlistUri: string,
-    rating: number,
-    metadata?: ShortcutPlaylistMetadata | null
+  /** Changes the star rating or energy of a playlist, album, or artist from its saved record. */
+  private async editEntity(
+    target: Extract<ShortcutTarget, { type: "playlist" | "artist" }>,
+    edit: AnnotationEdit,
   ): Promise<void> {
-    const tagData = this.getTagData();
-    if (!tagData) {
+    let saved: Record<string, PlaylistData | ArtistData | null>;
+    try {
+      saved = target.type === "playlist"
+        ? await saveEntityEdit<PlaylistData>("playlist", target.uri, edit, {
+            name: target.metadata?.name,
+            ownerName: target.metadata?.ownerName ?? null,
+            imageUrl: target.metadata?.imageUrl ?? null,
+            description: target.metadata?.description ?? null,
+            trackCount: target.metadata?.trackCount ?? null,
+            snapshotId: target.metadata?.snapshotId ?? null,
+          })
+        : await saveEntityEdit<ArtistData>("artist", target.uri, edit, {
+            name: target.metadata?.name,
+            imageUrl: target.metadata?.imageUrl ?? null,
+            followerCount: target.metadata?.followerCount ?? null,
+            genres: target.metadata?.genres || [],
+          });
+    } catch (error) {
+      console.error("Tagify: Could not save the keyboard shortcut change", error);
+      Spicetify.showNotification(getEditErrorMessage(error), true);
       return;
     }
+    if (!(target.uri in saved)) return;
 
-    const now = Date.now();
-    if (!tagData.playlists[playlistUri]) {
-      this.createPlaylistShell(playlistUri, metadata);
-    }
-
-    const playlistData = tagData.playlists[playlistUri];
-    let finalPlaylistData: PlaylistData | null = null;
-
-    if (rating === 0 && playlistData.energy === 0 && playlistData.tagIds.length === 0) {
-      delete tagData.playlists[playlistUri];
-    } else {
-      playlistData.rating = rating;
-      playlistData.dateModified = now;
-      if (!playlistData.dateCreated) {
-        playlistData.dateCreated = now;
-      }
-      finalPlaylistData = { ...playlistData };
-    }
-
-    const saved = await this.persistPlaylistChange(playlistUri, finalPlaylistData);
-    if (saved) {
-      this.notifyPlaylistUpdated(playlistUri, finalPlaylistData);
-    }
-  }
-
-  private async setPlaylistEnergy(
-    playlistUri: string,
-    energy: number,
-    metadata?: ShortcutPlaylistMetadata | null
-  ): Promise<void> {
-    const tagData = this.getTagData();
-    if (!tagData) {
-      return;
-    }
-
-    const now = Date.now();
-    if (!tagData.playlists[playlistUri]) {
-      this.createPlaylistShell(playlistUri, metadata);
-    }
-
-    const playlistData = tagData.playlists[playlistUri];
-    let finalPlaylistData: PlaylistData | null = null;
-
-    if (energy === 0 && playlistData.rating === 0 && playlistData.tagIds.length === 0) {
-      delete tagData.playlists[playlistUri];
-    } else {
-      playlistData.energy = energy;
-      playlistData.dateModified = now;
-      if (!playlistData.dateCreated) {
-        playlistData.dateCreated = now;
-      }
-      finalPlaylistData = { ...playlistData };
-    }
-
-    const saved = await this.persistPlaylistChange(playlistUri, finalPlaylistData);
-    if (saved) {
-      this.notifyPlaylistUpdated(playlistUri, finalPlaylistData);
-    }
-  }
-
-  private async setArtistRating(
-    artistUri: string,
-    rating: number,
-    metadata?: ShortcutArtistMetadata | null
-  ): Promise<void> {
-    const tagData = this.getTagData();
-    if (!tagData) {
-      return;
-    }
-
-    const now = Date.now();
-    if (!tagData.artists[artistUri]) {
-      this.createArtistShell(artistUri, metadata);
-    }
-
-    const artistData = tagData.artists[artistUri];
-    let finalArtistData: ArtistData | null = null;
-
-    if (rating === 0 && artistData.energy === 0 && artistData.tagIds.length === 0) {
-      delete tagData.artists[artistUri];
-    } else {
-      artistData.rating = rating;
-      artistData.dateModified = now;
-      if (!artistData.dateCreated) {
-        artistData.dateCreated = now;
-      }
-      finalArtistData = { ...artistData };
-    }
-
-    const saved = await this.persistArtistChange(artistUri, finalArtistData);
-    if (saved) {
-      this.notifyArtistUpdated(artistUri, finalArtistData);
-    }
-  }
-
-  private async setArtistEnergy(
-    artistUri: string,
-    energy: number,
-    metadata?: ShortcutArtistMetadata | null
-  ): Promise<void> {
-    const tagData = this.getTagData();
-    if (!tagData) {
-      return;
-    }
-
-    const now = Date.now();
-    if (!tagData.artists[artistUri]) {
-      this.createArtistShell(artistUri, metadata);
-    }
-
-    const artistData = tagData.artists[artistUri];
-    let finalArtistData: ArtistData | null = null;
-
-    if (energy === 0 && artistData.rating === 0 && artistData.tagIds.length === 0) {
-      delete tagData.artists[artistUri];
-    } else {
-      artistData.energy = energy;
-      artistData.dateModified = now;
-      if (!artistData.dateCreated) {
-        artistData.dateCreated = now;
-      }
-      finalArtistData = { ...artistData };
-    }
-
-    const saved = await this.persistArtistChange(artistUri, finalArtistData);
-    if (saved) {
-      this.notifyArtistUpdated(artistUri, finalArtistData);
-    }
+    dispatchTagDataUpdatedEvent("save", { recordsAnnounced: true });
+    window.dispatchEvent(
+      target.type === "playlist"
+        ? new CustomEvent(PLAYLIST_CHANGED_EVENT, {
+            detail: { playlistUri: target.uri, playlistData: saved[target.uri], timestamp: Date.now() },
+          })
+        : new CustomEvent(ARTIST_CHANGED_EVENT, {
+            detail: { artistUri: target.uri, artistData: saved[target.uri], timestamp: Date.now() },
+          })
+    );
   }
 
   private get isTemporarilyDisabled(): boolean {
@@ -794,18 +426,6 @@ class KeyboardShortcutService {
       return;
     }
 
-    const tagData = this.getTagData();
-    if (!tagData) {
-      return;
-    }
-
-    const currentData =
-      shortcutTarget.type === "track"
-        ? tagData.tracks[shortcutTarget.uri]
-        : shortcutTarget.type === "playlist"
-          ? tagData.playlists[shortcutTarget.uri]
-          : tagData.artists[shortcutTarget.uri];
-
     const digitToStarRating: { [key: string]: number } = {
       "1": 0.5,
       "2": 1,
@@ -832,59 +452,19 @@ class KeyboardShortcutService {
       "0": 10,
     };
 
-    // Handle energy ratings (with Shift)
-    if (isShiftPressed) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const newEnergy = digitToEnergyRating[digit];
-      const currentEnergy = currentData?.energy || 0;
-
-      // Toggle: if same energy, clear it
-      const nextEnergy = currentEnergy === newEnergy ? 0 : newEnergy;
-
-      if (shortcutTarget.type === "track") {
-        void this.setEnergy(shortcutTarget.uri, nextEnergy);
-      } else if (shortcutTarget.type === "playlist") {
-        void this.setPlaylistEnergy(
-          shortcutTarget.uri,
-          nextEnergy,
-          shortcutTarget.metadata
-        );
-      } else {
-        void this.setArtistEnergy(
-          shortcutTarget.uri,
-          nextEnergy,
-          shortcutTarget.metadata
-        );
-      }
-      return;
-    }
-
-    // Handle star ratings (no Shift)
     event.preventDefault();
     event.stopPropagation();
 
-    const newRating = digitToStarRating[digit];
-    const currentRating = currentData?.rating || 0;
-
-    // Toggle: if same rating, clear it
-    const nextRating = currentRating === newRating ? 0 : newRating;
+    // Pressing the saved value again clears it. That is decided from the
+    // saved record when the change is written, not from an earlier copy.
+    const edit: AnnotationEdit = isShiftPressed
+      ? { toggleEnergy: digitToEnergyRating[digit] }
+      : { toggleRating: digitToStarRating[digit] };
 
     if (shortcutTarget.type === "track") {
-      void this.setRating(shortcutTarget.uri, nextRating);
-    } else if (shortcutTarget.type === "playlist") {
-      void this.setPlaylistRating(
-        shortcutTarget.uri,
-        nextRating,
-        shortcutTarget.metadata
-      );
+      void this.editTrack(shortcutTarget.uri, edit);
     } else {
-      void this.setArtistRating(
-        shortcutTarget.uri,
-        nextRating,
-        shortcutTarget.metadata
-      );
+      void this.editEntity(shortcutTarget, edit);
     }
   }
 }

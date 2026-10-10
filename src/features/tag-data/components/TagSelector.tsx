@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import { getQuickTagMatches, getQuickTagTargets, getQuickTagNameError } from "../utils/quickTag";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./TagSelector.module.css";
 import { CustomTagAccent, Tag as TagNode, TagCategory, TagSubcategory } from "@/types/tagData";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
@@ -20,6 +21,7 @@ interface TagSelectorProps {
   trackTagIds?: string[];
   onToggleTag: (tagId: string) => void;
   onOpenTagManager: () => void;
+  onCreateTag?: (name: string, parentId: string) => Promise<string>;
   targetType?: "track" | "tracks" | "playlist" | "album" | "artist";
   isMultiTagging: boolean;
   isLockedTrack: boolean;
@@ -32,6 +34,7 @@ const TagSelector: React.FC<TagSelectorProps> = ({
   trackTagIds,
   onToggleTag,
   onOpenTagManager,
+  onCreateTag,
   targetType = "track",
   isMultiTagging = false,
   isLockedTrack = false,
@@ -68,6 +71,29 @@ const TagSelector: React.FC<TagSelectorProps> = ({
     () => filterTagSelectorCategories(sortedCategories, searchTerm),
     [sortedCategories, searchTerm],
   );
+
+  const targets = useMemo(() => getQuickTagTargets(categories), [categories]);
+  const matches = useMemo(() => getQuickTagMatches(categories, searchTerm), [categories, searchTerm]);
+  const exactMatches = matches.filter((tag) => tag.name.toLocaleLowerCase() === searchTerm.trim().toLocaleLowerCase());
+  const enterMatch = exactMatches.length === 1 ? exactMatches[0] : exactMatches.length === 0 && matches.length === 1 ? matches[0] : null;
+  const [chosenParent, setChosenParent] = useState("");
+  const parentId = targets.some((target) => target.id === chosenParent) ? chosenParent : targets[0]?.id || "";
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const createAndApply = async () => {
+    if (!onCreateTag || creating) return;
+    const error = getQuickTagNameError(searchTerm);
+    if (error) { setCreateError(error); return; }
+    setCreating(true);
+    setCreateError("");
+    try {
+      const id = await onCreateTag(searchTerm.trim(), parentId);
+      onToggleTag(id);
+      setSearchTerm("");
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : "Tagify couldn't create your tag. Please try again.");
+    } finally { setCreating(false); }
+  };
 
   const expandedCategories = new Set(expandedCategoryIds);
   const expandedSubcategories = new Set(expandedSubcategoryKeys);
@@ -139,11 +165,13 @@ const TagSelector: React.FC<TagSelectorProps> = ({
   useEffect(() => {
     if (!searchTerm) return;
 
-    setExpandedCategoryIds(visibleCategories.map((category) => category.id));
-    setExpandedSubcategoryKeys(
-      visibleCategories.flatMap(collectSubcategoryKeys),
-    );
-  }, [searchTerm, setExpandedCategoryIds, setExpandedSubcategoryKeys, visibleCategories]);
+    const categoryIds = visibleCategories.map(category => category.id);
+    const subcategoryKeys = visibleCategories.flatMap(collectSubcategoryKeys);
+    // Storage setters may change identity; avoid repeatedly storing identical expansion.
+    const same = (left: string[], right: string[]) => left.length === right.length && left.every((id, index) => id === right[index]);
+    if (!same(expandedCategoryIds, categoryIds)) setExpandedCategoryIds(categoryIds);
+    if (!same(expandedSubcategoryKeys, subcategoryKeys)) setExpandedSubcategoryKeys(subcategoryKeys);
+  }, [searchTerm, setExpandedCategoryIds, setExpandedSubcategoryKeys, visibleCategories, expandedCategoryIds, expandedSubcategoryKeys]);
 
   const renderTagGrid = (tags: TagNode[]) => (
     <div className={styles.tagGrid}>
@@ -154,6 +182,8 @@ const TagSelector: React.FC<TagSelectorProps> = ({
             tag.accentId ? styles.tagButtonAccented : ""
           } ${isTagApplied(tag.id) ? styles.tagApplied : ""}`}
           style={buildTagAccentCssVars(tag.accentId, customAccentsById)}
+          title={tag.name}
+          aria-pressed={isTagApplied(tag.id)}
           onClick={() => onToggleTag(tag.id)}
         >
           <span className={styles.tagButtonLabel}>
@@ -264,12 +294,32 @@ const TagSelector: React.FC<TagSelectorProps> = ({
               type="text"
               placeholder="Search tags..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              aria-label="Search tags"
+              disabled={creating}
+              onChange={(e) => { setSearchTerm(e.target.value); setCreateError(""); }}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  if (enterMatch && !isTagApplied(enterMatch.id)) onToggleTag(enterMatch.id);
+                }
+                if (event.key === "Escape") setSearchTerm("");
+              }}
               className={styles.searchInput}
             />
+            {searchTerm && <button className={styles.clearSearch} aria-label="Clear tag search" onClick={() => setSearchTerm("")} disabled={creating}>×</button>}
           </div>
         </div>
       </div>
+      {onCreateTag && searchTerm.trim() && !exactMatches.length && (
+        <div className={styles.quickCreate}>
+          <label>Save tag in <select aria-label="New tag category or folder" value={parentId} onChange={(event) => setChosenParent(event.target.value)} disabled={creating}>
+            {targets.length ? targets.map((target) => <option key={target.id} value={target.id}>{target.name}</option>) : <option value="">Quick tags</option>}
+          </select></label>
+          <button type="button" disabled={creating || !!getQuickTagNameError(searchTerm)} onClick={() => void createAndApply()}>{creating ? "Creating…" : `Create and apply “${searchTerm.trim()}”`}</button>
+        </div>
+      )}
+      {createError && <p role="alert">{createError}</p>}
 
       {isMultiTagging && (
         <div

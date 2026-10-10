@@ -1,3 +1,5 @@
+import { PrivateNote } from "@/features/private-notes/components/PrivateNote";
+import { getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
 import React, { useEffect, useMemo, useState } from "react";
 import styles from "./TrackDetails.module.css";
 import communityLinkStyles from "../../community/CommunityEntityLink.module.css";
@@ -19,18 +21,9 @@ import {
   organizeTrackTagsByCategory,
 } from "@/features/track-session/utils/trackDetails.tags";
 import { buildTagAccentCssVars } from "@/features/tag-data";
-import { CommunityEntityLens, getCommunityEntityUrl } from "@/features/community";
+import { CommunityEntityLens, getCommunityEntityUrl, lookupCommunityEntity } from "@/features/community";
+import { parseSpotifyEntity } from "@tagify/community-contracts";
 import { AlbumProgressLine } from "@/features/playlist-state";
-
-const COMMUNITY_ENTITY_API_PATTERN =
-  /^https:\/\/community\.tagify\.fm\/entity\/(track|album|artist)\/([A-Za-z0-9]{10,64})$/;
-
-function getCommunityEntityApiUrl(communityUrl: string | null): string | null {
-  if (!communityUrl) return null;
-  const match = communityUrl.match(COMMUNITY_ENTITY_API_PATTERN);
-  if (!match) return null;
-  return `https://community.tagify.fm/api/v2/entities/${match[1]}/${match[2]}`;
-}
 
 interface TrackDetailsProps {
   displayedTrack: SpotifyTrack; // The track displayed in TrackDetails
@@ -108,26 +101,23 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   const [isEditingBpm, setIsEditingBpm] = useState(false);
   const [editBpmValue, setEditBpmValue] = useState<string>("");
   const communityUrl = getCommunityEntityUrl(displayedTrack.uri || "");
-  const communityEntityApiUrl = getCommunityEntityApiUrl(communityUrl);
   const [hasCommunityEntity, setHasCommunityEntity] = useState(false);
 
   useEffect(() => {
     setHasCommunityEntity(false);
-    if (!communityEntityApiUrl) return;
+    const entity = communityUrl ? parseSpotifyEntity(displayedTrack.uri || "") : null;
+    if (!entity) return;
 
     let isCurrent = true;
-    void fetch(communityEntityApiUrl)
-      .then((response) => {
-        if (isCurrent) setHasCommunityEntity(response.ok);
-      })
-      .catch(() => {
-        if (isCurrent) setHasCommunityEntity(false);
-      });
+    // Shares one cached request with the Community perspectives below.
+    void lookupCommunityEntity(entity.kind, entity.providerId).then(({ found }) => {
+      if (isCurrent) setHasCommunityEntity(found);
+    });
 
     return () => {
       isCurrent = false;
     };
-  }, [communityEntityApiUrl]);
+  }, [communityUrl, displayedTrack.uri]);
 
   const handleBpmClick = () => {
     setIsEditingBpm(true);
@@ -217,6 +207,8 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   return (
     <div className={styles.container}>
       <div className={styles.lockControlContainer}>
+
+
         {communityUrl && hasCommunityEntity ? (
           <a
             className={communityLinkStyles.communityLink}
@@ -511,7 +503,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
                   halfIcon={<FontAwesomeIcon icon={faStarHalf} />}
                   fullIcon={<FontAwesomeIcon icon={faStar} />}
                   activeColor="#ffd700"
-                  color="var(--spice-button-disabled)"
+                  color="var(--tagify-rating-control-muted, var(--spice-button-disabled))"
                 />
               </div>
 
@@ -538,6 +530,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
             <div className={styles.energyContainer}>
               <input
                 type="range"
+                aria-label="Energy"
                 min="1"
                 max="10"
                 value={trackData.energy || 5}
@@ -563,6 +556,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
               )}
             </div>
           </div>
+          <PrivateNote key={`${getTagifyDatabaseName()}:${displayedTrack.uri}`} uri={displayedTrack.uri} inline />
         </div>
       </div>
 

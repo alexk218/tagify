@@ -118,10 +118,13 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
     try {
       const result = await onRetryMigration();
       if (result.success && !result.fallbackMode) {
-        Spicetify.showNotification("Storage upgrade successful!", false);
+        Spicetify.showNotification("Your library is open again. Changes will save.", false);
+      } else if (!result.olderCopy) {
+        // An older copy opens its own choice; anything else is still unavailable.
+        Spicetify.showNotification("Tagify still couldn't open your library. Try again later or restart Spotify.", true);
       }
     } catch {
-      Spicetify.showNotification("Storage upgrade failed", true);
+      Spicetify.showNotification("Tagify still couldn't open your library. Try again later or restart Spotify.", true);
     } finally {
       setIsRetryingMigration(false);
     }
@@ -250,11 +253,11 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
                 <div className={styles.toggleItem}>
                   <div className={styles.toggleInfo}>
                     <label className={styles.toggleLabel}>
-                      Storage Upgrade
+                      Saving is paused
                     </label>
                     <span className={styles.toggleDescription}>
-                      Upgrade to IndexedDB storage (removes ~10,000 track limit
-                      & speeds up performance)
+                      Tagify couldn&apos;t open your saved library, so changes
+                      aren&apos;t being saved. Your saved tags haven&apos;t been removed.
                     </span>
                   </div>
                   <button
@@ -262,7 +265,7 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
                     onClick={handleRetryMigration}
                     disabled={isRetryingMigration}
                   >
-                    {isRetryingMigration ? "Upgrading..." : "Retry Upgrade"}
+                    {isRetryingMigration ? "Trying again..." : "Try again"}
                   </button>
                 </div>
               )}

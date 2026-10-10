@@ -29,6 +29,7 @@ export const spotifyApiService = {
 export const spotifyService = {};
 export const flushLocalPersistence = async () => {};
 export const isLocalPersistencePaused = () => false;
+export const getTagifyDatabaseName = () => "tagify-db";
 export const normalizeSmartPlaylistCriteriaList = (value: unknown) => value;
 
 Object.assign(globalThis, { Spicetify: { Platform: { PlaylistAPI: {} }, showNotification() {} } });

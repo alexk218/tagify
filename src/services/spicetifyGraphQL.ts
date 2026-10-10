@@ -1,3 +1,5 @@
+import { getSpotifyRetryAfterMs } from "@/utils/spotifyRateLimit";
+
 type GraphQLDefinition = Record<string, unknown>;
 type GraphQLVariables = Record<string, unknown>;
 
@@ -43,5 +45,9 @@ export async function requestSpicetifyGraphQL<TResponse = unknown>(
     throw new TypeError("Spicetify GraphQL request function is unavailable");
   }
 
-  return request(definition, variables, context) as Promise<TResponse>;
+  const response = await request(definition, variables, context);
+  const errors = (response as { errors?: unknown[] } | null)?.errors;
+  const throttled = errors?.find((error) => getSpotifyRetryAfterMs(error) !== null);
+  if (throttled) throw throttled;
+  return response as TResponse;
 }

@@ -11,7 +11,8 @@
 
 .modal {
   width: min(560px, 100%);
-  overflow: hidden;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
   color: var(--spice-text);
   background: var(--spice-card);
   border: 1px solid rgb(255 255 255 / 10%);
@@ -97,6 +98,38 @@
   color: var(--spice-text);
   font-size: 14px;
   line-height: 1.55;
+}
+
+.installerSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: rgb(29 185 84 / 8%);
+  border: 1px solid rgb(29 185 84 / 22%);
+  border-radius: 10px;
+}
+
+.installerSection p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.installerLink {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  align-self: flex-start;
+  color: #1ed760;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.installerLink:hover {
+  color: #5ee889;
 }
 
 .commandSection {

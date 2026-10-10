@@ -1,7 +1,8 @@
+import { spotifyApiService } from "@/services/SpotifyApiService";
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildTaxonomyFromCategoryTree } from "@/utils/tagTaxonomy";
 import SmartPlaylistSharingDialog from "../SmartPlaylistSharingDialog";
 import { CREATE_SHARED_TAG } from "../../utils/smartPlaylist.recipes";
@@ -18,6 +19,8 @@ function show(overrides: Partial<React.ComponentProps<typeof SmartPlaylistSharin
   const props = { mode: "import" as const, bundle, taxonomy, playlists: [], tracks, onShare: vi.fn(), onImport: vi.fn().mockResolvedValue(summary), onClose: vi.fn(), ...overrides };
   render(<SmartPlaylistSharingDialog {...props} />); return props;
 }
+
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe("sharing from the user’s perspective", () => {
   it("requires tag matching, previews the recipient’s songs, and saves only after confirmation", async () => {
@@ -81,6 +84,26 @@ describe("sharing from the user’s perspective", () => {
     expect(screen.getByText(/songs that stop matching are removed/)).toBeInTheDocument();
     expect(onCreate).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Create playlist and enable sync" })); expect(onCreate).toHaveBeenCalledWith(setup);
+  });
+  it("reviews an existing playlist and enables sync only after confirmation", async () => {
+    const existing = { playlistId: "mine", playlistName: "My favourites" };
+    vi.spyOn(spotifyApiService, "getAllUserPlaylistReferencesStrict").mockResolvedValue([existing]);
+    const user = userEvent.setup(); const onCreate = vi.fn().mockResolvedValue(undefined);
+    show({ mode: "create", setup, useExisting: true, onCreate });
+    expect(screen.getByRole("button", { name: "Connect playlist and enable sync" })).toBeDisabled();
+    await screen.findByRole("option", { name: "My favourites" });
+    await user.selectOptions(screen.getByLabelText("Spotify playlist"), "mine");
+    expect(screen.getByText(/Songs that don’t match can be removed/)).toBeInTheDocument();
+    expect(onCreate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Connect playlist and enable sync" }));
+    expect(onCreate).toHaveBeenCalledWith(setup, existing);
+  });
+  it("restores personal files only after review and explains unresolved matches", async () => {
+    const user = userEvent.setup(); const props = show({ mode: "restore", backup: [setup], onImport: vi.fn().mockResolvedValue({ ...summary, unresolvedCount: 1 }) });
+    expect(props.onImport).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Restore Smart Playlists" }));
+    expect(props.onImport).toHaveBeenCalledWith([setup]);
+    expect(await screen.findByText(/remains inactive/)).toBeInTheDocument();
   });
   it("dismisses with Escape and keeps tag selections when searching", async () => {
     const user = userEvent.setup(); const props = show();

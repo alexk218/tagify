@@ -7,6 +7,9 @@ import { usePlaylistState } from "@/features/playlist-state";
 import type { SmartPlaylistCriteria } from "@/features/smart-playlists";
 import { TagTaxonomy } from "@/types/tagData";
 import TrackList from "../TrackList";
+import type { TrackListTrackData } from "@/features/track-session/model/trackList.types";
+import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
+import { emptyPrivateNote } from "@/services/sync/PrivateNotes";
 
 const taxonomy: TagTaxonomy = {
   categoryOrder: ["genre"],
@@ -45,6 +48,7 @@ const taxonomy: TagTaxonomy = {
 };
 
 interface TrackListHarnessProps {
+  tracks?: Record<string, TrackListTrackData>;
   smartPlaylists?: SmartPlaylistCriteria[];
   requestedSmartPlaylistEditId?: string | null;
   onSmartPlaylistEditRequestHandled?: () => void;
@@ -52,9 +56,11 @@ interface TrackListHarnessProps {
   onCreateSmartPlaylist?: (criteria: SmartPlaylistCriteria) => Promise<void>;
   onSetSmartPlaylists?: (value: React.SetStateAction<SmartPlaylistCriteria[]>) => Promise<void>;
   onSyncPlaylist?: (criteria: SmartPlaylistCriteria) => Promise<void>;
+  onTagTrack?: (uri: string) => void;
 }
 
 function TrackListHarness({
+  tracks,
   smartPlaylists = [],
   requestedSmartPlaylistEditId = null,
   onSmartPlaylistEditRequestHandled,
@@ -62,13 +68,14 @@ function TrackListHarness({
   onCreateSmartPlaylist = vi.fn(),
   onSetSmartPlaylists = vi.fn(),
   onSyncPlaylist = vi.fn().mockResolvedValue(undefined),
+  onTagTrack = vi.fn(),
 }: TrackListHarnessProps = {}) {
   const filters = useFilterState("tracks");
   const { createPlaylistFromFilters } = usePlaylistState();
 
   return (
     <TrackList
-      tracks={{
+      tracks={tracks || {
         "spotify:track:house": {
           name: "House Track",
           artists: "House Artist",
@@ -103,7 +110,7 @@ function TrackListHarness({
       onMoveTagToClauseLane={filters.moveTagToClauseLane}
       onReplaceTagFilterFormula={filters.replaceTagFilterFormula}
       onPlayTrack={vi.fn()}
-      onTagTrack={vi.fn()}
+      onTagTrack={onTagTrack}
       onClearTagFilters={filters.clearTagFilters}
       onCreatePlaylist={useRealPlaylistCreation ? createPlaylistFromFilters : vi.fn().mockResolvedValue(null)}
       onCreateSmartPlaylist={onCreateSmartPlaylist}
@@ -119,6 +126,41 @@ function TrackListHarness({
 }
 
 describe("TrackList tag filtering", () => {
+  it("keeps notes on every release accessible from a single confirmed song row", async () => {
+    const first = `spotify:track:${"a".repeat(22)}`, second = `spotify:track:${"b".repeat(22)}`;
+    const recordingIdentity = { isrc: "USABC2400001", artistIds: ["c".repeat(22)], durationMs: 210000, name: "Shared Song" };
+    const data = { name: "Shared Song", artists: "Artist", rating: 5, energy: 8, bpm: 120, tagIds: ["house"], recordingGroupId: "copies", recordingIdentity };
+    const read = vi.spyOn(indexedDBStorage, "getPrivateNotesForUris").mockImplementation(async uris =>
+      uris.map(uri => ({ ...emptyPrivateNote(uri), text: uri === second ? "Note on the compilation" : "Note on the original" })));
+    const onTagTrack = vi.fn();
+    try {
+      render(<TrackListHarness tracks={{ [first]: data, [second]: data }} onTagTrack={onTagTrack} />);
+      await screen.findByText("Note on the compilation");
+      expect(screen.getAllByText("Shared Song")).toHaveLength(1);
+      expect(read.mock.calls.at(-1)?.[0]).toEqual([first, second]);
+      await userEvent.setup().click(screen.getByText("Note on the compilation"));
+      expect(onTagTrack).toHaveBeenLastCalledWith(second);
+      await userEvent.setup().click(screen.getByText("Note on the original"));
+      expect(onTagTrack).toHaveBeenLastCalledWith(first);
+    } finally { read.mockRestore(); }
+  });
+  it("shows a compact private note, hides whitespace notes, and opens the existing track editor", async () => {
+    const text = "Build slowly.\nDrop comes after the long intro. ".repeat(40);
+    const read = vi.spyOn(indexedDBStorage, "getPrivateNotesForUris").mockResolvedValue([
+      { ...emptyPrivateNote("spotify:track:house"), text },
+      { ...emptyPrivateNote("spotify:track:chill"), text: " \n " },
+    ]);
+    const onTagTrack = vi.fn();
+    try {
+      render(<TrackListHarness onTagTrack={onTagTrack} />);
+      const preview = await screen.findByRole("button", { name: "Open private note for House Track" });
+      expect(preview).toHaveAttribute("title", `Your private note\n${text}`);
+      expect(preview.textContent).not.toContain("\n");
+      expect(screen.queryByRole("button", { name: "Open private note for Chill Track" })).not.toBeInTheDocument();
+      await userEvent.setup().click(preview);
+      expect(onTagTrack).toHaveBeenCalledWith("spotify:track:house");
+    } finally { read.mockRestore(); }
+  });
   beforeAll(() => {
     class IntersectionObserverMock {
       observe = vi.fn();

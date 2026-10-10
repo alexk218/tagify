@@ -4,12 +4,8 @@ import {
   type PublicEntityViewV1,
 } from "@tagify/community-contracts";
 import { Users } from "lucide-react";
-import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
-import { COMMUNITY_ORIGIN } from "./communityLinks";
-import { communityDeviceFetch, readCommunityDeviceCredential } from "./communityDevice";
+import { lookupCommunityEntity } from "./communityEntityCache";
 import styles from "./CommunityEntityLens.module.css";
-
-type EntityResponse = { entity: PublicEntityViewV1 };
 
 export function CommunityEntityLens({ entityUri, onAvailabilityChange }: {
   entityUri: string;
@@ -29,25 +25,11 @@ export function CommunityEntityLens({ entityUri, onAvailabilityChange }: {
     if (!entityRef) return;
 
     const load = async () => {
-      try {
-        const path = `/api/v2/entities/${entityRef.kind}/${entityRef.providerId}`;
-        const syncConfiguration = getDesktopSyncConfiguration();
-        const response = syncConfiguration?.accessToken
-            ? await fetch(`${COMMUNITY_ORIGIN}${path}`, {
-                headers: { authorization: `Bearer ${syncConfiguration.accessToken}` },
-              })
-          : readCommunityDeviceCredential()?.accessToken
-            ? await communityDeviceFetch(path)
-            : await fetch(`${COMMUNITY_ORIGIN}${path}`);
-        if (!response.ok) return;
-
-        const body = (await response.json()) as EntityResponse;
-        if (!isCurrent || !Array.isArray(body.entity?.contributors) || body.entity.contributors.length === 0) return;
-        setLoadedEntity({ entityUri, view: body.entity });
-        onAvailabilityChange?.(entityUri, true);
-      } catch {
-        // Keep both the perspectives panel and its Community link hidden.
-      }
+      const { entity } = await lookupCommunityEntity(entityRef.kind, entityRef.providerId);
+      if (!isCurrent || !Array.isArray(entity?.contributors) || entity.contributors.length === 0) return;
+      // Keep both the perspectives panel and its Community link hidden otherwise.
+      setLoadedEntity({ entityUri, view: entity });
+      onAvailabilityChange?.(entityUri, true);
     };
 
     void load();

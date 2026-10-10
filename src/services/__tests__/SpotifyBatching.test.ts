@@ -1,9 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spotifyApiService } from "@/services/SpotifyApiService";
+import { trackArtistIdentitiesStore } from "@/services/trackArtistIdentities";
+import { graphqlRateLimiter } from "@/utils/RateLimiter";
 import { spotifyService } from "@/services/SpotifyService";
 
 describe("Spotify metadata request protection", () => {
+  afterEach(() => { vi.useRealTimers(); });
   beforeEach(() => {
+    graphqlRateLimiter.reset();
     vi.restoreAllMocks();
     vi.mocked(Spicetify.GraphQL.Request).mockReset();
   });
@@ -44,11 +48,40 @@ describe("Spotify metadata request protection", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(Spicetify.GraphQL.Request).toHaveBeenCalledTimes(2);
+    expect(trackArtistIdentitiesStore.getSnapshot()["spotify:track:graph-2"].artists).toEqual([{ uri: "spotify:artist:artist", name: "Artist" }]);
+    await spotifyService.getTrackArtists("spotify:track:graph-2");
+    expect(Spicetify.GraphQL.Request).toHaveBeenCalledTimes(2);
     expect(result["spotify:track:graph-2"]).toMatchObject({
       albumUri: "spotify:album:album",
       albumImageUrl: "https://example.com/album.jpg",
       artists: "Artist",
     });
+  });
+
+  it("shares an in-flight track response across metadata and artist callers", async () => {
+    Spicetify.GraphQL.Definitions.getTrack = { name: "getTrack" };
+    let finish!: (value: unknown) => void;
+    vi.mocked(Spicetify.GraphQL.Request).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const uri = "spotify:track:shared-metadata";
+    const track = spotifyService.getTrack(uri);
+    const artistRead = spotifyService.getTrackArtists(uri);
+    expect(Spicetify.GraphQL.Request).toHaveBeenCalledTimes(1);
+    finish({ data: { trackUnion: { uri, name: "Track", duration: { totalMilliseconds: 1000 }, artists: { items: [{ uri: "spotify:artist:shared", profile: { name: "Shared" } }] } } } });
+    await Promise.all([track, artistRead]);
+    expect(Spicetify.GraphQL.Request).toHaveBeenCalledTimes(1);
+    expect(trackArtistIdentitiesStore.getSnapshot()[uri].artists).toEqual([{ uri: "spotify:artist:shared", name: "Shared" }]);
+  });
+
+  it("releases timed-out shared reads so a later retry can reach Spotify", async () => {
+    vi.useFakeTimers();
+    Spicetify.GraphQL.Definitions.getTrack = { name: "getTrack" };
+    vi.mocked(Spicetify.GraphQL.Request).mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce({ data: { trackUnion: { uri: "spotify:track:timeout-retry", artists: { items: [{ uri: "spotify:artist:recovered", profile: { name: "Recovered" } }] } } } });
+    const failed = expect(spotifyService.getTrackArtists("spotify:track:timeout-retry")).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await failed;
+    await expect(spotifyService.getTrackArtists("spotify:track:timeout-retry")).resolves.toEqual([{ uri: "spotify:artist:recovered", name: "Recovered" }]);
+    expect(Spicetify.GraphQL.Request).toHaveBeenCalledTimes(2);
   });
 
   it("retains the current GraphQL fallback when the Web API is unavailable", async () => {

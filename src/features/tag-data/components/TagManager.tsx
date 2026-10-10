@@ -52,6 +52,7 @@ import {
   type TaxonomyMoveReason,
   type TaxonomyMoveResult,
 } from "@/features/tag-data/utils/tagManager.taxonomy";
+import { mergeTaxonomy } from "@/features/tag-data/utils/tagData.taxonomyMerge";
 import {
   buildCustomTagAccentId,
   buildTagAccentCssVars,
@@ -251,7 +252,8 @@ interface TagManagerProps {
   initialSelectedSubcategoryId?: string | null;
   onSelectedSubcategoryIdChange?: (subcategoryId: string | null) => void;
   onClose: () => void;
-  onReplaceTaxonomy: (newTaxonomy: TagTaxonomy, removedTagIds: string[]) => void;
+  /** `base` is the saved tag setup the edit started from; changes saved elsewhere since then are kept. */
+  onReplaceTaxonomy: (newTaxonomy: TagTaxonomy, removedTagIds: string[], base: TagTaxonomy) => void;
 }
 
 const MAX_NAME_LENGTH = 30;
@@ -1135,6 +1137,11 @@ const TagManager: React.FC<TagManagerProps> = ({
     cloneTaxonomy({ ...taxonomy, ...normalizeColorLibrary(taxonomy) }),
   );
   const [hasChanges, setHasChanges] = useState<boolean>(false);
+  // The saved tags this draft started from. Changes saved elsewhere while the
+  // draft is open are merged into it rather than discarding the draft.
+  const draftBaseRef = useRef<TagTaxonomy>(taxonomy);
+  const hasChangesRef = useRef(false);
+  hasChangesRef.current = hasChanges;
   const [notification, setNotification] = useState<{
     message: string;
     isError: boolean;
@@ -1506,6 +1513,12 @@ const TagManager: React.FC<TagManagerProps> = ({
     result.status === "applied" ? "same-position" : result.reason;
 
   useEffect(() => {
+    const draftBase = draftBaseRef.current;
+    draftBaseRef.current = taxonomy;
+    if (hasChangesRef.current && draftBase !== taxonomy) {
+      setLocalTaxonomy((draft) => cloneTaxonomy(mergeTaxonomy(draftBase, draft, taxonomy)));
+      return;
+    }
     setLocalTaxonomy(cloneTaxonomy({ ...taxonomy, ...normalizeColorLibrary(taxonomy) }));
     setHasChanges(false);
   }, [taxonomy]);
@@ -2490,10 +2503,11 @@ const TagManager: React.FC<TagManagerProps> = ({
   };
 
   const handleSaveChanges = () => {
-    const removedTagIds = Object.keys(taxonomy.tagsById).filter(
+    const draftBase = draftBaseRef.current;
+    const removedTagIds = Object.keys(draftBase.tagsById).filter(
       (tagId) => !(tagId in localTaxonomy.tagsById),
     );
-    onReplaceTaxonomy(localTaxonomy, removedTagIds);
+    onReplaceTaxonomy(localTaxonomy, removedTagIds, draftBase);
     setHasChanges(false);
     onClose();
   };

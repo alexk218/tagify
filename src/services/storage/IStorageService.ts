@@ -71,7 +71,7 @@ export interface IStorageService {
   /**
    * Save multiple tracks in a single transaction
    */
-  saveTracks(tracks: Map<string, TrackData>): Promise<boolean>;
+  saveTracks(tracks: Map<string, TrackData>, previous?: Record<string, TrackData>): Promise<boolean>;
 
   /**
    * Save and delete multiple tracks in a single transaction.
@@ -97,7 +97,7 @@ export interface IStorageService {
   /**
    * Save multiple playlists in a single transaction
    */
-  savePlaylists(playlists: Map<string, PlaylistData>): Promise<boolean>;
+  savePlaylists(playlists: Map<string, PlaylistData>, previous?: Record<string, PlaylistData>): Promise<boolean>;
 
   /**
    * Get a single artist by URI
@@ -117,7 +117,7 @@ export interface IStorageService {
   /**
    * Save multiple artists in a single transaction
    */
-  saveArtists(artists: Map<string, ArtistData>): Promise<boolean>;
+  saveArtists(artists: Map<string, ArtistData>, previous?: Record<string, ArtistData>): Promise<boolean>;
 
   /**
    * Get all track URIs

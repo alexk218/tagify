@@ -1,5 +1,7 @@
 .controlBar {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   align-items: center;
   padding: 8px;
@@ -11,6 +13,7 @@
 /* ! PILL BUTTONS */
 .actionPills {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
   background: rgb(0 0 0 / 20%);
@@ -117,15 +120,4 @@
   transform: scale(1.1);
 }
 
-.saveStatus {
-  font-size: 12px;
-  color: var(--spice-subtext);
-  opacity: 0.7;
-  font-weight: 500;
-  background: rgb(34 197 94 / 10%);
-  padding: 4px 8px;
-  border-radius: 6px;
-  border: 1px solid rgb(34 197 94 / 20%);
-  margin-left: auto;
-  margin-right: 10px;
-}
+.editControls { margin-left: auto; display: flex; align-items: center; }

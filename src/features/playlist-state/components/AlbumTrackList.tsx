@@ -1,3 +1,4 @@
+import { albumTrackListsStore } from "../services/albumTrackLists";
 import React, { useMemo, useState } from "react";
 import type { CustomTagAccent, TrackData } from "@/types/tagData";
 import {
@@ -8,6 +9,8 @@ import { buildTagAccentCssVars } from "@/features/tag-data";
 import { useAlbumTracks } from "../hooks/useAlbumTracks";
 import AlbumTrackRating from "./AlbumTrackRating";
 import styles from "./AlbumTrackList.module.css";
+import { usePrivateNotePreviews } from "@/features/private-notes/hooks/usePrivateNotePreviews";
+import { PrivateNotePreview, PrivateNotePreviewError } from "@/features/private-notes/components/PrivateNotePreview";
 
 export interface AlbumTrackIdentity {
   name: string;
@@ -34,10 +37,6 @@ interface AlbumTrackRow {
 
 const COLLAPSED_ROW_COUNT = 12;
 
-function hasTagifyData(track: TrackData | undefined): track is TrackData {
-  return Boolean(track && (track.rating > 0 || track.energy > 0 || track.tagIds.length > 0));
-}
-
 /** Every track on the album with what the user has set on it. */
 const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
   albumUri,
@@ -51,9 +50,9 @@ const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
   const albumTracks = useAlbumTracks(albumUri);
   const rows = useMemo<AlbumTrackRow[]>(() => {
     const taggedOnAlbum = Object.entries(tracks).filter(
-      ([, track]) => track.albumUri === albumUri && hasTagifyData(track),
+      ([, track]) => track.albumUri === albumUri && (track.rating > 0 || track.energy > 0 || track.tagIds.some((id) => resolvedLookup.has(id))),
     );
-    const listed = albumTracks.tracks.map((track) => ({
+    const listed = Array.from(new Map(albumTracks.tracks.map((track) => [track.uri, track])).values()).map((track) => ({
       uri: track.uri,
       name: track.name,
       artists: track.artists,
@@ -77,9 +76,10 @@ const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
       .sort((left, right) => left.name.localeCompare(right.name));
 
     return [...listed, ...unlisted];
-  }, [albumTracks.tracks, albumUri, tracks]);
+  }, [albumTracks.tracks, albumUri, tracks, resolvedLookup]);
   const hasSeveralDiscs = new Set(rows.map((row) => row.discNumber ?? 0)).size > 1;
   const visibleRows = showAll ? rows : rows.slice(0, COLLAPSED_ROW_COUNT);
+  const notePreviews = usePrivateNotePreviews(visibleRows.map(row => row.uri));
 
   if (albumTracks.status === "loading") {
     return <p className={styles.status}>Loading tracks…</p>;
@@ -87,11 +87,13 @@ const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
 
   return (
     <div className={styles.trackList}>
+      {notePreviews.error && <PrivateNotePreviewError onRetry={notePreviews.retry} />}
       {albumTracks.status === "failed" ? (
         <p className={styles.status}>
           {rows.length > 0
             ? "Spotify didn't list this album's other tracks right now, so only the ones you've rated or tagged are shown."
             : "Spotify didn't list this album's tracks right now."}
+          {" "}<button type="button" onClick={() => { void albumTrackListsStore.request(albumUri, true); }}>Try again</button>
         </p>
       ) : null}
 
@@ -102,7 +104,7 @@ const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
             hasSeveralDiscs &&
             row.discNumber !== null &&
             row.discNumber !== (previousRow?.discNumber ?? null);
-          const data = hasTagifyData(row.data) ? row.data : undefined;
+          const data = row.data && (row.data.rating > 0 || row.data.energy > 0 || row.data.tagIds.some((id) => resolvedLookup.has(id))) ? row.data : undefined;
           const tags = (data?.tagIds || [])
             .map((tagId) => resolvedLookup.get(tagId))
             .filter((tag): tag is ResolvedTagNode => Boolean(tag))
@@ -122,6 +124,7 @@ const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
                   className={styles.open}
                   onClick={() => onTagTrack(row.uri)}
                   title={`${data ? "Edit" : "Tag"} "${row.name}" in Tracks`}
+                  aria-label={`${data ? "Edit" : "Tag"} "${row.name}" in Tracks`}
                 >
                   <span className={styles.number}>{row.trackNumber ?? ""}</span>
                   <span className={styles.main}>
@@ -139,6 +142,7 @@ const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
                         ))}
                       </span>
                     ) : null}
+                    <PrivateNotePreview text={notePreviews.texts[row.uri]} trackName={row.name} />
                   </span>
                 </button>
                 <span className={styles.values}>

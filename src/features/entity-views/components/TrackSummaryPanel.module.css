@@ -1,0 +1,116 @@
+.panel {
+  background: rgb(0 0 0 / 16%);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.header {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.title {
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 auto 0 0;
+}
+
+.summary {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.action {
+  display: inline-flex;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  margin: 2px 0 0;
+}
+
+.stat {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+}
+
+.stat dt {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.stat dd {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 5px;
+  margin: 0;
+}
+
+.starIcon {
+  align-self: center;
+  color: #ffd700;
+}
+
+.statValue {
+  color: var(--spice-text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.energyValue {
+  color: #1e90ff;
+}
+
+.statSource {
+  color: var(--spice-subtext);
+  font-size: 11px;
+}
+
+.notices {
+  color: var(--spice-subtext);
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+  line-height: 1.4;
+}
+
+.textButton {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 0 2px;
+  text-decoration: underline;
+  text-decoration-color: rgb(255 255 255 / 25%);
+  text-underline-offset: 2px;
+}
+
+.textButton:hover:not(:disabled),
+.textButton:focus-visible {
+  color: var(--spice-text);
+  text-decoration-color: currentcolor;
+}
+
+.textButton:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 35%);
+  outline-offset: 1px;
+}
+
+.textButton:disabled {
+  cursor: default;
+  opacity: 0.5;
+}

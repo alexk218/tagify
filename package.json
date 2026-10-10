@@ -1,6 +1,6 @@
 {
   "name": "tagify-secret",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "exports": {
     "./components/ui": "./src/components/ui/index.ts",
@@ -14,6 +14,8 @@
     "build": "spicetify-creator && node scripts/build/copy-version-metadata.cjs",
     "watch": "spicetify-creator --watch",
     "verify:archive": "python3 scripts/build/verify-release-archive.py",
+    "build:installer:mac": "bash scripts/install/build-tagify-installer.sh",
+    "test:installer:mac": "bash scripts/install/macos/test.sh",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:core",
     "test:watch": "vitest src/features/tag-data/utils/__tests__ src/features/smart-playlists/utils/__tests__ src/features/track-session/utils/__tests__ src/features/multi-track-tagging/utils/__tests__ src/features/filter-state/hooks/__tests__ src/features/discovery-survey/hooks/__tests__ src/features/power-user/hooks/__tests__ src/features/update-check/hooks/__tests__",

@@ -98,7 +98,7 @@ const AlbumTrackRating: React.FC<AlbumTrackRatingProps> = ({ trackName, rating, 
             halfIcon={<FontAwesomeIcon icon={faStarHalf} />}
             fullIcon={<FontAwesomeIcon icon={faStar} />}
             activeColor="#ffd700"
-            color="var(--spice-button-disabled)"
+            color="var(--tagify-rating-control-muted, var(--spice-button-disabled))"
           />
         </span>
       </span>

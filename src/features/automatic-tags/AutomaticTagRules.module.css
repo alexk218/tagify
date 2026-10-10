@@ -1,0 +1,190 @@
+.launch {
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--spice-card);
+  color: var(--spice-text);
+  cursor: pointer;
+
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 75%);
+
+}
+
+.dialog {
+  width: 740px;
+  max-width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 12px;
+  background: var(--spice-main);
+  color: var(--spice-text);
+
+}
+
+.dialog header, .dialog footer, .row, .saved > div {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+
+}
+
+.dialog header {
+  justify-content: space-between;
+
+}
+
+.dialog p {
+  color: var(--spice-subtext);
+  margin: 12px 0;
+  line-height: 1.5;
+
+}
+
+.row > input {
+  flex: 1;
+  min-width: 160px;
+
+}
+
+.row label input {
+  width: 100%;
+
+}
+
+.dialog button, .dialog select, .dialog input:not([type="checkbox"]) {
+  padding: 8px 10px;
+  border: 1px solid rgb(255 255 255 / 25%);
+  border-radius: 6px;
+  background: var(--spice-card);
+  color: var(--spice-text);
+  max-width: 100%;
+
+}
+
+.dialog button {
+  cursor: pointer;
+
+}
+
+.dialog button:disabled {
+  opacity: 0.5;
+  cursor: default;
+
+}
+
+.dialog button:focus-visible, .dialog input:focus-visible, .dialog select:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+
+}
+
+.dialog input[type="checkbox"] {
+  accent-color: var(--spice-button);
+  margin-right: 8px;
+
+}
+
+.saved {
+  margin: 16px 0;
+
+}
+
+.saved > div {
+  margin: 8px 0;
+
+}
+
+.saved span {
+  flex: 1;
+  overflow-wrap: anywhere;
+
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  border: 0;
+  padding: 0;
+  min-width: 0;
+
+}
+
+.editor h3 {
+  margin: 8px 0 0;
+
+}
+
+.editor > label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+}
+
+.row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 100px;
+
+}
+
+.tags {
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 8px;
+  max-height: 190px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  padding: 12px;
+
+}
+
+.tags label {
+  display: flex;
+  align-items: center;
+  overflow-wrap: anywhere;
+
+}
+
+.tags small {
+  color: var(--spice-subtext);
+  margin-left: 6px;
+
+}
+
+.preview {
+  padding: 16px;
+  border: 1px solid var(--spice-button);
+  border-radius: 8px;
+  margin-top: 16px;
+
+}
+
+.preview label {
+  display: block;
+  margin: 12px 0;
+
+}
+
+.dialog summary {
+  cursor: pointer;
+
+}

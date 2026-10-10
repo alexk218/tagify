@@ -5,6 +5,8 @@ import { defaultTagData } from "@/constants/defaultTagData";
 import { flushLocalPersistence, setLocalPersistencePaused } from "@/services/sync/SyncLocalState";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
 import { useTagDataPersistence } from "../useTagDataPersistence";
+import { isAutomaticFileBackupDue } from "../../utils/tagData.backup";
+import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 
 const { persistTagDataDiffMock } = vi.hoisted(() => ({
   persistTagDataDiffMock: vi.fn(),
@@ -15,8 +17,11 @@ vi.mock("../../utils/tagData.persistence", () => ({
 }));
 
 vi.mock("../../utils/tagData.backup", () => ({
+  isAutomaticFileBackupDue: vi.fn(() => true),
   maybeDownloadAutomaticTagDataFileBackup: vi.fn(() => ({ status: "skipped" })),
 }));
+
+vi.mock("../../utils/tagData.backupContents", () => ({ readCompleteBackupContents: vi.fn().mockResolvedValue({}) }));
 
 vi.mock("@/services/storage/IndexedDBStorageService", () => ({
   indexedDBStorage: { loadAll: vi.fn().mockResolvedValue(null) },
@@ -34,6 +39,72 @@ describe("useTagDataPersistence recovery gate", () => {
     setLocalPersistencePaused(false);
     (syncRuntime as unknown as { setStatus(status: "unlinked"): void }).setStatus("unlinked");
     vi.useRealTimers();
+  });
+
+  // Reading and packing the whole library made every tag click lag; it only
+  // runs when a backup file is actually due.
+  it("does not read the library for a backup file after each save unless one is due", async () => {
+    vi.mocked(isAutomaticFileBackupDue).mockReturnValue(false);
+    const latestTagDataRef = { current: defaultTagData };
+    const changed = { ...defaultTagData, tracks: { first: { rating: 4, energy: 0, bpm: null, tagIds: [] } } };
+    renderHook(() => useTagDataPersistence({ tagData: defaultTagData, isLoading: false, initRef: { current: true }, latestTagDataRef, setTagData: vi.fn(), setLastSaved: vi.fn(), saveTimeoutRef: { current: null }, pendingSaveRef: { current: null }, skipNextAutoSaveRef: { current: false }, persistedDataRef: { current: defaultTagData } }));
+    latestTagDataRef.current = changed;
+    await act(async () => { await flushLocalPersistence(); });
+    expect(persistTagDataDiffMock).toHaveBeenCalledTimes(1);
+    expect(indexedDBStorage.loadAll).not.toHaveBeenCalled();
+    vi.mocked(isAutomaticFileBackupDue).mockReturnValue(true);
+  });
+
+  // When the saved library couldn't be opened, edits can't be saved. The user
+  // is told instead of the change silently disappearing later.
+  it("says an edit wasn't saved while the library can't be opened", async () => {
+    const changed = { ...defaultTagData, tracks: { first: { rating: 4, energy: 0, bpm: null, tagIds: [] } } };
+    const options = { isLoading: false, initRef: { current: true }, latestTagDataRef: { current: defaultTagData }, setTagData: vi.fn(), setLastSaved: vi.fn(), saveTimeoutRef: { current: null }, pendingSaveRef: { current: null }, skipNextAutoSaveRef: { current: false }, persistedDataRef: { current: null } };
+    const { rerender } = renderHook(({ data }) => useTagDataPersistence({ ...options, tagData: data }), { initialProps: { data: defaultTagData } });
+    expect(Spicetify.showNotification).not.toHaveBeenCalled();
+    rerender({ data: changed });
+    expect(Spicetify.showNotification).toHaveBeenCalledWith(expect.stringContaining("that change wasn't saved"), true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    expect(persistTagDataDiffMock).not.toHaveBeenCalled();
+  });
+
+  it("flushes the latest optimistic edit before React schedules its persistence effect", async () => {
+    const latestTagDataRef = { current: defaultTagData };
+    const changed = { ...defaultTagData, tracks: { first: { rating: 4, energy: 0, bpm: null, tagIds: [] } } };
+    const persistedDataRef = { current: defaultTagData };
+    renderHook(() => useTagDataPersistence({ tagData: defaultTagData, isLoading: false, initRef: { current: true }, latestTagDataRef, setTagData: vi.fn(), setLastSaved: vi.fn(), saveTimeoutRef: { current: null }, pendingSaveRef: { current: null }, skipNextAutoSaveRef: { current: false }, persistedDataRef }));
+    latestTagDataRef.current = changed;
+    await act(async () => { await flushLocalPersistence(); });
+    expect(persistTagDataDiffMock).toHaveBeenCalledTimes(1);
+    expect(persistTagDataDiffMock).toHaveBeenCalledWith(defaultTagData, changed);
+    expect(persistedDataRef.current).toBe(changed);
+  });
+
+  it("persists an edit batched with a refreshed taxonomy snapshot", async () => {
+    const changed = { ...defaultTagData, tracks: { "spotify:track:new": { rating: 0, energy: 0, bpm: null, tagIds: ["created-tag"] } } };
+    const persistedDataRef = { current: defaultTagData };
+    renderHook(() => useTagDataPersistence({
+      tagData: changed, isLoading: false, initRef: { current: true },
+      latestTagDataRef: { current: changed }, setTagData: vi.fn(), setLastSaved: vi.fn(),
+      saveTimeoutRef: { current: null }, pendingSaveRef: { current: null },
+      skipNextAutoSaveRef: { current: true }, persistedDataRef,
+    }));
+    await act(async () => { await flushLocalPersistence(); });
+    expect(persistTagDataDiffMock).toHaveBeenCalledWith(defaultTagData, changed);
+  });
+
+  it("does not replace a newer optimistic edit with an older render's pending snapshot", async () => {
+    const latestTagDataRef = { current: defaultTagData };
+    const older = { ...defaultTagData, tracks: { first: { rating: 4, energy: 0, bpm: null, tagIds: [] } } };
+    const newest = { ...older, tracks: { first: { ...older.tracks.first, energy: 7 } } };
+    const persistedDataRef = { current: defaultTagData };
+    const options = { isLoading: false, initRef: { current: true }, latestTagDataRef, setTagData: vi.fn(), setLastSaved: vi.fn(), saveTimeoutRef: { current: null }, pendingSaveRef: { current: null }, skipNextAutoSaveRef: { current: false }, persistedDataRef };
+    const { rerender } = renderHook(({ data }) => useTagDataPersistence({ ...options, tagData: data }), { initialProps: { data: defaultTagData } });
+    latestTagDataRef.current = newest;
+    rerender({ data: older });
+    await act(async () => { await flushLocalPersistence(); });
+    expect(persistTagDataDiffMock).toHaveBeenCalledTimes(1);
+    expect(persistTagDataDiffMock).toHaveBeenCalledWith(defaultTagData, newest);
   });
 
   it("saves a new tag after Community connects but waits for a library choice", async () => {

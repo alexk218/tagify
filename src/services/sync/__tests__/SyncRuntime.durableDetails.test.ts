@@ -17,8 +17,9 @@ const LOCAL = "spotify:local:My+Band:Demo:Track+One:215";
 
 type Runtime = {
   pull(configuration: DesktopSyncConfiguration): Promise<boolean>;
-  syncLocalFileBackup(configuration: DesktopSyncConfiguration): Promise<void>;
+  syncLocalFileBackup(configuration: DesktopSyncConfiguration): Promise<boolean>;
   capabilities: unknown;
+  conditionalLocalFileReads: boolean;
 };
 const runtime = syncRuntime as unknown as Runtime;
 
@@ -44,6 +45,7 @@ describe("dates and local files in the cloud backup", () => {
 
   afterEach(() => {
     runtime.capabilities = null;
+    runtime.conditionalLocalFileReads = true;
     indexedDBStorage.resetConnection();
     localStorage.clear();
     vi.restoreAllMocks();
@@ -131,8 +133,58 @@ describe("dates and local files in the cloud backup", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ error: { code: "sync_unavailable", message: "unavailable" } }, { status: 503 }));
 
-    await expect(runtime.syncLocalFileBackup(configuration)).resolves.toBeUndefined();
+    await expect(runtime.syncLocalFileBackup(configuration)).resolves.toBe(false);
     expect(warn).toHaveBeenCalledWith("Tagify sync: local-file backup will retry", expect.any(String));
+  });
+
+  async function seedLocalFileShadow() {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => json({ revision: 3, nextAfter: null, entries: {} }));
+    expect(await runtime.syncLocalFileBackup(configuration)).toBe(true);
+    vi.mocked(globalThis.fetch).mockReset();
+    const newer = "spotify:local:My+Band:Demo:Track+Three:200";
+    expect(await indexedDBStorage.saveTrack(newer, { rating: 4, energy: 0, bpm: null, tagIds: ["late"], dateCreated: 400, dateModified: 400 })).toBe(true);
+    return newer;
+  }
+
+  it("accepts Community's small unchanged reply and still backs up new local-file edits", async () => {
+    const newer = await seedLocalFileShadow();
+    const requests: Array<{ method: string; headers: Record<string, string> }> = [];
+    vi.mocked(globalThis.fetch).mockImplementation(async (_input, init) => {
+      requests.push({ method: init?.method || "GET", headers: init?.headers as Record<string, string> });
+      return (init?.method || "GET") === "GET" ? json({ unchanged: true, revision: 3 }) : json({ revision: 4, changed: true });
+    });
+
+    expect(await runtime.syncLocalFileBackup(configuration)).toBe(true);
+
+    expect(requests[0].headers["if-none-match"]).toBe('"local-files-3"');
+    expect(requests.map((request) => request.method)).toEqual(["GET", "PUT"]);
+    expect(await indexedDBStorage.getTrack(newer)).toMatchObject({ rating: 4, tagIds: ["late"] });
+  });
+
+  it("switches to plain reads when Spotify cannot read Community's not-modified reply", async () => {
+    await seedLocalFileShadow();
+    const reads: Array<string | undefined> = [];
+    vi.mocked(globalThis.fetch).mockImplementation(async (_input, init) => {
+      if ((init?.method || "GET") !== "GET") return json({ revision: 4, changed: true });
+      const condition = (init?.headers as Record<string, string>)["if-none-match"];
+      reads.push(condition);
+      if (condition) throw new TypeError("Failed to fetch");
+      return json({ revision: 3, nextAfter: null, entries: {} });
+    });
+
+    expect(await runtime.syncLocalFileBackup(configuration)).toBe(true);
+    expect(await runtime.syncLocalFileBackup(configuration)).toBe(true);
+
+    expect(reads).toEqual(['"local-files-3"', undefined, undefined]);
+  });
+
+  it("reports a failed backup so sync can back off", async () => {
+    await seedLocalFileShadow();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(globalThis.fetch).mockRejectedValue(new TypeError("Failed to fetch"));
+
+    expect(await runtime.syncLocalFileBackup(configuration)).toBe(false);
+    expect(runtime.conditionalLocalFileReads).toBe(true);
   });
 
   it("does nothing until Community supports the local-file backup", async () => {

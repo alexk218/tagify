@@ -5,13 +5,14 @@ import ArtistDetails from "../../artist-state/components/ArtistDetails";
 import PlaylistDetails from "../../playlist-state/components/PlaylistDetails";
 import type { TagTaxonomy } from "@/types/tagData";
 import { spotifyApiService } from "@/services/SpotifyApiService";
+import { clearCommunityEntityCache } from "../communityEntityCache";
 
 const taxonomy: TagTaxonomy = {
   categoryOrder: [], categoriesById: {}, subcategoriesById: {}, tagsById: {},
   customAccentsById: {}, colorThemesById: {}, ungroupedColorIds: [],
 };
 const callbacks = {
-  onSetRating: vi.fn(), onSetEnergy: vi.fn(), onRemoveTag: vi.fn(),
+  onAddTag: vi.fn(), onSetRating: vi.fn(), onSetEnergy: vi.fn(), onRemoveTag: vi.fn(),
   onToggleTagIncludeOff: vi.fn(), onRefreshMetadata: vi.fn(),
 };
 function Details({ kind, uri }: { kind: "album" | "artist"; uri: string }) {
@@ -34,6 +35,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
+  clearCommunityEntityCache();
 });
 
 for (const kind of ["album", "artist"] as const) {
@@ -54,7 +56,7 @@ for (const kind of ["album", "artist"] as const) {
 
     it.each([
       ["no contributors", withoutPerspectives],
-      ["missing Community page", () => new Response(null, { status: 404 })],
+      ["missing Community page", () => Response.json({ error: "Entity not found" }, { status: 404 })],
       ["failed request", () => Promise.reject(new Error("Offline"))],
     ])("stays hidden with %s", async (_label, response) => {
       let settled = false;

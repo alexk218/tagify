@@ -1,3 +1,7 @@
+import { rememberRuleFacts } from "@/features/automatic-tags/facts";
+import { normalizeRecordingIdentity } from "@/features/recording-reuse/utils/recordingReuse";
+import { normalizeQueuePage } from "@/features/track-session/utils/taggingQueue.logic";
+import { trackArtistIdentitiesStore, type TrackArtist } from "@/services/trackArtistIdentities";
 import { audioFeaturesService } from "@/services/AudioFeaturesService";
 import { requestSpicetifyGraphQL } from "@/services/spicetifyGraphQL";
 import { graphqlRateLimiter } from "@/utils/RateLimiter";
@@ -25,9 +29,10 @@ interface GraphQLAlbumTrackItem {
   track?: {
     uri?: unknown;
     name?: unknown;
+    duration?: { totalMilliseconds?: number };
     discNumber?: unknown;
     trackNumber?: unknown;
-    artists?: { items?: Array<{ profile?: { name?: string } } | null> };
+    artists?: { items?: Array<{ uri?: string; profile?: { name?: string } } | null> };
   };
 }
 
@@ -35,6 +40,7 @@ export interface SpotifyAlbumTrack {
   uri: string;
   name: string;
   artists: string;
+  artistsData?: Array<{ uri: string; name: string }>;
   discNumber: number;
   trackNumber: number;
 }
@@ -56,6 +62,58 @@ class SpotifyApiService {
       null
     );
   }
+
+  getRecordingIdentity = async (uri: string, signal?: AbortSignal) => {
+    const id = uri.match(/^spotify:track:([A-Za-z0-9]{22})$/)?.[1];
+    if (!id) throw new Error("Recording matching is available for Spotify songs.");
+    if (Date.now() < this.playlistReadsBlockedUntil) throw new Error("Spotify needs a short break. Wait a moment, then try again.");
+    const token = this.getAccessToken();
+    if (!token) throw new Error("Sign in to Spotify again to check this recording.");
+    const response = await fetch(`https://api.spotify.com/v1/tracks/${id}`, { headers: { Authorization: `Bearer ${token}` }, signal });
+    if (!response.ok) {
+      if (response.status === 429) {
+        const retry = Number(response.headers.get("Retry-After"));
+        this.playlistReadsBlockedUntil = Date.now() + (Number.isFinite(retry) && retry > 0 ? retry : 60) * 1000;
+      }
+      throw new Error("Spotify couldn't check this recording. Wait a moment, then try again.");
+    }
+    const value = await response.json();
+    return normalizeRecordingIdentity({ isrc: value.external_ids?.isrc?.toUpperCase(), artistIds: value.artists?.map((artist: { id?: string }) => artist.id), durationMs: value.duration_ms, name: value.name });
+  };
+
+  getTaggingQueuePage = async (playlistId: string | null, offset = 0, signal?: AbortSignal, useWebApi = false) => {
+    const limit = 50;
+    if (Date.now() < this.playlistReadsBlockedUntil) throw new Error("Spotify needs a short break. Wait a moment, then check more tracks.");
+    try {
+      if (useWebApi) throw new Error("Use precise library paging");
+      const native = playlistId
+        ? await (Spicetify.Platform.PlaylistAPI as any).getContents(`spotify:playlist:${playlistId}`, { offset, limit })
+        : await (Spicetify.Platform.LibraryAPI as any).getTracks({ offset, limit });
+      if (!Array.isArray(native?.items) || native.items.length > limit || (typeof native.offset === "number" && native.offset !== offset)) {
+        throw new Error("Desktop library paging is unavailable");
+      }
+      return { ...normalizeQueuePage(native, offset), backend: "desktop" as const };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      if ((error as any)?.status === 429) {
+        this.playlistReadsBlockedUntil = Date.now() + 60_000;
+        throw new Error("Spotify needs a short break. Wait a moment, then check more tracks.");
+      }
+    }
+    const token = this.getAccessToken();
+    if (!token) throw new Error("Spotify needs you to sign in again before checking your library.");
+    const endpoint = playlistId ? `playlists/${encodeURIComponent(playlistId)}/items` : "me/tracks";
+    const response = await fetch(`https://api.spotify.com/v1/${endpoint}?limit=${limit}&offset=${offset}`, { headers: { Authorization: `Bearer ${token}` }, signal });
+    if (!response.ok) {
+      if (response.status === 429) {
+        const retry = Number(response.headers.get("Retry-After"));
+        this.playlistReadsBlockedUntil = Date.now() + (Number.isFinite(retry) && retry > 0 ? retry : 60) * 1000;
+        throw new Error("Spotify needs a short break. Wait a moment, then check more tracks.");
+      }
+      throw new Error("Spotify couldn't check those tracks. Make sure you're online and can open this library, then try again.");
+    }
+    return { ...normalizeQueuePage(await response.json(), offset), backend: "web" as const };
+  };
 
   createPrivatePlaylist = async (name: string, description = ""): Promise<string> => {
     const token = this.getAccessToken();
@@ -312,12 +370,14 @@ class SpotifyApiService {
       const items: GraphQLAlbumTrackItem[] = Array.isArray(trackPage?.items)
         ? trackPage.items
         : [];
+      if (items.some((item) => typeof item?.track?.uri !== "string" || !item.track.uri.startsWith("spotify:track:"))) return null;
 
       items.forEach((item, index) => {
         const track = item?.track;
         if (typeof track?.uri !== "string" || !track.uri.startsWith("spotify:track:")) {
           return;
         }
+        rememberRuleFacts(track.uri, { durationMs: track.duration?.totalMilliseconds, albumUri: albumUri, name: typeof track.name === "string" ? track.name : undefined, artists: track.artists?.items?.map(artist => artist?.profile?.name).filter(Boolean).join(", ") });
         tracks.push({
           uri: track.uri,
           name: typeof track.name === "string" ? track.name : "Unknown Track",
@@ -327,6 +387,9 @@ class SpotifyApiService {
                 .filter(Boolean)
                 .join(", ")
             : "",
+          artistsData: (track.artists?.items ?? []).flatMap((artist) =>
+            artist?.uri?.startsWith("spotify:artist:") && artist.profile?.name
+              ? [{ uri: artist.uri, name: artist.profile.name }] : []),
           discNumber: typeof track.discNumber === "number" ? track.discNumber : 1,
           trackNumber:
             typeof track.trackNumber === "number" ? track.trackNumber : offset + index + 1,
@@ -335,15 +398,11 @@ class SpotifyApiService {
 
       const totalCount =
         typeof trackPage?.totalCount === "number" ? trackPage.totalCount : null;
-      if (
-        items.length < ALBUM_GRAPHQL_PAGE_SIZE ||
-        (totalCount !== null && offset + items.length >= totalCount)
-      ) {
-        break;
-      }
+      if ((totalCount !== null && offset + items.length >= totalCount) ||
+        (totalCount === null && items.length < ALBUM_GRAPHQL_PAGE_SIZE)) return tracks;
+      if (items.length < ALBUM_GRAPHQL_PAGE_SIZE) return null;
     }
-
-    return tracks;
+    return null;
   };
 
   private getAlbumTracksFromWebApi = async (
@@ -363,21 +422,24 @@ class SpotifyApiService {
           { headers: { Authorization: `Bearer ${token}` } },
         );
         if (!response.ok) {
-          return tracks.length > 0 ? tracks : null;
+          return null;
         }
 
         const body: {
           items?: Array<{
             uri?: string;
             name?: string;
-            artists?: Array<{ name?: string }>;
+            artists?: Array<{ name?: string; uri?: string }>;
             disc_number?: number;
             track_number?: number;
+            duration_ms?: number;
           }>;
           next?: string | null;
         } = await response.json();
+        if (!Array.isArray(body.items) || body.items.some((track) => !track?.uri?.startsWith("spotify:track:"))) return null;
         (body.items || []).forEach((track) => {
           if (typeof track.uri === "string" && track.uri.startsWith("spotify:track:")) {
+            rememberRuleFacts(track.uri, { durationMs: track.duration_ms, albumUri: `spotify:album:${albumId}`, name: track.name, artists: track.artists?.map(artist => artist.name).filter(Boolean).join(", ") });
             tracks.push({
               uri: track.uri,
               name: track.name || "Unknown Track",
@@ -385,16 +447,17 @@ class SpotifyApiService {
                 .map((artist) => artist.name)
                 .filter(Boolean)
                 .join(", "),
+              artistsData: (track.artists ?? []).flatMap((artist) =>
+                artist.uri?.startsWith("spotify:artist:") && artist.name
+                  ? [{ uri: artist.uri, name: artist.name }] : []),
               discNumber: track.disc_number ?? 1,
               trackNumber: track.track_number ?? tracks.length + 1,
             });
           }
         });
-        if (!body.next) {
-          break;
-        }
+        if (!body.next) return tracks;
       }
-      return tracks;
+      return null;
     } catch (error) {
       console.warn("Error fetching album tracks from Spotify Web API:", error);
       return null;
@@ -806,6 +869,18 @@ class SpotifyApiService {
       ) {
         return this.getPlaylistTrackUrisFromWebApi(playlistId);
       }
+      trackArtistIdentitiesStore.rememberMany(contents.items.flatMap((item: { uri?: string; link?: string; artists?: Array<{ uri?: string; link?: string; name?: string }> }) => {
+        const uri = item.uri ?? item.link;
+        const artists = (Array.isArray(item.artists) ? item.artists : []).flatMap((artist): TrackArtist[] => {
+          const artistUri = artist?.uri ?? artist?.link;
+          return typeof artistUri === "string" && typeof artist?.name === "string" ? [{ uri: artistUri, name: artist.name }] : [];
+        });
+        return typeof uri === "string" ? [[uri, artists] as const] : [];
+      }));
+      contents.items.forEach((item: { uri?: string; link?: string; duration?: { milliseconds?: number; totalMilliseconds?: number }; duration_ms?: number; name?: string; artists?: Array<{ name?: string }>; album?: { uri?: string; link?: string } }) => rememberRuleFacts(item.uri ?? item.link ?? "", {
+        durationMs: item.duration?.milliseconds ?? item.duration?.totalMilliseconds ?? item.duration_ms,
+        albumUri: item.album?.uri ?? item.album?.link, name: item.name, artists: item.artists?.map(artist => artist.name).filter(Boolean).join(", "),
+      }));
       const uris = contents.items.map((item: any) => item?.uri ?? item?.link);
       if (uris.some((uri: unknown) => typeof uri !== "string")) {
         throw new Error(`Spotify returned incomplete contents for ${playlistUri}`);
@@ -850,9 +925,18 @@ class SpotifyApiService {
       if (!Array.isArray(page?.items)) {
         throw new Error("Spotify playlist items response is incomplete");
       }
+      trackArtistIdentitiesStore.rememberMany(page.items.map((item: { track?: { uri: string; artists?: TrackArtist[] }; item?: { uri: string; artists?: TrackArtist[] } }) => {
+        const track = item.track ?? item.item;
+        return [track?.uri ?? "", track?.artists ?? []] as const;
+      }));
       for (const item of page.items) {
+        const track = item.track ?? item.item;
+        rememberRuleFacts(track?.uri ?? "", { durationMs: track?.duration_ms, albumUri: track?.album?.uri, name: track?.name, artists: track?.artists?.map((artist: { name?: string }) => artist.name).filter(Boolean).join(", ") });
         const uri = item?.track?.uri ?? item?.item?.uri;
-        if (typeof uri === "string" && uri.startsWith("spotify:track:")) {
+        if (typeof uri !== "string") {
+          throw new Error("Spotify playlist items response has unavailable identities");
+        }
+        if (uri.startsWith("spotify:track:") || uri.startsWith("spotify:local:")) {
           trackUris.push(uri);
         }
       }

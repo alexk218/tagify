@@ -10,7 +10,7 @@ import {
   storageMigrationService,
   MigrationResult,
 } from "./StorageMigrationService";
-import { defaultTagData } from "@/constants/defaultTagData";
+import type { RebaseRecordOptions } from "@/features/tag-data/utils/tagData.rebase";
 
 export type StorageInitStatus =
   | "uninitialized"
@@ -88,8 +88,15 @@ class StorageService {
 
         this.initStatus = "ready";
 
-        // Return info about the previous migration for debugging
-        const diagnostics = await storageMigrationService.getDiagnostics();
+        // Information about the earlier move, for debugging only. A failed
+        // read here must not mark ready storage as broken.
+        let diagnostics: Awaited<ReturnType<typeof storageMigrationService.getDiagnostics>>;
+        try {
+          diagnostics = await storageMigrationService.getDiagnostics();
+        } catch (error) {
+          console.warn("StorageService: Could not read storage details", error);
+          return { status: "ready" };
+        }
         return {
           status: "ready",
           // Include a "migrationResult" that indicates it was already done
@@ -183,13 +190,9 @@ class StorageService {
    * Load all tag data
    */
   async loadAll(): Promise<TagDataStructure> {
-    if (!this.isReady()) {
-      console.warn("StorageService: Not ready, returning default data");
-      return defaultTagData;
-    }
-
-    const data = await indexedDBStorage.loadAll();
-    return data || defaultTagData;
+    // A failed read must never look like an empty library: callers back it
+    // up, copy it, or compare against it.
+    return this.loadAllStrict();
   }
 
   async loadAllStrict(): Promise<TagDataStructure> {
@@ -213,7 +216,7 @@ class StorageService {
    * Get taxonomy
    */
   async getTaxonomy(): Promise<TagTaxonomy> {
-    if (!this.isReady()) return defaultTagData.taxonomy;
+    if (!this.isReady()) throw new Error("Your saved tags are still loading. Please try again.");
     return indexedDBStorage.getTaxonomy();
   }
 
@@ -223,6 +226,21 @@ class StorageService {
   async saveTaxonomy(taxonomy: TagTaxonomy, options?: { captureSync?: boolean }): Promise<boolean> {
     if (!this.isReady()) return false;
     return indexedDBStorage.saveTaxonomy(taxonomy, options);
+  }
+
+  async getLatestBulkUndo() {
+    if (!this.isReady()) return null;
+    return indexedDBStorage.getLatestBulkUndo();
+  }
+
+  async undoBulkTagUpdate(id: string) {
+    if (!this.isReady()) throw new Error("Your tracks are still loading. Please try again.");
+    return indexedDBStorage.undoBulkTagUpdate(id);
+  }
+
+  async createQuickTag(name: string, parentId: string, expectedDatabaseName?: string) {
+    if (!this.isReady()) throw new Error("Your tags are still loading. Please try again.");
+    return indexedDBStorage.createQuickTag(name, parentId, expectedDatabaseName);
   }
 
   /**
@@ -260,17 +278,17 @@ class StorageService {
   /**
    * Save multiple tracks
    */
-  async saveTracks(tracks: Map<string, TrackData>): Promise<boolean> {
+  async saveTracks(tracks: Map<string, TrackData>, previous?: Record<string, TrackData>, options?: RebaseRecordOptions): Promise<boolean> {
     if (!this.isReady()) return false;
-    return indexedDBStorage.saveTracks(tracks);
+    return indexedDBStorage.saveTracks(tracks, previous, options);
   }
 
   /** Save and delete multiple tracks atomically. */
   async saveTrackChanges(
-    changes: Map<string, TrackData | null>
+    changes: Map<string, TrackData | null>, options?: { undoable?: boolean },
   ): Promise<boolean> {
     if (!this.isReady()) return false;
-    return indexedDBStorage.saveTrackChanges(changes);
+    return indexedDBStorage.saveTrackChanges(changes, options);
   }
 
   /**
@@ -290,9 +308,9 @@ class StorageService {
   }
 
   /** Save/update multiple playlists or albums in one transaction. */
-  async savePlaylists(playlists: Map<string, PlaylistData>): Promise<boolean> {
+  async savePlaylists(playlists: Map<string, PlaylistData>, previous?: Record<string, PlaylistData>, options?: RebaseRecordOptions): Promise<boolean> {
     if (!this.isReady()) return false;
-    return indexedDBStorage.savePlaylists(playlists);
+    return indexedDBStorage.savePlaylists(playlists, previous, options);
   }
 
   /**
@@ -320,9 +338,9 @@ class StorageService {
   }
 
   /** Save/update multiple artists in one transaction. */
-  async saveArtists(artists: Map<string, ArtistData>): Promise<boolean> {
+  async saveArtists(artists: Map<string, ArtistData>, previous?: Record<string, ArtistData>, options?: RebaseRecordOptions): Promise<boolean> {
     if (!this.isReady()) return false;
-    return indexedDBStorage.saveArtists(artists);
+    return indexedDBStorage.saveArtists(artists, previous, options);
   }
 
   /**
@@ -342,10 +360,11 @@ class StorageService {
   }
 
   /**
-   * Get track count
+   * Get track count. Throws when storage isn't ready or can't be read, so a
+   * failure is never reported as an empty library.
    */
   async getTrackCount(): Promise<number> {
-    if (!this.isReady()) return 0;
+    if (!this.isReady()) throw new Error("Your saved Tagify details are still loading. Please try again.");
     return indexedDBStorage.getTrackCount();
   }
 

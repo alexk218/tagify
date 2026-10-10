@@ -2,7 +2,7 @@ import packageJson from "@/package";
 import { readFileSync } from "node:fs";
 import type { AnnotationSnapshotV1, TaxonomyNodeSnapshotV1 } from "@tagify/sync-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { syncRuntime, accountSyncLockName, buildLocalSnapshot, canCombineInitialLibrariesWithoutReview, capabilitiesCacheKey, coalesceOutboxIntents, expandSyncTaxonomy, gzipJsonBody, materializeEntity, parentRevisionsFromSnapshot, planDurableAppStateConflictReconciliation, revokeDesktopSyncDevice, runWithAccountSyncLock, safetySyncDelayMs, shouldStampAnnotationDateModified, syncClientHeaders, syncFailureBackoffMs, type InitialMergeReview } from "../SyncRuntime";
+import { syncRuntime, accountSyncLockName, buildLocalSnapshot, canCombineInitialLibrariesWithoutReview, capabilitiesCacheKey, coalesceOutboxIntents, expandSyncTaxonomy, gzipJsonBody, materializeEntity, parentRevisionsFromSnapshot, revokeDesktopSyncDevice, runWithAccountSyncLock, safetySyncDelayMs, shouldStampAnnotationDateModified, syncClientHeaders, syncFailureBackoffMs, type InitialMergeReview } from "../SyncRuntime";
 import { setDesktopSyncConfiguration } from "../SyncLocalState";
 import type { EntityReplaceIntent } from "../SyncLocalState";
 import { defaultTagData } from "@/constants/defaultTagData";
@@ -135,7 +135,7 @@ describe("desktop sync protocol invariants", () => {
       "x-tagify-sync-protocol": "2",
       "x-tagify-sync-generation": "event-driven-v1",
     });
-    expect(capabilitiesCacheKey("https://community.example/path")).toContain(`${packageJson.version}:https://community.example`);
+    expect(capabilitiesCacheKey("https://community.example/path")).toContain(`${packageJson.version}:notes-v1:https://community.example`);
   });
 
   it("compresses reviewed initial libraries before sending them through Vercel", async () => {
@@ -258,33 +258,16 @@ describe("desktop sync protocol invariants", () => {
   it("does not poll projection confirmation after every private backup", () => {
     const source = readFileSync("src/services/sync/SyncRuntime.ts", "utf8");
     const runBody = source.match(/private async run[\s\S]+?async restoreFromCloud/)?.[0] || "";
-    expect(runBody).toContain("await this.settleLocalAndPublicSync(active)");
+    expect(runBody).toContain("await this.settleLocalAndPublicSync(active, explicit)");
     expect(runBody).toContain("this.setSettledStatus()");
     expect(source).not.toContain('"/api/v2/sync/confirm"');
     expect(source).toContain('event: "projection_cursor"');
     expect(source).toContain('this.projectionReviewRequired ? "publication-review-required"');
   });
 
-  it("reconciles stale durable-state revisions against the canonical snapshot", () => {
-    const canonicalPreference = {
-      domain: "preferences" as const,
-      value: { "tagify:tagFilterEditorMode": "advanced" },
-      revision: 3,
-      updatedAt: "2026-09-16T00:00:00.000Z",
-    };
-
-    expect(planDurableAppStateConflictReconciliation(
-      ["preferences", "smart-playlists"],
-      [canonicalPreference],
-    )).toEqual({
-      canonicalDocuments: [canonicalPreference],
-      missingDomains: ["smart-playlists"],
-    });
-  });
-
   it("restores smart playlists atomically with a cloud snapshot", () => {
     const storageSource = readFileSync("src/services/storage/IndexedDBStorageService.ts", "utf8");
-    const replaceBody = storageSource.match(/async replaceCloudReplica[\s\S]+?private async getStoredTaxonomyRecord/)?.[0] || "";
+    const replaceBody = storageSource.match(/async replaceCloudReplica[\s\S]+?async getTaxonomy\(\)/)?.[0] || "";
     const runtimeSource = readFileSync("src/services/sync/SyncRuntime.ts", "utf8");
 
     expect(replaceBody).toContain('document.domain === "smart-playlists"');
@@ -296,10 +279,10 @@ describe("desktop sync protocol invariants", () => {
     const runtimeSource = readFileSync("src/services/sync/SyncRuntime.ts", "utf8");
     const materializer = runtimeSource.match(/function tagDataFromSnapshot[\s\S]+?function replicaManifest/)?.[0] || "";
     const storageSource = readFileSync("src/services/storage/IndexedDBStorageService.ts", "utf8");
-    const replaceBody = storageSource.match(/async replaceCloudReplica[\s\S]+?private async getStoredTaxonomyRecord/)?.[0] || "";
+    const replaceBody = storageSource.match(/async replaceCloudReplica[\s\S]+?async getTaxonomy\(\)/)?.[0] || "";
 
     expect(materializer).not.toContain("dateModified: Date.now()");
-    expect(replaceBody).toContain("previousDateModified");
+    expect(replaceBody).toContain("preserveDeviceAnnotation");
   });
 
   it("flushes debounced persistence and drains every outbox batch before completing Sync Now", () => {
@@ -309,7 +292,7 @@ describe("desktop sync protocol invariants", () => {
     expect(settleBody).toContain("const firstIntent = (await readOutbox())[0]");
     expect(settleBody).toContain("await this.push(configuration)");
     expect(settleBody).not.toContain("confirmProjection");
-    expect(settleBody).toContain("if (!(await readOutbox()).length) return");
+    expect(settleBody).toMatch(/if \(!\(await readOutbox\(\)\)\.length\) \{\s+this\.settledEditCount = [^;]+;\s+return;/);
   });
 
   it("does not treat track audio metadata patches as tagging edits", () => {

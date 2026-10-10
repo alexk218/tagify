@@ -1,3 +1,5 @@
+import type { LocalPrivateNote } from "./PrivateNotes.types";
+import { isPrivateNoteUri } from "@tagify/sync-contracts";
 import type { ArtistData, PlaylistData, TagDataStructure, TagTaxonomy, TrackData } from "@/types/tagData";
 import { storageService } from "@/services/storage/StorageService";
 import { IndexedDBStorageService } from "@/services/storage/IndexedDBStorageService";
@@ -31,7 +33,9 @@ import {
 } from "./DurableAppState";
 import type { DurableAppStateDocumentV2 } from "@tagify/sync-contracts";
 import { defaultTagData } from "@/constants/defaultTagData";
-import { enrollDesktopRecovery } from "./SyncInstallRecovery";
+import { createEmptyTaxonomy, normalizeTaxonomyTree } from "@/utils/tagTaxonomy";
+import { addMissingTaxonomy } from "./PreserveLocalTaxonomyMetadata";
+import { clearRecoveryUnavailable, enrollDesktopRecovery } from "./SyncInstallRecovery";
 import { wereSmartPlaylistsExplicitlyCleared } from "@/features/smart-playlists/utils/smartPlaylist.storage";
 
 export const PENDING_PAIRING_STORAGE_KEY = "tagify:sync:pending-pairing";
@@ -65,6 +69,8 @@ let stagedApproval: ApprovedPairing | null = null;
 export class SyncPairingService {
   async begin(apiBaseUrl: string, name: string, platform: string): Promise<PendingPairing> {
     this.cancelPending();
+    // Choosing to link again means automatic reconnection is worth checking on the next start.
+    clearRecoveryUnavailable();
     const verifier = randomBase64Url(48);
     const response = await fetch(`${trimSlash(apiBaseUrl)}/api/v2/device-authorizations`, {
       method: "POST",
@@ -227,6 +233,7 @@ export class SyncPairingService {
 
     await flushLocalPersistence();
     const localData = await storageService.loadAll();
+    await copyPrivateNotesReplica(getTagifyDatabaseName(), LEGACY_DATABASE_NAME, true);
     stashDurableLocalStateForAccount(configuration.accountId);
     setDesktopSyncConfiguration(null);
 
@@ -283,11 +290,18 @@ export class SyncPairingService {
       recovered += recoverEntityRecords(transaction, "playlists", "playlist", sourcePlaylists, targetPlaylists, batchId);
       recovered += recoverEntityRecords(transaction, "artists", "artist", sourceArtists, targetArtists, batchId);
       const sourceTaxonomy = sourceCategories.find((record) => (record as { id?: unknown }).id === "taxonomy") as { id: string; data: TagTaxonomy } | undefined;
-      const targetTaxonomy = targetCategories.find((record) => (record as { id?: unknown }).id === "taxonomy");
-      if (sourceTaxonomy && JSON.stringify(sourceTaxonomy) !== JSON.stringify(targetTaxonomy)) {
-        transaction.objectStore("categories").put(sourceTaxonomy);
-        appendIntent(transaction, makeTaxonomyIntent(sourceTaxonomy.data, batchId));
-        recovered++;
+      const targetTaxonomy = (targetCategories.find((record) => (record as { id?: unknown }).id === "taxonomy") as { data?: TagTaxonomy } | undefined)?.data;
+      if (sourceTaxonomy) {
+        // The older copy has no shared history with this one, so it may only
+        // add what is missing here; nothing is renamed or removed on this
+        // device or in Community.
+        const current = targetTaxonomy ?? createEmptyTaxonomy();
+        const combined = addMissingTaxonomy(current, sourceTaxonomy.data);
+        if (JSON.stringify(normalizeTaxonomyTree(combined)) !== JSON.stringify(normalizeTaxonomyTree(current))) {
+          transaction.objectStore("categories").put({ id: "taxonomy", data: combined });
+          appendIntent(transaction, makeTaxonomyIntent(combined, batchId, current));
+          recovered++;
+        }
       }
       const targetSmartById = new Map(targetSmartPlaylists.map((record) => [(record as { id: string }).id, record]));
       for (const record of sourceSmartPlaylists) {
@@ -358,27 +372,31 @@ export function buildReplicaReconciliationPlan(
     [source.artists, target.artists, "artist"],
   ] as const;
 
+  // The preserved replica is the copy both sides started from, so each intent
+  // carries it as its base and only this device's local-only changes are sent;
+  // changes other devices made meanwhile are kept.
   for (const [sourceRecords, targetRecords, kind] of collections) {
     for (const [uri, data] of Object.entries(sourceRecords)) {
       if (JSON.stringify(data) === JSON.stringify(targetRecords[uri])) continue;
-      const intent = createEntityReplaceIntent(uri, kind, data, batchId);
+      const intent = createEntityReplaceIntent(uri, kind, data, batchId, targetRecords[uri] ?? null);
       if (intent) entityIntents.push(intent);
     }
     for (const uri of Object.keys(targetRecords)) {
       if (sourceRecords[uri]) continue;
-      const intent = createEntityDeleteIntent(uri, kind, batchId);
+      const intent = createEntityDeleteIntent(uri, kind, batchId, targetRecords[uri]);
       if (intent) entityIntents.push(intent);
     }
   }
 
-  const taxonomyIntent = JSON.stringify(source.taxonomy) === JSON.stringify(target.taxonomy)
+  const taxonomyIntent: TaxonomyReplaceIntent | null = JSON.stringify(source.taxonomy) === JSON.stringify(target.taxonomy)
     ? null
     : {
         id: crypto.randomUUID(),
         batchId,
         createdAt: Date.now(),
-        type: "taxonomy.replace" as const,
+        type: "taxonomy.replace",
         taxonomy: source.taxonomy,
+        base: target.taxonomy,
       };
 
   return { entityIntents, taxonomyIntent };
@@ -437,6 +455,7 @@ async function reconcileUnlinkedReplica(accountId: string): Promise<void> {
     plan.entityIntents.forEach((intent) => outbox.put(intent));
     if (plan.taxonomyIntent) outbox.put(plan.taxonomyIntent);
     await transactionDone(transaction);
+    await copyPrivateNotesReplica(source.name, target.name, true);
   } finally {
     source.close();
     target.close();
@@ -477,9 +496,13 @@ async function prepareAccountReplica(accountId: string, mode: ReturnType<typeof 
   const target = await openReplica(targetName, true);
   const targetHasReplica = await Promise.all([
     "tracks", "playlists", "artists", "smartPlaylists", SYNC_STORES.OUTBOX, SYNC_STORES.STATE,
-    SYNC_STORES.CONFLICTS, SYNC_STORES.TOMBSTONES,
+    SYNC_STORES.CONFLICTS, SYNC_STORES.TOMBSTONES, SYNC_STORES.PRIVATE_NOTES,
   ].map((store) => countStore(target, store))).then((counts) => counts.some((count) => count > 0));
-  if (targetHasReplica) { target.close(); return; }
+  if (targetHasReplica) {
+    target.close();
+    if (mode === "seed-unlinked") await copyPrivateNotesReplica(getTagifyDatabaseName(), targetName, false);
+    return;
+  }
   const preparation = getEmptyReplicaPreparation(mode);
   if (preparation === "leave-empty") {
     target.close();
@@ -492,7 +515,7 @@ async function prepareAccountReplica(accountId: string, mode: ReturnType<typeof 
   }
   const sourceName = getTagifyDatabaseName();
   const source = await openReplica(sourceName, false);
-  const stores = ["tracks", "playlists", "artists", "categories", "metadata", "smartPlaylists"];
+  const stores = ["tracks", "playlists", "artists", "categories", "metadata", "smartPlaylists", SYNC_STORES.PRIVATE_NOTES];
   const contents = new Map<string, unknown[]>();
   await Promise.all(stores.map(async (store) => {
     contents.set(store, source.objectStoreNames.contains(store) ? await requestResult(source.transaction(store).objectStore(store).getAll()) : []);
@@ -504,6 +527,30 @@ async function prepareAccountReplica(accountId: string, mode: ReturnType<typeof 
     transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); transaction.onabort = () => reject(transaction.error);
   });
   source.close(); target.close();
+}
+
+async function copyPrivateNotesReplica(sourceName: string, targetName: string, replace: boolean): Promise<void> {
+  const source = await openReplica(sourceName, false);
+  const target = await openReplica(targetName, true);
+  try {
+    const incoming = source.objectStoreNames.contains(SYNC_STORES.PRIVATE_NOTES)
+      ? (await getStoreRecords(source, SYNC_STORES.PRIVATE_NOTES) as LocalPrivateNote[]).filter(note => isPrivateNoteUri(note.uri)) : [];
+    const existing = replace ? [] : await getStoreRecords(target, SYNC_STORES.PRIVATE_NOTES) as LocalPrivateNote[];
+    const byUri = new Map(existing.map(note => [note.uri, note]));
+    const merged = incoming.map(note => {
+      const previous = byUri.get(note.uri);
+      if (replace) return note;
+      if (!previous) return { ...note, revision: 0, baseText: "", dirty: !!note.text };
+      if (previous.text === note.text) return previous;
+      if (previous.conflict && previous.conflict.text !== note.text) throw new Error("This account already has two different copies of a note. Resolve those copies before connecting this local library.");
+      return { ...previous, text: note.text, dirty: true, conflict: { uri: previous.uri, text: previous.text, revision: previous.revision, updatedAt: previous.updatedAt } };
+    });
+    const transaction = target.transaction(SYNC_STORES.PRIVATE_NOTES, "readwrite");
+    const store = transaction.objectStore(SYNC_STORES.PRIVATE_NOTES);
+    if (replace) store.clear();
+    merged.forEach(note => store.put(note));
+    await transactionDone(transaction);
+  } finally { source.close(); target.close(); }
 }
 
 export function shouldRecoverLegacyReplica(sourceModified: number, targetModified: number, recoveredModified: number): boolean {
@@ -521,16 +568,19 @@ function recoverEntityRecords(
   storageKind: "track" | "playlist" | "artist",
   sourceRecords: unknown[],
   targetRecords: unknown[],
-  batchId: ReturnType<Crypto["randomUUID"]>,
+  batchId: string,
 ): number {
-  const targetByUri = new Map(targetRecords.map((record) => [(record as { uri: string }).uri, record]));
+  const targetByUri = new Map(targetRecords.map((record) => [(record as { uri: string }).uri, record as { uri: string } & (TrackData | PlaylistData | ArtistData)]));
   let recovered = 0;
   for (const record of sourceRecords) {
     const sourceRecord = record as { uri: string } & (TrackData | PlaylistData | ArtistData);
-    if (JSON.stringify(sourceRecord) === JSON.stringify(targetByUri.get(sourceRecord.uri))) continue;
+    const targetRecord = targetByUri.get(sourceRecord.uri);
+    if (JSON.stringify(sourceRecord) === JSON.stringify(targetRecord)) continue;
+    // A record changed more recently in this replica stays as it is.
+    if (targetRecord && (targetRecord.dateModified ?? 0) > (sourceRecord.dateModified ?? 0)) continue;
     transaction.objectStore(storeName).put(sourceRecord);
     const { uri, ...data } = sourceRecord;
-    appendIntent(transaction, makeEntityReplaceIntent(uri, storageKind, data as TrackData | PlaylistData | ArtistData, batchId));
+    appendIntent(transaction, makeEntityReplaceIntent(uri, storageKind, data as TrackData | PlaylistData | ArtistData, batchId, targetRecord ?? null));
     recovered++;
   }
   return recovered;

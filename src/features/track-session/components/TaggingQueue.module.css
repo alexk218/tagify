@@ -1,0 +1,13 @@
+.queue { margin: 16px 0; padding: 16px; background: var(--spice-card); border: 1px solid var(--spice-button); border-radius: 8px; color: var(--spice-text); }
+.queue summary { cursor: pointer; font-size: 18px; font-weight: 700; }
+.queue p { margin: 12px 0; font-size: 13px; color: var(--spice-subtext); }
+.controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.queue select, .queue button, .controls input { color: var(--spice-text); background: var(--spice-main); border: 1px solid var(--spice-button); border-radius: 4px; padding: 6px 8px; max-width: 100%; }
+.queue button { cursor: pointer; }
+.queue button:disabled { cursor: default; opacity: .5; }
+.list { list-style: none; padding: 0; margin: 0; }
+.list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--spice-button); }
+.list label { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.list span { min-width: 0; }
+.list strong, .list small { display: block; overflow-wrap: anywhere; }
+.list small { color: var(--spice-subtext); font-size: 12px; margin-top: 3px; }

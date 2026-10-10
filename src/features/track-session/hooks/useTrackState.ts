@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { SetStateAction } from "react";
 import { spotifyService } from "@/services/SpotifyService";
 import { SpotifyTrack } from "@/types/SpotifyTypes";
+import type { TrackData } from "@/types/tagData";
 import {
   createLocalSpotifyTrack,
   createSpotifyTrackFromPlayerItem,
@@ -11,22 +13,29 @@ import {
   persistTrackLockState,
 } from "@/features/track-session/utils/trackSession.storage";
 
-export function useTrackState() {
+export function useTrackState(savedTracks: Record<string, TrackData> = {}) {
   const [currentlyPlayingTrack, setCurrentlyPlayingTrack] =
     useState<SpotifyTrack | null>(null);
-  const [lockedTrack, setLockedTrack] = useState<SpotifyTrack | null>(null);
+  const [lockedTrack, setLockedTrackState] = useState<SpotifyTrack | null>(null);
   const [isStorageLoaded, setIsStorageLoaded] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
+  const selectionRequest = useRef(0);
+  const setLockedTrack = useCallback((track: SetStateAction<SpotifyTrack | null>) => {
+    selectionRequest.current++;
+    setLockedTrackState(track);
+  }, []);
 
   const activeTrack =
-    isLocked && lockedTrack ? lockedTrack : currentlyPlayingTrack;
+    isLocked ? lockedTrack : currentlyPlayingTrack;
+
+  useEffect(() => () => { selectionRequest.current++; }, []);
 
   useEffect(() => {
     const persistedState = loadPersistedTrackLockState();
 
     if (persistedState.isLocked && persistedState.lockedTrack) {
       setIsLocked(true);
-      setLockedTrack(persistedState.lockedTrack);
+      setLockedTrackState(persistedState.lockedTrack);
     }
 
     setIsStorageLoaded(true);
@@ -58,7 +67,7 @@ export function useTrackState() {
         setCurrentlyPlayingTrack(newTrack);
 
         if (!isLocked) {
-          setLockedTrack(newTrack);
+          setLockedTrackState(newTrack);
         }
       } catch (error) {
         console.error("Error updating current track:", error);
@@ -74,8 +83,9 @@ export function useTrackState() {
   }, [isLocked, isStorageLoaded]);
 
   const toggleLock = () => {
+    selectionRequest.current++;
     if (isLocked) {
-      setLockedTrack(currentlyPlayingTrack);
+      setLockedTrackState(currentlyPlayingTrack);
       setIsLocked(false);
       Spicetify.Platform.History.push("/tagify");
       return;
@@ -85,24 +95,33 @@ export function useTrackState() {
   };
 
   const handleSelectTrackForTagging = async (uri: string) => {
+    const request = ++selectionRequest.current;
+    const saved = savedTracks[uri];
+    // Switch the editor now; Spotify details may arrive much later.
+    const knownTrack: SpotifyTrack | null = saved?.name && saved.artists ? {
+      uri, name: saved.name, artists: [{ name: saved.artists }],
+      album: { name: saved.albumName || "", uri: saved.albumUri || undefined, images: saved.albumImageUrl ? [{ url: saved.albumImageUrl }] : [] },
+      duration_ms: 0,
+    } : null;
+    setLockedTrackState(uri.startsWith("spotify:local:") ? createLocalSpotifyTrack(uri) : knownTrack);
+    setIsLocked(true);
     try {
       if (uri.startsWith("spotify:local:")) {
-        setLockedTrack(createLocalSpotifyTrack(uri));
-        setIsLocked(true);
         return;
       }
 
       const trackData = await spotifyService.getTrack(uri);
+      if (request !== selectionRequest.current) return;
 
       if (!trackData) {
         throw new Error("Failed to fetch track data");
       }
 
-      setLockedTrack(createSpotifyTrackFromTrackInfo(uri, trackData));
-      setIsLocked(true);
+      setLockedTrackState(createSpotifyTrackFromTrackInfo(uri, trackData));
     } catch (error) {
+      if (request !== selectionRequest.current) return;
       console.error("Error loading track for tagging:", error);
-      Spicetify.showNotification("Error loading track for tagging", true);
+      Spicetify.showNotification(knownTrack ? "Some song details couldn't be loaded. You can keep tagging; open the song again to retry." : "Song details couldn't be loaded. Open the song again to retry.", true);
     }
   };
 

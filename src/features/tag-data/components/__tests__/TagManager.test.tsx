@@ -732,6 +732,36 @@ describe("TagManager", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  // Sync or the extension can save a new tag while the manager is open.
+  // The open draft keeps its changes and the new tag is kept on save.
+  it("keeps unsaved changes and a tag created elsewhere while the manager is open", async () => {
+    const user = userEvent.setup();
+    const initial = createTaxonomy();
+    const { onReplaceTaxonomy, rerender } = renderTagManager({ taxonomy: initial });
+
+    await user.type(screen.getByPlaceholderText(/Add tag to Electronic/i), "Acid");
+    await user.click(screen.getByRole("button", { name: /Add Tag/i }));
+
+    const updated = createTaxonomy();
+    const electronic = Object.values(updated.subcategoriesById).find((folder) => folder.name === "Electronic")!;
+    updated.tagsById.lofi = { id: "lofi", name: "Lo-fi", parentId: electronic.id, subcategoryId: electronic.id };
+    electronic.tagIds.push("lofi");
+    updated.childrenByParentId![electronic.id] = [...(updated.childrenByParentId![electronic.id] ?? []), "lofi"];
+    rerender(
+      <TagManager
+        taxonomy={updated} tracks={{}} playlists={{}} artists={{}} activeTagFilters={[]} excludedTagFilters={[]}
+        smartPlaylists={[]} onClose={vi.fn()} onReplaceTaxonomy={onReplaceTaxonomy}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+    const [savedTaxonomy, removedTagIds, base] = onReplaceTaxonomy.mock.calls[0] as [TagTaxonomy, string[], TagTaxonomy];
+    const names = Object.values(savedTaxonomy.tagsById).map((tag) => tag.name);
+    expect(names).toEqual(expect.arrayContaining(["Acid", "Lo-fi", "House"]));
+    expect(removedTagIds).toEqual([]);
+    expect(base).toBe(updated);
+  });
+
   it("saves accent changes for a tag", async () => {
     const user = userEvent.setup();
     const { onReplaceTaxonomy } = renderTagManager();

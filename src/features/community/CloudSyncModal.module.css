@@ -10,14 +10,21 @@
 .body p { margin: 0; color: var(--spice-subtext); line-height: 1.6; }
 .warning { display: flex; gap: 11px; align-items: flex-start; padding: 13px; border: 1px solid rgb(226 168 102 / 28%); border-radius: 10px; color: #f1d0a8; background: rgb(226 168 102 / 9%); line-height: 1.5; }
 .warning svg { flex: 0 0 auto; margin-top: 2px; }
+.choice { display: grid; gap: 10px; padding: 13px; border: 1px solid rgb(155 140 255 / 30%); border-radius: 10px; background: rgb(155 140 255 / 8%); }
+.choice > div:first-child { display: grid; gap: 3px; }
+.choice > div:first-child span { color: var(--spice-subtext); font-size: 12px; line-height: 1.45; }
+.choiceRow { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding-top: 9px; border-top: 1px solid rgb(255 255 255 / 8%); }
+.choiceRow > span { font-weight: 700; font-size: 13px; }
+.choiceActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.choiceActions button { min-height: 34px; padding: 6px 12px; border: 1px solid rgb(155 140 255 / 36%); border-radius: 9px; color: var(--spice-text); background: rgb(155 140 255 / 13%); cursor: pointer; font-weight: 700; }
+.choiceActions button:hover:not(:disabled) { border-color: rgb(155 140 255 / 70%); }
+.choiceActions button:disabled { opacity: .5; cursor: not-allowed; }
 .consent { display: flex; gap: 10px; align-items: flex-start; line-height: 1.45; }
 .consent input { margin-top: 3px; accent-color: #9b8cff; }
 .primary, .actions button, .secondary { min-height: 38px; display: inline-flex; justify-content: center; gap: 8px; align-items: center; padding: 8px 14px; border: 1px solid rgb(155 140 255 / 36%); border-radius: 9px; color: white; background: #7566d8; cursor: pointer; font-weight: 700; }
 .primary:disabled, .actions button:disabled { opacity: .5; cursor: not-allowed; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .actions button { flex: 1; min-width: 180px; background: rgb(155 140 255 / 13%); }
-.quietAction { justify-self: start; min-height: 28px; padding: 3px 5px; border: 0; color: var(--spice-subtext); background: transparent; cursor: pointer; font-size: 11px; font-weight: 600; opacity: .68; }
-.quietAction:hover { color: var(--spice-text); opacity: 1; text-decoration: underline; }
 .secondary { color: var(--spice-subtext); background: transparent; border-color: rgb(255 255 255 / 12%); }
 .code { display: grid; gap: 8px; place-items: center; padding: 22px; border-radius: 12px; background: rgb(155 140 255 / 10%); }
 .code span { color: var(--spice-subtext); }

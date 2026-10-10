@@ -7,6 +7,7 @@ export const MAX_ANNOTATIONS = 100_000;
 export const MAX_APP_STATE_DOCUMENT_BYTES = 512_000;
 
 export * from "./initialMerge";
+export * from "./privateNotes";
 
 export const DURABLE_APP_STATE_DOMAINS = [
   "smart-playlists",

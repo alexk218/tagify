@@ -133,11 +133,11 @@ describe("Community sync persistence safety", () => {
     };
     setDesktopSyncConfiguration(configuration);
     expect(await storageService.switchAccountDatabase()).toBe(true);
-    const originalSave = storageService.saveTrack.bind(storageService);
+    const originalApply = indexedDBStorage.runSyncTransaction.bind(indexedDBStorage);
     const captureStates: boolean[] = [];
-    vi.spyOn(storageService, "saveTrack").mockImplementation(async (uri, data, options) => {
-      if (options?.captureSync === false) captureStates.push(isSyncCaptureEnabled());
-      return originalSave(uri, data, options);
+    vi.spyOn(indexedDBStorage, "runSyncTransaction").mockImplementation((reads, plan) => {
+      if (reads.tracks?.length) captureStates.push(isSyncCaptureEnabled());
+      return originalApply(reads, plan);
     });
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(JSON.stringify(
       String(input).includes("/sync/pull")

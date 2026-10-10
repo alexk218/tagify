@@ -1,0 +1,55 @@
+.notice {
+  align-items: center;
+  background: rgb(30 144 255 / 8%);
+  border: 1px solid rgb(30 144 255 / 22%);
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.icon {
+  color: #6cb4ff;
+  flex: 0 0 auto;
+}
+
+.text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.message {
+  color: var(--spice-text);
+  font-size: 13px;
+}
+
+.help {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.button {
+  background: rgb(0 0 0 / 24%);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 6px;
+  color: var(--spice-text);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 30px;
+  padding: 5px 11px;
+  white-space: nowrap;
+}
+
+.button:hover:not(:disabled),
+.button:focus-visible {
+  background: rgb(255 255 255 / 10%);
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}

@@ -187,10 +187,32 @@ describe("SmartPlaylistModal", () => {
       );
       expect(screen.getByRole("button", { name: "Import" })).toHaveAttribute(
         "title",
-        "Add smart playlist setups that someone shared with you",
+        "Restore your Smart Playlists or add shared setups",
       );
       expect(screen.getByText("Create, organize, and share playlists that stay up to date automatically.")).toBeInTheDocument();
       expect(screen.queryByText(/legacy|portable|recipe|binding/i)).not.toBeInTheDocument();
+    });
+
+    it("backs up every Smart Playlist in one click even when the list is filtered", async () => {
+      const user = userEvent.setup(); renderModal();
+      await user.type(screen.getByPlaceholderText("Search playlists..."), "Chill");
+      await user.click(screen.getByRole("button", { name: "Backup", exact: true }));
+      expect(mockOnExportSmartPlaylists).toHaveBeenCalledWith(mockSmartPlaylists, true);
+      expect(screen.getByRole("heading", { name: "Smart Playlists (2)" })).toBeInTheDocument();
+      expect(screen.queryByText("Save backup file")).not.toBeInTheDocument();
+    });
+
+    it("keeps the library open and allows retrying a failed backup", async () => {
+      mockOnExportSmartPlaylists.mockRejectedValueOnce(new Error("Download failed"));
+      const user = userEvent.setup(); renderModal();
+      await user.click(screen.getByRole("button", { name: "Backup", exact: true }));
+      expect(Spicetify.showNotification).toHaveBeenCalledWith(
+        "Your Smart Playlists couldn’t be backed up. Please try again.", true,
+      );
+      const backupButton = screen.getByRole("button", { name: "Backup", exact: true });
+      expect(backupButton).toBeEnabled();
+      await user.click(backupButton);
+      expect(mockOnExportSmartPlaylists).toHaveBeenCalledTimes(2);
     });
 
     it("should render empty state when no smart playlists exist", () => {
@@ -240,7 +262,7 @@ describe("SmartPlaylistModal", () => {
       renderModal();
       expect(screen.queryByRole("heading", { name: "Tag songs from your phone" })).not.toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Mobile tagging" }));
-      expect(screen.getByRole("heading", { name: "Tag songs from your phone" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Tag songs from your phone" })).toBeInTheDocument();
     });
 
     it("waits for account history while allowing mobile help to open manually", async () => {
@@ -249,7 +271,7 @@ describe("SmartPlaylistModal", () => {
       renderModal();
       expect(screen.queryByRole("heading", { name: "Tag songs from your phone" })).not.toBeInTheDocument();
       await userEvent.setup().click(screen.getByRole("button", { name: "Mobile tagging" }));
-      expect(screen.getByRole("heading", { name: "Tag songs from your phone" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Tag songs from your phone" })).toBeInTheDocument();
     });
 
     it("keeps imported definitions visible when their old Spotify IDs cannot be resolved", async () => {

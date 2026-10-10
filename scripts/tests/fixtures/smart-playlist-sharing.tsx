@@ -1,3 +1,7 @@
+import { connectExistingSmartPlaylist } from "../../../src/features/smart-playlists/utils/smartPlaylist.connectExisting";
+import { downloadPersonalSmartPlaylistBackup } from "../../../src/features/smart-playlists/utils/smartPlaylist.import";
+import { useSmartPlaylistActions } from "../../../src/features/smart-playlists/hooks/useSmartPlaylistActions";
+import { useTagData } from "../../../src/features/tag-data/hooks/useTagData";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import SmartPlaylistModal from "../../../src/features/smart-playlists/components/SmartPlaylistModal";
@@ -28,7 +32,7 @@ let creations: number = remote?.creations ?? 0;
 spotifyApiService.createPrivatePlaylist = async () => { const id = `newSpotify${++creations}`; members[id] = []; return id; };
 spotifyApiService.getAllTrackUrisInPlaylistStrict = async (id) => [...(members[id] ?? [])];
 spotifyApiService.getPlaylistTrackCounts = async () => Object.fromEntries(Object.entries(members).map(([id, songs]) => [id, songs.length]));
-spotifyApiService.getAllUserPlaylistReferencesStrict = async () => [];
+spotifyApiService.getAllUserPlaylistReferencesStrict = async () => [{ playlistId: "existing-spotify", playlistName: "My favourites" }, { playlistId: "my-night-playlist", playlistName: "My night playlist" }];
 spotifyApiService.removeTrackFromPlaylist = async (removed, id) => { members[id] = (members[id] ?? []).filter((item) => item !== removed); return true; };
 spotifyApiService.addTrackToSpotifyPlaylist = async (added, id) => { if (added.startsWith("spotify:local:")) return { success: true, wasAdded: false }; if (!(members[id] ?? []).includes(added)) (members[id] ??= []).push(added); return { success: true, wasAdded: true }; };
 storageService.isReady = () => true;
@@ -37,18 +41,23 @@ const service = new SmartPlaylistSyncService();
 Spicetify.Platform.PlaylistAPI.getMetadata = async () => null;
 
 function App() {
+  const { importTagData } = useTagData();
   const [data, setData] = useState(library);
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState("");
   const refresh = async () => { const next = await indexedDBStorage.loadAllStrict(); localStorage.setItem(remoteKey, JSON.stringify({ creations, members })); setData(next as typeof data); setStatus(JSON.stringify({ creations, members, playlists: next.smartPlaylists, tracks: next.tracks }, null, 2)); };
+  const { importSmartPlaylists } = useSmartPlaylistActions({ smartPlaylists: data.smartPlaylists ?? [],
+    updateSmartPlaylistsImmediate: async (update) => { const next = update(await indexedDBStorage.getAllSmartPlaylists()); if (!await indexedDBStorage.saveSmartPlaylists(next)) throw new Error("Save failed"); await refresh(); return next; },
+    replaceSmartPlaylists: async () => {}, refreshSmartPlaylists: refresh });
   const importFile = async (value: unknown, choices?: SmartPlaylistRecipeSelection[]) => {
+    if (Array.isArray(value)) { const summary = await importSmartPlaylists(value); await refresh(); return summary; }
     const current = await indexedDBStorage.loadAllStrict();
     const installed = await indexedDBStorage.installSharedSmartPlaylistSetups(value as SmartPlaylistRecipeBundle, choices ?? getRecipeSelections(value as SmartPlaylistRecipeBundle, current.taxonomy, current.smartPlaylists ?? []));
     await refresh();
     return { importedCount: installed.importedCount, skippedCount: installed.skippedCount, createdTagCount: installed.createdTagCount, relinkedCount: 0, unresolvedCount: 0, verificationUnavailable: false, recipeImport: true };
   };
   const reset = async () => { await indexedDBStorage.init(); await indexedDBStorage.saveAll(library); markConfirmedMembershipBaselines([saved], new Set([saved.playlistId])); members = { "existing-spotify": [uri] }; creations = 0; await refresh(); setOpen(true); };
-  return <><h1>Sharing safety example</h1><p>Isolated library and Spotify membership.</p><button onClick={() => void reset()}>Open example</button><button onClick={() => void refresh().then(() => setOpen(true))}>Reopen saved library</button><button onClick={() => void service.reconcileAll().then(refresh)}>Run Spotify sync</button><button onClick={() => downloadSmartPlaylistRecipeBundle(bundle)}>Download example share</button><pre>{status}</pre>
-    {open ? <SmartPlaylistModal smartPlaylists={data.smartPlaylists ?? []} taxonomy={data.taxonomy} tracks={data.tracks} onEditPlaylist={() => {}} onUpdateSmartPlaylists={async (update) => { const current = await indexedDBStorage.getAllSmartPlaylists(); await indexedDBStorage.saveSmartPlaylists(typeof update === "function" ? update(current) : update); await refresh(); }} onSyncPlaylist={async () => {}} onExportSmartPlaylists={async (selected) => { downloadSmartPlaylistRecipeBundle(await createSmartPlaylistRecipeBundle(selected ?? data.smartPlaylists ?? [], data.taxonomy)); }} onImportSmartPlaylists={importFile} onBindRecipe={async (setup) => { await createSharedSmartPlaylist(setup.id!); await refresh(); }} onClose={() => setOpen(false)} /> : null}</>;
+  return <><h1>Sharing safety example</h1><p>Isolated library and Spotify membership.</p><button onClick={() => void reset()}>Open example</button><button onClick={() => void refresh().then(() => setOpen(true))}>Reopen saved library</button><button onClick={() => void service.reconcileAll().then(refresh)}>Run Spotify sync</button><button onClick={() => downloadSmartPlaylistRecipeBundle(bundle)}>Download example share</button><button onClick={() => void importTagData(library).then(refresh)}>Import example tag backup</button><pre>{status}</pre>
+    {open ? <SmartPlaylistModal smartPlaylists={data.smartPlaylists ?? []} taxonomy={data.taxonomy} tracks={data.tracks} onEditPlaylist={() => {}} onUpdateSmartPlaylists={async (update) => { const current = await indexedDBStorage.getAllSmartPlaylists(); await indexedDBStorage.saveSmartPlaylists(typeof update === "function" ? update(current) : update); await refresh(); }} onSyncPlaylist={async () => {}} onExportSmartPlaylists={async (selected, personalBackup) => { if (personalBackup) downloadPersonalSmartPlaylistBackup(selected ?? data.smartPlaylists ?? []); else downloadSmartPlaylistRecipeBundle(await createSmartPlaylistRecipeBundle(selected ?? data.smartPlaylists ?? [], data.taxonomy)); }} onImportSmartPlaylists={importFile} onBindRecipe={async (setup, existing) => { if (existing) await connectExistingSmartPlaylist(setup.id!, existing); else await createSharedSmartPlaylist(setup.id!); await refresh(); }} onClose={() => setOpen(false)} /> : null}</>;
 }
 createRoot(document.getElementById("app")!).render(<App />);

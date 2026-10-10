@@ -19,3 +19,6 @@ export type {
 } from "./model/useTagData.types";
 export { withPlaylistMetadata } from "./utils/tagData.playlistMutations";
 export { withArtistMetadata } from "./utils/tagData.artistMutations";
+
+export { isTrackEmpty } from "./utils/tagData.helpers";
+export { dispatchTagDataUpdatedEvent } from "./utils/tagData.events";

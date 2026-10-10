@@ -98,13 +98,6 @@
   width: 100%;
 }
 
-.searchInput:focus,
-.select:focus,
-.tagSearchInput:focus {
-  border-color: rgb(255 255 255 / 30%);
-  outline: none;
-}
-
 .sortButton {
   background: rgb(0 0 0 / 20%);
   border: none;
@@ -113,11 +106,6 @@
   cursor: pointer;
   height: 34px;
   width: 34px;
-}
-
-.sortButton:hover,
-.filterToggle:hover {
-  background: rgb(255 255 255 / 10%);
 }
 
 .clearButton {
@@ -136,11 +124,6 @@
   text-decoration: underline;
 }
 
-.filterSection {
-  display: grid;
-  gap: 10px;
-}
-
 .filterToggle {
   align-items: center;
   background: rgb(0 0 0 / 20%);
@@ -154,6 +137,11 @@
   gap: 8px;
   min-height: 34px;
   padding: 7px 10px;
+}
+
+.sortButton:hover,
+.filterToggle:hover {
+  background: rgb(255 255 255 / 10%);
 }
 
 .filterToggleActive {
@@ -284,6 +272,13 @@
   width: 100%;
 }
 
+.searchInput:focus,
+.select:focus,
+.tagSearchInput:focus {
+  border-color: rgb(255 255 255 / 30%);
+  outline: none;
+}
+
 .filterHint {
   color: var(--spice-subtext);
   font-size: 12px;
@@ -353,253 +348,15 @@
   padding: 4px 0;
 }
 
+/* Rows follow the space Spotify gives the list, not the window size. */
 .list {
   container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-right: 4px;
-}
-
-.playlistItem {
-  align-items: start;
-  background: rgb(0 0 0 / 20%);
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: 56px minmax(0, 1fr);
-  padding: 10px 12px;
-  transition: background 0.2s ease;
-}
-
-.albumItem {
-  grid-template-columns: 56px minmax(0, 1fr) 156px;
-}
-
-.playlistItem:hover {
-  background: rgb(255 255 255 / 10%);
-}
-
-.playlistItemActive {
-  box-shadow: inset 0 0 0 1px rgb(30 144 255 / 45%);
-}
-
-.cover {
-  background: var(--spice-button-disabled);
-  height: 56px;
-  object-fit: cover;
-  width: 56px;
-}
-
-.albumCover {
-  border-radius: 3px;
-  box-shadow:
-    inset 0 0 0 1px rgb(255 255 255 / 12%),
-    0 4px 12px rgb(0 0 0 / 28%);
-}
-
-.playlistCover {
-  border-radius: 12px;
-  box-shadow:
-    -5px 5px 0 rgb(255 255 255 / 8%),
-    -10px 10px 0 rgb(255 255 255 / 4%),
-    0 4px 12px rgb(0 0 0 / 28%);
-}
-
-.coverPlaceholder {
-  display: grid;
-  place-items: center;
-  color: var(--spice-subtext);
-  font-size: 24px;
-}
-
-.playlistText {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.playlistName {
-  background: transparent;
-  border: 0;
-  color: var(--spice-text);
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 700;
-  justify-self: start;
-  line-height: 1.25;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  padding: 0;
-  text-align: left;
-}
-
-.playlistName:hover,
-.playlistName:focus-visible {
-  color: rgb(255 255 255 / 94%);
-  outline: none;
-  text-decoration: underline;
-}
-
-.playlistMeta {
-  align-items: center;
-  color: var(--spice-subtext);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 12px;
-  gap: 4px 10px;
-  min-height: 18px;
-}
-
-.ownerName {
-  color: var(--spice-text);
-  opacity: 0.8;
-}
-
-.playlistRating {
-  align-items: center;
-  display: inline-flex;
-  height: 18px;
-}
-
-.playlistEnergy {
-  background: rgb(0 0 0 / 30%);
-  border-radius: 4px;
-  color: var(--spice-text);
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.2;
-  padding: 2px 6px;
-  white-space: nowrap;
-}
-
-.updated {
-  font-variant-numeric: tabular-nums;
-}
-
-.tags {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.commonTags {
-  align-items: center;
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.commonTagsLabel {
-  color: var(--spice-subtext);
-  font-size: 11px;
-  margin-left: 4px;
-}
-
-.commonTag {
-  background: transparent;
-  border: 1px dashed rgb(255 255 255 / 26%);
-  border-radius: 12px;
-  color: var(--spice-text);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 12px;
-  line-height: 1.2;
-  opacity: 0.88;
-  padding: 3px 8px;
-}
-
-.commonTag:hover {
-  background: rgb(255 255 255 / 8%);
-  opacity: 1;
-}
-
-.trackStats {
-  align-self: center;
-  display: grid;
-  gap: 5px;
-  justify-items: end;
-  min-width: 0;
-}
-
-.progressText {
-  color: var(--spice-subtext);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.progressComplete {
-  color: var(--spice-button, #1db954);
-  font-weight: 700;
-}
-
-.trackAverage {
-  align-items: center;
-  color: var(--spice-subtext);
-  display: inline-flex;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  gap: 4px;
-}
-
-.trackAverage svg {
-  color: #ffd700;
-}
-
-.tag {
-  background: rgb(0 0 0 / 30%);
-  border: none;
-  border-radius: 12px;
-  color: var(--spice-text);
-  cursor: pointer;
-  display: inline-flex;
-  font-family: inherit;
-  font-size: 12px;
-  line-height: 1.2;
-  padding: 4px 8px;
-}
-
-.tag:hover {
-  background: rgb(255 255 255 / 10%);
-}
-
-.tagAccented {
-  background: color-mix(in srgb, rgb(0 0 0 / 24%) 68%, var(--tag-accent-tint) 32%);
-  box-shadow: inset 0 0 0 1px var(--tag-accent-border);
-  color: var(--tag-accent-text, var(--spice-text));
-}
-
-.tagActive {
-  background: #1e90ff;
-  box-shadow: none;
-  color: white;
-  font-weight: 700;
-}
-
-.tagActive.tagAccented {
-  background: color-mix(in srgb, var(--tag-accent-dot) 64%, black 36%);
-  color: var(--tag-accent-text);
-}
-
-.tagActive.tagAccented:hover {
-  background: color-mix(in srgb, var(--tag-accent-dot) 74%, black 26%);
-}
-
-.tagExcluded,
-.tagExcluded.tagAccented {
-  background: #b91c1c;
-  border-color: rgb(248 113 113 / 55%);
-  color: white;
-  text-decoration: line-through;
-}
-
-.tagExcluded:hover,
-.tagExcluded.tagAccented:hover {
-  background: #991b1b;
+  list-style: none;
+  margin: 0;
+  padding: 0 4px 0 0;
 }
 
 .emptyState {
@@ -609,7 +366,7 @@
   text-align: center;
 }
 
-@media (max-width: 760px) {
+@media (width <= 760px) {
   .filterControlsGrid {
     grid-template-columns: 1fr;
   }
@@ -626,24 +383,4 @@
 
 .filterControlsRightGrid > label {
   white-space: nowrap;
-}
-
-/* Rows follow the space Spotify gives the list, not the window size. */
-@container (max-width: 520px) {
-  .playlistItem,
-  .albumItem {
-    grid-template-columns: 48px minmax(0, 1fr);
-  }
-
-  .cover {
-    height: 48px;
-    width: 48px;
-  }
-
-  .trackStats {
-    grid-column: 2;
-    justify-items: start;
-    max-width: 220px;
-    width: 100%;
-  }
 }
