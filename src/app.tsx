@@ -1,3 +1,4 @@
+import { announceSavedTracks } from "@/extensions/extensionEdits";
 import { useAutomaticRecordingReuse } from "@/features/recording-reuse/hooks/useAutomaticRecordingReuse";
 import { useRecordingLibrary } from "@/features/recording-reuse/hooks/useRecordingLibrary";
 import { RecordingConflicts } from "@/features/recording-reuse/components/RecordingConflicts";
@@ -9,13 +10,13 @@ import { storageService } from "@/services/storage/StorageService";
 import { usePlaylistTrackInsights, useArtistTrackInsights, playlistMembershipStore } from "@/features/track-insights";
 import { useAlbumMembership, useAlbumTrackListLookups } from "@/features/playlist-state";
 import { useRatingControlTheme } from "@/hooks/shared/useRatingControlTheme";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useProductAnalyticsView } from "@/features/product-analytics/useProductAnalyticsView";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./app.module.css";
 import "./styles/globals.css";
 import packageJson from "@/package";
 import {
   DataManager,
-  ExportModal,
   MigrationResultModal,
   TagManager,
   TagSelector,
@@ -41,6 +42,7 @@ import {
 import { ArtistDetails, TaggedArtistsList } from "@/features/artist-state";
 import { useFontAwesome } from "./hooks/shared/useFontAwesome";
 import { trackService } from "./services/TrackService";
+import { StatsLoading, StatsSheet, StatsWorkspace, useStatsBaseline, type StatsTrackSet } from "@/features/library-stats";
 import { UpdateBanner, useUpdateChecker } from "@/features/update-check";
 import { CommunityUpdates } from "@/features/community-updates/CommunityUpdates";
 import { MultiTrackDetails, useMultiTrackTagging } from "@/features/multi-track-tagging";
@@ -65,11 +67,12 @@ import {
   useMetadataBackfill,
 } from "@/features/metadata-backfill";
 import { graphqlRateLimiter } from "./utils/RateLimiter";
-import { audioFeaturesRateLimiter } from "./services/AudioFeaturesService";
 import { spotifyApiService } from "./services/SpotifyApiService";
+import { revealElement } from "@/utils/revealElement";
 import { pruneTagFilterFormula } from "@/utils/tagFilterGroups";
 import { buildCategoryTree, buildValidTagIdSet } from "@/utils/tagTaxonomy";
 import {
+  CommunityConnectPrompt,
   CommunityOnboardingModal,
   CloudSyncModal,
   CloudRecoveryModal,
@@ -122,7 +125,11 @@ function App() {
     useState<string[] | undefined>(undefined);
   const [selectedTagManagerSubcategoryId, setSelectedTagManagerSubcategoryId] =
     useState<string | null | undefined>(undefined);
-  const [showExport, setShowExport] = useState<boolean>(false);
+  const [showStats, setShowStats] = useState<boolean>(false);
+  // Stats stays mounted after its first opening so it reopens exactly where the member left it.
+  const [statsMounted, setStatsMounted] = useState<boolean>(false);
+  // Tracks the member opened from Stats; the track list shows exactly these until cleared.
+  const [statsTrackSet, setStatsTrackSet] = useState<(StatsTrackSet & { id: number; reveal: "list" | "track" }) | null>(null);
   const [showMigrationModal, setShowMigrationModal] = useState(false);
   const [showCommunityWorkspace, setShowCommunityWorkspace] = useState(false);
   const [showCommunityOnboarding, setShowCommunityOnboarding] = useState(false);
@@ -169,6 +176,7 @@ function App() {
     tagData,
     isLoading,
     refreshPersistedTagData,
+    showSavedRecords,
     applyShortcutTrackUpdate,
     applyShortcutPlaylistUpdate,
     applyShortcutArtistUpdate,
@@ -196,7 +204,6 @@ function App() {
     setArtistEnergy,
     refreshArtistMetadata,
     replaceTaxonomy,
-    exportData,
     exportTagData,
     importTagData,
     resetTagData,
@@ -347,12 +354,15 @@ function App() {
   );
 
   useTagifyUsage(packageJson.version);
+  useProductAnalyticsView(isLoading ? null : showTagManager ? "tag_manager_opened" :
+    showCommunityWorkspace ? "community_opened" : showStats ? "stats_opened" :
+    showLocalTracksModal ? "local_files_opened" : showCloudSync ? "cloud_sync_opened" : `${activeView}_viewed`);
   const { shouldShowSurvey, completeSurvey, skipSurvey } = useDiscoverySurvey(packageJson.version, {
     lastUserTrackAddedEvent,
     canShowSurvey: !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode &&
       !shouldShowPowerUserModal && !showCommunityOnboarding && !showCloudRecovery &&
       !cloudRecoveryPending && !showCloudSync && !showMigrationModal && !showTagManager &&
-      !showExport && !showLocalTracksModal,
+      !showStats && !showLocalTracksModal,
   });
 
   useFontAwesome();
@@ -369,6 +379,25 @@ function App() {
     setActiveView(view);
     setShowCommunityWorkspace(false);
   }, []);
+
+  const toggleStats = useCallback(() => {
+    setStatsMounted(true);
+    setShowStats((current) => !current);
+  }, []);
+  const closeStats = useCallback(() => setShowStats(false), []);
+  const returnToStats = useCallback(() => { setStatsMounted(true); setShowStats(true); }, []);
+
+  const statsBaseline = useStatsBaseline(tagData, statsMounted && !isLoading);
+
+  // Stats actions close the sheet and show exactly the tracks behind the number in the Tracks view.
+  // The track list scrolls itself into view; opening one song shows its details at the top instead.
+  const appRootRef = useRef<HTMLDivElement>(null);
+  const showStatsTracks = useCallback((set: StatsTrackSet, reveal: "list" | "track" = "list") => {
+    setStatsTrackSet({ ...set, id: Date.now(), reveal });
+    setShowStats(false);
+    selectAppView("tracks");
+    if (reveal === "track") requestAnimationFrame(() => revealElement(appRootRef.current));
+  }, [selectAppView]);
 
   const connectCommunity = useCallback(() => {
     if (cloudRecoveryPending) {
@@ -632,11 +661,7 @@ function App() {
     }
 
     const hasCachedArtistMetadata =
-      activeArtistData &&
-      (activeArtistData.name ||
-        activeArtistData.imageUrl !== undefined ||
-        activeArtistData.followerCount !== undefined ||
-        activeArtistData.genres !== undefined);
+      activeArtistData && activeArtistData.name && activeArtistData.name !== "Unknown Artist";
 
     if (hasCachedArtistMetadata) {
       setActiveArtistMetadata({
@@ -662,7 +687,7 @@ function App() {
         followerCount: metadata.followerCount,
         genres: metadata.genres,
       });
-    });
+    }).catch(() => { /* Saved edits remain usable while optional details are unavailable. */ });
 
     return () => {
       isCurrent = false;
@@ -1066,14 +1091,16 @@ function App() {
     } finally { trackEditHistory.release(session); }
   };
 
-  const onRecordingsChanged = async (changes: Parameters<typeof syncMultipleTracksWithSmartPlaylists>[0]) => {
-    await refreshPersistedTagData();
-    dispatchTagDataUpdatedEvent("save");
-    const latest = (await indexedDBStorage.loadAllStrict()).tracks;
-    void syncMultipleTracksWithSmartPlaylists(Object.fromEntries(Object.keys(changes).map(uri => [uri, latest[uri] || null])));
+  const onRecordingsChanged = async (changes: Parameters<typeof syncMultipleTracksWithSmartPlaylists>[0], syncChanges = changes) => {
+    const account = getTagifyDatabaseName();
+    const latest = await indexedDBStorage.getRecordingTracks(Object.keys(changes), account);
+    if (account !== getTagifyDatabaseName()) return;
+    showSavedRecords({ tracks: Object.fromEntries(Object.keys(changes).map(uri => [uri, latest[uri] || null])) });
+    announceSavedTracks(latest);
+    if (Object.keys(syncChanges).length) void syncMultipleTracksWithSmartPlaylists(Object.fromEntries(Object.keys(syncChanges).map(uri => [uri, latest[uri] || null])));
   };
   const recordingConflicts = useRecordingLibrary(tagData.tracks, !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode, onRecordingsChanged);
-  useAutomaticRecordingReuse(activeView === "tracks" && !isMultiTagging && isDisplayedTrackMusic ? activeTrack : null, tagData.tracks, onRecordingsChanged);
+  const recordingReuseStatus = useAutomaticRecordingReuse(activeView === "tracks" && !isMultiTagging && isDisplayedTrackMusic ? activeTrack : null, tagData.tracks, onRecordingsChanged);
 
   const handleCreateQuickTag = async (name: string, parentId: string) => {
     await flushLocalPersistence();
@@ -1121,8 +1148,7 @@ function App() {
       selectedTagsForSelector,
       trackDataMap,
       rateLimiterStats: () => ({
-        graphql: graphqlRateLimiter.getStats(),
-        audioFeatures: audioFeaturesRateLimiter.getStats(),
+        spotify: graphqlRateLimiter.getStats(),
       }),
     };
   }, [
@@ -1153,65 +1179,73 @@ function App() {
   const currentPlaylistFilterState =
     activeView === "albums" ? albumFilterState : playlistFilterState;
   const isLibraryViewActive = !showCommunityWorkspace;
+  // Optional prompts wait until loading, recovery, onboarding and Tagify's own dialogs are out of the way.
+  const canShowOptionalPrompts =
+    !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode &&
+    !shouldShowSurvey && !shouldShowPowerUserModal && !showCommunityOnboarding &&
+    !showCloudRecovery && !cloudRecoveryPending && !showCloudSync &&
+    !showMigrationModal && !showTagManager && !showStats;
 
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
-        <div className={styles.titleArea}>
-          <h1 className={styles.title}>Tagify</h1>
+    <div ref={appRootRef} className={styles.container}>
+      <div className={styles.headerFrame}>
+        <div className={styles.header}>
+          <div className={styles.titleArea}>
+            <h1 className={styles.title}>Tagify</h1>
+          </div>
+          <div className={styles.viewTabs} role="tablist" aria-label="Tagify views">
+            <button
+              className={`${styles.viewTab} ${
+                isLibraryViewActive && activeView === "tracks" ? styles.viewTabActive : ""
+              }`}
+              onClick={() => selectAppView("tracks")}
+              role="tab"
+              aria-selected={isLibraryViewActive && activeView === "tracks"}
+            >
+              Tracks
+            </button>
+            <button
+              className={`${styles.viewTab} ${
+                isLibraryViewActive && activeView === "albums" ? styles.viewTabActive : ""
+              }`}
+              onClick={() => selectAppView("albums")}
+              role="tab"
+              aria-selected={isLibraryViewActive && activeView === "albums"}
+            >
+              Albums
+            </button>
+            <button
+              className={`${styles.viewTab} ${
+                isLibraryViewActive && activeView === "playlists" ? styles.viewTabActive : ""
+              }`}
+              onClick={() => selectAppView("playlists")}
+              role="tab"
+              aria-selected={isLibraryViewActive && activeView === "playlists"}
+            >
+              Playlists
+            </button>
+            <button
+              className={`${styles.viewTab} ${
+                isLibraryViewActive && activeView === "artists" ? styles.viewTabActive : ""
+              }`}
+              onClick={() => selectAppView("artists")}
+              role="tab"
+              aria-selected={isLibraryViewActive && activeView === "artists"}
+            >
+              Artists
+            </button>
+          </div>
+          <button
+            className={`${styles.communityButton} ${showCommunityWorkspace ? styles.communityButtonActive : ""}`}
+            onClick={openCommunityWorkspace}
+            title="Open the Tagify Community workspace"
+            aria-label="Open the Tagify Community workspace"
+            aria-pressed={showCommunityWorkspace}
+          >
+            <Users size={15} aria-hidden="true" />
+            <span>Community</span>
+          </button>
         </div>
-        <div className={styles.viewTabs} role="tablist" aria-label="Tagify views">
-          <button
-            className={`${styles.viewTab} ${
-              isLibraryViewActive && activeView === "tracks" ? styles.viewTabActive : ""
-            }`}
-            onClick={() => selectAppView("tracks")}
-            role="tab"
-            aria-selected={isLibraryViewActive && activeView === "tracks"}
-          >
-            Tracks
-          </button>
-          <button
-            className={`${styles.viewTab} ${
-              isLibraryViewActive && activeView === "albums" ? styles.viewTabActive : ""
-            }`}
-            onClick={() => selectAppView("albums")}
-            role="tab"
-            aria-selected={isLibraryViewActive && activeView === "albums"}
-          >
-            Albums
-          </button>
-          <button
-            className={`${styles.viewTab} ${
-              isLibraryViewActive && activeView === "playlists" ? styles.viewTabActive : ""
-            }`}
-            onClick={() => selectAppView("playlists")}
-            role="tab"
-            aria-selected={isLibraryViewActive && activeView === "playlists"}
-          >
-            Playlists
-          </button>
-          <button
-            className={`${styles.viewTab} ${
-              isLibraryViewActive && activeView === "artists" ? styles.viewTabActive : ""
-            }`}
-            onClick={() => selectAppView("artists")}
-            role="tab"
-            aria-selected={isLibraryViewActive && activeView === "artists"}
-          >
-            Artists
-          </button>
-        </div>
-        <button
-          className={`${styles.communityButton} ${showCommunityWorkspace ? styles.communityButtonActive : ""}`}
-          onClick={openCommunityWorkspace}
-          title="Open the Tagify Community workspace"
-          aria-label="Open the Tagify Community workspace"
-          aria-pressed={showCommunityWorkspace}
-        >
-          <Users size={15} aria-hidden="true" />
-          <span>Community</span>
-        </button>
       </div>
 
       {updateInfo?.hasUpdate && (
@@ -1237,12 +1271,7 @@ function App() {
         </div>
       )}
 
-      <CommunityUpdates enabled={
-        !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode &&
-        !shouldShowSurvey && !shouldShowPowerUserModal && !showCommunityOnboarding &&
-        !showCloudRecovery && !cloudRecoveryPending && !showCloudSync &&
-        !showMigrationModal && !showTagManager && !showExport
-      } />
+      <CommunityUpdates enabled={canShowOptionalPrompts} />
       {metadataBackfillProgress && metadataBackfillProgress.total > 0 && (
         <div
           className={styles.backfillBanner}
@@ -1269,12 +1298,14 @@ function App() {
         </div>
       )}
 
-      <SmartPlaylistTagChoices enabled={
-        !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode &&
-        !shouldShowSurvey && !shouldShowPowerUserModal && !showCommunityOnboarding &&
-        !showCloudRecovery && !cloudRecoveryPending && !showCloudSync &&
-        !showMigrationModal && !showTagManager && !showExport
-      } />
+      {/* The Community workspace already offers its own Connect button. */}
+      <CommunityConnectPrompt
+        enabled={canShowOptionalPrompts && !showCommunityWorkspace}
+        connected={syncConnected}
+        onConnect={connectCommunity}
+      />
+
+      <SmartPlaylistTagChoices enabled={canShowOptionalPrompts} />
 
       {shouldShowSurvey && (
         <DiscoverySurveyModal
@@ -1307,7 +1338,8 @@ function App() {
       <DataManager
         onExportTagData={exportTagData}
         onImportTagData={importTagData}
-        onExportRekordbox={() => setShowExport(true)}
+        onOpenStats={toggleStats}
+        statsOpen={showStats}
         onResetTagifyData={handleResetTagifyState}
         onRetryMigration={retryMigration}
         historyControls={editingMode && <TrackEditHistoryControls canUndo={editHistory.canUndo} canRedo={editHistory.canRedo} busy={editHistory.busy} onUndo={editHistory.undo} onRedo={editHistory.redo} />}
@@ -1364,6 +1396,7 @@ function App() {
                 activeTrack &&
                 isDisplayedTrackMusic && (
                   <TrackDetails
+                    recordingReuseStatus={recordingReuseStatus}
                     displayedTrack={activeTrack}
                     currentlyPlayingTrack={currentlyPlayingTrack}
                     trackData={activeTrackData || EMPTY_TRACK_DETAILS_DATA}
@@ -1429,6 +1462,9 @@ function App() {
                 onClearTagFilters={clearTagFilters}
                 onPlayTrack={playTrack}
                 onTagTrack={handleSelectTrackForTagging}
+                statsTrackSet={statsTrackSet}
+                onClearStatsTrackSet={() => setStatsTrackSet(null)}
+                onReturnToStats={returnToStats}
                 onCreatePlaylist={createPlaylistFromFilters}
                 onCreateSmartPlaylist={createSmartPlaylist}
                 smartPlaylists={smartPlaylists}
@@ -1608,9 +1644,6 @@ function App() {
           />
       )}
 
-      {showExport && (
-        <ExportModal data={exportData()} onClose={() => setShowExport(false)} />
-      )}
 
       {showLocalTracksModal && (
         <LocalTracksModal
@@ -1627,6 +1660,22 @@ function App() {
           onClose={() => setShowMigrationModal(false)}
           onRetry={retryMigration}
         />
+      )}
+
+      {statsMounted && !isLoading && (
+        <StatsSheet open={showStats} onClose={closeStats}>
+          {statsBaseline === undefined ? <StatsLoading /> : <StatsWorkspace
+            tagData={tagData}
+            baseline={statsBaseline}
+            onShowTracks={showStatsTracks}
+            onOpenTrack={(trackUri, set) => {
+              showStatsTracks(set, "track");
+              void handleSelectTrackForTagging(trackUri);
+            }}
+            onPlayTracks={(trackUris) => void trackService.playAllFilteredTracks(trackUris)}
+            onClose={closeStats}
+          />}
+        </StatsSheet>
       )}
     </div>
   );

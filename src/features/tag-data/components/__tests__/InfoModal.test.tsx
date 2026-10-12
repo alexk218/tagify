@@ -4,9 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 import InfoModal from "../InfoModal";
 
 describe("InfoModal", () => {
-  it("summarizes Tagify 3.1.0 and keeps prior releases available", async () => {
+  it("summarizes Tagify 3.2.0 and keeps prior releases available", async () => {
     render(<InfoModal initialSection="whats-new" onClose={vi.fn()} />);
 
+    expect(screen.getByRole("link", { name: "What's new in Tagify 3.2.0" })).toHaveAttribute("href", "https://tagify.fm/releases/client/v3.2.0/");
+    expect(screen.getByRole("heading", { name: "See the music behind your stats" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your tags follow matching releases" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("What's New in Tagify 3.1.0", { selector: "span" }));
     expect(screen.getByRole("link", { name: "What's New in Tagify 3.1.0" })).toHaveAttribute("href", "https://github.com/alexk218/tagify/releases/tag/v3.1.0");
     expect(screen.getByRole("heading", { name: "Private notes" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Undo / redo" })).toBeInTheDocument();

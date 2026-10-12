@@ -1,9 +1,6 @@
 import { TagDataStructure, TrackData } from "@/types/tagData";
 import { defaultTagData } from "@/constants/defaultTagData";
 import { indexedDBStorage } from "./storage/IndexedDBStorageService";
-import { spotifyService } from "./SpotifyService";
-import { audioFeaturesService } from "./AudioFeaturesService";
-import { normalizeCamelotKey } from "@/utils/camelotKey";
 import packageJson from "@/package";
 import {
   hasUserLibraryContent,
@@ -429,20 +426,8 @@ class MigrationOrchestrator {
           total: 100,
         });
 
-        data = await this.addTrackMetadata(data, (processed, total) => {
-          const progress = 20 + Math.floor((processed / total) * 40);
-          onProgress?.({
-            phase: "data-migrations",
-            message: `Updating song details: ${processed}/${total}`,
-            current: progress,
-            total: 100,
-          });
-        });
-        data = enforceMigrationDateModifiedPolicy(
-          data,
-          trackDateModifiedBeforeMigrations,
-          "addTrackMetadata",
-        );
+        // Optional Spotify details are filled by the bounded, checkpointed backfill.
+        // Startup migrations must remain local even for a 50,000-song library.
 
         state.migrations.addTrackMetadata = true;
         migrationsRun.push("addTrackMetadata");
@@ -705,106 +690,6 @@ class MigrationOrchestrator {
 
     console.log(`[Orchestrator] Cleaned up ${removedCount} empty tracks`);
     return { ...data, tracks: cleanedTracks };
-  }
-
-  private async addTrackMetadata(
-    data: TagDataStructure,
-    onProgress?: (processed: number, total: number) => void,
-  ): Promise<TagDataStructure> {
-    const allTrackUris = Object.keys(data.tracks);
-
-    // Find tracks needing work
-    const tracksNeedingWork = allTrackUris.filter((uri) => {
-      if (uri.startsWith("spotify:local:")) return false;
-      const track = data.tracks[uri];
-      return (
-        !track.name ||
-        !track.artists ||
-        track.bpm === null ||
-        normalizeCamelotKey(track.camelotKey) === null
-      );
-    });
-
-    console.log(
-      `[Orchestrator] ${tracksNeedingWork.length} tracks need metadata/audio features`,
-    );
-
-    if (tracksNeedingWork.length === 0) {
-      return data;
-    }
-
-    const updatedData = { ...data, tracks: { ...data.tracks } };
-    const BATCH_SIZE = 5;
-    const DELAY_BETWEEN_BATCHES = 200;
-
-    for (let i = 0; i < tracksNeedingWork.length; i += BATCH_SIZE) {
-      const batch = tracksNeedingWork.slice(i, i + BATCH_SIZE);
-
-      await Promise.allSettled(
-        batch.map(async (uri) => {
-          const track = updatedData.tracks[uri];
-          const needsMetadata = !track.name || !track.artists;
-          const needsBpm = track.bpm === null;
-          const needsCamelotKey =
-            normalizeCamelotKey(track.camelotKey) === null;
-
-          try {
-            if (needsMetadata) {
-              const trackInfo = await spotifyService.getTrack(uri);
-              if (trackInfo) {
-                updatedData.tracks[uri] = {
-                  ...updatedData.tracks[uri],
-                  name: trackInfo.name,
-                  artists: trackInfo.artists,
-                };
-              }
-            }
-
-            if (needsBpm || needsCamelotKey) {
-              const trackId = uri.split(":").pop();
-              if (trackId) {
-                const audioFeatures =
-                  await audioFeaturesService.getAudioFeaturesByTrackId(trackId);
-
-                const bpm = audioFeatures?.bpm ?? null;
-                if (needsBpm && bpm !== null) {
-                  updatedData.tracks[uri] = {
-                    ...updatedData.tracks[uri],
-                    bpm,
-                  };
-                }
-
-                const camelotKey = normalizeCamelotKey(
-                  audioFeatures?.camelotKey
-                );
-                if (needsCamelotKey && camelotKey !== null) {
-                  updatedData.tracks[uri] = {
-                    ...updatedData.tracks[uri],
-                    camelotKey,
-                  };
-                }
-              }
-            }
-          } catch (error) {
-            console.warn(
-              `[Orchestrator] Failed to fetch data for ${uri}:`,
-              error,
-            );
-          }
-        }),
-      );
-
-      onProgress?.(
-        Math.min(i + BATCH_SIZE, tracksNeedingWork.length),
-        tracksNeedingWork.length,
-      );
-
-      if (i + BATCH_SIZE < tracksNeedingWork.length) {
-        await this.delay(DELAY_BETWEEN_BATCHES);
-      }
-    }
-
-    return updatedData;
   }
 
   private delay(ms: number): Promise<void> {

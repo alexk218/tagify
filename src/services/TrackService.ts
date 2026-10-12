@@ -1,183 +1,49 @@
+/** Context URI for lists Tagify asks Spotify to play; Spotify plays the given pages in order. */
+const LIST_CONTEXT_URI = "spotify:app:tagify";
+/** Large lists are split into pages, the way Spotify pages its own playlists. */
+const LIST_PAGE_SIZE = 500;
+
 class TrackService {
   playTrack = async (uri: string): Promise<void> => {
     try {
-      // Cannot play local files directly. Can only add them to queue
-      if (uri.startsWith("spotify:local:")) {
-        if (!this.isActuallyPlaying()) {
-          // cannot add track to queue when no tracks playing and queue empty. play dummy Spotify track first.
-          const dummyUri = await this.getDummyTrackUri();
-          Spicetify.Player.playUri(dummyUri);
-          await new Promise((resolve) => setTimeout(resolve, 300));
-        }
-
-        const trackObject = [{ uri }];
-        await Spicetify.addToQueue(trackObject);
-
-        // wait for queue to update, then skip
-        await new Promise((resolve) => setTimeout(resolve, 300));
-        Spicetify.Player.next();
-      } else {
-        // direct playback for Spotify tracks
-        Spicetify.Player.playUri(uri);
-      }
+      // Spotify can't open a local file on its own, but it plays one inside a list.
+      if (uri.startsWith("spotify:local:")) await this.playList([uri]);
+      else await Spicetify.Player.playUri(uri);
     } catch (err) {
       console.error("Error in playTrack:", err);
+      Spicetify.showNotification("Spotify couldn't play this track. Try again in a moment.", true);
     }
   };
 
-  // Spicetify.Player.isPlaying() is not accurate. Needs more thorough checking
-  private isActuallyPlaying = () => {
-    const playerData = Spicetify.Player.data;
-    const isPlaying = Spicetify.Player.isPlaying();
-    const hasTrack = playerData?.item?.uri;
-    const isPaused = playerData?.isPaused;
-
-    // Only consider it playing if we have a track - player says it's playing - and it's not paused
-    return isPlaying && hasTrack && !isPaused;
-  };
-
   /**
-   * Plays a collection of track URIs, handling mixed collections with local files
+   * Plays a collection of track URIs in order, local files included.
    */
   playAllFilteredTracks = async (trackUris: string[]): Promise<void> => {
     if (trackUris.length === 0) {
       Spicetify.showNotification("No playable tracks match the filters", true);
       return;
     }
-
-    const spotifyTrackUris: string[] = trackUris.filter(
-      (uri) => !uri.startsWith("spotify:local:"),
-    );
-    const isMixedTrackCollection: boolean = trackUris.some((uri) =>
-      uri.startsWith("spotify:local:"),
-    );
-    if (isMixedTrackCollection) {
-      await this.playMixedTrackCollection(trackUris, spotifyTrackUris);
-    } else {
-      await this.playSpotifyOnlyCollection(spotifyTrackUris);
+    try {
+      await this.playList(trackUris);
+      Spicetify.showNotification(`Playing ${trackUris.length} ${trackUris.length === 1 ? "track" : "tracks"}`);
+    } catch (error) {
+      console.error("Error playing tracks:", error);
+      Spicetify.showNotification("Spotify couldn't start these tracks. Try again in a moment.", true);
     }
   };
 
   /**
-   * When filtered tracks are only Spotify tracks (no Local Files) - simple approach
+   * Hands Spotify the whole list as one playback context. Unlike playing the first track and
+   * queueing the rest, this starts immediately, keeps the order and works with local files.
    */
-  private playSpotifyOnlyCollection = async (
-    spotifyTrackUris: string[],
-  ): Promise<void> => {
-    try {
-      await Spicetify.Player.playUri(spotifyTrackUris[0]);
-
-      const remainingTracks = [...spotifyTrackUris.slice(1)];
-      const tracksToQueue = remainingTracks.map((uri) => ({ uri }));
-
-      await Spicetify.addToQueue(tracksToQueue);
-      Spicetify.showNotification(`Playing ${spotifyTrackUris.length} tracks`);
-    } catch (error) {
-      console.error("Error playing tracks:", error);
-      Spicetify.showNotification("Failed to start playback", true);
+  private playList = async (trackUris: string[]): Promise<void> => {
+    const player = Spicetify.Platform?.PlayerAPI as { play?: (context: unknown, options: unknown, playOptions: unknown) => Promise<unknown> } | undefined;
+    if (typeof player?.play !== "function") throw new Error("Spotify's player isn't available");
+    const pages = [];
+    for (let start = 0; start < trackUris.length; start += LIST_PAGE_SIZE) {
+      pages.push({ items: trackUris.slice(start, start + LIST_PAGE_SIZE).map((uri) => ({ uri })) });
     }
-  };
-
-  /**
-   * When filtered tracks (Play All) contains Local Files
-   * Requires more complex approach (cannot play a Local File directly, must queue)
-   */
-  private playMixedTrackCollection = async (
-    allTrackUris: string[],
-    spotifyTrackUris: string[],
-  ): Promise<void> => {
-    try {
-      // Get a dummy track URI (this will be played solely to clear the track queue)
-      const dummyUri =
-        spotifyTrackUris.length > 0
-          ? spotifyTrackUris[0]
-          : await this.getDummyTrackUri();
-
-      await this.clearQueueWithDummyTrack(dummyUri);
-
-      await this.queueAndStartPlayback(allTrackUris, dummyUri);
-
-      Spicetify.showNotification(`Playing ${allTrackUris.length} tracks`);
-    } catch (error) {
-      console.error("Error playing tracks:", error);
-      Spicetify.showNotification("Failed to start playback", true);
-    }
-  };
-
-  private clearQueueWithDummyTrack = async (
-    dummyUri: string,
-  ): Promise<void> => {
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await Spicetify.Player.playUri(dummyUri);
-
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await Spicetify.Player.playUri(dummyUri); // Play again to force clear
-
-    await this.waitForSpecificTrack(dummyUri);
-  };
-
-  private queueAndStartPlayback = async (
-    trackUris: string[],
-    dummyUri: string,
-  ): Promise<void> => {
-    const tracksToQueue = trackUris.map((uri) => ({ uri }));
-    await Spicetify.addToQueue(tracksToQueue);
-
-    // Skip first track queue
-    Spicetify.Player.next();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    const playerData: Spicetify.PlayerState = Spicetify.Player.data;
-
-    const currentUri = playerData.item?.uri;
-    if (currentUri === dummyUri) {
-      Spicetify.Player.next();
-    }
-  };
-
-  private getDummyTrackUri = async (): Promise<string> => {
-    try {
-      // Use LibraryAPI to get a track from liked songs
-      const tracks = await (Spicetify.Platform.LibraryAPI as any).getTracks({
-        limit: 1,
-      });
-
-      if (tracks?.items?.[0]?.uri) {
-        return tracks.items[0].uri;
-      }
-
-      // Fallback - Never Gonna Give You Up - Rick Astley
-      return "spotify:track:4iV5W9uYEdYUVa79Axb7Rh";
-    } catch (error) {
-      console.error("Error getting dummy track:", error);
-      return "spotify:track:4iV5W9uYEdYUVa79Axb7Rh";
-    }
-  };
-
-  private waitForSpecificTrack = (expectedUri: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const maxAttempts = 30; // 3 seconds max wait
-      let attempts = 0;
-      const checkPlayback = () => {
-        attempts++;
-        // Check if we're playing and get the current track
-        if (Spicetify.Player.isPlaying() && Spicetify.Player.data) {
-          const playerData: Spicetify.PlayerState = Spicetify.Player.data;
-          const currentUri = playerData.item?.uri;
-          if (currentUri === expectedUri) {
-            resolve();
-            return;
-          }
-        }
-        // Timeout after max attempts
-        if (attempts >= maxAttempts) {
-          reject(new Error(`Timeout waiting for track ${expectedUri} to play`));
-          return;
-        }
-        setTimeout(checkPlayback, 100);
-      };
-      checkPlayback();
-    });
+    await player.play({ uri: LIST_CONTEXT_URI, pages }, { featureIdentifier: "tagify" }, {});
   };
 }
 

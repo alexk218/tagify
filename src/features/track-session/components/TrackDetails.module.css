@@ -6,6 +6,8 @@
   flex-direction: column;
   gap: 16px;
   position: relative;
+  /* Layout follows the card's width; Spotify's sidebars narrow it independently of the window. */
+  container-type: inline-size;
 }
 
 .contentLayout {
@@ -734,4 +736,15 @@
   }
 }
 
-@media (max-width: 760px) { .contentLayout { flex-wrap: wrap; gap: 20px; } .trackInfoContainer { max-width: none; flex-basis: 100%; padding-right: 72px; } .controlsContainer { max-width: none; min-width: 0; flex-basis: 100%; } }
+/* The track actions take their own row only where they would otherwise cover the rating. */
+@container (max-width: 820px) {
+  .container:has(.switchTrackButton) .lockControlContainer { position: static; align-self: flex-end; }
+}
+
+/* Cards too narrow for two columns stack the details and controls below the track actions. */
+@container (max-width: 560px) {
+  .lockControlContainer { position: static; align-self: flex-end; }
+  .contentLayout { flex-wrap: wrap; gap: 20px; }
+  .trackInfoContainer { max-width: none; flex-basis: 100%; }
+  .controlsContainer { max-width: none; min-width: 0; flex-basis: 100%; }
+}

@@ -95,6 +95,30 @@ export function getSpotifyRowLayout(row) {
   return { container, columns, lastColumn, columnIndex };
 }
 
+export function buildSpotifyColumnTemplate({ container, columns, columnIndex }) {
+  const inlineTemplate = container.style.getPropertyValue("grid-template-columns");
+  const nativeTemplate = inlineTemplate.includes("[last]")
+    ? inlineTemplate
+    : getComputedStyle(container).getPropertyValue("--grid-template-columns");
+  // Keep Spotify's responsive widths and named lines. Recommended rows have
+  // no track-number column, so a numbered-playlist template squeezes the title.
+  if (nativeTemplate.includes("[last]")) {
+    return nativeTemplate.replace("[last]", "[tagify] 150px [last]");
+  }
+
+  const first = columns[0];
+  const startsWithTitle = columns.length === 2 || Boolean(first.querySelector(
+    '.main-trackList-rowMainContentTitle, .main-trackList-rowTitle, [data-testid="internal-track-link"], [data-testid="track-title"], a[href*="/track/"], a[href^="spotify:track:"]',
+  ));
+  return Array.from({ length: columns.length + 1 }, (_, index) => {
+    if (index === columnIndex - 1) return "[tagify] 150px";
+    if (index === columns.length) return "[last] minmax(120px,1fr)";
+    if (!startsWithTitle && index === 0) return "[index] 16px";
+    if (index === (startsWithTitle ? 0 : 1)) return "[first] minmax(0,3fr)";
+    return `[var${startsWithTitle ? index : index - 1}] minmax(0,2fr)`;
+  }).join(" ");
+}
+
 export function insertSpotifyColumn(layout, column, gridTemplate) {
   const { container, lastColumn, columnIndex } = layout;
   const originalIndex = lastColumn.getAttribute("aria-colindex");
@@ -126,6 +150,10 @@ export function getSpotifyPlayerAnchor(root = document) {
     'a[href*="/local/"]',
     'a[href^="spotify:local:"]',
   ].join(", "));
+  // Current song titles open the album. Skip cover links and use the text block.
+  if (!info) info = Array.from(widget.querySelectorAll('a[href*="/album/"], a[href^="spotify:album:"]')).find(
+    link => link.textContent.trim() && !link.closest('[data-testid="cover-art-button"]'),
+  );
   if (!info) return null;
   while (info.parentElement !== widget) info = info.parentElement;
   return info;

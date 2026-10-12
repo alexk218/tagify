@@ -576,7 +576,7 @@ function Get-LatestTagifyVersion {
     param()
 
     try {
-        $apiUrl = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
+        $apiUrl = "https://tagify.fm/releases/client/latest.json"
         $latestRelease = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 15
         
         $version = $latestRelease.tag_name -replace 'v', ''
@@ -592,7 +592,7 @@ function Get-LatestTagifyVersion {
         }
         else {
             # Fallback URL
-            $downloadUrl = "https://github.com/$REPO_OWNER/$REPO_NAME/releases/latest/download/tagify.zip"
+            throw "A verified Tagify download is unavailable. Try again later."
         }
         
         return @{
@@ -606,7 +606,7 @@ function Get-LatestTagifyVersion {
         Write-Log "Could not check for latest Tagify version: $_"
         return @{
             Version      = "Unknown"
-            DownloadUrl  = "https://github.com/$REPO_OWNER/$REPO_NAME/releases/latest/download/tagify.zip"
+            DownloadUrl  = $null
             ReleaseNotes = ""
             Success      = $false
         }
@@ -1004,6 +1004,9 @@ function Download-TagifyRelease {
     $zipPath = "$tempDir\tagify.zip"
     
     try {
+        $release = Invoke-RestMethod -Uri 'https://tagify.fm/releases/client/latest.json' -TimeoutSec 15
+        $asset = $release.assets | Where-Object { $_.browser_download_url -eq $DownloadUrl -and $_.name -eq "tagify-$($release.tag_name).zip" } | Select-Object -First 1
+        if (-not $asset -or $asset.digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or $DownloadUrl -ne "https://tagify.fm/releases/client/$($release.tag_name)/$($asset.name)") { throw "The Tagify download could not be verified. Check again before installing." }
         Write-Log "Download URL: $DownloadUrl"
         Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipPath -UseBasicParsing
         
@@ -1011,6 +1014,7 @@ function Download-TagifyRelease {
             Write-ErrorAndExit "Downloaded file is missing or empty"
         }
         
+        if ((Get-Item $zipPath).Length -ne $asset.size -or (Get-FileHash $zipPath -Algorithm SHA256).Hash -ne $asset.digest.Substring(7)) { throw "The download did not pass verification. Try again." }
         $fileSize = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
         Write-Log "Downloaded tagify.zip ($fileSize MB)"
         

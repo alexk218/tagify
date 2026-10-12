@@ -2,6 +2,16 @@
 
 set -e  # Exit on any error
 
+# Mac setup is handled by the verified, recoverable native manager. Keep this
+# compatibility entry point harmless for users following older instructions.
+if [ "$(uname -s)" = "Darwin" ]; then
+    printf '%s\n' 'Install or repair Tagify with Tagify Manager for Mac:' \
+        'https://tagify.fm/download/mac' \
+        'Download the newest Mac DMG, open it, and move Tagify Manager to Applications.' \
+        'Your current Spotify and Tagify setup has not been changed.'
+    exit 0
+fi
+
 # Colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -16,10 +26,14 @@ NAME="tagify"
 CUSTOM_APP_DIR="$CUSTOM_APPS_DIR/$NAME"
 TAGIFY_STATE_DIR="$HOME/.config/tagify"
 INSTALL_RECOVERY_KEY_FILE="$TAGIFY_STATE_DIR/install-recovery-key"
-LATEST_TAG=$(curl -s https://api.github.com/repos/alexk218/tagify/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-ZIP_URL="https://github.com/alexk218/tagify/releases/download/$LATEST_TAG/tagify-$LATEST_TAG.zip"
-ZIP_FILE="/tmp/tagify.zip"
-TEMP_DIR="/tmp/tagify-install"
+TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/tagify-install.XXXXXX")
+trap 'rm -rf "$TEMP_DIR"' EXIT
+curl -fsSL --max-time 30 https://tagify.fm/releases/client/latest.json -o "$TEMP_DIR/release.json"
+LATEST_TAG=$(sed -n 's/.*"tag_name": *"\(v[0-9]*\.[0-9]*\.[0-9]*\)".*/\1/p' "$TEMP_DIR/release.json")
+EXPECTED_SHA=$(sed -n 's/.*"digest": *"sha256:\([a-f0-9]*\)".*/\1/p' "$TEMP_DIR/release.json")
+[[ "$LATEST_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ "$EXPECTED_SHA" =~ ^[a-f0-9]{64}$ ]] || { echo 'Update information could not be verified.'; exit 1; }
+ZIP_URL="https://tagify.fm/releases/client/$LATEST_TAG/tagify-$LATEST_TAG.zip"
+ZIP_FILE="$TEMP_DIR/tagify.zip"
 
 install_recovery_bootstrap() {
     mkdir -p "$TAGIFY_STATE_DIR"
@@ -56,19 +70,9 @@ echo -e "${CYAN}✅ Spicetify found${NC}"
 # Create CustomApps directory if it doesn't exist
 mkdir -p "$CUSTOM_APPS_DIR"
 
-# Remove existing installation
-if [ -e "$CUSTOM_APP_DIR" ]; then
-    echo -e "${CYAN}🔄 Removing existing installation...${NC}"
-    rm -rf "$CUSTOM_APP_DIR"
-fi
-
-# Clean and create temp directory
-rm -rf "$TEMP_DIR"
-mkdir -p "$TEMP_DIR"
-
 # Download the zip file
 echo -e "${CYAN}📥 Downloading Tagify...${NC}"
-if ! curl -L -o "$ZIP_FILE" "$ZIP_URL"; then
+if ! curl -fL --max-time 120 -o "$ZIP_FILE" "$ZIP_URL"; then
     echo -e "${RED}❌ Failed to download Tagify${NC}"
     echo "URL: $ZIP_URL"
     exit 1
@@ -82,6 +86,7 @@ fi
 
 echo -e "${CYAN}✅ Download completed ($(du -h "$ZIP_FILE" | cut -f1))${NC}"
 
+printf '%s  %s\n' "$EXPECTED_SHA" "$ZIP_FILE" | sha256sum -c -
 # Extract files
 echo -e "${CYAN}📦 Extracting files...${NC}"
 if ! unzip -o -q "$ZIP_FILE" -d "$TEMP_DIR"; then
@@ -89,18 +94,15 @@ if ! unzip -o -q "$ZIP_FILE" -d "$TEMP_DIR"; then
     exit 1
 fi
 
-# Find what was extracted and move it properly
-cd "$TEMP_DIR"
-EXTRACTED_ITEMS=(*)
-
-if [ ${#EXTRACTED_ITEMS[@]} -eq 1 ] && [ -d "${EXTRACTED_ITEMS[0]}" ]; then
-    # Single directory extracted - move it to the target location
-    mv "${EXTRACTED_ITEMS[0]}" "$CUSTOM_APP_DIR"
-else
-    # Multiple items or files - create target dir and move everything into it
-    mkdir -p "$CUSTOM_APP_DIR"
-    mv * "$CUSTOM_APP_DIR/"
+# Only verified runtime files may replace an existing installation.
+for required in manifest.json package.json index.js extension.js style.css; do
+    test -s "$TEMP_DIR/tagify/$required" || { echo 'The download is incomplete.'; exit 1; }
+done
+if [ -e "$CUSTOM_APP_DIR" ]; then
+    cp -a "$CUSTOM_APP_DIR" "$CUSTOM_APP_DIR.backup-$(date +%Y%m%d-%H%M%S)"
+    rm -rf "$CUSTOM_APP_DIR"
 fi
+mv "$TEMP_DIR/tagify" "$CUSTOM_APP_DIR"
 
 install_recovery_bootstrap
 
@@ -110,7 +112,7 @@ spicetify config custom_apps "$NAME"
 spicetify apply
 
 # Clean up
-rm -rf "$ZIP_FILE" "$TEMP_DIR"
+rm -f "$ZIP_FILE"
 
 echo -e "${GREEN}Tagify installation complete!
 

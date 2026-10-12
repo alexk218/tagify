@@ -142,10 +142,13 @@ it("restores the linked releases actually changed by a single-song edit, preserv
   await act(async () => { await result.current.actions.setRating(a, 4); });
   expect(Object.keys(trackEditHistory.getSnapshot().undo[0].changes).sort()).toEqual([a, b]);
   await act(async () => { result.current.history.undo(); });
-  await waitFor(() => expect(result.current.history.canRedo).toBe(true));
-  expect(result.current.data.tracks[a]).toEqual(linked.tracks[a]);
-  expect(result.current.data.tracks[b]).toEqual(linked.tracks[b]);
-  expect(result.current.data.tracks[c]).toEqual(song);
+  // History and the refreshed React library can commit in separate renders.
+  await waitFor(() => {
+    expect(result.current.history.canRedo).toBe(true);
+    expect(result.current.data.tracks[a]).toEqual(linked.tracks[a]);
+    expect(result.current.data.tracks[b]).toEqual(linked.tracks[b]);
+    expect(result.current.data.tracks[c]).toEqual(song);
+  });
 });
 
 it("uses keyboard history outside text fields while leaving native text undo alone", async () => {

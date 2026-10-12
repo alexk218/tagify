@@ -1,3 +1,4 @@
+import { spotifyRead } from "@/services/SpotifyRequests";
 import { shouldExcludePlaylist } from "./PlaylistSettings";
 import { normalizeSpotifyUserIdentity } from "./SpotifyUserIdentity";
 
@@ -112,10 +113,11 @@ async function getAllPlaylistsWithSnapshots(): Promise<
   let offset = 0;
   let hasMore = true;
 
-  while (hasMore) {
-    const response = await Spicetify.CosmosAsync.get(
+  for (let page = 0; hasMore; page++) {
+      if (page >= 1000) throw new Error("Spotify playlist paging exceeded its limit");
+    const response = await spotifyRead<any>(`desktop:get:${JSON.stringify([`https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}&fields=items(id,name,snapshot_id,owner,description),next`])}`, () => Spicetify.CosmosAsync.get(
       `https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}&fields=items(id,name,snapshot_id,owner,description),next`
-    );
+    ));
 
     if (response && response.items && response.items.length > 0) {
       playlists.push(...response.items);
@@ -155,12 +157,13 @@ async function processChangedPlaylistNoFilter(
     let hasMore = true;
 
     while (hasMore) {
-      const response = await Spicetify.CosmosAsync.get(
-        `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100&offset=${offset}&fields=items(track(uri)),next`
-      );
+      const response = await spotifyRead<any>(`desktop:get:${JSON.stringify([`https://api.spotify.com/v1/playlists/${playlist.id}/items?limit=100&offset=${offset}&fields=items(item(uri)),next`])}`, () => Spicetify.CosmosAsync.get(
+        `https://api.spotify.com/v1/playlists/${playlist.id}/items?limit=100&offset=${offset}&fields=items(item(uri)),next`
+      ));
 
       if (response && response.items && response.items.length > 0) {
         response.items.forEach((item: any) => {
+          item = { ...item, track: item.item ?? item.track };
           if (item.track && item.track.uri) {
             const trackUri = item.track.uri;
 
@@ -228,9 +231,9 @@ async function processLikedSongs(
     const lastSyncDate = new Date(lastSync);
 
     while (hasMore) {
-      const response = await Spicetify.CosmosAsync.get(
+      const response = await spotifyRead<any>(`desktop:get:${JSON.stringify([`https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}&fields=items(added_at,track(uri)),next`])}`, () => Spicetify.CosmosAsync.get(
         `https://api.spotify.com/v1/me/tracks?limit=50&offset=${offset}&fields=items(added_at,track(uri)),next`
-      );
+      ));
 
       if (response && response.items && response.items.length > 0) {
         let foundOldTrack = false;
@@ -298,7 +301,7 @@ export async function incrementalRefreshPlaylistCache(): Promise<number> {
     const now = Date.now();
 
     // Get user profile
-    const userProfile = await Spicetify.CosmosAsync.get("https://api.spotify.com/v1/me");
+    const userProfile = await spotifyRead<any>(`desktop:get:${JSON.stringify(["https://api.spotify.com/v1/me"])}`, () => Spicetify.CosmosAsync.get("https://api.spotify.com/v1/me"));
     const userId = resolveCurrentUserId(userProfile);
 
     if (!userId) {
@@ -388,7 +391,7 @@ export async function incrementalRefreshPlaylistCache(): Promise<number> {
 export async function fullRefreshPlaylistCache(): Promise<number> {
   try {
     // Get user profile
-    const userProfile = await Spicetify.CosmosAsync.get("https://api.spotify.com/v1/me");
+    const userProfile = await spotifyRead<any>(`desktop:get:${JSON.stringify(["https://api.spotify.com/v1/me"])}`, () => Spicetify.CosmosAsync.get("https://api.spotify.com/v1/me"));
     const userId = resolveCurrentUserId(userProfile);
 
     if (!userId) {
@@ -408,7 +411,8 @@ export async function fullRefreshPlaylistCache(): Promise<number> {
       id: string;
       name: string;
       owner: { id: string; display_name: string };
-      tracks: { total: number };
+      tracks?: { total: number };
+      items?: { total: number };
       description: string;
       snapshot_id: string;
     }> = [];
@@ -418,9 +422,9 @@ export async function fullRefreshPlaylistCache(): Promise<number> {
 
     // Fetch all playlists
     while (hasMore) {
-      const response = await Spicetify.CosmosAsync.get(
-        `https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}&fields=items(id,name,owner,tracks.total,description,snapshot_id)`
-      );
+      const response = await spotifyRead<any>(`desktop:get:${JSON.stringify([`https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}&fields=items(id,name,owner,items.total,description,snapshot_id)`])}`, () => Spicetify.CosmosAsync.get(
+        `https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset}&fields=items(id,name,owner,items.total,description,snapshot_id)`
+      ));
 
       if (response && response.items && response.items.length > 0) {
         playlists.push(...response.items);
@@ -450,7 +454,7 @@ export async function fullRefreshPlaylistCache(): Promise<number> {
     // Process playlists one by one to avoid rate limits
     for (const playlist of filteredPlaylists) {
       // Skip very large playlists
-      if (playlist.tracks.total > 1000) {
+      if ((playlist.items?.total ?? playlist.tracks?.total ?? 0) > 1000) {
         continue;
       }
 
@@ -459,17 +463,19 @@ export async function fullRefreshPlaylistCache(): Promise<number> {
         let tracksOffset = 0;
         let hasMoreTracks = true;
 
-        while (hasMoreTracks) {
+        for (let page = 0; hasMoreTracks; page++) {
+          if (page >= 1000) throw new Error("Spotify playlist paging exceeded its limit");
           // Add a delay to avoid rate limits
           await new Promise((resolve) => setTimeout(resolve, 100));
 
-          const tracksResponse = await Spicetify.CosmosAsync.get(
-            `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=100&offset=${tracksOffset}&fields=items(track(uri,name,artists,local)),next`
-          );
+          const tracksResponse = await spotifyRead<any>(`desktop:get:${JSON.stringify([`https://api.spotify.com/v1/playlists/${playlist.id}/items?limit=100&offset=${tracksOffset}&fields=items(item(uri,name,artists,local)),next`])}`, () => Spicetify.CosmosAsync.get(
+            `https://api.spotify.com/v1/playlists/${playlist.id}/items?limit=100&offset=${tracksOffset}&fields=items(item(uri,name,artists,local)),next`
+          ));
 
           if (tracksResponse && tracksResponse.items && tracksResponse.items.length > 0) {
             // Process tracks
             tracksResponse.items.forEach((item: any) => {
+              item = { ...item, track: item.item ?? item.track };
               if (item.track && item.track.uri) {
                 const trackUri = item.track.uri;
                 const isLocalFile = trackUri.startsWith("spotify:local:");

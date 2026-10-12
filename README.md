@@ -66,23 +66,27 @@ iwr -useb "https://raw.githubusercontent.com/alexk218/tagify/main/install.ps1" |
 
 ### macOS — full installer
 
-1. Download [Tagify.pkg](scripts/install/Tagify.pkg) and open it. It places **Tagify Installer** in Applications and opens it.
+1. [Download the latest Tagify Manager for Mac](https://tagify.fm/download/mac). Open it and drag **Tagify Manager** into Applications. ZIP and PKG downloads are available as alternatives.
 2. Click **Install Tagify**. The installer sets up Spicetify, installs the latest stable Tagify, and applies it to Spotify.
 3. Click **Open Spotify**, then choose Tagify.
 
-Run the installer again whenever you want to update or repair Tagify. Your saved tags, themes, and other apps stay in place. Requires macOS 12 or later; supports Intel and Apple Silicon.
+Reopen Tagify Manager whenever you want to update or repair Tagify. Repair keeps your installed versions, including betas. Your saved tags, themes, and other apps stay in place. If setup is interrupted, reopen the manager and choose **Restore previous setup** before trying again. Requires macOS 12 or later; supports Intel and Apple Silicon.
+
+The manager checks available disk space before setup and keeps the three newest completed setup backups for each Spotify copy. Unfinished recovery copies are preserved. It recognizes Spicetify installed through Homebrew and leaves its updates to Homebrew. You can uncheck **Block Spotify updates** and choose **Apply Changes** even if Spicetify is missing or broken.
 
 **Block Spotify updates** is checked by default, because Spotify updates can remove Tagify from Spotify. Your saved tags stay safe. Uncheck it before installing to allow automatic Spotify updates again; after a Spotify update, run the installer to restore Tagify.
 
 An unsigned development build may require **Open Anyway** in System Settings → Privacy & Security after the first launch attempt. Public distribution should use the signed, notarized build. See the [Mac installer build guide](scripts/install/macos/BUILD.md).
 
-### macOS/Linux — terminal option
+### Linux — terminal option
 
-Open **Terminal** and run:
+On Linux, open **Terminal** and run:
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/alexk218/tagify/main/install.sh" | bash
 ```
+
+Older Mac terminal instructions now direct you to Tagify Manager without changing your installation.
 
 ### **Manual install**
 

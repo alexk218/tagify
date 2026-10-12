@@ -1,5 +1,6 @@
 .container {
   container-type: inline-size;
+  scroll-margin-top: 8px;
   background: var(--spice-card);
   border-radius: 8px;
   padding: 16px;
@@ -1656,4 +1657,68 @@
     flex-basis: 100%;
     margin-left: 0;
   }
+}
+
+/* Tracks opened from Stats: what is showing, and the ways back. */
+
+/* A list opened from Stats: the title names it, with a way back and a way out. */
+.statsBack,
+.statsShowAll {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.statsBack {
+  align-self: flex-start;
+  padding: 2px 0;
+  background: transparent;
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.statsBack:hover {
+  color: var(--spice-text);
+}
+
+.statsTitle {
+  overflow-wrap: anywhere;
+  /* Receives focus when the list opens, for screen readers; it isn't a control. */
+  outline: none;
+}
+
+.statsMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.statsMeta .trackCount {
+  margin-top: 0;
+}
+
+.statsShowAll {
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--spice-text);
+  font-size: 12px;
+}
+
+.statsShowAll:hover {
+  border-color: var(--spice-subtext);
+  background: rgb(255 255 255 / 6%);
+}
+
+.statsBack:focus-visible,
+.statsShowAll:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
 }

@@ -1,4 +1,5 @@
-import { Dispatch, MutableRefObject, SetStateAction, useCallback } from "react";
+import { getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
+import { Dispatch, MutableRefObject, SetStateAction, useCallback, useRef } from "react";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { ArtistData, TagDataStructure, TagTaxonomy } from "@/types/tagData";
 import { buildValidTagIdSet } from "@/utils/tagTaxonomy";
@@ -40,8 +41,8 @@ export function useTagDataArtistActions({
   );
 
   const getArtistMetadata = useCallback(
-    async (artistUriOrId: string): Promise<ArtistMetadata | null> => {
-      const metadata = await spotifyApiService.getArtistMetadata(artistUriOrId);
+    async (artistUriOrId: string, background = false): Promise<ArtistMetadata | null> => {
+      const metadata = await spotifyApiService.getArtistMetadata(artistUriOrId, { priority: background ? "background" : "foreground" });
       if (!metadata) {
         return null;
       }
@@ -56,45 +57,40 @@ export function useTagDataArtistActions({
     [],
   );
 
-  // Looking up details can take a moment; the library is read again after
-  // the lookup so edits made meanwhile are kept, and an artist created by an
-  // overlapping edit is not created twice.
+  const pendingMetadata = useRef(new Map<string, object>());
+  const hydrateMetadata = useCallback((uri: string, recreated = false) => {
+    const account = getTagifyDatabaseName();
+    const key = `${account}:${uri}`;
+    if (pendingMetadata.current.has(key) && !recreated) return;
+    const original = latestTagDataRef.current.artists[uri];
+    const token = {};
+    pendingMetadata.current.set(key, token);
+    void getArtistMetadata(uri, true).then(metadata => {
+      if (!metadata || account !== getTagifyDatabaseName() || pendingMetadata.current.get(key) !== token) return;
+      const data = latestTagDataRef.current, current = data.artists[uri];
+      // Never recreate a removed entity or overwrite details edited meanwhile.
+      if (!current || current.dateCreated !== original?.dateCreated || !(!current.name || current.name === "Unknown Artist" || current.imageUrl === undefined)) return;
+      commitDataSnapshot({ ...data, artists: { ...data.artists, [uri]: withArtistMetadata(current, metadata, current.dateModified ?? 0) } });
+    }).catch(() => { /* Optional details can be recovered by the bounded backfill. */ })
+      .finally(() => { if (pendingMetadata.current.get(key) === token) pendingMetadata.current.delete(key); });
+  }, [commitDataSnapshot, getArtistMetadata, latestTagDataRef]);
+
+  // Save locally first. A Spotify pause must not delay or reject an annotation.
   const getOrCreateArtistData = useCallback(
-    async (
-      artistUriOrId: string,
-      providedMetadata?: ArtistMetadata,
-    ): Promise<{ artistUri: string; currentData: TagDataStructure }> => {
+    (artistUriOrId: string, providedMetadata?: ArtistMetadata) => {
       const artistUri = normalizeArtistUri(artistUriOrId);
-      const needsHydration = (artist: ArtistData) =>
-        !artist.name || artist.name === "Unknown Artist" || artist.imageUrl === undefined;
-      const existingArtist = latestTagDataRef.current.artists[artistUri];
-      const needsMetadata = !existingArtist || needsHydration(existingArtist);
-      const metadata = needsMetadata ? providedMetadata || (await getArtistMetadata(artistUri)) : null;
-      const now = Date.now();
       const currentData = latestTagDataRef.current;
       const latest = currentData.artists[artistUri];
-
-      if (!latest) {
-        const nextData: TagDataStructure = {
-          ...currentData,
-          artists: { ...currentData.artists, [artistUri]: createInitialArtistData(now, metadata ?? undefined) },
-        };
-        commitDataSnapshot(nextData);
-        return { artistUri, currentData: nextData };
+      if (!latest || providedMetadata) {
+        const now = Date.now();
+        commitDataSnapshot({ ...currentData, artists: { ...currentData.artists,
+          [artistUri]: latest ? withArtistMetadata(latest, providedMetadata!, now) : createInitialArtistData(now, providedMetadata),
+        } });
       }
-
-      if (metadata && needsHydration(latest)) {
-        const nextData: TagDataStructure = {
-          ...currentData,
-          artists: { ...currentData.artists, [artistUri]: withArtistMetadata(latest, metadata, now) },
-        };
-        commitDataSnapshot(nextData);
-        return { artistUri, currentData: nextData };
-      }
-
-      return { artistUri, currentData };
+      if (!providedMetadata && (!latest || !latest.name)) hydrateMetadata(artistUri, !latest);
+      return { artistUri, currentData: latestTagDataRef.current };
     },
-    [commitDataSnapshot, getArtistMetadata, latestTagDataRef],
+    [commitDataSnapshot, hydrateMetadata, latestTagDataRef],
   );
 
   // Suggestions use already displayed metadata and only add; repeated clicks are harmless.
@@ -123,7 +119,7 @@ export function useTagDataArtistActions({
       tagId: string,
       metadata?: ArtistMetadata,
     ) => {
-      const { artistUri } = await getOrCreateArtistData(
+      const { artistUri } = getOrCreateArtistData(
         artistUriOrId,
         metadata,
       );
@@ -179,7 +175,7 @@ export function useTagDataArtistActions({
       rating: number,
       metadata?: ArtistMetadata,
     ) => {
-      const { artistUri } = await getOrCreateArtistData(
+      const { artistUri } = getOrCreateArtistData(
         artistUriOrId,
         metadata,
       );
@@ -208,7 +204,7 @@ export function useTagDataArtistActions({
       energy: number,
       metadata?: ArtistMetadata,
     ) => {
-      const { artistUri } = await getOrCreateArtistData(
+      const { artistUri } = getOrCreateArtistData(
         artistUriOrId,
         metadata,
       );

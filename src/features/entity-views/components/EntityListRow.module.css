@@ -197,12 +197,6 @@
   background: #991b1b;
 }
 
-.tag:focus-visible,
-.commonTagButton:focus-visible {
-  outline: 2px solid rgb(255 255 255 / 45%);
-  outline-offset: 1px;
-}
-
 .trackTags {
   align-items: center;
   display: inline-flex;
@@ -265,6 +259,12 @@
   text-decoration: line-through;
 }
 
+.tag:focus-visible,
+.commonTagButton:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 45%);
+  outline-offset: 1px;
+}
+
 .moreTags {
   color: var(--spice-subtext);
   font-size: 11px;
@@ -272,11 +272,14 @@
 }
 
 .aside {
+  align-self: start;
   color: var(--spice-subtext);
   display: grid;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   gap: 5px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(18px, auto) auto auto;
   justify-items: end;
   max-width: 220px;
   min-width: 150px;
@@ -287,6 +290,7 @@
   align-items: center;
   display: inline-flex;
   gap: 8px;
+  grid-row: 1;
   min-height: 18px;
 }
 
@@ -309,7 +313,11 @@
 .progress {
   align-items: center;
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 8px;
+  grid-row: 2;
+  justify-content: flex-end;
+  max-width: 100%;
 }
 
 .progressBar {
@@ -327,18 +335,23 @@
 }
 
 .average {
-  align-items: center;
+  align-items: baseline;
   display: inline-flex;
   gap: 4px;
-  white-space: nowrap;
+  grid-row: 3;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .average svg {
   color: #ffd700;
+  flex-shrink: 0;
 }
 
 .status {
   font-style: italic;
+  grid-row: 4;
 }
 
 /* Rows follow the space Spotify gives the list, not the window size. */
@@ -358,5 +371,9 @@
     max-width: none;
     min-width: 0;
     text-align: left;
+  }
+
+  .progress {
+    justify-content: flex-start;
   }
 }

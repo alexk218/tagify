@@ -39,29 +39,15 @@ describe("SpotifyApiService entity metadata", () => {
     });
   });
 
-  it("uses Spotify Web API for artist metadata before GraphQL", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          name: "Recovered Artist",
-          images: [{ url: "https://example.com/artist.jpg" }],
-          followers: { total: 1234 },
-          genres: ["house"],
-        }),
-        { status: 200 },
-      ),
-    );
-
-    await expect(
-      spotifyApiService.getArtistMetadata("spotify:artist:artist-1"),
-    ).resolves.toEqual({
-      uri: "spotify:artist:artist-1",
-      name: "Recovered Artist",
-      imageUrl: "https://example.com/artist.jpg",
-      followerCount: 1234,
-      genres: ["house"],
-    });
-    expect(Spicetify.GraphQL.Request).not.toHaveBeenCalled();
+  it("uses desktop artist metadata without Web API requests", async () => {
+    (Spicetify.GraphQL.Definitions as any).queryArtistOverview = { name: "queryArtistOverview" };
+    vi.mocked(Spicetify.GraphQL.Request).mockResolvedValue({ data: { artistUnion: {
+      uri: "spotify:artist:artist-1", name: "Recovered Artist",
+      images: [{ url: "https://example.com/artist.jpg" }], followers: { total: 1234 }, genres: ["house"],
+    } } } as never);
+    await expect(spotifyApiService.getArtistMetadata("spotify:artist:artist-1")).resolves.toMatchObject({ name: "Recovered Artist" });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(Spicetify.GraphQL.Request).toHaveBeenCalledTimes(1);
   });
 
   describe("album lengths", () => {
@@ -89,18 +75,10 @@ describe("SpotifyApiService entity metadata", () => {
       delete (Spicetify.GraphQL.Definitions as any).getAlbum;
     });
 
-    it("reads the album length from Spotify's client API when the Web API is throttled", async () => {
+    it("stops album fallbacks when Spotify throttles the Web API", async () => {
       vi.mocked(globalThis.fetch).mockResolvedValue(new Response(null, { status: 429 }));
-      vi.mocked(Spicetify.GraphQL.Request).mockResolvedValue(albumUnion() as any);
-
-      await expect(
-        spotifyApiService.getPlaylistMetadata("spotify:album:album-2"),
-      ).resolves.toMatchObject({
-        name: "Quiet Machines",
-        ownerName: "Low Orbit",
-        trackCount: 12,
-        description: "Released 1992-02-12T00:00:00Z",
-      });
+      await expect(spotifyApiService.getPlaylistMetadata("spotify:album:album-2")).rejects.toMatchObject({ status: 429 });
+      expect(Spicetify.GraphQL.Request).not.toHaveBeenCalled();
     });
 
     it("asks only Spotify's client API for a length, one track per page", async () => {
@@ -273,35 +251,19 @@ describe("SpotifyApiService entity metadata", () => {
     ]);
   });
 
-  it("reads every playlist page when the Spotify desktop read fails", async () => {
-    (Spicetify.Platform.PlaylistAPI as any).getContents = vi.fn().mockRejectedValue(new Error("desktop unavailable"));
-    (Spicetify.Platform as any).AuthorizationAPI = {
-      getState: () => ({ token: { accessToken: "test-token" } }),
-    };
-    vi.mocked(globalThis.fetch)
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        items: [{ track: { uri: "spotify:track:first" } }],
-        next: "https://api.spotify.com/v1/playlists/playlist-1/items?offset=1",
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        items: [{ track: { uri: "spotify:track:second" } }],
-        next: null,
-      }), { status: 200 }));
-
+  it("reads every desktop playlist page without a Web API fallback", async () => {
+    (Spicetify.Platform.PlaylistAPI as any).getContents = vi.fn()
+      .mockResolvedValueOnce({ items: [{ uri: "spotify:track:first" }], totalLength: 2 })
+      .mockResolvedValueOnce({ items: [{ uri: "spotify:track:second" }], totalLength: 2, offset: 1 });
     await expect(spotifyApiService.getAllTrackUrisInPlaylistStrict("playlist-1"))
       .resolves.toEqual(["spotify:track:first", "spotify:track:second"]);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it("never mistakes a failed Spotify fallback for an empty playlist", async () => {
+  it("never mistakes a failed desktop read for an empty playlist", async () => {
     (Spicetify.Platform.PlaylistAPI as any).getContents = vi.fn().mockRejectedValue(new Error("desktop unavailable"));
-    (Spicetify.Platform as any).AuthorizationAPI = {
-      getState: () => ({ token: { accessToken: "test-token" } }),
-    };
-    vi.mocked(globalThis.fetch).mockResolvedValue(new Response(null, { status: 403 }));
-
-    await expect(spotifyApiService.getAllTrackUrisInPlaylistStrict("playlist-1"))
-      .rejects.toThrow("403");
+    await expect(spotifyApiService.getAllTrackUrisInPlaylistStrict("playlist-1")).rejects.toThrow("desktop unavailable");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });
 
@@ -318,32 +280,32 @@ describe("safe playlist writes", () => {
     vi.useRealTimers();
   });
 
-  it("does not add a track when both membership reads fail", async () => {
+  it("does not add a track when desktop membership is unavailable", async () => {
     vi.spyOn(playlistApi, "getContents").mockRejectedValue(new Error("Invalid playlist response!"));
     const add = vi.spyOn(playlistApi, "add");
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 429, headers: { "Retry-After": "120" } }));
     await expect(spotifyApiService.addTrackToSpotifyPlaylist("spotify:track:playing", "five-star")).resolves.toEqual({ success: false, wasAdded: false });
     expect(add).not.toHaveBeenCalled();
     await spotifyApiService.addTrackToSpotifyPlaylist("spotify:track:playing", "five-star");
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it("resumes playlist reads after Spotify's requested cooldown", async () => {
     vi.useFakeTimers();
-    vi.spyOn(playlistApi, "getContents").mockRejectedValue(new Error("Unavailable"));
+    vi.spyOn(playlistApi, "getContents").mockRejectedValueOnce({ status: 429, retryAfterSeconds: 120 }).mockResolvedValue({ items: [{ uri: "spotify:track:playing" }], totalLength: 1 });
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": "120" } }))
       .mockResolvedValue(new Response(JSON.stringify({ items: [{ track: { uri: "spotify:track:playing" } }], next: null }), { status: 200 }));
-    await expect(spotifyApiService.getAllTrackUrisInPlaylistStrict("five-star")).rejects.toThrow("429");
+    await expect(spotifyApiService.getAllTrackUrisInPlaylistStrict("five-star")).rejects.toMatchObject({ status: 429 });
     await vi.advanceTimersByTimeAsync(119_000);
-    await expect(spotifyApiService.getAllTrackUrisInPlaylistStrict("other-playlist")).rejects.toThrow("rate limit");
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    await expect(spotifyApiService.getAllTrackUrisInPlaylistStrict("other-playlist")).rejects.toMatchObject({ status: 429 });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1_000);
     await expect(spotifyApiService.getAllTrackUrisInPlaylistStrict("five-star")).resolves.toEqual(["spotify:track:playing"]);
   });
 
-  it("uses the complete fallback to avoid adding an existing track", async () => {
-    vi.spyOn(playlistApi, "getContents").mockRejectedValue(new Error("Invalid playlist response!"));
+  it("uses complete desktop membership to avoid adding an existing track", async () => {
+    vi.spyOn(playlistApi, "getContents").mockResolvedValue({ items: [{ uri: "spotify:track:playing" }], totalLength: 1 });
     const add = vi.spyOn(playlistApi, "add");
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [{ track: { uri: "spotify:track:playing" } }], next: null }), { status: 200 }));
     await expect(spotifyApiService.addTrackToSpotifyPlaylist("spotify:track:playing", "five-star")).resolves.toEqual({ success: true, wasAdded: false });

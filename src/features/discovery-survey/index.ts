@@ -5,4 +5,4 @@ export type {
   UseDiscoverySurveyReturn,
 } from "./hooks/useDiscoverySurvey";
 
-export { useTagifyUsage } from "./services/tagifyUsage";
+export { recordMeaningfulAction, useTagifyUsage } from "./services/tagifyUsage";

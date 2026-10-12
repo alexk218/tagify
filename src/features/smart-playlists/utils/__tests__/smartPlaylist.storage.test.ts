@@ -39,11 +39,24 @@ function createPlaylist(overrides: Partial<SmartPlaylistCriteria> = {}): SmartPl
 }
 
 describe("smartPlaylist.storage", () => {
+  it("does not migrate old rules after an account changes during the read", async () => {
+    localStorage.setItem(SMART_PLAYLIST_STORAGE_KEY, JSON.stringify([createPlaylist()]));
+    let current = true;
+    storageMocks.getAllSmartPlaylists.mockImplementationOnce(async () => { current = false; return []; });
+    const check = () => { if (!current) throw new Error("account changed"); };
+    await expect(loadSmartPlaylistsFromStorage(check)).rejects.toThrow("account changed");
+    expect(storageMocks.saveSmartPlaylists).not.toHaveBeenCalled();
+    expect(localStorage.getItem(SMART_PLAYLIST_STORAGE_KEY)).not.toBeNull();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
     storageMocks.getAllSmartPlaylists.mockResolvedValue([]);
-    storageMocks.saveSmartPlaylists.mockResolvedValue(true);
+    storageMocks.saveSmartPlaylists.mockImplementation(async (next) => {
+      if (typeof next === "function") next(await storageMocks.getAllSmartPlaylists());
+      return true;
+    });
   });
 
   it("remembers an intentional last-rule removal for the connected account", async () => {
@@ -69,7 +82,7 @@ describe("smartPlaylist.storage", () => {
 
     await saveSmartPlaylistsToStorage(data);
 
-    expect(storageMocks.saveSmartPlaylists).toHaveBeenCalledWith(data);
+    expect(storageMocks.saveSmartPlaylists).toHaveBeenCalledWith(data, undefined, false);
     expect(localStorage.removeItem).toHaveBeenCalledWith(SMART_PLAYLIST_STORAGE_KEY);
   });
 
@@ -96,7 +109,7 @@ describe("smartPlaylist.storage", () => {
         },
       },
     ]);
-    expect(storageMocks.saveSmartPlaylists).toHaveBeenCalledWith(loaded);
+    expect(storageMocks.saveSmartPlaylists).toHaveBeenCalledWith(loaded, undefined);
     expect(localStorage.removeItem).toHaveBeenCalledWith(SMART_PLAYLIST_STORAGE_KEY);
   });
 
@@ -127,7 +140,7 @@ describe("smartPlaylist.storage", () => {
       if (storageMocks.saveSmartPlaylists.mock.calls.length === 1) {
         await firstSave;
       }
-      stored = playlists;
+      stored = typeof playlists === "function" ? playlists(stored) : playlists;
       return true;
     });
 
@@ -140,10 +153,10 @@ describe("smartPlaylist.storage", () => {
     expect(stored.map((playlist) => playlist.playlistId)).toEqual(["created", "imported"]);
   });
 
-  it("skips storage writes when the updater leaves the current playlists unchanged", async () => {
+  it("passes the updater into the transaction so unchanged playlists remain unchanged", async () => {
     const stored = [createPlaylist()];
     storageMocks.getAllSmartPlaylists.mockResolvedValue(stored);
     await expect(updateSmartPlaylistsInStorage((current) => current)).resolves.toBe(stored);
-    expect(storageMocks.saveSmartPlaylists).not.toHaveBeenCalled();
+    expect(storageMocks.saveSmartPlaylists).toHaveBeenCalledWith(expect.any(Function), undefined);
   });
 });

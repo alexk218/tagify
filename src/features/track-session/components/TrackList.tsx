@@ -27,10 +27,13 @@ import { SmartPlaylistModal } from "@/features/smart-playlists";
 import { collectMatchingTrackUris } from "@/features/smart-playlists";
 import type { SpotifyPlaylistReference } from "@/features/smart-playlists";
 import { formatTimestamp } from "@/utils/formatters";
+import { revealElement } from "@/utils/revealElement";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
+  faArrowLeft,
   faBoltLightning,
   faFloppyDisk,
+  faXmark,
   faStar,
   faStarHalf,
 } from "@fortawesome/free-solid-svg-icons";
@@ -187,6 +190,13 @@ interface TrackListProps {
   ) => Promise<SmartPlaylistImportSummary>;
   requestedSmartPlaylistEditId?: string | null;
   onSmartPlaylistEditRequestHandled?: () => void;
+  /**
+   * Tracks opened from Stats; while set, the list shows only these. A new id starts from clear
+   * filters and scrolls the list into view, unless `reveal` is "track" (a song was opened instead).
+   */
+  statsTrackSet?: { id: number; label: string; trackUris: string[]; reveal?: "list" | "track" } | null;
+  onClearStatsTrackSet?: () => void;
+  onReturnToStats?: () => void;
 }
 
 const TrackList: React.FC<TrackListProps> = ({
@@ -219,6 +229,9 @@ const TrackList: React.FC<TrackListProps> = ({
   onImportSmartPlaylists,
   requestedSmartPlaylistEditId = null,
   onSmartPlaylistEditRequestHandled,
+  statsTrackSet = null,
+  onClearStatsTrackSet,
+  onReturnToStats,
 }) => {
   const [showCreatePlaylistModal, setShowCreatePlaylistModal] =
     useState<boolean>(false);
@@ -286,6 +299,31 @@ const TrackList: React.FC<TrackListProps> = ({
     () => Object.entries(deferredTracks),
     [deferredTracks],
   );
+  const statsTrackUris = useMemo(() => statsTrackSet ? new Set(statsTrackSet.trackUris) : null, [statsTrackSet]);
+  // Search, filters and sorting still work inside a set opened from Stats.
+  const listedEntries = useMemo(
+    () => statsTrackUris ? trackEntries.filter(([uri]) => statsTrackUris.has(uri)) : trackEntries,
+    [trackEntries, statsTrackUris],
+  );
+  // Opening a new set from Stats starts from clear filters, so the list shows exactly what Stats
+  // counted, and brings the list into view so it's clear where the tracks went. Runs once per
+  // newly opened set.
+  const statsTrackSetId = statsTrackSet?.id ?? null;
+  const revealStatsList = statsTrackSet?.reveal !== "track";
+  const lastStatsTrackSetId = useRef<number | null>(null);
+  const listContainerRef = useRef<HTMLDivElement>(null);
+  const statsTitleRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (statsTrackSetId === null || statsTrackSetId === lastStatsTrackSetId.current) return;
+    lastStatsTrackSetId.current = statsTrackSetId;
+    clearAllFilters();
+    if (!revealStatsList) return;
+    const frame = requestAnimationFrame(() => {
+      revealElement(listContainerRef.current);
+      statsTitleRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [statsTrackSetId]);
 
   const tagDisplayLookup = useMemo(() => buildTagDisplayLookup(taxonomy), [taxonomy]);
   const customAccentsById = taxonomy.customAccentsById;
@@ -307,9 +345,10 @@ const TrackList: React.FC<TrackListProps> = ({
 
   const recordingKeys = useMemo(() => recordingDisplayKeys(deferredTracks), [deferredTracks]);
   const uniqueTrackCount = useMemo(() => collapseRecordingEntries(trackEntries, recordingKeys).length, [trackEntries, recordingKeys]);
+  const listedUniqueCount = useMemo(() => collapseRecordingEntries(listedEntries, recordingKeys).length, [listedEntries, recordingKeys]);
   const matchingTracks = useMemo(
     () =>
-      filterTrackEntries(trackEntries, trackInfo, {
+      filterTrackEntries(listedEntries, trackInfo, {
         includeTagClauses,
         clauseConnectors,
         ratingFilters,
@@ -321,7 +360,7 @@ const TrackList: React.FC<TrackListProps> = ({
         searchTerm,
       }),
     [
-      trackEntries,
+      listedEntries,
       trackInfo,
       includeTagClauses,
       clauseConnectors,
@@ -763,6 +802,8 @@ const TrackList: React.FC<TrackListProps> = ({
 
   const handleEditSmartPlaylist = useCallback(
     (playlist: SmartPlaylistCriteria) => {
+      // Editing a smart playlist works on filters across the whole library.
+      onClearStatsTrackSet?.();
       onReplaceTagFilterFormula({
         clauses: playlist.criteria.includeTagClauses,
         connectors: playlist.criteria.clauseConnectors,
@@ -783,6 +824,7 @@ const TrackList: React.FC<TrackListProps> = ({
       setShowSmartPlaylistModal(false);
     },
     [
+      onClearStatsTrackSet,
       onReplaceTagFilterFormula,
       setBpmMaxFilter,
       setBpmMinFilter,
@@ -948,20 +990,43 @@ const TrackList: React.FC<TrackListProps> = ({
   };
 
   return (
-    <div className={styles.container}>
+    <div ref={listContainerRef} className={styles.container}>
       <div className={styles.filterControlsGrid}>
         {/* HEADER */}
         <div className={styles.filterControlsLeftGrid}>
           <div className={styles.header}>
             <div className={styles.titleSection}>
-              <h2 className={styles.title}>Tagged Tracks</h2>
-              <span className={styles.trackCount}>
-                {activeFilterCount > 0 || searchTerm.trim() !== ""
-                  ? `${filteredTracks.length}/${
-                      uniqueTrackCount
-                    } tracks`
-                  : `${uniqueTrackCount} tracks`}
-              </span>
+              {statsTrackSet ? (
+                <>
+                  {onReturnToStats && (
+                    <button type="button" className={styles.statsBack} onClick={onReturnToStats}>
+                      <FontAwesomeIcon icon={faArrowLeft} aria-hidden="true" /> Back to Stats
+                    </button>
+                  )}
+                  <h2 ref={statsTitleRef} tabIndex={-1} className={`${styles.title} ${styles.statsTitle}`}>{statsTrackSet.label}</h2>
+                  <span className={styles.statsMeta}>
+                    <span className={styles.trackCount}>
+                      {searchTerm.trim() !== ""
+                        ? `${filteredTracks.length} of ${listedUniqueCount} tracks`
+                        : `${listedUniqueCount} ${listedUniqueCount === 1 ? "track" : "tracks"}`}
+                    </span>
+                    <button type="button" className={styles.statsShowAll} onClick={() => { setSearchTerm(""); onClearStatsTrackSet?.(); }}>
+                      <FontAwesomeIcon icon={faXmark} aria-hidden="true" /> Show all tracks
+                    </button>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <h2 className={styles.title}>Tagged Tracks</h2>
+                  <span className={styles.trackCount}>
+                    {activeFilterCount > 0 || searchTerm.trim() !== ""
+                      ? `${filteredTracks.length}/${
+                          uniqueTrackCount
+                        } tracks`
+                      : `${uniqueTrackCount} tracks`}
+                  </span>
+                </>
+              )}
               {editingSmartPlaylist && (
                 <span
                   className={styles.smartPlaylistEditingBadge}
@@ -1005,16 +1070,16 @@ const TrackList: React.FC<TrackListProps> = ({
             {editingSmartPlaylist ? "Save Smart Playlist" : "Create Playlist"}
           </button>
 
-          {/* Smart Playlist button */}
-          <button
-            className={styles.smartPlaylistButton}
-            onClick={handleSmartPlaylistClick}
-            title={`Smart Playlists (${smartPlaylists.length})`}
-          >
-            {/* <i className="fa-solid fa-bolt-lightning"></i> */}
-
-            <FontAwesomeIcon icon={faBoltLightning} />
-          </button>
+          {/* Smart Playlist button. A list from Stats isn't a set of filters, so it has none. */}
+          {!statsTrackSet && (
+            <button
+              className={styles.smartPlaylistButton}
+              onClick={handleSmartPlaylistClick}
+              title={`Smart Playlists (${smartPlaylists.length})`}
+            >
+              <FontAwesomeIcon icon={faBoltLightning} />
+            </button>
+          )}
         </div>
         <div className={styles.filterControlsRightGrid}>
           <div className={styles.searchBox}>
@@ -1031,20 +1096,22 @@ const TrackList: React.FC<TrackListProps> = ({
 
       {/* FILTER CONTROLS */}
       <div className={styles.filterControlsGrid}>
-        {/* Left zone - Filter toggle */}
-        <div className={styles.filterControlsLeftGrid}>
-          <button
-            className={`${styles.filterToggle} ${
-              showFilterOptions ? styles.filterToggleActive : ""
-            }`}
-            onClick={() => setShowFilterOptions(!showFilterOptions)}
-          >
-            Filters{" "}
-            {activeFilterCount > 0 && (
-              <span className={styles.filterBadge}>{activeFilterCount}</span>
-            )}
-          </button>
-        </div>
+        {/* Left zone - Filter toggle. A list from Stats already is the filter; search and sorting still apply. */}
+        {!statsTrackSet && (
+          <div className={styles.filterControlsLeftGrid}>
+            <button
+              className={`${styles.filterToggle} ${
+                showFilterOptions ? styles.filterToggleActive : ""
+              }`}
+              onClick={() => setShowFilterOptions(!showFilterOptions)}
+            >
+              Filters{" "}
+              {activeFilterCount > 0 && (
+                <span className={styles.filterBadge}>{activeFilterCount}</span>
+              )}
+            </button>
+          </div>
+        )}
 
         {/* Center zone - active formula */}
         {/* Right zone - Sort controls */}
@@ -1080,7 +1147,7 @@ const TrackList: React.FC<TrackListProps> = ({
           </button>
         </div>
       </div>
-      {showFilterOptions && (
+      {showFilterOptions && !statsTrackSet && (
         <div className={styles.filterOptions}>
           <div className={styles.filterOptionsTopRow}>
             {allRatings.size > 0 ? (
@@ -2063,6 +2130,7 @@ const TrackList: React.FC<TrackListProps> = ({
           bpmMaxFilter={bpmMaxFilter}
           camelotKeyFilters={normalizedCamelotKeyFilters}
           editingSmartPlaylistName={editingSmartPlaylist?.playlistName}
+          statsListLabel={statsTrackSet?.label}
           onClose={handleCloseCreatePlaylistModal}
           onCreatePlaylist={handleCreatePlaylist}
         />

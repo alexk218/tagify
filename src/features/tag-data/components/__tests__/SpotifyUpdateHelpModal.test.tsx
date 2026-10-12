@@ -21,7 +21,7 @@ describe("SpotifyUpdateHelpModal", () => {
   it("opens from the control bar update-protection icon", async () => {
     render(
       <DataManager
-        onExportRekordbox={vi.fn()}
+        onOpenStats={vi.fn()}
         onExportTagData={vi.fn()}
         onImportTagData={vi.fn()}
         onResetTagifyData={vi.fn()}
@@ -65,7 +65,7 @@ describe("SpotifyUpdateHelpModal", () => {
     render(<SpotifyUpdateHelpModal onClose={vi.fn()} />);
 
     expect(screen.getByRole("link", { name: "Get the Windows installer" }))
-      .toHaveAttribute("href", "https://github.com/alexk218/tagify-installer/releases/latest");
+      .toHaveAttribute("href", "https://tagify.fm/download/windows");
     expect(screen.getByText(/lets you block automatic Spotify updates/)).toHaveTextContent(/checks for Tagify and Spicetify updates/);
     expect(screen.queryByRole("button", { name: "Copy Spotify update blocking command" })).not.toBeInTheDocument();
     expect(document.querySelector("code")).toBeNull();

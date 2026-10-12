@@ -3,6 +3,7 @@ import { ExternalLink, Megaphone, X } from "lucide-react";
 import Portal from "@/components/ui/Portal";
 import { COMMUNITY_ORIGIN, openCommunityUrl } from "@/features/community/communityLinks";
 import { COMMUNITY_UPDATE_INTERVAL_MS, communityUpdateService, type CommunityUpdate } from "./communityUpdateService";
+import { isAnotherDialogOpen } from "@/utils/openDialogs";
 import styles from "./CommunityUpdates.module.css";
 
 export function CommunityUpdates({ enabled }: { enabled: boolean }) {
@@ -40,8 +41,7 @@ export function CommunityUpdates({ enabled }: { enabled: boolean }) {
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tryShowing = () => {
-      const otherDialog = document.querySelector('[role="dialog"], [aria-modal="true"], .GenericModal, .tagify-portal > *');
-      if (document.visibilityState !== "visible" || otherDialog) {
+      if (document.visibilityState !== "visible" || isAnotherDialogOpen()) {
         clearTimeout(timer);
         timer = undefined;
         return;

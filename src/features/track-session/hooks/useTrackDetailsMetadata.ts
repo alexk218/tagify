@@ -169,12 +169,14 @@ export function useTrackDetailsMetadata({
 
   useEffect(() => {
     let isCancelled = false;
+    const controller = new AbortController();
     const isTrackChanged = previousTrackUriRef.current !== displayedTrack.uri;
     previousTrackUriRef.current = displayedTrack.uri;
 
     if (!isTrackChanged) {
       return () => {
         isCancelled = true;
+      controller.abort();
       };
     }
 
@@ -197,13 +199,14 @@ export function useTrackDetailsMetadata({
         }
 
         const [metadata, audioFeatureMetadata] = await Promise.all([
-          spotifyService.getTrackMetadata(displayedTrack.uri).catch((error) => {
+          spotifyService.getTrackMetadata(displayedTrack.uri, controller.signal).catch((error) => {
             console.error("Error fetching track metadata:", error);
             return null;
           }),
           fetchAudioFeatureMetadata(displayedTrack.uri, trackData),
         ]);
 
+        if (isCancelled) return;
         let sourceContext: string | null = null;
         let nextContextUri: string | null = null;
 
@@ -228,6 +231,7 @@ export function useTrackDetailsMetadata({
           }
         }
 
+        if (isCancelled) return;
         const { bpm, camelotKey } = audioFeatureMetadata;
 
         if (hasPersistedTrackData) {
@@ -281,6 +285,7 @@ export function useTrackDetailsMetadata({
 
     return () => {
       isCancelled = true;
+      controller.abort();
     };
   }, [
     artistNames,

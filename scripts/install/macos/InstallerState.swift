@@ -19,9 +19,72 @@ struct StableVersion: Comparable {
     static func == (left: StableVersion, right: StableVersion) -> Bool { left.components == right.components }
 }
 
+// Installed versions may be betas; public update discovery remains stable-only.
+struct InstalledVersion: Comparable {
+    let stable: StableVersion
+    let prerelease: String?
+    let string: String
+
+    init?(_ raw: String) {
+        let value = raw.hasPrefix("v") ? String(raw.dropFirst()) : raw
+        let pieces = value.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)
+        let release = pieces[0].split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let stable = StableVersion(String(release[0])) else { return nil }
+        func validIdentifiers(_ text: Substring, numericRules: Bool) -> Bool {
+            text.split(separator: ".", omittingEmptySubsequences: false).allSatisfy {
+                !$0.isEmpty && $0.range(of: #"^[A-Za-z0-9-]+$"#, options: .regularExpression) != nil &&
+                (!numericRules || !$0.allSatisfy(\.isNumber) || $0.count == 1 || !$0.hasPrefix("0"))
+            }
+        }
+        guard release.count == 1 || validIdentifiers(release[1], numericRules: true),
+              pieces.count == 1 || validIdentifiers(pieces[1], numericRules: false) else { return nil }
+        self.stable = stable
+        prerelease = release.count == 2 ? String(release[1]) : nil
+        string = value
+    }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.stable == rhs.stable && lhs.prerelease == rhs.prerelease }
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        if lhs.stable != rhs.stable { return lhs.stable < rhs.stable }
+        guard let left = lhs.prerelease else { return false }
+        guard let right = rhs.prerelease else { return true }
+        let a = left.split(separator: "."), b = right.split(separator: ".")
+        for (x, y) in zip(a, b) where x != y {
+            let xn = x.allSatisfy(\.isNumber), yn = y.allSatisfy(\.isNumber)
+            if xn && yn { return x.count == y.count ? x < y : x.count < y.count }
+            if xn != yn { return xn }
+            return x < y
+        }
+        return a.count < b.count
+    }
+}
+
+enum TagifyPackage {
+    static let required = ["index.js", "extension.js", "style.css", "manifest.json", "package.json"]
+    static func version(at folder: URL) -> String? {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent("package.json")),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let version = json["version"] as? String, InstalledVersion(version) != nil else { return nil }
+        return version
+    }
+    static func nonemptyFile(_ url: URL) -> Bool {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? NSNumber else { return false }
+        return size.intValue > 0
+    }
+    static func valid(at folder: URL) -> Bool {
+        guard version(at: folder) != nil, required.allSatisfy({ nonemptyFile(folder.appendingPathComponent($0)) }),
+              let data = try? Data(contentsOf: folder.appendingPathComponent("manifest.json")),
+              (try? JSONSerialization.jsonObject(with: data)) is [String: Any] else { return false }
+        return true
+    }
+}
+
 struct InstallerPreferences: Codable {
     var tutorialCompleted = false
     var blockSpotifyUpdates: Bool?
+    var spotifyPath: String?
+    var skippedManagerVersion: String?
 
     static func location(home: URL) -> URL {
         home.appendingPathComponent("Library/Application Support/Tagify/Installer/preferences.json")
@@ -41,57 +104,63 @@ struct InstallerPreferences: Codable {
 
 struct SetupStatus {
     var spotifyFound = false
-    var signedIn = false
+    var spotifyPrepared = false
     var spotifyVersion: String?
     var spicetifyVersion: String?
     var tagifyVersion: String?
     var tagifyApplied = false
     var updatesBlocked: Bool?
+    var spicetifySource: SpicetifySource = .manager
+    var spotifyReadOnly = false
+    var updateFolderLocked: Bool?
+    var spicetifyComplete = true
 
-    var ready: Bool { spotifyFound && signedIn && spicetifyVersion != nil && tagifyApplied }
+    var ready: Bool { spotifyFound && spotifyPrepared && !spotifyReadOnly && spicetifyVersion != nil && spicetifyComplete && tagifyApplied }
 
     static func inspect(paths: InstallerPaths, command: (URL, [String], [String: String]) throws -> CommandResult = { try InstallerSystem.run($0, $1, $2, timeout: 8) }) -> SetupStatus {
         let files = FileManager.default
         let plist = NSDictionary(contentsOf: paths.spotify.appendingPathComponent("Contents/Info.plist"))
         var result = SetupStatus()
-        result.spotifyFound = plist?["CFBundleIdentifier"] as? String == "com.spotify.client" && files.fileExists(atPath: paths.resources.appendingPathComponent("Apps").path)
-        result.signedIn = files.fileExists(atPath: paths.prefs.path)
+        result.spotifyFound = InstallerDiscovery.spotifyApp(paths.spotify)
+        result.spotifyPrepared = InstallerDiscovery.spotifyPrepared(paths.prefs)
+        result.spotifyReadOnly = (try? paths.spotify.resourceValues(forKeys: [.volumeIsReadOnlyKey]).volumeIsReadOnly) == true
+        result.spicetifySource = paths.spicetifySource
+        result.spicetifyComplete = files.isExecutableFile(atPath: paths.binary.path) && TagifyPackage.nonemptyFile(paths.binary.deletingLastPathComponent().appendingPathComponent("jsHelper/spicetifyWrapper.js"))
         let prefs = (try? String(contentsOf: paths.prefs, encoding: .utf8)) ?? ""
         let launchedVersion = TagifyInstaller.iniValue(prefs, section: nil, key: "app.last-launched-version")?.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
         result.spotifyVersion = plist?["CFBundleShortVersionString"] as? String ?? launchedVersion
         if files.isExecutableFile(atPath: paths.binary.path),
            let reported = try? command(paths.binary, ["-v"], ["HOME": paths.home.path, "SPICETIFY_CONFIG": paths.config.path, "PATH": "/usr/bin:/bin"]),
-           reported.status == 0, let version = StableVersion(reported.output.trimmingCharacters(in: .whitespacesAndNewlines)) {
+           reported.status == 0, let version = InstalledVersion(reported.output.trimmingCharacters(in: .whitespacesAndNewlines)) {
             result.spicetifyVersion = version.string
         }
-        if let package = try? Data(contentsOf: paths.tagify.appendingPathComponent("package.json")),
-           let json = try? JSONSerialization.jsonObject(with: package) as? [String: Any],
-           let version = json["version"] as? String, StableVersion(version) != nil { result.tagifyVersion = version }
+        result.tagifyVersion = TagifyPackage.version(at: paths.tagify)
         let config = (try? String(contentsOf: paths.config.appendingPathComponent("config-xpui.ini"), encoding: .utf8)) ?? ""
         let enabled = TagifyInstaller.iniValue(config, section: "AdditionalOptions", key: "custom_apps")?.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }.contains("tagify") == true
         let configuredPath = TagifyInstaller.iniValue(config, section: "Setting", key: "spotify_path")
         let correctCopy = configuredPath.map { URL(fileURLWithPath: $0).standardizedFileURL == paths.resources.standardizedFileURL } ?? true
         let backupVersion = TagifyInstaller.iniValue(config, section: "Backup", key: "version")
         let currentBackup = backupVersion.flatMap { old in launchedVersion.map { old == $0 } } ?? true
-        let required = ["index.js", "extension.js", "style.css", "manifest.json", "package.json"].map { paths.tagify.appendingPathComponent($0) } + [
+        let applied = [
             paths.resources.appendingPathComponent("Apps/xpui/spicetify-routes-tagify.js"),
             paths.resources.appendingPathComponent("Apps/xpui/extensions/tagify/extension.js")
         ]
-        result.tagifyApplied = result.tagifyVersion != nil && enabled && correctCopy && currentBackup && required.allSatisfy {
-            ((try? files.attributesOfItem(atPath: $0.path)[.size] as? NSNumber)?.intValue ?? 0) > 0
+        result.tagifyApplied = TagifyPackage.valid(at: paths.tagify) && enabled && correctCopy && currentBackup && applied.allSatisfy(TagifyPackage.nonemptyFile)
+        do {
+            result.updatesBlocked = try SpotifyUpdateState.isBlocked(paths.spotifyUpdates)
+            result.updateFolderLocked = ((try SpotifyUpdateState.directoryFlags(paths.spotifyUpdates)) ?? 0) & UInt32(UF_IMMUTABLE) != 0
         }
-        do { result.updatesBlocked = try SpotifyUpdateState.isBlocked(paths.spotifyUpdates) }
         catch { result.updatesBlocked = nil }
         return result
     }
 
     func needsSpicetifyUpdate(latest: String?) -> Bool {
-        guard let installed = spicetifyVersion.flatMap(StableVersion.init), let available = latest.flatMap(StableVersion.init) else { return false }
+        guard let installed = spicetifyVersion.flatMap(InstalledVersion.init), installed.prerelease == nil, let available = latest.flatMap(InstalledVersion.init) else { return false }
         return available > installed
     }
 
     func needsTagifyUpdate(latest: String?) -> Bool {
-        guard let installed = tagifyVersion.flatMap(StableVersion.init), let available = latest.flatMap(StableVersion.init) else { return false }
+        guard let installed = tagifyVersion.flatMap(InstalledVersion.init), installed.prerelease == nil, let available = latest.flatMap(InstalledVersion.init) else { return false }
         return available > installed
     }
 }
@@ -125,10 +194,10 @@ enum InstallerUpdates {
             let names = ["TagifyInstaller-mac.dmg", "TagifyInstaller-mac.zip", "Tagify.pkg"]
             for name in names {
                 guard let asset = release.assets.first(where: { $0.name == name }),
-                      asset.browser_download_url.scheme == "https", asset.browser_download_url.host == "github.com",
+                      asset.browser_download_url.scheme == "https", asset.browser_download_url.host == "tagify.fm",
                       asset.browser_download_url.user == nil, asset.browser_download_url.password == nil,
                       asset.browser_download_url.query == nil, asset.browser_download_url.fragment == nil,
-                      asset.browser_download_url.path == "/\(repository)/releases/download/\(release.tag_name)/\(name)",
+                      asset.browser_download_url.path == "/releases/manager/\(release.tag_name)/\(name)",
                       asset.digest?.range(of: #"^sha256:[a-fA-F0-9]{64}$"#, options: .regularExpression) != nil else { continue }
                 return InstallerUpdate(version: version, notes: release.body ?? "A newer Tagify installer is available for your Mac.", asset: asset)
             }
@@ -156,12 +225,12 @@ enum InstallerUpdates {
     }
 
     static func check(installed: String) throws -> InstallerUpdate? {
-        let data = try json(URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=100")!)
+        let data = try json(URL(string: "https://tagify.fm/releases/manager/releases.json")!)
         return select(try JSONDecoder().decode([InstallerRelease].self, from: data), installed: installed)
     }
 
     static func latestTagify() throws -> String {
-        let release = try JSONDecoder().decode(Release.self, from: json(URL(string: "https://api.github.com/repos/alexk218/tagify/releases/latest")!))
+        let release = try JSONDecoder().decode(Release.self, from: json(URL(string: "https://tagify.fm/releases/client/latest.json")!))
         _ = try release.asset(repository: "alexk218/tagify", architecture: "arm64")
         return String(release.tag_name.drop(while: { $0 == "v" }))
     }
@@ -172,20 +241,4 @@ enum InstallerUpdates {
         return String(release.tag_name.drop(while: { $0 == "v" }))
     }
 
-    static func download(_ update: InstallerUpdate, downloads: URL, transfer: (URL, URL) throws -> Void = InstallerSystem.download) throws -> URL {
-        let files = FileManager.default
-        let temporary = files.temporaryDirectory.appendingPathComponent("tagify-installer-update-\(UUID().uuidString)")
-        defer { try? files.removeItem(at: temporary) }
-        try transfer(update.asset.browser_download_url, temporary)
-        try TagifyInstaller.verify(temporary, digest: update.asset.digest ?? "")
-        try files.createDirectory(at: downloads, withIntermediateDirectories: true)
-        let ext = URL(fileURLWithPath: update.asset.name).pathExtension
-        var destination = downloads.appendingPathComponent("TagifyInstaller-mac-\(update.version.string).\(ext)")
-        if files.fileExists(atPath: destination.path) {
-            if (try? TagifyInstaller.verify(destination, digest: update.asset.digest ?? "")) != nil { return destination }
-            destination = downloads.appendingPathComponent("TagifyInstaller-mac-\(update.version.string)-\(UUID().uuidString).\(ext)")
-        }
-        try files.moveItem(at: temporary, to: destination)
-        return destination
-    }
 }

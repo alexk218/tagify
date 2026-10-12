@@ -90,4 +90,16 @@ describe("cloud replica refresh", () => {
     expect(restored.taxonomy.customAccentsById["custom:warm"]).toMatchObject({ themeId: "sunset", createdAt: 11, updatedAt: 22 });
     expect(restored.taxonomy.colorThemesById.sunset).toMatchObject({ createdAt: 33, updatedAt: 44 });
   });
+
+  it.each([["tracks", "spotify:track:4uLU6hMCjMI75M1A2tKUQC"], ["playlists", PLAYLIST], ["artists", ARTIST]] as const)("aligns reviewed %s dates without changing ordinary restore date preservation", async (kind, uri) => {
+    await indexedDBStorage.init();
+    const existing: TagDataStructure = { schemaVersion: TAG_DATA_SCHEMA_VERSION, taxonomy: createEmptyTaxonomy(), tracks: {}, playlists: {},
+      artists: {}, smartPlaylists: [], [kind]: { [uri]: { rating: 4, energy: 0, tagIds: [], dateCreated: 300, dateModified: 400, name: "Artist" } } };
+    await indexedDBStorage.saveAll(existing);
+    const incoming = { ...existing, [kind]: { [uri]: { rating: 3, energy: 0, tagIds: [], dateCreated: 100, dateModified: 500 } } };
+    await indexedDBStorage.replaceCloudReplica(incoming, manifest, [], []);
+    expect((await indexedDBStorage.loadAllStrict())[kind][uri]).toMatchObject({ rating: 3, dateCreated: 300, dateModified: 400 });
+    await indexedDBStorage.replaceCloudReplica(incoming, manifest, [], [], [], { annotationDates: "canonical" });
+    expect((await indexedDBStorage.loadAllStrict())[kind][uri]).toMatchObject({ rating: 3, dateCreated: 100, dateModified: 500, name: "Artist" });
+  });
 });

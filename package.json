@@ -1,6 +1,6 @@
 {
   "name": "tagify-secret",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "private": true,
   "exports": {
     "./components/ui": "./src/components/ui/index.ts",
@@ -18,10 +18,10 @@
     "test:installer:mac": "bash scripts/install/macos/test.sh",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:core",
-    "test:watch": "vitest src/features/tag-data/utils/__tests__ src/features/smart-playlists/utils/__tests__ src/features/track-session/utils/__tests__ src/features/multi-track-tagging/utils/__tests__ src/features/filter-state/hooks/__tests__ src/features/discovery-survey/hooks/__tests__ src/features/power-user/hooks/__tests__ src/features/update-check/hooks/__tests__",
-    "test:ui": "vitest --ui src/features/tag-data/utils/__tests__ src/features/smart-playlists/utils/__tests__ src/features/track-session/utils/__tests__ src/features/multi-track-tagging/utils/__tests__ src/features/filter-state/hooks/__tests__ src/features/discovery-survey/hooks/__tests__ src/features/power-user/hooks/__tests__ src/features/update-check/hooks/__tests__",
-    "test:all": "vitest run",
-    "test:core": "vitest run src/features/tag-data/utils/__tests__ src/features/smart-playlists/utils/__tests__ src/features/track-session/utils/__tests__ src/features/multi-track-tagging/utils/__tests__ src/features/filter-state/hooks/__tests__ src/features/discovery-survey/hooks/__tests__ src/features/power-user/hooks/__tests__ src/features/update-check/hooks/__tests__"
+    "test:watch": "vitest src/features/tag-data/utils/__tests__ src/features/library-stats/model/__tests__ src/features/smart-playlists/utils/__tests__ src/features/track-session/utils/__tests__ src/features/multi-track-tagging/utils/__tests__ src/features/filter-state/hooks/__tests__ src/features/discovery-survey/hooks/__tests__ src/features/power-user/hooks/__tests__ src/features/update-check/hooks/__tests__",
+    "test:ui": "vitest --ui src/features/tag-data/utils/__tests__ src/features/library-stats/model/__tests__ src/features/smart-playlists/utils/__tests__ src/features/track-session/utils/__tests__ src/features/multi-track-tagging/utils/__tests__ src/features/filter-state/hooks/__tests__ src/features/discovery-survey/hooks/__tests__ src/features/power-user/hooks/__tests__ src/features/update-check/hooks/__tests__",
+    "test:all": "node scripts/tests/spotify-request-boundary.mjs && node --test scripts/tests/spotify-request-boundary.checks.mjs && vitest run",
+    "test:core": "vitest run src/features/tag-data/utils/__tests__ src/features/library-stats/model/__tests__ src/features/smart-playlists/utils/__tests__ src/features/track-session/utils/__tests__ src/features/multi-track-tagging/utils/__tests__ src/features/filter-state/hooks/__tests__ src/features/discovery-survey/hooks/__tests__ src/features/power-user/hooks/__tests__ src/features/update-check/hooks/__tests__"
   },
   "dependencies": {
     "@tagify/community-contracts": "file:vendor/tagify-community-contracts",

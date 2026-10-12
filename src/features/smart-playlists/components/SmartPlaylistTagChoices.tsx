@@ -7,6 +7,7 @@ import { findDisplayTagName } from "@/utils/tagTaxonomy";
 import { evaluateTagFilterFormula, flattenTagFilterFormula, flattenExcludedTagFilterFormula, formatTagFilterFormula } from "@/utils/tagFilterGroups";
 import { smartPlaylistTagChoices, type TagChoice } from "../utils/smartPlaylist.tagChoices";
 import { loadSmartPlaylistsFromStorage } from "../utils/smartPlaylist.storage";
+import { isAnotherDialogOpen } from "@/utils/openDialogs";
 import styles from "./SmartPlaylistTagChoices.module.css";
 
 export default function SmartPlaylistTagChoices({ enabled }: { enabled: boolean }) {
@@ -48,9 +49,7 @@ export default function SmartPlaylistTagChoices({ enabled }: { enabled: boolean 
   useEffect(() => {
     if (!waiting) { setUnblocked(false); return; }
     const check = () => {
-      const other = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], .GenericModal, .tagify-portal > *'))
-        .some((node) => !node.contains(dialog.current) && !dialog.current?.contains(node));
-      setUnblocked(!other && document.visibilityState === "visible");
+      setUnblocked(!isAnotherDialogOpen(dialog.current) && document.visibilityState === "visible");
     };
     const observer = new MutationObserver(check);
     observer.observe(document.body, { childList: true, subtree: true });

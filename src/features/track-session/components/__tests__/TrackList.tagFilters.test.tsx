@@ -57,6 +57,9 @@ interface TrackListHarnessProps {
   onSetSmartPlaylists?: (value: React.SetStateAction<SmartPlaylistCriteria[]>) => Promise<void>;
   onSyncPlaylist?: (criteria: SmartPlaylistCriteria) => Promise<void>;
   onTagTrack?: (uri: string) => void;
+  statsTrackSet?: { id: number; label: string; trackUris: string[]; reveal?: "list" | "track" } | null;
+  onClearStatsTrackSet?: () => void;
+  onReturnToStats?: () => void;
 }
 
 function TrackListHarness({
@@ -69,6 +72,9 @@ function TrackListHarness({
   onSetSmartPlaylists = vi.fn(),
   onSyncPlaylist = vi.fn().mockResolvedValue(undefined),
   onTagTrack = vi.fn(),
+  statsTrackSet = null,
+  onClearStatsTrackSet = vi.fn(),
+  onReturnToStats = vi.fn(),
 }: TrackListHarnessProps = {}) {
   const filters = useFilterState("tracks");
   const { createPlaylistFromFilters } = usePlaylistState();
@@ -121,11 +127,62 @@ function TrackListHarness({
       onImportSmartPlaylists={vi.fn()}
       requestedSmartPlaylistEditId={requestedSmartPlaylistEditId}
       onSmartPlaylistEditRequestHandled={onSmartPlaylistEditRequestHandled}
+      statsTrackSet={statsTrackSet}
+      onClearStatsTrackSet={onClearStatsTrackSet}
+      onReturnToStats={onReturnToStats}
     />
   );
 }
 
 describe("TrackList tag filtering", () => {
+  it("shows exactly the tracks opened from Stats, as their own list with a clear way out", async () => {
+    const user = userEvent.setup();
+    const onReturnToStats = vi.fn(), onClearStatsTrackSet = vi.fn();
+    const { rerender } = render(<TrackListHarness />);
+    await user.type(screen.getByPlaceholderText("Search tracks..."), "Chill");
+    expect(screen.queryByText("House Track")).not.toBeInTheDocument();
+
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+    rerender(<TrackListHarness statsTrackSet={{ id: 1, label: "Tagged House", trackUris: ["spotify:track:house"] }}
+      onReturnToStats={onReturnToStats} onClearStatsTrackSet={onClearStatsTrackSet} />);
+    const title = screen.getByRole("heading", { name: "Tagged House" });
+    // The list comes into view and takes focus, so it's clear where the tracks went.
+    await waitFor(() => expect(title).toHaveFocus());
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll.mock.instances[0]).toBe(title.closest("div[class*='container']"));
+    scroll.mockRestore();
+    expect(await screen.findByText("House Track")).toBeInTheDocument();
+    expect(screen.queryByText("Chill Track")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search tracks...")).toHaveValue("");
+    expect(screen.getByText("1 track")).toBeInTheDocument();
+    // The list is the filter: no filter or smart playlist controls compete with it.
+    expect(screen.queryByRole("button", { name: /^Filters/ })).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/^Smart Playlists/)).not.toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText("Search tracks..."), "Nothing");
+    expect(screen.getByText("0 of 1 tracks")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Back to Stats" }));
+    expect(onReturnToStats).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Show all tracks" }));
+    expect(onClearStatsTrackSet).toHaveBeenCalledTimes(1);
+
+    rerender(<TrackListHarness />);
+    expect(screen.getByRole("heading", { name: "Tagged Tracks" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search tracks...")).toHaveValue("");
+    expect(screen.getByRole("button", { name: /^Filters/ })).toBeInTheDocument();
+  });
+
+  it("leaves the view on the song when a song was opened from Stats", async () => {
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+    render(<TrackListHarness statsTrackSet={{ id: 2, label: "Tagged House", trackUris: ["spotify:track:house"], reveal: "track" }} />);
+    expect(await screen.findByText("House Track")).toBeInTheDocument();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(scroll).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Tagged House" })).not.toHaveFocus();
+    scroll.mockRestore();
+  });
+
   it("keeps notes on every release accessible from a single confirmed song row", async () => {
     const first = `spotify:track:${"a".repeat(22)}`, second = `spotify:track:${"b".repeat(22)}`;
     const recordingIdentity = { isrc: "USABC2400001", artistIds: ["c".repeat(22)], durationMs: 210000, name: "Shared Song" };

@@ -389,6 +389,7 @@ export function useTagData(options: UseTagDataOptions = {}) {
     lastSaved,
     loadTagData,
     refreshPersistedTagData,
+    showSavedRecords,
     applyShortcutTrackUpdate,
     applyShortcutPlaylistUpdate,
     applyShortcutArtistUpdate,

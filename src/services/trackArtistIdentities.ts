@@ -1,3 +1,4 @@
+import { spotifyBackgroundPolicy } from "./SpotifyBackgroundPolicy";
 import { getSpotifyRetryAfterMs } from "@/utils/spotifyRateLimit";
 
 export type TrackArtist = { uri: string; name: string; };
@@ -29,7 +30,7 @@ export class TrackArtistIdentitiesStore {
   private checkState = { isChecking: false, blockedUntil: 0 };
   constructor(
     // Lazy import keeps the cache usable from every Spotify metadata response.
-    private lookup = async (uri: string) => (await import("@/services/SpotifyService")).spotifyService.getTrackArtists(uri),
+    private lookup = async (uri: string, automatic = false) => (await import("@/services/SpotifyService")).spotifyService.getTrackArtists(uri, automatic ? "background" : "foreground"),
     private storage: Pick<Storage, "getItem" | "setItem"> | null = typeof localStorage === "undefined" ? null : localStorage,
   ) {
     try {
@@ -92,13 +93,13 @@ export class TrackArtistIdentitiesStore {
     // Metadata arriving in a burst should cause one library summary update.
     if (!this.notifyTimer) this.notifyTimer = setTimeout(this.publish, 250);
   }
-  request(uri: string): Promise<boolean> {
+  request(uri: string, automatic = false): Promise<boolean> {
     if (!uri.startsWith("spotify:track:")) return Promise.resolve(false);
     if (this.getSnapshot()[uri]) return Promise.resolve(true);
     const pending = this.pending.get(uri);
     if (pending) return pending;
     if (Date.now() < this.checkState.blockedUntil) return Promise.resolve(false);
-    const task = this.lookup(uri).then((artists) => {
+    const task = this.lookup(uri, automatic).then((artists) => {
       if (!validArtists(artists).length) {
         this.failed.add(uri);
         this.pauseUntil(Date.now() + FAILURE_PAUSE_MS);
@@ -136,10 +137,11 @@ export class TrackArtistIdentitiesStore {
           if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
           if (!shouldContinue() || Date.now() < this.checkState.blockedUntil) break;
           if (this.getSnapshot()[uri]) continue;
+          if (options.automatic && !spotifyBackgroundPolicy.reserve("artist-identities", uri, 50)) continue;
           this.nextRequestAt = Date.now() + REQUEST_INTERVAL_MS;
           attempts += 1;
           if (options.automatic) this.automaticRemaining -= 1;
-          if (!await this.request(uri)) break;
+          if (!await this.request(uri, options.automatic)) break;
         }
       } finally {
         this.checkState = { ...this.checkState, isChecking: false };

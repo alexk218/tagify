@@ -98,6 +98,7 @@ export type ArtistTag = string;
 export interface TrackData {
   recordingIdentity?: RecordingIdentity;
   recordingGroupId?: string;
+  recordingGroupConfirmed?: boolean;
   recordingReuseDisabled?: boolean;
   rating: number;
   energy: number;

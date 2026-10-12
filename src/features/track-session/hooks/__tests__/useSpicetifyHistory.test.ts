@@ -60,7 +60,7 @@ describe("useSpicetifyHistory", () => {
     );
 
     await waitFor(() => {
-      expect(mockSpotifyService.getBatchTracks).toHaveBeenCalledWith(trackUris);
+      expect(mockSpotifyService.getBatchTracks).toHaveBeenCalledWith(trackUris, 2, expect.any(AbortSignal));
       expect(setMultiTagTracks).toHaveBeenLastCalledWith(
         expect.arrayContaining([
           expect.objectContaining({ uri: trackUris[0], name: `Track ${trackUris[0]}` }),

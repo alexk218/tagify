@@ -68,7 +68,7 @@ describe("artist identities and request budgets", () => {
     await vi.runAllTimersAsync();
     await retry;
     expect(store.getSnapshot()["spotify:track:available"].artists).toEqual(artists);
-    expect(lookup.mock.calls[1]).toEqual(["spotify:track:available"]);
+    expect(lookup.mock.calls[1]).toEqual(["spotify:track:available", false]);
   });
   it("makes zero requests when metadata has already supplied the library's artists", async () => {
     const lookup = vi.fn();

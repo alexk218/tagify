@@ -83,6 +83,12 @@ function spotifyPlaylist(initial: string[], firstRead?: () => Promise<void>) {
     members = members.filter((member) => member !== uri);
     return true;
   });
+  vi.spyOn(spotifyApiService, "updatePlaylistTracks").mockImplementation(async (_id, additions, removals) => {
+    const added = additions.filter(uri => !members.includes(uri));
+    const removed = removals.filter(uri => members.includes(uri));
+    members = [...members.filter(uri => !removed.includes(uri)), ...added];
+    return { added, removed, success: true };
+  });
   return { members: () => members, read, add };
 }
 
@@ -105,6 +111,31 @@ const updateNotices = () => vi.mocked(Spicetify.showNotification).mock.calls
   .map(([message]) => String(message)).filter((message) => message.includes("updated"));
 
 describe("Smart Playlist sync while songs are being tagged", () => {
+  it("refuses a playlist save when its database changes while opening storage", async () => {
+    const p = playlist({ ratingFilters: [5] });
+    await seed(p, {});
+    const ready = vi.spyOn(indexedDBStorage as any, "ensureReady").mockImplementationOnce(async () => {
+      localStorage.setItem("tagify:sync:account-id", "new-account");
+      return true;
+    });
+    await expect(indexedDBStorage.saveSmartPlaylists([{ ...p, playlistName: "Old queued change" }])).rejects.toThrow("account changed");
+    ready.mockRestore();
+    localStorage.removeItem("tagify:sync:account-id");
+    expect((await savedPlaylist()).playlistName).toBe(p.playlistName);
+  });
+
+  it("checks the originating Spotify account again after storage opens", async () => {
+    const p = playlist({ ratingFilters: [5] });
+    await seed(p, {});
+    let current = true;
+    const ready = vi.spyOn(indexedDBStorage as any, "ensureReady").mockImplementationOnce(async () => { current = false; return true; });
+    await expect(indexedDBStorage.saveSmartPlaylists([{ ...p, playlistName: "Old queued change" }], () => {
+      if (!current) throw new Error("account changed");
+    })).rejects.toThrow("account changed");
+    ready.mockRestore();
+    expect((await savedPlaylist()).playlistName).toBe(p.playlistName);
+  });
+
   beforeEach(async () => {
     localStorage.clear();
     vi.stubGlobal("indexedDB", new IDBFactory());
@@ -255,7 +286,7 @@ describe("Smart Playlist sync while songs are being tagged", () => {
     finishRead.resolve();
     await Promise.all([extensionPass, pageSync]);
 
-    expect(lockRequests).toHaveBeenCalledWith(SMART_PLAYLIST_SYNC_LOCK, { mode: "exclusive", signal: expect.any(AbortSignal) }, expect.any(Function));
+    expect(lockRequests).toHaveBeenCalledWith(SMART_PLAYLIST_SYNC_LOCK, { mode: "exclusive" }, expect.any(Function));
     expect(spotify.members()).toEqual([songX]);
     expect((await savedPlaylist()).smartPlaylistTrackUris).toEqual([songX]);
     expect(await saved(songX)).toMatchObject({ rating: 5, energy: 6, tagIds: [vocal, deep], dateModified: 50 });

@@ -37,9 +37,9 @@ const detectOS = (): "windows" | "mac" | "linux" => {
 
 const getInstallCommand = (os: "windows" | "mac" | "linux"): string => {
   if (os === "windows") {
-    return 'iwr -useb "https://raw.githubusercontent.com/alexk218/tagify/main/install.ps1" | iex';
+    return 'iwr -useb "https://tagify.fm/releases/install/Install-Tagify-Full.ps1" | iex';
   }
-  return 'curl -fsSL "https://raw.githubusercontent.com/alexk218/tagify/main/install.sh" | bash';
+  return 'curl -fsSL "https://tagify.fm/releases/install/install.sh" | bash';
 };
 
 const getOSLabel = (os: "windows" | "mac" | "linux"): string => {
@@ -113,7 +113,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
     window.open(
       isMac
         ? macInstallerUrl ?? INSTALLER_RELEASES_URL
-        : `${INSTALLER_RELEASES_URL}/latest/download/TagifyInstaller.exe`,
+        : "https://tagify.fm/download/windows",
       "_blank",
       "noopener,noreferrer"
     );
@@ -394,7 +394,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
               <div className={styles.changelogHeader}>
                 <h4 className={styles.changelogTitle}>Release Notes</h4>
                 <a
-                  href={`https://github.com/alexk218/tagify/releases/tag/v${updateInfo.latestVersion}`}
+                  href={updateInfo.downloadUrl || "https://tagify.fm"}
                   target="_blank"
                   rel="noopener noreferrer"
                   className={styles.releaseLink}

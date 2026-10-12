@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  buildSpotifyColumnTemplate,
   getRowItemUri,
   getSpotifyPlayerAnchor,
   getSpotifyRowLayout,
@@ -73,6 +74,42 @@ describe("Spotify tracklist layouts", () => {
     row.innerHTML = '<div aria-colindex="invalid"></div><div aria-colindex="invalid"></div>';
     expect(getSpotifyRowLayout(row)).toBeNull();
   });
+
+  it.each([false, true])("preserves native responsive columns, numbered=%s", (numbered) => {
+    const grid = tracklist("modern");
+    const layout = getSpotifyRowLayout(getSpotifyTrackRows(grid)[0]);
+    const native = `${numbered ? "[index] 16px " : ""}[first] minmax(180px,4fr) [var1] minmax(0,2fr) [last] 120px`;
+    grid.style.setProperty("--grid-template-columns", native);
+    // jsdom does not inherit custom properties, unlike the real Spotify browser.
+    layout.container.style.setProperty("--grid-template-columns", native);
+    const template = buildSpotifyColumnTemplate(layout);
+    expect(template).toBe(native.replace("[last]", "[tagify] 150px [last]"));
+    const previousStyle = layout.container.style.cssText;
+    const restore = insertSpotifyColumn(layout, document.createElement("div"), template);
+    restore();
+    expect(layout.container.style.cssText).toBe(previousStyle);
+  });
+
+  it("keeps a directly supplied named layout rather than substituting the inherited template", () => {
+    const grid = tracklist("modern");
+    const layout = getSpotifyRowLayout(getSpotifyTrackRows(grid)[0]);
+    layout.container.style.gridTemplateColumns = "[first] 4fr [var1] 2fr [last] 80px";
+    layout.container.style.setProperty("--grid-template-columns", "[index] 16px [first] 4fr [last] 120px");
+    expect(buildSpotifyColumnTemplate(layout)).toBe("[first] 4fr [var1] 2fr [tagify] 150px [last] 80px");
+  });
+
+  it.each(["main-trackList-rowSectionStart", "hashedCell"])("gives unnumbered recommendation titles flexible space without native widths (%s)", (className) => {
+    const row = document.createElement("div");
+    row.innerHTML = `<div role="gridcell" aria-colindex="1" class="${className}"><a href="/track/song">Not A Lot Left</a></div><div role="gridcell" aria-colindex="2">Album</div><div role="gridcell" aria-colindex="3">Add</div>`;
+    expect(buildSpotifyColumnTemplate(getSpotifyRowLayout(row))).toBe("[first] minmax(0,3fr) [var1] minmax(0,2fr) [tagify] 150px [last] minmax(120px,1fr)");
+  });
+
+  it("retains track-number spacing for a numbered playlist without native widths", () => {
+    const grid = tracklist("legacy");
+    const layout = getSpotifyRowLayout(getSpotifyTrackRows(grid)[0]);
+    layout.columns[0].className = "main-trackList-rowSectionStart";
+    expect(buildSpotifyColumnTemplate(layout)).toBe("[index] 16px [first] minmax(0,3fr) [var1] minmax(0,2fr) [tagify] 150px [last] minmax(120px,1fr)");
+  });
 });
 
 describe("Spotify playbar insertion", () => {
@@ -81,13 +118,18 @@ describe("Spotify playbar insertion", () => {
     expect(getSpotifyPlayerAnchor()).toBe(document.querySelector(".main-trackInfo-container"));
   });
 
-  it.each(["/track/song", "/local/artist/album/song", "spotify:local:artist:album:song:123"])("finds the song info around a %s link without legacy classes", (href) => {
+  it.each(["/track/song", "/album/release", "spotify:album:release", "/local/artist/album/song", "spotify:local:artist:album:song:123"])("finds the song info around a %s link without legacy classes", (href) => {
     document.body.innerHTML = `<div data-testid="now-playing-widget"><div data-testid="cover-art-button"></div><div class="hashedInfo"><div><a href="${href}">Song</a></div><div>Artist</div></div><button>Like</button></div>`;
     expect(getSpotifyPlayerAnchor()).toBe(document.querySelector(".hashedInfo"));
   });
 
   it("finds a title with no track link", () => {
     document.body.innerHTML = '<div data-testid="now-playing-widget"><div></div><div class="hashedInfo"><span data-testid="context-item-info-title">Song</span></div></div>';
+    expect(getSpotifyPlayerAnchor()).toBe(document.querySelector(".hashedInfo"));
+  });
+
+  it("uses the album-linked song title rather than its cover", () => {
+    document.body.innerHTML = '<div data-testid="now-playing-widget"><a href="/album/release"><img alt="Cover"></a><div class="hashedInfo"><a href="/album/release">Song</a><a href="/artist/artist">Artist</a></div></div>';
     expect(getSpotifyPlayerAnchor()).toBe(document.querySelector(".hashedInfo"));
   });
 

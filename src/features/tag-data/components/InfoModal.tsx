@@ -52,7 +52,7 @@ interface InfoModalProps {
   initialSection?: string;
 }
 
-const LATEST_WHATS_NEW_VERSION = "3.1.0";
+const LATEST_WHATS_NEW_VERSION = "3.2.0";
 const WHATS_NEW_SEEN_VERSION_KEY = "tagify:info-modal:whats-new-seen-version";
 
 const hasSeenLatestWhatsNew = () => {
@@ -101,7 +101,7 @@ const InfoModal: React.FC<InfoModalProps> = ({
   ];
 
   const getReleaseUrl = (version: string) => {
-    return `https://github.com/alexk218/tagify/releases/tag/v${version}`;
+    return version === "3.2.0" ? "https://tagify.fm/releases/client/v3.2.0/" : `https://github.com/alexk218/tagify/releases/tag/v${version}`;
   };
 
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
@@ -232,6 +232,20 @@ const InfoModal: React.FC<InfoModalProps> = ({
 
               {activeSection === "whats-new" && (
                 <div className={styles.section}>
+                  <div className={styles.whatsNewHeader}>
+                    <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.2.0")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.2.0</a></h3>
+                  </div>
+                  <p className={styles.text}>New Stats, quicker tagging and more reliable Smart Playlists.</p>
+                  <h4 className={styles.featureTitle}>See the music behind your stats</h4>
+                  <p className={styles.text}>Explore your tagging calendar, streaks, favorite tags, ratings, artists, tempo, energy and musical keys. Open a chart’s songs to search, play or turn them into a playlist.</p>
+                  <p className={styles.text}>You can also choose to share your tagging calendar, longest streak, average rating and favorite tag pairs on your <a href="https://community.tagify.fm" target="_blank" rel="noopener noreferrer">Tagify Community profile</a>!</p>
+                  <h4 className={styles.featureTitle}>Your tags follow matching releases</h4>
+                  <p className={styles.text}>Spotify often has multiple releases of the same recording, like a single and an album release. Tagify detects matching copies and keeps your tags, ratings and energy consistent across them.</p>
+                  <p className={styles.text}>+ other minor bug fixes!</p>
+                  <p className={styles.text}>Thanks to everyone who tested and reported problems!</p>
+                  <details className={styles.releaseAccordion}>
+                    <summary className={styles.releaseSummary}><span>What's New in Tagify 3.1.0</span></summary>
+                    <div>
                   {/* TAGIFY 3.1.0 */}
                   <div className={styles.whatsNewHeader}>
                     <h3 className={styles.sectionTitle}>
@@ -263,6 +277,8 @@ const InfoModal: React.FC<InfoModalProps> = ({
                   <p className={styles.text}>
                     <a href="https://www.tagify.fm" target="_blank" rel="noopener noreferrer">download the Mac installer at tagify.fm</a>
                   </p>
+                    </div>
+                  </details>
                   <details className={styles.releaseAccordion}>
                     <summary className={styles.releaseSummary}>
                       <span>What's New in Tagify 3.0.0</span>
@@ -1466,7 +1482,7 @@ const InfoModal: React.FC<InfoModalProps> = ({
                       </p>
 
                       <a
-                        href="https://github.com/alexk218/tagify-installer/releases"
+                        href="https://tagify.fm"
                         target="_blank"
                         rel="noopener noreferrer"
                         className={styles.platformBadge}
@@ -1560,7 +1576,7 @@ const InfoModal: React.FC<InfoModalProps> = ({
                   <div className={styles.sourceCodeLink}>
                     <FontAwesomeIcon icon={faGithub} />
                     <a
-                      href="https://github.com/alexk218/tagify/blob/main/Install-Tagify-Full.ps1"
+                      href="https://tagify.fm/releases/install/Install-Tagify-Full.ps1"
                       target="_blank"
                       rel="noopener noreferrer"
                     >
@@ -1586,7 +1602,7 @@ const InfoModal: React.FC<InfoModalProps> = ({
                       />
                     </a>
                     <a
-                      href="https://github.com/alexk218/tagify-installer/releases"
+                      href="https://tagify.fm"
                       target="_blank"
                       rel="noopener noreferrer"
                       className={styles.installerDownloadLink}

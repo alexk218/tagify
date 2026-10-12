@@ -12,6 +12,7 @@ export const SYNC_STORES = {
   RECOVERY_CHECKPOINT: "sync-recovery-checkpoint",
   PRIVATE_NOTES: "private-notes",
 } as const;
+export const STATS_BASELINE_CHANGED_EVENT = "tagify:statsBaselineChanged";
 export const SYNC_OUTBOX_CHANGED_EVENT = "tagify:syncOutboxChanged";
 /** Local-file tracks have no outbox intent; this asks sync to back them up. */
 export const LOCAL_FILES_CHANGED_EVENT = "tagify:localFilesChanged";
@@ -306,12 +307,13 @@ export function syncAnnotationValues(data: SyncableEntityData | null | undefined
  * holds. Community stores normalized values, so wherever the device's own
  * value normalizes to the cloud value the device keeps its original (exact
  * rating, BPM, key spelling, tags Community cannot store). The device's dates
- * stay too, so Last Updated order does not change.
+ * stay by default. Reviewed reconciliation can adopt the saved canonical
+ * dates so stats and Last Updated agree across replicas.
  */
-export function preserveDeviceAnnotation<T extends SyncableEntityData>(incoming: T, device: T, storageKind: "track" | "playlist" | "artist"): T {
+export function preserveDeviceAnnotation<T extends SyncableEntityData>(incoming: T, device: T, storageKind: "track" | "playlist" | "artist", dates: "device" | "canonical" = "device"): T {
   const next = { ...incoming };
-  if (device.dateCreated !== undefined) next.dateCreated = device.dateCreated;
-  if (device.dateModified !== undefined) next.dateModified = device.dateModified;
+  if (device.dateCreated !== undefined && (dates === "device" || incoming.dateCreated === undefined)) next.dateCreated = device.dateCreated;
+  if (device.dateModified !== undefined && (dates === "device" || incoming.dateModified === undefined)) next.dateModified = device.dateModified;
   if (normalizeSyncRating(device.rating) === normalizeSyncRating(next.rating)) next.rating = device.rating;
   if (normalizeSyncEnergy(device.energy) === normalizeSyncEnergy(next.energy)) next.energy = device.energy;
   if (storageKind === "track") {

@@ -1,9 +1,10 @@
 import type { LocalPrivateNote } from "@/services/sync/PrivateNotes.types";
 import { isPrivateNoteUri } from "@tagify/sync-contracts";
-import { detachInconsistentRecordingGroups, expandRecordingEdits, normalizeRecordingIdentity, recordingAnnotations, recordingConflict, sameRecording } from "@/features/recording-reuse/utils/recordingReuse";
+import { detachInconsistentRecordingGroups, expandRecordingEdits, normalizeRecordingIdentity, recordingAnnotations, recordingConflict, sameRecording, similarRecording } from "@/features/recording-reuse/utils/recordingReuse";
 import type { RecordingChoices } from "@/features/recording-reuse/utils/recordingLibrary";
 import type { RecordingIdentity } from "@/types/tagData";
 import { restoreBulkTrack, type BulkUndoEntry } from "@/features/multi-track-tagging/utils/bulkUndo";
+import type { StatsBaseline } from "@/features/library-stats/model/libraryStats";
 import { applyBatchTagUpdatesToData } from "@/features/tag-data/utils/tagData.batchUpdates";
 import { defaultTagData } from "@/constants/defaultTagData";
 import type { BatchTagUpdate } from "@/types/tagData";
@@ -56,6 +57,7 @@ import {
   makeTaxonomyIntent,
   noteLocalFileChange,
   preserveDeviceAnnotation,
+  STATS_BASELINE_CHANGED_EVENT,
   SYNC_STORES,
   TAGIFY_DATABASE_VERSION,
   type LocalSyncIntent,
@@ -78,6 +80,19 @@ const STORES = {
   COMMUNITY_ROLLBACKS: "community-rollbacks",
   OUTBOX: SYNC_STORES.OUTBOX,
 } as const;
+
+interface SmartPlaylistTrackTransaction {
+  prepare: (playlists: SmartPlaylistCriteria[]) => void;
+  update: (playlists: SmartPlaylistCriteria[]) => SmartPlaylistCriteria[];
+}
+
+interface RecordingLookupCache {
+  identity?: RecordingIdentity;
+  retryAt?: number;
+  failures?: number;
+  foreground?: number[];
+  background?: number[];
+}
 
 interface CommunityRollbackRecord {
   id: string;
@@ -654,7 +669,7 @@ export class IndexedDBStorageService implements IStorageService {
     syncStateRecords: unknown[],
     appState: DurableAppStateDocumentV2[],
     localAppState: DurableAppStateDocumentV2[] = [],
-    options: { keepQueuedEdits?: boolean } = {},
+    options: { keepQueuedEdits?: boolean; annotationDates?: "device" | "canonical" } = {},
   ): Promise<boolean> {
     if (!(await this.ensureReady())) return false;
     const stores = [
@@ -678,6 +693,7 @@ export class IndexedDBStorageService implements IStorageService {
       const playlists = transaction.objectStore(STORES.PLAYLISTS).getAll();
       const artists = transaction.objectStore(STORES.ARTISTS).getAll();
       const smartPlaylists = transaction.objectStore(STORES.SMART_PLAYLISTS).getAll();
+      const statsBaseline = transaction.objectStore(STORES.METADATA).get("statsBaseline");
       const cloudTaxonomy = transaction.objectStore(SYNC_STORES.STATE).get("taxonomy-shadow");
       const queued = options.keepQueuedEdits
         ? transaction.objectStore(SYNC_STORES.OUTBOX).index("by-created-at").getAll()
@@ -716,7 +732,7 @@ export class IndexedDBStorageService implements IStorageService {
           const preserve = <T extends TrackData | PlaylistData | ArtistData>(incoming: Record<string, T>, existing: Record<string, T>, kind: "track" | "playlist" | "artist") =>
             Object.fromEntries(Object.entries({ ...localOnly(existing, kind), ...incoming }).map(([uri, value]) => {
               const before = existing[uri];
-              return [uri, before ? preserveDeviceAnnotation({ ...before, ...value }, before, kind) as T : value];
+              return [uri, before ? preserveDeviceAnnotation({ ...before, ...value }, before, kind, options.annotationDates) as T : value];
             })) as Record<string, T>;
           const next = {
             tracks: preserve(data.tracks, previous.tracks, "track"),
@@ -750,6 +766,17 @@ export class IndexedDBStorageService implements IStorageService {
           durableSmartPlaylists.forEach((value) => transaction.objectStore(STORES.SMART_PLAYLISTS).put(value));
           transaction.objectStore(STORES.METADATA).put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
           transaction.objectStore(STORES.METADATA).put({ key: META_KEYS.VERSION, value: TAG_DATA_SCHEMA_VERSION });
+          // A device's first-open Stats baseline must not override reviewed
+          // song dates. The empty baseline keeps synced tracks on their saved
+          // first-tagged dates, including when Stats first opens on a new device.
+          const previousBaseline = statsBaseline.result?.value as StatsBaseline | undefined;
+          if (options.annotationDates === "canonical" || !previousBaseline) {
+            const canonicalBaseline: StatsBaseline = {
+              takenAt: previousBaseline?.takenAt ?? 0,
+              dates: Object.fromEntries(Object.entries(previousBaseline?.dates ?? {}).filter(([uri]) => uri in localOnlyTracks)),
+            };
+            transaction.objectStore(STORES.METADATA).put({ key: "statsBaseline", value: canonicalBaseline });
+          } else transaction.objectStore(STORES.METADATA).put(statsBaseline.result);
           pendingIntents.forEach((intent) => transaction.objectStore(SYNC_STORES.OUTBOX).put(intent));
           // Items the previous cloud copy had but this one doesn't were removed
           // elsewhere; keep them marked deleted so they are never sent again.
@@ -767,7 +794,10 @@ export class IndexedDBStorageService implements IStorageService {
       };
       // Requests in one transaction finish in order; the last one sees every read.
       (queued ?? cloudTaxonomy).onsuccess = writeReplica;
-      transaction.oncomplete = () => resolve(true);
+      transaction.oncomplete = () => {
+        window.dispatchEvent(new Event(STATS_BASELINE_CHANGED_EVENT));
+        resolve(true);
+      };
       transaction.onerror = () => resolve(false);
       transaction.onabort = () => resolve(false);
     });
@@ -1240,6 +1270,91 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
+  /** Matching reads only its candidates; failures must never resemble missing songs. */
+  async getRecordingTracks(uris: string[], account = getTagifyDatabaseName()): Promise<Record<string, TrackData>> {
+    if (!(await this.ensureReady()) || this.db?.name !== account || account !== getTagifyDatabaseName()) throw new Error("Your account changed. Reopen your music.");
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(STORES.TRACKS, "readonly");
+      const result: Record<string, TrackData> = {};
+      [...new Set(uris)].forEach(uri => {
+        const request = tx.objectStore(STORES.TRACKS).get(uri);
+        request.onsuccess = () => {
+          if (request.result) { const { uri: _, ...data } = request.result; result[uri] = data; }
+        };
+      });
+      tx.oncomplete = () => resolve(result);
+      tx.onerror = tx.onabort = () => reject(new Error("Your saved songs could not be read. Please try again."));
+    });
+  }
+
+  /** Use the existing group index so a single edit never loads the whole library. */
+  async getRecordingGroupTracksStrict(groups: string[], account = getTagifyDatabaseName()): Promise<Record<string, TrackData>> {
+    const check = () => {
+      if (this.db?.name !== account || account !== getTagifyDatabaseName()) throw new Error("Your account changed. Reopen your music.");
+    };
+    if (!(await this.ensureReady())) throw new Error("Your saved songs are still loading. Please try again.");
+    check();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(STORES.TRACKS, "readonly");
+      const index = tx.objectStore(STORES.TRACKS).index("by-recording-group");
+      const result: Record<string, TrackData> = {};
+      [...new Set(groups)].forEach(group => {
+        const request = index.getAll(group);
+        request.onsuccess = () => {
+          for (const { uri, ...data } of request.result) result[uri] = data;
+        };
+      });
+      tx.oncomplete = () => { try { check(); resolve(result); } catch (error) { reject(error); } };
+      tx.onerror = tx.onabort = () => reject(new Error("Your saved songs could not be read. Please try again."));
+    });
+  }
+
+  async getRecordingLookup(uri: string, account = getTagifyDatabaseName()): Promise<RecordingLookupCache | undefined> {
+    if (!(await this.ensureReady()) || this.db?.name !== account || account !== getTagifyDatabaseName()) throw new Error("Your account changed. Reopen your music.");
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(STORES.METADATA, "readonly");
+      const request = tx.objectStore(STORES.METADATA).get(`recordingLookup:${uri}`);
+      tx.oncomplete = () => resolve(request.result?.value);
+      tx.onerror = tx.onabort = () => reject(new Error("Saved song checks could not be read. Please try again."));
+    });
+  }
+
+  /** Device-local lookup results also cover releases not yet added to Tagify. */
+  async cacheRecordingLookup(uri: string, value: RecordingLookupCache, account = getTagifyDatabaseName()) {
+    if (!(await this.ensureReady()) || this.db?.name !== account || account !== getTagifyDatabaseName()) return;
+    const tx = this.db!.transaction(STORES.METADATA, "readwrite");
+    const committed = transactionCommitted(tx, "Remembering a song check");
+    tx.objectStore(STORES.METADATA).put({ key: `recordingLookup:${uri}`, value });
+    if (!(await committed)) throw new Error("This song check could not be saved. Please try again.");
+  }
+
+  /** Stats' first-open dates for this device and account; see `StatsBaseline`. */
+  async getStatsBaseline(account = getTagifyDatabaseName()): Promise<StatsBaseline | null> {
+    if (!(await this.ensureReady()) || this.db?.name !== account || account !== getTagifyDatabaseName()) throw new Error("Your account changed. Reopen Stats.");
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(STORES.METADATA, "readonly");
+      const request = tx.objectStore(STORES.METADATA).get("statsBaseline");
+      tx.oncomplete = () => resolve(request.result?.value ?? null);
+      tx.onerror = tx.onabort = () => reject(new Error("Your stats could not be read. Please try again."));
+    });
+  }
+
+  /** Saves the baseline once; an existing one is kept and returned, so the first one always wins. */
+  async saveStatsBaseline(baseline: StatsBaseline, account = getTagifyDatabaseName()): Promise<StatsBaseline> {
+    if (!(await this.ensureReady()) || this.db?.name !== account || account !== getTagifyDatabaseName()) throw new Error("Your account changed. Reopen Stats.");
+    const tx = this.db!.transaction(STORES.METADATA, "readwrite");
+    const committed = transactionCommitted(tx, "Saving your stats");
+    const store = tx.objectStore(STORES.METADATA);
+    let saved = baseline;
+    const existing = store.get("statsBaseline");
+    existing.onsuccess = () => {
+      if (existing.result?.value) saved = existing.result.value;
+      else store.put({ key: "statsBaseline", value: baseline });
+    };
+    if (!(await committed)) throw new Error("Your stats could not be saved. Please try again.");
+    return saved;
+  }
+
   async getBulkEditHistory(): Promise<{ undo: BulkUndoEntry | null; redo: BulkUndoEntry | null }> {
     const account = getTagifyDatabaseName();
     if (!(await this.ensureReady()) || this.db?.name !== account) return { undo: null, redo: null };
@@ -1259,11 +1374,13 @@ export class IndexedDBStorageService implements IStorageService {
 
   private async mutateBulkTracks<T>(uris: string[], mutate: (
     current: Record<string, TrackData>, history: BulkUndoEntry[], taxonomy: TagTaxonomy, redo: BulkUndoEntry[],
-  ) => { changes: Record<string, TrackData | null>; history: BulkUndoEntry[]; redo?: BulkUndoEntry[]; result: T }, skipSyncUri?: string, expectedDatabaseName?: string): Promise<T> {
+  ) => { changes: Record<string, TrackData | null>; history: BulkUndoEntry[]; redo?: BulkUndoEntry[]; result: T }, skipSyncUri?: string, expectedDatabaseName?: string, smartPlaylists?: SmartPlaylistTrackTransaction): Promise<T> {
     if (!(await this.ensureReady())) throw new Error("Your tracks are still loading. Please try again.");
     if (expectedDatabaseName && this.db?.name !== expectedDatabaseName) throw new Error("Your account changed. Reopen the music before adding tags.");
     return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction([STORES.TRACKS, STORES.METADATA, STORES.OUTBOX, STORES.CATEGORIES], "readwrite");
+      const tx = this.db!.transaction([STORES.TRACKS, STORES.METADATA, STORES.OUTBOX, STORES.CATEGORIES,
+        ...(smartPlaylists ? [STORES.SMART_PLAYLISTS] : [])], "readwrite");
+      const playlistRequest = smartPlaylists ? tx.objectStore(STORES.SMART_PLAYLISTS).getAll() : undefined;
       const tracks = tx.objectStore(STORES.TRACKS);
       const metadata = tx.objectStore(STORES.METADATA);
       const taxonomyRequest = tx.objectStore(STORES.CATEGORIES).get(CATEGORY_DOCUMENT_KEYS.TAXONOMY);
@@ -1278,7 +1395,13 @@ export class IndexedDBStorageService implements IStorageService {
           // Tag checks must see the saved tags, including a library that only has
           // the older categories document; an empty taxonomy would drop tags.
           const taxonomy = taxonomyFromCategoryDocuments(taxonomyRequest.result, legacyTaxonomyRequest.result) ?? createEmptyTaxonomy();
+          const playlists = playlistRequest ? normalizeSmartPlaylistCriteriaList(playlistRequest.result) : [];
+          if (playlistRequest && playlists.length !== playlistRequest.result.length) throw new Error("Your Smart Playlists couldn't be read. Please try again.");
+          smartPlaylists?.prepare(playlists);
           const mutation = mutate(current, historyRequest.result?.value || [], taxonomy, redoRequest.result?.value || []);
+          smartPlaylists?.update(playlists).forEach((playlist, index) => {
+            if (playlist !== playlists[index]) tx.objectStore(STORES.SMART_PLAYLISTS).put(playlist);
+          });
           result = mutation.result;
           const batchId = crypto.randomUUID();
           Object.entries(mutation.changes).forEach(([uri, data]) => {
@@ -1325,6 +1448,22 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
+  /** Fill details already shown by Spotify; never create a song or change its annotations/dates. */
+  async rememberRecordingDetails(uri: string, details: { name?: string; artists?: string }, account = getTagifyDatabaseName(), isCurrent = () => true) {
+    return this.mutateBulkTracks([uri], (tracks, history) => {
+      const changes: Record<string, TrackData> = {};
+      const current = tracks[uri];
+      if (current && isCurrent()) {
+        const next = { ...current };
+        for (const key of ["name", "artists"] as const) {
+          if (!current[key]?.trim() && details[key]?.trim()) next[key] = details[key]!.trim();
+        }
+        if (next.name !== current.name || next.artists !== current.artists) changes[uri] = next;
+      }
+      return { changes, history, result: changes };
+    }, undefined, account);
+  }
+
   async rememberRecordingIdentities(identities: Record<string, RecordingIdentity>, account = getTagifyDatabaseName()) {
     return this.mutateBulkTracks(Object.keys(identities), (tracks, history) => {
       const changes: Record<string, TrackData> = {};
@@ -1336,23 +1475,24 @@ export class IndexedDBStorageService implements IStorageService {
     }, undefined, account);
   }
 
-  async linkRecordings(proposals: Record<string, { identity: RecordingIdentity; annotations: string; details?: Partial<TrackData> }>, sourceUri: string, replace: boolean, options?: { automatic?: boolean; expectedDatabaseName?: string; isCurrent?: () => boolean; choices?: RecordingChoices }) {
+  async linkRecordings(proposals: Record<string, { identity: RecordingIdentity; annotations: string; details?: Partial<TrackData> }>, sourceUri: string, replace: boolean, options?: { automatic?: boolean; confirmSimilar?: boolean; expectedDatabaseName?: string; isCurrent?: () => boolean; choices?: RecordingChoices }) {
     return this.mutateBulkTracks(Object.keys(proposals), (tracks, history, taxonomy) => {
       if (options?.isCurrent && !options.isCurrent()) throw new Error("Your library changed. Review these songs again.");
       const source = tracks[sourceUri];
       if (!source || !proposals[sourceUri]) throw new Error("Choose a saved release to reuse its tagging.");
       const identities = Object.values(proposals).map(proposal => proposal.identity);
-      if (identities.length < 2 || !identities.every(identity => identities.every(other => sameRecording(identity, other)))) throw new Error("These releases couldn't be confirmed as the same recording.");
-      if (Object.keys(tracks).some(uri => !proposals[uri])) throw new Error("Linked releases have changed. Check the recording again before linking.");
+      const confirmed = options?.confirmSimilar === true && !options.automatic;
+      if (identities.length < 2 || !identities.every(identity => normalizeRecordingIdentity(identity) && identities.every(other => confirmed ? similarRecording(identity, other) : sameRecording(identity, other)))) throw new Error("These releases couldn't be confirmed as the same recording.");
+      if (Object.keys(tracks).some(uri => !proposals[uri])) throw Object.assign(new Error("Linked releases have changed. Check the recording again before linking."), { code: "tagify-recording-changed" });
       Object.entries(proposals).forEach(([uri, proposal]) => {
-        if (recordingAnnotations(tracks[uri]) !== proposal.annotations || tracks[uri]?.recordingReuseDisabled) throw new Error("Tagging changed since you checked. Check the recording again before linking.");
+        if (recordingAnnotations(tracks[uri]) !== proposal.annotations || tracks[uri]?.recordingReuseDisabled) throw Object.assign(new Error("Tagging changed since you checked. Check the recording again before linking."), { code: "tagify-recording-changed" });
       });
       const members = Object.values(tracks);
       if (!replace && !options?.choices && members.some(a => members.some(b => recordingConflict(a, b)))) throw new Error("These releases have different tagging. Choose which tagging to keep before linking.");
       const annotation = options?.choices || (replace ? source : {
         rating: members.find(track => track.rating > 0)?.rating || 0,
         energy: members.find(track => track.energy > 0)?.energy || 0,
-        tagIds: members.find(track => track.tagIds.length)?.tagIds || [],
+        tagIds: [...new Set(members.flatMap(track => track.tagIds))],
       });
       if (!Number.isFinite(annotation.rating) || annotation.rating < 0 || annotation.rating > 5 || !Number.isFinite(annotation.energy) || annotation.energy < 0 || annotation.energy > 10) throw new Error("Choose a valid rating and energy before saving.");
       const validTags = buildValidTagIdSet(taxonomy);
@@ -1363,9 +1503,8 @@ export class IndexedDBStorageService implements IStorageService {
       Object.entries(proposals).forEach(([uri, proposal]) => {
         const before = tracks[uri];
         const after: TrackData = { ...{ rating: 0, energy: 0, bpm: null, tagIds: [] }, ...proposal.details, ...before,
-          rating: annotation.rating, energy: annotation.energy, tagIds: [...new Set(annotation.tagIds)], recordingIdentity: proposal.identity, recordingGroupId: groupId };
+          rating: annotation.rating, energy: annotation.energy, tagIds: [...new Set(annotation.tagIds)], recordingIdentity: proposal.identity, recordingGroupId: groupId, recordingGroupConfirmed: confirmed || undefined };
         if (!before) { after.dateCreated = now; after.dateModified = now; }
-        if (!options?.automatic && recordingAnnotations(before) !== recordingAnnotations(after)) after.dateModified = now;
         changes[uri] = after;
       });
       return { changes, history, result: changes };
@@ -1375,7 +1514,7 @@ export class IndexedDBStorageService implements IStorageService {
   async unlinkRecording(uri: string, disabled = true, account = getTagifyDatabaseName()) {
     return this.mutateBulkTracks([uri], (tracks, history) => {
       const before = tracks[uri] || { rating: 0, energy: 0, bpm: null, tagIds: [] };
-      const { recordingGroupId: _, ...data } = before;
+      const { recordingGroupId: _, recordingGroupConfirmed: _confirmed, ...data } = before;
       const changes = { [uri]: { ...data, recordingReuseDisabled: disabled } };
       return { changes, history, result: changes };
     }, undefined, account);
@@ -1471,7 +1610,10 @@ export class IndexedDBStorageService implements IStorageService {
         // Apply only this edit's delta so background matching and edits saved
         // in the meantime (including other tags) are preserved.
         if (options?.previous) Object.entries(requested).forEach(([uri, next]) => {
-          if (next) requested[uri] = rebaseRecord(options.previous![uri], next, tracks[uri], options);
+          // A backfill started before an import/deletion must not restore a
+          // removed song after its metadata response arrives.
+          if (options.keepConcurrentChanges && options.previous![uri] && !tracks[uri]) delete requested[uri];
+          else if (next) requested[uri] = rebaseRecord(options.previous![uri], next, tracks[uri], options);
         });
         const entries = expandRecordingEdits(tracks, requested);
         const entry: BulkUndoEntry = { id: crypto.randomUUID(), createdAt: Date.now(), changes: Object.fromEntries(
@@ -1496,7 +1638,7 @@ export class IndexedDBStorageService implements IStorageService {
    */
   async patchTracks(
     changes: Record<string, (current: TrackData | null) => TrackData | null | undefined>,
-    options?: { expectedDatabaseName?: string; undoable?: boolean },
+    options?: { expectedDatabaseName?: string; undoable?: boolean; smartPlaylists?: SmartPlaylistTrackTransaction },
   ): Promise<Record<string, TrackData | null>> {
     const uris = Object.keys(changes);
     if (!uris.length) return {};
@@ -1512,7 +1654,7 @@ export class IndexedDBStorageService implements IStorageService {
         Object.entries(expanded).map(([uri, after]) => [uri, { before: tracks[uri] || null, after }]),
       ) };
       return { changes: expanded, history: [...history, entry], result: expanded };
-    }, undefined, options?.expectedDatabaseName);
+    }, undefined, options?.expectedDatabaseName, options?.smartPlaylists);
   }
 
   async restoreTrackEdit(entry: BulkUndoEntry, direction: "undo" | "redo", account: string, isCurrent: () => boolean) {
@@ -1834,6 +1976,44 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
+  /** Read the current rules and only the candidate songs; undefined requests a full reconciliation snapshot. */
+  async getSmartPlaylistSyncState(uris?: string[], account = getTagifyDatabaseName()): Promise<{
+    tracks: Record<string, TrackData>; playlists: SmartPlaylistCriteria[];
+  }> {
+    const check = () => {
+      if (this.db?.name !== account || getTagifyDatabaseName() !== account) throw new Error("Your account changed. Reopen your Smart Playlists.");
+    };
+    if (!(await this.ensureReady())) throw new Error("Your saved songs couldn't be read. Please try again.");
+    check();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction([STORES.TRACKS, STORES.SMART_PLAYLISTS], "readonly");
+      const playlists = tx.objectStore(STORES.SMART_PLAYLISTS).getAll();
+      const store = tx.objectStore(STORES.TRACKS);
+      const tracks: Record<string, TrackData> = {};
+      const accept = (record: (TrackData & { uri: string }) | undefined) => {
+        if (record) { const { uri, ...data } = record; tracks[uri] = data; }
+      };
+      if (uris) {
+        for (const uri of new Set(uris)) {
+          const request = store.get(uri);
+          request.onsuccess = () => accept(request.result);
+        }
+      } else {
+        const request = store.getAll();
+        request.onsuccess = () => request.result.forEach(accept);
+      }
+      tx.oncomplete = () => {
+        try {
+          check();
+          const normalized = normalizeSmartPlaylistCriteriaList(playlists.result);
+          if (normalized.length !== playlists.result.length) throw new Error("Your Smart Playlists couldn't be read. Please try again.");
+          resolve({ tracks, playlists: normalized });
+        } catch (error) { reject(error); }
+      };
+      tx.onerror = tx.onabort = () => reject(new Error("Your saved songs couldn't be read. Please try again."));
+    });
+  }
+
   async getAllSmartPlaylists(): Promise<SmartPlaylistCriteria[]> {
     if (!(await this.ensureReady())) {
       throw new Error("IndexedDB: Smart Playlists could not be opened");
@@ -1902,35 +2082,41 @@ export class IndexedDBStorageService implements IStorageService {
   }
 
   async saveSmartPlaylists(
-    playlists: SmartPlaylistCriteria[],
+    playlists: SmartPlaylistCriteria[] | ((current: SmartPlaylistCriteria[]) => SmartPlaylistCriteria[]),
+    assertCurrent?: () => void,
+    preserveMembership = false,
   ): Promise<boolean> {
+    const account = getTagifyDatabaseName();
+    assertCurrent?.();
     if (!(await this.ensureReady())) return false;
-    const normalized = normalizeSmartPlaylistCriteriaList(playlists);
-    if (normalized.length !== playlists.length ||
-        new Set(normalized.map((playlist) => playlist.id)).size !== normalized.length) {
-      console.error("IndexedDB: Refusing to replace Smart Playlists with invalid or duplicate rules");
-      return false;
-    }
-
-    return new Promise((resolve) => {
-      try {
-        const transaction = this.db!.transaction(
-          [STORES.SMART_PLAYLISTS, STORES.METADATA],
-          "readwrite",
-        );
-        const store = transaction.objectStore(STORES.SMART_PLAYLISTS);
-        store.clear();
-        normalized.forEach((playlist) => store.put(playlist));
-        transaction
-          .objectStore(STORES.METADATA)
-          .put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
-        transaction.oncomplete = () => resolve(true);
-        transaction.onerror = () => resolve(false);
-        transaction.onabort = () => resolve(false);
-      } catch (error) {
-        console.error("IndexedDB: Failed to save smart playlists", error);
-        resolve(false);
-      }
+    const check = () => {
+      assertCurrent?.();
+      if (this.db?.name !== account || getTagifyDatabaseName() !== account) throw new Error("Your account changed. Reopen your Smart Playlists.");
+    };
+    check();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORES.SMART_PLAYLISTS, STORES.METADATA], "readwrite");
+      const store = transaction.objectStore(STORES.SMART_PLAYLISTS);
+      const request = store.getAll();
+      request.onsuccess = () => {
+        try {
+          check();
+          const current = normalizeSmartPlaylistCriteriaList(request.result);
+          if (current.length !== request.result.length) throw new Error("Your Smart Playlists couldn't be read. Please try again.");
+          const next = typeof playlists === "function" ? playlists(current) : playlists;
+          if (next === current) return;
+          const normalized = normalizeSmartPlaylistCriteriaList(next);
+          if (normalized.length !== next.length || new Set(normalized.map(playlist => playlist.id)).size !== normalized.length) {
+            transaction.abort(); return;
+          }
+          const saved = preserveMembership ? preserveSmartPlaylistMembership(normalized, current, { pendingChoices: "current" }) : normalized;
+          store.clear();
+          saved.forEach(playlist => store.put(playlist));
+          transaction.objectStore(STORES.METADATA).put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
+        } catch (error) { reject(error); transaction.abort(); }
+      };
+      transaction.oncomplete = () => resolve(true);
+      transaction.onerror = transaction.onabort = () => resolve(false);
     });
   }
 

@@ -8,6 +8,7 @@ import type {
 } from "./index";
 
 export type InitialMergeSource = "device" | "community";
+export const INITIAL_MERGE_REVIEW_VERSION = 2 as const;
 
 export type InitialMergeConflictKind =
   | "annotation-field"
@@ -55,6 +56,11 @@ export interface InitialMergeRequestV1 {
   expectedCommunityChecksum: string | null;
   deviceSnapshot: LibrarySnapshotV2;
   resolutions: Record<string, InitialMergeSource>;
+}
+
+/** V2 reviews include cleared fields and absent tag memberships as choices. */
+export interface InitialMergeRequestV2 extends Omit<InitialMergeRequestV1, "version"> {
+  version: typeof INITIAL_MERGE_REVIEW_VERSION;
 }
 
 export interface InitialMergeResultV1 {
@@ -201,8 +207,6 @@ function mergeAnnotations(
       const cloudField = cloud.fields[field];
       if (equal(localField.value, cloudField.value)) continue;
       changed = true;
-      if (localField.value === null) continue;
-      if (cloudField.value === null) { Object.assign(merged.fields, { [field]: clone(localField) }); continue; }
       const id = `annotation:${key}:field:${field}`;
       state.conflicts.push({ id, kind: "annotation-field", subjectId: key, field, deviceValue: localField.value, communityValue: cloudField.value });
       if (resolutions[id] === "device") Object.assign(merged.fields, { [field]: clone(localField) });
@@ -210,10 +214,10 @@ function mergeAnnotations(
     const tagIds = [...new Set([...Object.keys(cloud.tagMemberships), ...Object.keys(local.tagMemberships)])].sort();
     merged.tagMemberships = {};
     for (const tagId of tagIds) {
-      const localMembership = local.tagMemberships[tagId];
-      const cloudMembership = cloud.tagMemberships[tagId];
-      if (!cloudMembership) { merged.tagMemberships[tagId] = clone(localMembership); changed = true; continue; }
-      if (!localMembership) { merged.tagMemberships[tagId] = clone(cloudMembership); continue; }
+      // Both copies contain this item. Absence is a choice to keep it untagged,
+      // not permission to restore the other copy's tag without review.
+      const localMembership = local.tagMemberships[tagId] ?? { value: false, revision: 0 };
+      const cloudMembership = cloud.tagMemberships[tagId] ?? { value: false, revision: 0 };
       if (localMembership.value === cloudMembership.value) { merged.tagMemberships[tagId] = clone(cloudMembership); continue; }
       changed = true;
       const id = `annotation:${key}:tag:${tagId}`;

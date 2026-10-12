@@ -74,10 +74,55 @@ func configureInstallerPanel(_ panel: NSPanel) {
     panel.contentView?.layer?.backgroundColor = panel.backgroundColor.cgColor
 }
 
-func installerLabel(_ text: String, size: CGFloat = 13, weight: NSFont.Weight = .regular, color: NSColor = .labelColor) -> NSTextField {
-    let view = NSTextField(wrappingLabelWithString: text)
+final class InstallerLabel: NSTextField {
+    // Draw linked text normally, but open links directly instead of entering a field editor.
+    func linkRegions() -> [(NSRect, URL)] {
+        let text = attributedStringValue
+        let storage = NSTextStorage(attributedString: text)
+        let layout = NSLayoutManager()
+        let drawingRect = cell?.drawingRect(forBounds: bounds) ?? bounds
+        let container = NSTextContainer(size: NSSize(width: drawingRect.width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        storage.addLayoutManager(layout)
+        layout.addTextContainer(container)
+        layout.ensureLayout(for: container)
+        var regions: [(NSRect, URL)] = []
+        text.enumerateAttribute(.link, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+            guard let url = value as? URL else { return }
+            let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            layout.enumerateLineFragments(forGlyphRange: glyphs) { _, _, _, lineGlyphs, _ in
+                let part = NSIntersectionRange(glyphs, lineGlyphs)
+                guard part.length > 0 else { return }
+                let rect = layout.boundingRect(forGlyphRange: part, in: container)
+                let y = self.isFlipped ? drawingRect.minY + rect.minY : drawingRect.maxY - rect.maxY
+                regions.append((NSRect(x: drawingRect.minX + rect.minX, y: y, width: rect.width, height: rect.height), url))
+            }
+        }
+        return regions
+    }
+
+    func link(at point: NSPoint) -> URL? { linkRegions().first { $0.0.contains(point) }?.1 }
+    override var acceptsFirstResponder: Bool { !linkRegions().isEmpty }
+    override func mouseDown(with event: NSEvent) {
+        if let url = link(at: convert(event.locationInWindow, from: nil)) { NSWorkspace.shared.open(url) }
+    }
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        for (rect, _) in linkRegions() { addCursorRect(rect, cursor: .pointingHand) }
+    }
+    override func keyDown(with event: NSEvent) {
+        if event.characters == "\r" || event.characters == " " {
+            if let url = linkRegions().first?.1 { NSWorkspace.shared.open(url) }
+        } else { super.keyDown(with: event) }
+    }
+}
+
+func installerLabel(_ text: String, size: CGFloat = 13, weight: NSFont.Weight = .regular, color: NSColor = .labelColor) -> InstallerLabel {
+    let view = InstallerLabel(wrappingLabelWithString: text)
     view.font = .systemFont(ofSize: size, weight: weight)
     view.textColor = color
+    view.isSelectable = false
+    view.isEditable = false
     return view
 }
 
@@ -128,15 +173,15 @@ final class TutorialController: NSObject {
     private let completion: () -> Void
     private let dismissed: () -> Void
     private let pages = [
-        ("Your music, organized.", "Tagify adds tags, ratings, and filters to your music inside Spotify. Use this installer to get started or bring Tagify back after a Spotify update."),
-        ("A few minutes to get started.", "Download the Mac desktop app from spotify.com/download/mac. Tagify works inside the desktop app, so the web player and mobile apps won't work for setup. Open Spotify and sign in first, then choose Install Tagify.\n\nSpotify briefly closes during setup. Your saved tags, ratings, themes, and other apps stay in place. Block Spotify updates is on by default; you can change it here any time."),
-        ("Find Tagify in Spotify.", "When setup finishes, choose Open Spotify, then choose Tagify in Spotify.\n\nIf Tagify disappears, return to this installer and choose Tagify missing? Repair. Reopen this guide any time with Tutorial.")
+        ("What does this installer do?", "Spicetify lets you customize Spotify and run apps like Tagify.\n\nThis installer sets up both Spicetify and Tagify, checks for updates, and keeps things stable."),
+        ("A few minutes to get started.", "Download the Mac desktop app from spotify.com/download/mac. Tagify works inside the desktop app, so the web player and mobile apps won't work for setup. Open Spotify and sign in first, then choose Install Tagify.\n\nSpotify briefly closes during setup. Your saved tags, ratings, themes, and other apps stay in place."),
+        ("Keep this app somewhere safe", "You’ll need it to keep Tagify up and running. When setup finishes, choose Open Spotify, then choose Tagify in Spotify.\n\nSpotify updates can remove Spicetify and Tagify, so Block Spotify updates is on by default. You can turn it off anytime.\n\nIf Tagify disappears, reopen this installer and choose Repair Tagify to restore it. Reopen this guide any time with Tutorial.")
     ]
 
     init(parent: NSWindow, completion: @escaping () -> Void, dismissed: @escaping () -> Void) {
         self.completion = completion
         self.dismissed = dismissed
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 540, height: 420), styleMask: [.titled], backing: .buffered, defer: false)
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 540, height: 480), styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
         configureInstallerPanel(panel)
         panel.title = "Tagify tutorial"
@@ -144,7 +189,7 @@ final class TutorialController: NSObject {
         back.target = self; back.action = #selector(previous)
         close.target = self; close.action = #selector(dismiss)
         body.allowsEditingTextAttributes = true
-        body.isSelectable = true
+        body.isSelectable = false
         next.keyEquivalent = "\r"
         close.keyEquivalent = "\u{1b}"
         let controls = installerStack([close, NSView(), back, next], vertical: false)
@@ -170,15 +215,22 @@ final class TutorialController: NSObject {
             .font: body.font ?? NSFont.systemFont(ofSize: 15),
             .foregroundColor: body.textColor ?? NSColor.labelColor
         ])
-        if page == 1 {
-            let range = (text as NSString).range(of: "spotify.com/download/mac")
+        if page == 0 || page == 1 {
+            let linkText = page == 0 ? "Spicetify" : "spotify.com/download/mac"
+            let linkURL = page == 0 ? "https://spicetify.app/" : "https://www.spotify.com/download/mac/"
+            let range = (text as NSString).range(of: linkText)
             attributed.addAttributes([
-                .link: URL(string: "https://www.spotify.com/download/mac/")!,
+                .link: URL(string: linkURL)!,
                 .foregroundColor: NSColor.linkColor,
                 .underlineStyle: NSUnderlineStyle.single.rawValue
             ], range: range)
         }
         body.attributedStringValue = attributed
+        let url = page == 0 ? URL(string: "https://spicetify.app/") : (page == 1 ? URL(string: "https://www.spotify.com/download/mac/") : nil)
+        body.setAccessibilityCustomActions(url.map { link in
+            [NSAccessibilityCustomAction(name: page == 0 ? "Open Spicetify homepage" : "Open Spotify download page", handler: { NSWorkspace.shared.open(link) })]
+        })
+        panel.invalidateCursorRects(for: body)
         pageLabel.stringValue = "\(page + 1) of \(pages.count)"
         back.isEnabled = page > 0
         next.title = page == pages.count - 1 ? "Got it" : "Next"

@@ -1,6 +1,7 @@
+import { albumTrackListsStore } from "../services/albumTrackLists";
 import type { PlaylistTrackInsights } from "@/features/track-insights";
 import { useAlbumMembership, useAlbumTrackListLookups } from "../hooks/useAlbumTracks";
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactStars from "react-rating-stars-component";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faStar, faStarHalf } from "@fortawesome/free-solid-svg-icons";
@@ -480,20 +481,34 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
       sortOrder,
     ],
   );
+  const listRef = useRef<HTMLUListElement>(null);
+  const [visibleUris, setVisibleUris] = useState<string[]>([]);
+  const displayedUrisKey = JSON.stringify(sortedPlaylists.map(([uri]) => uri));
+  useEffect(() => {
+    const rows = listRef.current?.querySelectorAll<HTMLElement>("[data-entity-uri]");
+    if (!rows) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setVisibleUris(JSON.parse(displayedUrisKey).slice(0, 20));
+      return;
+    }
+    const visible = new Set<string>();
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        const uri = (entry.target as HTMLElement).dataset.entityUri!;
+        if (entry.isIntersecting) visible.add(uri); else visible.delete(uri);
+      }
+      setVisibleUris([...visible]);
+    }, { rootMargin: "200px" });
+    rows.forEach(row => observer.observe(row));
+    return () => observer.disconnect();
+  }, [displayedUrisKey]);
   const albumUrisToLoad = useMemo(() => isAlbumList
-    ? [...new Set([...(activePlaylistUri ? [activePlaylistUri] : []), ...sortedPlaylists.map(([uri]) => uri), ...allPlaylistEntries.map(([uri]) => uri)])]
-    : [], [activePlaylistUri, sortedPlaylists, allPlaylistEntries, isAlbumList]);
+    ? [...new Set([...(activePlaylistUri ? [activePlaylistUri] : []), ...visibleUris])]
+    : [], [activePlaylistUri, visibleUris, isAlbumList]);
   useAlbumTrackListLookups(albumUrisToLoad);
-  // Ask for missing album lengths in the order the albums are shown.
-  const albumUrisToLookUp = useMemo(
-    () =>
-      isAlbumList
-        ? sortedPlaylists
-            .filter(([uri, playlist]) => !isTrackTotal(playlist.trackCount) && !membership[uri])
-            .map(([albumUri]) => albumUri)
-        : [],
-    [isAlbumList, sortedPlaylists, membership],
-  );
+  // A full tracklist also supplies its total; only failed lists need a separate lookup.
+  const albumUrisToLookUp = useMemo(() => albumUrisToLoad.filter(uri =>
+    !membership[uri] && !isTrackTotal(playlists[uri]?.trackCount) && albumTrackListsStore.getSnapshot()[uri]?.status === "failed"), [albumUrisToLoad, membership]);
   useAlbumTrackTotalLookups(albumUrisToLookUp);
 
   const activeTagFilterCount = activeTagFilters.length + excludedTagFilters.length;
@@ -814,7 +829,7 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
           ) : null}
         </p>
       ) : (
-        <ul className={styles.list}>
+        <ul ref={listRef} className={styles.list}>
           {sortedPlaylists.map(([playlistUri, playlist]) => {
             const ownTags = playlist.tagIds
               .map((tagId) => resolvedLookup.get(tagId))
@@ -903,6 +918,7 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
             return (
               <EntityListRow
                 key={playlistUri}
+                entityUri={playlistUri}
                 kind={isAlbumList ? "album" : "playlist"}
                 entityLabel={entityLabel}
                 name={playlist.name || `Unknown ${entityLabel}`}

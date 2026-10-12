@@ -1,4 +1,5 @@
-import { Dispatch, MutableRefObject, SetStateAction, useCallback } from "react";
+import { getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
+import { Dispatch, MutableRefObject, SetStateAction, useCallback, useRef } from "react";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { PlaylistData, TagDataStructure, TagTaxonomy } from "@/types/tagData";
 import { buildValidTagIdSet } from "@/utils/tagTaxonomy";
@@ -59,8 +60,8 @@ export function useTagDataPlaylistActions({
   );
 
   const getPlaylistMetadata = useCallback(
-    async (playlistUriOrId: string): Promise<PlaylistMetadata | null> => {
-      const metadata = await spotifyApiService.getPlaylistMetadata(playlistUriOrId);
+    async (playlistUriOrId: string, background = false): Promise<PlaylistMetadata | null> => {
+      const metadata = await spotifyApiService.getPlaylistMetadata(playlistUriOrId, { priority: background ? "background" : "foreground" });
       if (!metadata) {
         return null;
       }
@@ -77,43 +78,40 @@ export function useTagDataPlaylistActions({
     [],
   );
 
-  // Looking up details can take a moment; the library is read again after
-  // the lookup so edits made meanwhile are kept, and a playlist created by an
-  // overlapping edit is not created twice.
+  const pendingMetadata = useRef(new Map<string, object>());
+  const hydrateMetadata = useCallback((uri: string, recreated = false) => {
+    const account = getTagifyDatabaseName();
+    const key = `${account}:${uri}`;
+    if (pendingMetadata.current.has(key) && !recreated) return;
+    const original = latestTagDataRef.current.playlists[uri];
+    const token = {};
+    pendingMetadata.current.set(key, token);
+    void getPlaylistMetadata(uri, true).then(metadata => {
+      if (!metadata || account !== getTagifyDatabaseName() || pendingMetadata.current.get(key) !== token) return;
+      const data = latestTagDataRef.current, current = data.playlists[uri];
+      // Never recreate a removed entity or overwrite details edited meanwhile.
+      if (!current || current.dateCreated !== original?.dateCreated || !(needsPlaylistMetadataHydration(uri, current))) return;
+      commitDataSnapshot({ ...data, playlists: { ...data.playlists, [uri]: withPlaylistMetadata(current, metadata, current.dateModified ?? 0) } });
+    }).catch(() => { /* Optional details can be recovered by the bounded backfill. */ })
+      .finally(() => { if (pendingMetadata.current.get(key) === token) pendingMetadata.current.delete(key); });
+  }, [commitDataSnapshot, getPlaylistMetadata, latestTagDataRef]);
+
+  // Save locally first. A Spotify pause must not delay or reject an annotation.
   const getOrCreatePlaylistData = useCallback(
-    async (
-      playlistUriOrId: string,
-      providedMetadata?: PlaylistMetadata,
-    ): Promise<{ playlistUri: string; currentData: TagDataStructure }> => {
+    (playlistUriOrId: string, providedMetadata?: PlaylistMetadata) => {
       const playlistUri = normalizePlaylistUri(playlistUriOrId);
-      const existingPlaylist = latestTagDataRef.current.playlists[playlistUri];
-      const needsMetadata = !existingPlaylist || needsPlaylistMetadataHydration(playlistUri, existingPlaylist);
-      const metadata = needsMetadata ? providedMetadata || (await getPlaylistMetadata(playlistUri)) : null;
-      const now = Date.now();
       const currentData = latestTagDataRef.current;
       const latest = currentData.playlists[playlistUri];
-
-      if (!latest) {
-        const nextData: TagDataStructure = {
-          ...currentData,
-          playlists: { ...currentData.playlists, [playlistUri]: createInitialPlaylistData(now, metadata ?? undefined) },
-        };
-        commitDataSnapshot(nextData);
-        return { playlistUri, currentData: nextData };
+      if (!latest || providedMetadata) {
+        const now = Date.now();
+        commitDataSnapshot({ ...currentData, playlists: { ...currentData.playlists,
+          [playlistUri]: latest ? withPlaylistMetadata(latest, providedMetadata!, now) : createInitialPlaylistData(now, providedMetadata),
+        } });
       }
-
-      if (metadata && needsPlaylistMetadataHydration(playlistUri, latest)) {
-        const nextData: TagDataStructure = {
-          ...currentData,
-          playlists: { ...currentData.playlists, [playlistUri]: withPlaylistMetadata(latest, metadata, now) },
-        };
-        commitDataSnapshot(nextData);
-        return { playlistUri, currentData: nextData };
-      }
-
-      return { playlistUri, currentData };
+      if (!providedMetadata && (!latest || !latest.name)) hydrateMetadata(playlistUri, !latest);
+      return { playlistUri, currentData: latestTagDataRef.current };
     },
-    [commitDataSnapshot, getPlaylistMetadata, latestTagDataRef],
+    [commitDataSnapshot, hydrateMetadata, latestTagDataRef],
   );
 
   // Suggestions use already displayed metadata and only add; repeated clicks are harmless.
@@ -142,7 +140,7 @@ export function useTagDataPlaylistActions({
       tagId: string,
       metadata?: PlaylistMetadata,
     ) => {
-      const { playlistUri } = await getOrCreatePlaylistData(
+      const { playlistUri } = getOrCreatePlaylistData(
         playlistUriOrId,
         metadata,
       );
@@ -198,7 +196,7 @@ export function useTagDataPlaylistActions({
       rating: number,
       metadata?: PlaylistMetadata,
     ) => {
-      const { playlistUri } = await getOrCreatePlaylistData(
+      const { playlistUri } = getOrCreatePlaylistData(
         playlistUriOrId,
         metadata,
       );
@@ -227,7 +225,7 @@ export function useTagDataPlaylistActions({
       energy: number,
       metadata?: PlaylistMetadata,
     ) => {
-      const { playlistUri } = await getOrCreatePlaylistData(
+      const { playlistUri } = getOrCreatePlaylistData(
         playlistUriOrId,
         metadata,
       );

@@ -5,5 +5,5 @@ CONSOLE_USER=$(/usr/bin/stat -f '%Su' /dev/console)
 if [ "$CONSOLE_USER" = "root" ] || [ "$CONSOLE_USER" = "loginwindow" ] || [ -z "$CONSOLE_USER" ]; then exit 0; fi
 CONSOLE_UID=$(/usr/bin/id -u "$CONSOLE_USER")
 /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -H -u "$CONSOLE_USER" \
-    /usr/bin/open "/Applications/Tagify Installer.app" || true
+    /usr/bin/open "/Applications/Tagify Manager.app" || true
 exit 0

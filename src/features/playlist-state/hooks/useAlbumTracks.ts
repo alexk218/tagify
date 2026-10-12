@@ -16,7 +16,7 @@ export function useAlbumTrackListLookups(uris: string[]): void {
     void (async () => {
       for (const uri of uris) {
         if (cancelled) break;
-        await albumTrackListsStore.request(uri);
+        await albumTrackListsStore.request(uri, false, true);
       }
     })();
     return () => { cancelled = true; };

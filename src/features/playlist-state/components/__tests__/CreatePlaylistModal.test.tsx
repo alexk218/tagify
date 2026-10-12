@@ -43,6 +43,18 @@ describe("CreatePlaylistModal", () => {
     });
   });
 
+  describe("Lists from Stats", () => {
+    it("names the playlist after the list and offers no smart playlist", () => {
+      renderModal({ activeTagDisplayNames: [], activeTagFormula: "", ratingFilters: [], energyMinFilter: null,
+        bpmMinFilter: null, bpmMaxFilter: null, statsListLabel: "Tagged tracks with no rating" });
+      expect(screen.getByLabelText(/playlist name/i)).toHaveValue("Tagify - Tagged tracks with no rating");
+      expect(screen.getByLabelText(/description/i)).toHaveValue("Tagged tracks with no rating. Created from Tagify Stats.");
+      expect(screen.queryByLabelText(/smart playlist/i)).not.toBeInTheDocument();
+      expect(screen.getByText("Tagged tracks with no rating", { selector: "span" })).toBeInTheDocument();
+      expect(screen.queryByText("No filters applied")).not.toBeInTheDocument();
+    });
+  });
+
   describe("Form Inputs", () => {
     it("should allow editing playlist name", async () => {
       const user = userEvent.setup();

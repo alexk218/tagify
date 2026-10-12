@@ -8,6 +8,7 @@ describe("Spotify metadata request protection", () => {
   afterEach(() => { vi.useRealTimers(); });
   beforeEach(() => {
     graphqlRateLimiter.reset();
+    spotifyService.clearCache();
     vi.restoreAllMocks();
     vi.mocked(Spicetify.GraphQL.Request).mockReset();
   });
@@ -72,16 +73,17 @@ describe("Spotify metadata request protection", () => {
     expect(trackArtistIdentitiesStore.getSnapshot()[uri].artists).toEqual([{ uri: "spotify:artist:shared", name: "Shared" }]);
   });
 
-  it("releases timed-out shared reads so a later retry can reach Spotify", async () => {
+  it("does not launch a duplicate when an uncancellable lookup times out", async () => {
     vi.useFakeTimers();
     Spicetify.GraphQL.Definitions.getTrack = { name: "getTrack" };
-    vi.mocked(Spicetify.GraphQL.Request).mockImplementationOnce(() => new Promise(() => {}))
-      .mockResolvedValueOnce({ data: { trackUnion: { uri: "spotify:track:timeout-retry", artists: { items: [{ uri: "spotify:artist:recovered", profile: { name: "Recovered" } }] } } } });
-    const failed = expect(spotifyService.getTrackArtists("spotify:track:timeout-retry")).rejects.toThrow("timed out");
+    let finish!: (value: unknown) => void;
+    vi.mocked(Spicetify.GraphQL.Request).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const failed = expect(spotifyService.getTrackArtists("spotify:track:timeout-retry")).rejects.toThrow("taking too long");
     await vi.advanceTimersByTimeAsync(10_000);
     await failed;
-    await expect(spotifyService.getTrackArtists("spotify:track:timeout-retry")).resolves.toEqual([{ uri: "spotify:artist:recovered", name: "Recovered" }]);
-    expect(Spicetify.GraphQL.Request).toHaveBeenCalledTimes(2);
+    await expect(spotifyService.getTrackArtists("spotify:track:timeout-retry")).rejects.toThrow("taking too long");
+    expect(Spicetify.GraphQL.Request).toHaveBeenCalledTimes(1);
+    finish({}); await vi.advanceTimersByTimeAsync(0);
   });
 
   it("retains the current GraphQL fallback when the Web API is unavailable", async () => {
@@ -117,4 +119,16 @@ describe("Spotify metadata request protection", () => {
       trackCount: 12,
     });
   });
+});
+
+it("reuses a completed response across track detail callers", async () => {
+  spotifyService.clearCache();
+  Spicetify.GraphQL.Definitions.getTrack = { name: "getTrack" };
+  const request = vi.mocked(Spicetify.GraphQL.Request).mockReset().mockResolvedValue({ data: { trackUnion: {
+    uri: "spotify:track:cached", name: "Cached", duration: { totalMilliseconds: 1000 }, artists: { items: [] },
+  } } });
+  await spotifyService.getTrack("spotify:track:cached");
+  await spotifyService.getTrackMetadata("spotify:track:cached");
+  await spotifyService.getAlbumCover("spotify:track:cached");
+  expect(request).toHaveBeenCalledTimes(1);
 });

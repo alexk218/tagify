@@ -1,3 +1,4 @@
+import { spotifyWrite, spotifyFetch } from "@/services/SpotifyRequests";
 import { useState } from "react";
 
 export interface CreatedPlaylistInfo {
@@ -42,9 +43,9 @@ export function usePlaylistState() {
         typeof (Spicetify.Platform.RootlistAPI as any).createPlaylist ===
         "function"
       ) {
-        const result = await (
+        const result = await spotifyWrite<any>(() => (
           Spicetify.Platform.RootlistAPI as any
-        ).createPlaylist(playlistName, { before: "start" });
+        ).createPlaylist(playlistName, { before: "start" }));
         playlistUri = typeof result === "string" ? result : result?.uri;
       } else {
         const accessToken =
@@ -52,14 +53,12 @@ export function usePlaylistState() {
             ?.accessToken ||
           (Spicetify.Platform.PlaylistAPI as any)?._builder?._accessToken;
 
-        const userId = Spicetify.Platform.username;
-
-        if (!accessToken || !userId) {
-          throw new Error("Could not get access token or username");
+        if (!accessToken) {
+          throw new Error("Could not get access token");
         }
 
-        const createResponse = await fetch(
-          `https://api.spotify.com/v1/users/${userId}/playlists`,
+        const createResponse = await spotifyFetch(
+          "https://api.spotify.com/v1/me/playlists",
           {
             method: "POST",
             headers: {
@@ -100,11 +99,11 @@ export function usePlaylistState() {
       if (spotifyTrackUris.length > 0) {
         for (let index = 0; index < spotifyTrackUris.length; index += 100) {
           const batch = spotifyTrackUris.slice(index, index + 100);
-          await (Spicetify.Platform.PlaylistAPI as any).add(
+          await spotifyWrite(() => (Spicetify.Platform.PlaylistAPI as any).add(
             playlistUri,
             batch,
             { after: "end" },
-          );
+          ));
         }
       }
 

@@ -7,6 +7,11 @@
   font-family: var(--spice-font);
 }
 
+/* The header adapts to Tagify's own width, which Spotify's sidebars narrow independently of the window. */
+.headerFrame {
+  container-type: inline-size;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -110,25 +115,22 @@
   box-shadow: 0 0 0 2px rgb(155 140 255 / 10%);
 }
 
-@media (max-width: 640px) {
+/* Narrow: title and Community share the first row; the view tabs span the second. */
+@container (max-width: 600px) {
   .header {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
   }
 
   .viewTabs {
-    width: 100%;
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 
   .viewTab {
     flex: 1 1 0;
     min-width: 0;
-  }
-
-  .communityButton {
-    justify-content: center;
-    width: 100%;
   }
 }
 

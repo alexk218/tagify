@@ -26,6 +26,7 @@ import { parseSpotifyEntity } from "@tagify/community-contracts";
 import { AlbumProgressLine } from "@/features/playlist-state";
 
 interface TrackDetailsProps {
+  recordingReuseStatus?: "idle" | "checking" | "unavailable";
   displayedTrack: SpotifyTrack; // The track displayed in TrackDetails
   currentlyPlayingTrack: SpotifyTrack | null; // The currently playing track
   trackData: TrackDetailsTrackData;
@@ -52,6 +53,7 @@ interface TrackDetailsProps {
 }
 
 const TrackDetails: React.FC<TrackDetailsProps> = ({
+  recordingReuseStatus = "idle",
   displayedTrack,
   currentlyPlayingTrack,
   trackData,
@@ -598,7 +600,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
           </div>
         )}
         {!hasGroupedTags ? (
-          <p className={styles.noTags}>No tags applied</p>
+          <p className={styles.noTags} role="status">{recordingReuseStatus === "checking" ? "Checking saved tags…" : recordingReuseStatus === "unavailable" ? "Couldn’t check saved tags. Reopen this song to try again later." : "No tags applied"}</p>
         ) : (
           <div className={styles.tagCategories}>
             {/* Filter categories to only show those with tags */}

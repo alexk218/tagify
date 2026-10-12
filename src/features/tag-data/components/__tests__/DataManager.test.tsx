@@ -32,7 +32,7 @@ describe("DataManager", () => {
   });
 
   it("replaces the last-saved status with editing controls beside Settings", () => {
-    render(<DataManager onExportTagData={vi.fn()} onImportTagData={vi.fn()} onExportRekordbox={vi.fn()} onResetTagifyData={vi.fn()} onRetryMigration={vi.fn()} historyControls={<button>Undo</button>} />);
+    render(<DataManager onExportTagData={vi.fn()} onImportTagData={vi.fn()} onOpenStats={vi.fn()} onResetTagifyData={vi.fn()} onRetryMigration={vi.fn()} historyControls={<button>Undo</button>} />);
     expect(screen.queryByText(/Last saved/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Undo" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Undo" }).parentElement!.nextElementSibling).toBe(screen.getByRole("button", { name: "Settings" }));
@@ -44,7 +44,7 @@ describe("DataManager", () => {
       <DataManager
         onExportTagData={vi.fn().mockResolvedValue(undefined)}
         onImportTagData={onImportTagData}
-        onExportRekordbox={vi.fn()}
+        onOpenStats={vi.fn()}
         onResetTagifyData={vi.fn().mockResolvedValue(undefined)}
         onRetryMigration={vi.fn()}
       />,
@@ -76,7 +76,7 @@ describe("DataManager", () => {
       <DataManager
         onExportTagData={vi.fn().mockResolvedValue(undefined)}
         onImportTagData={onImportTagData}
-        onExportRekordbox={vi.fn()}
+        onOpenStats={vi.fn()}
         onResetTagifyData={vi.fn().mockResolvedValue(undefined)}
         onRetryMigration={vi.fn()}
       />,
@@ -109,7 +109,7 @@ describe("DataManager", () => {
       <DataManager
         onExportTagData={vi.fn().mockResolvedValue(undefined)}
         onImportTagData={vi.fn()}
-        onExportRekordbox={vi.fn()}
+        onOpenStats={vi.fn()}
         onResetTagifyData={vi.fn().mockResolvedValue(undefined)}
         onRetryMigration={vi.fn()}
       />,
@@ -144,4 +144,14 @@ describe("DataManager", () => {
       "false",
     );
   });
+
+  it("opens the Stats view and shows when it is open", () => {
+    const onOpenStats = vi.fn();
+    const { rerender } = render(<DataManager onExportTagData={vi.fn()} onImportTagData={vi.fn()} onOpenStats={onOpenStats} onResetTagifyData={vi.fn()} onRetryMigration={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "View your stats" }));
+    expect(onOpenStats).toHaveBeenCalledTimes(1);
+    rerender(<DataManager onExportTagData={vi.fn()} onImportTagData={vi.fn()} onOpenStats={onOpenStats} statsOpen onResetTagifyData={vi.fn()} onRetryMigration={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Close your stats" })).toHaveAttribute("aria-pressed", "true");
+  });
 });
+

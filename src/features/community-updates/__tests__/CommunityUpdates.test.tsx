@@ -53,6 +53,25 @@ describe("Community update popup", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
+  it("ignores dialogs Spotify keeps mounted but hidden, and still waits for shown ones", async () => {
+    const hidden = document.createElement("div");
+    hidden.setAttribute("role", "dialog");
+    hidden.textContent = "Choose a language";
+    Object.assign(hidden, { checkVisibility: () => false });
+    const shown = document.createElement("section");
+    shown.setAttribute("role", "dialog");
+    Object.assign(shown, { checkVisibility: () => true });
+    document.body.append(hidden, shown);
+    render(<CommunityUpdates enabled />);
+    await advance(3000);
+    await advance(2000);
+    expect(screen.queryByRole("dialog", { name: "What's new in Community" })).toBeNull();
+    await act(async () => { shown.remove(); });
+    await advance(1100);
+    expect(screen.getByRole("dialog", { name: "What's new in Community" })).toBeInTheDocument();
+    hidden.remove();
+  });
+
   it("does not starve a waiting notice when the underlying player updates", async () => {
     render(<CommunityUpdates enabled />);
     await advance(3100);

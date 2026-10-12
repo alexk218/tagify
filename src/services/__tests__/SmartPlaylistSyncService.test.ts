@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { rememberPlaylistAdditions, readPlaylistAdditionOrigins } from "../SpotifyPlaylistWriteOrigins";
 import { SmartPlaylistSyncService } from "@/services/SmartPlaylistSyncService";
 import {
   SMART_PLAYLIST_MEMBERSHIP_BASELINES_KEY,
@@ -22,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   },
   spotifyApi: {
     getAllTrackUrisInPlaylistStrict: vi.fn(),
+    getTrackUrisForBackgroundSync: vi.fn(),
+    updatePlaylistTracks: vi.fn(),
     removeTrackFromPlaylist: vi.fn(),
     addTrackToSpotifyPlaylist: vi.fn(),
     fetchAudioFeatures: vi.fn(),
@@ -36,6 +39,8 @@ const mocks = vi.hoisted(() => ({
     getAllSmartPlaylists: vi.fn(),
     saveSmartPlaylists: vi.fn(),
     patchTracks: vi.fn(),
+    getRecordingGroupTracksStrict: vi.fn(),
+    getSmartPlaylistSyncState: vi.fn(),
   },
 }));
 
@@ -54,7 +59,7 @@ vi.mock("@/services/SpotifyService", () => ({
 vi.mock("@/services/sync/SyncLocalState", () => ({
   isLocalPersistencePaused: mocks.isLocalPersistencePaused,
   flushLocalPersistence: mocks.flushLocalPersistence,
-  getTagifyDatabaseName: () => "tagify-db",
+  getTagifyDatabaseName: () => localStorage.getItem("tagify:sync:account-id") ? `tagify-db:${localStorage.getItem("tagify:sync:account-id")}` : "tagify-db",
 }));
 
 const criteria = {
@@ -117,6 +122,196 @@ function confirmMembershipBaseline(...playlists: SmartPlaylistCriteria[]): void 
 }
 
 describe("SmartPlaylistSyncService", () => {
+  it("reclaims successful addition records only after their membership save succeeds", async () => {
+    const p = playlist(); savePlaylists([p]); confirmMembershipBaseline(p);
+    const uri = "spotify:track:confirmed-write";
+    mocks.spotifyApi.updatePlaylistTracks.mockImplementation(async (id, additions) => {
+      rememberPlaylistAdditions(id, additions);
+      return { added: additions, removed: [], success: true };
+    });
+    const data = track({ rating: 5, energy: 6, tagIds: ["house"] });
+    const service = new SmartPlaylistSyncService();
+    mocks.indexed.saveSmartPlaylists.mockResolvedValueOnce(false);
+    await expect(service.syncTrack(uri, data)).rejects.toThrow("Failed to save");
+    expect(readPlaylistAdditionOrigins(p.playlistId).uris.has(uri)).toBe(true);
+    await service.syncTrack(uri, data);
+    expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([uri]);
+    expect(readPlaylistAdditionOrigins(p.playlistId).uris.size).toBe(0);
+  });
+
+
+  it("rejects queued work if only the Tagify database changes, then accepts new account work", async () => {
+    let release!: () => void;
+    const lock = { request: async <T,>(_name: string, _options: unknown, run: () => Promise<T>) => {
+      await new Promise<void>(resolve => { release = resolve; }); return run();
+    } };
+    localStorage.setItem("tagify:sync:account-id", "library-a");
+    savePlaylists([playlist()]);
+    const service = new SmartPlaylistSyncService(lock);
+    const data = track({ rating: 5, energy: 6, tagIds: ["house"] });
+    const old = service.syncTrack("spotify:track:old", data);
+    await Promise.resolve();
+    localStorage.setItem("tagify:sync:account-id", "library-b");
+    release();
+    await expect(old).rejects.toThrow("Your account changed");
+    expect(mocks.spotifyApi.updatePlaylistTracks).not.toHaveBeenCalled();
+    const next = service.syncTrack("spotify:track:new", data);
+    await Promise.resolve(); release(); await next;
+    expect(mocks.spotifyApi.updatePlaylistTracks).toHaveBeenCalledWith("playlist-1", ["spotify:track:new"], [], undefined, expect.any(Object));
+  });
+
+  it("stops rather than adding another linked copy when the group read fails", async () => {
+    const a = `spotify:track:${"a".repeat(22)}`, b = `spotify:track:${"b".repeat(22)}`;
+    savePlaylists([playlist({ smartPlaylistTrackUris: [a] })]);
+    mocks.indexed.getRecordingGroupTracksStrict.mockRejectedValueOnce(new Error("The library is busy"));
+    await expect(new SmartPlaylistSyncService().syncTrack(b, track({ rating: 5, energy: 6, tagIds: ["house"], recordingGroupId: "same" }))).rejects.toThrow("library is busy");
+    expect(mocks.spotifyApi.updatePlaylistTracks).not.toHaveBeenCalled();
+    expect(mocks.indexed.saveSmartPlaylists).not.toHaveBeenCalled();
+  });
+
+
+  it("keeps 50k pending choices without repeated scans of playlist membership", async () => {
+    const uris = Array.from({ length: 50000 }, (_, i) => `spotify:track:${String(i).padStart(22, "0")}`);
+    const playlists = Array.from({ length: 5 }, (_, i) => playlist({
+      playlistId: `large-${i}`, smartPlaylistTrackUris: uris.slice(i * 10000, (i + 1) * 10000),
+      pendingTagChoices: uris.slice(i * 10000, (i + 1) * 10000),
+      criteria: { ...criteria, includeTagClauses: [{ tagIds: ["house", "techno"], excludedTagIds: [], operator: "OR" }] },
+    }));
+    savePlaylists(playlists); confirmMembershipBaseline(...playlists);
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks: Object.fromEntries(uris.map(uri => [uri, track({ rating: 5, energy: 6 })])) });
+    mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockImplementation(async id => playlists.find(p => p.playlistId === id)!.smartPlaylistTrackUris);
+    const original = Array.prototype.includes;
+    let largeScans = 0;
+    const includes = vi.spyOn(Array.prototype, "includes").mockImplementation(function (this: unknown[], value, start) {
+      if (this.length >= 10000 && typeof value === "string" && value.startsWith("spotify:track:")) largeScans++;
+      return original.call(this, value, start);
+    });
+    try { await new SmartPlaylistSyncService().reconcileAll(); }
+    finally { includes.mockRestore(); }
+    expect(largeScans).toBe(0);
+    expect(mocks.indexed.playlists.reduce((n, p) => n + (p.pendingTagChoices?.length ?? 0), 0)).toBe(50000);
+    expect(mocks.spotifyApi.updatePlaylistTracks).not.toHaveBeenCalled();
+  });
+
+  it("reads only affected recording groups when tagging one song in a 50k library", async () => {
+    const tracks: Record<string, TrackData> = {};
+    for (let i = 0; i < 50000; i++) tracks[`spotify:track:${String(i).padStart(22, "0")}`] = track({
+      rating: 5, energy: 6, tagIds: ["house"], recordingGroupId: `pair-${Math.floor(i / 2)}`,
+      recordingIdentity: { isrc: "USABC2400001", artistIds: ["a".repeat(22)], durationMs: 180000, name: `song-${Math.floor(i / 2)}` },
+    });
+    const uris = Object.keys(tracks);
+    savePlaylists([playlist({ smartPlaylistTrackUris: uris.filter((_, i) => i % 2 === 0) })]);
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks });
+    mocks.indexed.getRecordingGroupTracksStrict.mockResolvedValue({ [uris[0]]: tracks[uris[0]], [uris[1]]: tracks[uris[1]] });
+    await new SmartPlaylistSyncService().syncTrack(uris[1], tracks[uris[1]]);
+    expect(mocks.indexed.getRecordingGroupTracksStrict).toHaveBeenCalledWith(["pair-0"], "tagify-db");
+    expect(mocks.storage.loadAllStrict).not.toHaveBeenCalled();
+    expect(mocks.spotifyApi.updatePlaylistTracks).not.toHaveBeenCalled();
+  });
+
+  it("retains write origins after failed persistence and recovers with a new service instance", async () => {
+    const p = playlist(); savePlaylists([p]); confirmMembershipBaseline(p);
+    const uri = "spotify:track:late-after-restart";
+    rememberPlaylistAdditions(p.playlistId, [uri]);
+    const tracks = { [uri]: track({ rating: 1, energy: 7, tagIds: ["newer"], dateModified: 99 }) };
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks });
+    mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockResolvedValue([uri]);
+    mocks.spotifyApi.updatePlaylistTracks.mockResolvedValue({ added: [], removed: [], success: false });
+    mocks.indexed.saveSmartPlaylists.mockResolvedValueOnce(false);
+    await expect(new SmartPlaylistSyncService().reconcilePlaylist(p.playlistId)).rejects.toThrow();
+    expect(readPlaylistAdditionOrigins(p.playlistId).uris.has(uri)).toBe(true);
+    mocks.spotifyApi.updatePlaylistTracks.mockResolvedValue({ added: [], removed: [uri], success: true });
+    mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockResolvedValueOnce([uri]).mockResolvedValue([]);
+    await new SmartPlaylistSyncService().reconcilePlaylist(p.playlistId);
+    expect(tracks[uri]).toMatchObject({ rating: 1, energy: 7, tagIds: ["newer"], dateModified: 99 });
+    expect(mocks.indexed.patchTracks).not.toHaveBeenCalled();
+    expect(readPlaylistAdditionOrigins(p.playlistId).uris.size).toBe(0);
+  });
+
+  it("stops an active pass before saving inbound edits after an account switch", async () => {
+    const previous = Spicetify.Platform.username;
+    Spicetify.Platform.username = "before";
+    const p = playlist(); savePlaylists([p]); confirmMembershipBaseline(p);
+    mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockImplementation(async () => {
+      Spicetify.Platform.username = "after";
+      return ["spotify:track:other-account"];
+    });
+    try {
+      await new SmartPlaylistSyncService().reconcilePlaylist(p.playlistId);
+      expect(mocks.indexed.patchTracks).not.toHaveBeenCalled();
+      expect(mocks.indexed.saveSmartPlaylists).not.toHaveBeenCalled();
+      expect(mocks.spotifyApi.updatePlaylistTracks).not.toHaveBeenCalled();
+    } finally { Spicetify.Platform.username = previous; }
+  });
+
+  it('does not interpret a late Tagify write as a new Spotify edit after Undo', async () => {
+    vi.useFakeTimers();
+    const { spotifyApiService: realApi } = await vi.importActual<typeof import('../SpotifyApiService')>('../SpotifyApiService');
+    const p = playlist(); savePlaylists([p]); confirmMembershipBaseline(p);
+    const uri = 'spotify:track:late';
+    const tracks = { [uri]: track({ rating: 5, energy: 6, tagIds: ['house'] }) };
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks });
+    const previousApi = { ...Spicetify.Platform.PlaylistAPI };
+    let remote: string[] = [], finish!: () => void;
+    const api = Spicetify.Platform.PlaylistAPI as any;
+    api.getContents = vi.fn(async () => ({ items: remote.map(uri => ({ uri, uid: uri })) }));
+    api.add = vi.fn((_playlist, batch: string[]) => new Promise<void>(resolve => { finish = () => { remote.push(...batch); resolve(); }; }));
+    mocks.spotifyApi.updatePlaylistTracks.mockImplementation(realApi.updatePlaylistTracks);
+    api.remove = vi.fn(async (_id, items: { uri: string }[]) => { const removing = new Set(items.map(item => item.uri)); remote = remote.filter(uri => !removing.has(uri)); });
+    mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockImplementation(realApi.getAllTrackUrisInPlaylistStrict);
+    const service = new SmartPlaylistSyncService();
+    delete api.__tagifySmartPlaylistAddHook;
+    (service as any).installDesktopAddHook();
+    try {
+      const adding = service.syncTrack(uri, tracks[uri]);
+      await vi.advanceTimersByTimeAsync(10_001); await adding;
+      tracks[uri] = { ...tracks[uri], rating: 1 };
+      await service.syncTrack(uri, tracks[uri]);
+      finish(); await vi.advanceTimersByTimeAsync(0);
+      await service.reconcilePlaylist(p.playlistId);
+      expect(tracks[uri].rating).toBe(1);
+      expect(remote).toEqual([]);
+      expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([]);
+    } finally { delete api.__tagifySmartPlaylistAddHook; Object.assign(api, previousApi); vi.useRealTimers(); }
+  });
+
+  it('does not baseline a song first seen during final confirmation without applying its criteria', async () => {
+    const p = playlist(); savePlaylists([p]); confirmMembershipBaseline(p);
+    const tracks: Record<string, TrackData> = { 'spotify:track:local': track({ rating: 5, energy: 6, tagIds: ['house'] }) };
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks });
+    let remote: string[] = [];
+    mocks.spotifyApi.updatePlaylistTracks.mockImplementation(async (_id, added, removed) => {
+      remote = [...remote.filter(uri => !removed.includes(uri)), ...added];
+      return { success: true, added, removed };
+    });
+    mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockResolvedValueOnce([]).mockImplementationOnce(async () => {
+      remote.push('spotify:track:mobile'); return [...remote];
+    }).mockImplementation(async () => [...remote]);
+    const service = new SmartPlaylistSyncService();
+    await service.reconcilePlaylist(p.playlistId);
+    expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual(['spotify:track:local']);
+    await service.reconcilePlaylist(p.playlistId);
+    expect(tracks['spotify:track:mobile']?.rating).toBe(5);
+    expect(remote).toContain('spotify:track:mobile');
+  });
+
+  it('does not apply an old account edit after it waited for the sync lock', async () => {
+    const previous = Spicetify.Platform.username;
+    let release!: () => void;
+    const lock = { request: async <T,>(_name: string, _options: unknown, run: () => Promise<T>) => { await new Promise<void>(resolve => { release = resolve; }); return run(); } };
+    Spicetify.Platform.username = 'account-a';
+    savePlaylists([playlist({ playlistId: 'account-a-playlist' })]);
+    const service = new SmartPlaylistSyncService(lock);
+    const task = service.syncTrack('spotify:track:account-a-edit', track({ rating: 5, energy: 6, tagIds: ['house'] }));
+    await Promise.resolve();
+    Spicetify.Platform.username = 'account-b';
+    savePlaylists([playlist({ playlistId: 'account-b-playlist' })]);
+    try {
+      release(); await expect(task).rejects.toThrow('Your account changed');
+      expect(mocks.spotifyApi.updatePlaylistTracks).not.toHaveBeenCalled();
+    } finally { Spicetify.Platform.username = previous; }
+  });
+
   it("does not add another confirmed release when a matching copy is already a member", async () => {
     const a = `spotify:track:${"a".repeat(22)}`, b = `spotify:track:${"b".repeat(22)}`;
     const recordingIdentity = { isrc: "USABC2400001", artistIds: ["c".repeat(22)], durationMs: 180000, name: "Song" };
@@ -158,14 +353,22 @@ describe("SmartPlaylistSyncService", () => {
     mocks.indexed.playlists = [];
     mocks.indexed.getAllSmartPlaylists.mockImplementation(async () => mocks.indexed.playlists);
     mocks.indexed.saveSmartPlaylists.mockImplementation(async (playlists) => {
-      mocks.indexed.playlists = playlists;
+      mocks.indexed.playlists = typeof playlists === "function" ? playlists(mocks.indexed.playlists) : playlists;
       return true;
     });
+    mocks.indexed.getRecordingGroupTracksStrict.mockImplementation(async (groups: string[]) => {
+      const { tracks } = await mocks.storage.loadAllStrict();
+      return Object.fromEntries(Object.entries(tracks as Record<string, TrackData>).filter(([, data]) => groups.includes(data.recordingGroupId ?? "")));
+    });
+    mocks.indexed.getSmartPlaylistSyncState.mockImplementation(async () => ({
+      tracks: (await mocks.storage.loadAllStrict.getMockImplementation()?.())?.tracks ?? {}, playlists: mocks.indexed.playlists,
+    }));
     mocks.storage.isReady.mockReturnValue(true);
     mocks.storage.getTracks.mockResolvedValue(new Map());
     mocks.storage.getTaxonomy.mockResolvedValue({});
     // Changes each song from the saved library, like the real storage.
-    mocks.indexed.patchTracks.mockImplementation(async (changes: Record<string, (current: TrackData | null) => TrackData | null | undefined>) => {
+    mocks.indexed.patchTracks.mockImplementation(async (changes: Record<string, (current: TrackData | null) => TrackData | null | undefined>, options) => {
+      options?.smartPlaylists?.prepare(mocks.indexed.playlists);
       const { tracks } = await mocks.storage.loadAllStrict();
       const saved: Record<string, TrackData | null> = {};
       for (const [uri, change] of Object.entries(changes)) {
@@ -175,6 +378,7 @@ describe("SmartPlaylistSyncService", () => {
         if (next) tracks[uri] = next;
         else delete tracks[uri];
       }
+      if (options?.smartPlaylists) mocks.indexed.playlists = options.smartPlaylists.update(mocks.indexed.playlists);
       return saved;
     });
     mocks.storage.loadAllStrict.mockResolvedValue({
@@ -184,7 +388,22 @@ describe("SmartPlaylistSyncService", () => {
       playlists: {},
       artists: {},
     });
+    // Model batch results using the existing per-song outcome fixtures.
+    mocks.spotifyApi.updatePlaylistTracks.mockImplementation(async (id, additions, removals) => {
+      const added: string[] = [], removed: string[] = [];
+      for (const uri of removals) {
+        if (!await mocks.spotifyApi.removeTrackFromPlaylist(uri, id)) return { added, removed, success: false };
+        removed.push(uri);
+      }
+      for (const uri of additions) {
+        const result = await mocks.spotifyApi.addTrackToSpotifyPlaylist(uri, id);
+        if (!result.success) return { added, removed, success: false };
+        if (result.wasAdded) added.push(uri);
+      }
+      return { added, removed, success: true };
+    });
     mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockResolvedValue([]);
+    mocks.spotifyApi.getTrackUrisForBackgroundSync.mockImplementation((id, options) => mocks.spotifyApi.getAllTrackUrisInPlaylistStrict(id, 0, options));
     mocks.spotifyApi.removeTrackFromPlaylist.mockResolvedValue(true);
     mocks.spotifyApi.addTrackToSpotifyPlaylist.mockResolvedValue({
       success: true,
@@ -753,7 +972,7 @@ describe("SmartPlaylistSyncService", () => {
     ]);
   });
 
-  it("does not advance membership when final Spotify confirmation fails", async () => {
+  it("records processed inbound membership even when final Spotify confirmation fails", async () => {
     const activePlaylist = playlist({
       smartPlaylistTrackUris: ["spotify:track:existing"],
     });
@@ -774,7 +993,7 @@ describe("SmartPlaylistSyncService", () => {
 
     expect(summary.failedPlaylistNames).toEqual(["House"]);
     expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([
-      "spotify:track:existing",
+      "spotify:track:existing", "spotify:track:new",
     ]);
   });
 
@@ -902,7 +1121,7 @@ describe("SmartPlaylistSyncService", () => {
 
       const callsAfterImmediateAdd =
         mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mock.calls.length;
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(300_000);
       expect(
         mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mock.calls.length,
       ).toBeGreaterThan(callsAfterImmediateAdd);
@@ -1011,7 +1230,7 @@ describe("SmartPlaylistSyncService", () => {
       finish([]);
       await settle();
       expect(mocks.storage.loadAllStrict).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(59_999);
+      await vi.advanceTimersByTimeAsync(299_999);
       expect(mocks.storage.loadAllStrict).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(1);
       expect(mocks.storage.loadAllStrict).toHaveBeenCalledTimes(2);
@@ -1040,9 +1259,8 @@ describe("SmartPlaylistSyncService", () => {
       window.addEventListener("tagify:smartPlaylistsUpdated", updated);
       try {
         service.startBackgroundReconciliation();
-        await vi.advanceTimersByTimeAsync(60_000);
+        await vi.advanceTimersByTimeAsync(300_000);
         expect(mocks.spotifyApi.getAllTrackUrisInPlaylistStrict).toHaveBeenCalledTimes(2);
-        expect(mocks.indexed.saveSmartPlaylists).not.toHaveBeenCalled();
         expect(mocks.indexed.playlists[0].lastSyncAt).toBe(1);
         expect(updated).not.toHaveBeenCalled();
       } finally {
@@ -1106,9 +1324,183 @@ describe("SmartPlaylistSyncService", () => {
       service.startBackgroundReconciliation();
       await settle();
       expect(mocks.storage.loadAllStrict).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(300_000);
       expect(mocks.storage.loadAllStrict).toHaveBeenCalledTimes(2);
       expect(vi.getTimerCount()).toBe(1);
     });
   });
+
+  it("finishes all inbound songs on explicit sync, including beyond the automatic 50-song budget", async () => {
+    const p = playlist(); savePlaylists([p]); confirmMembershipBaseline(p);
+    const uris = Array.from({ length: 152 }, (_, i) => `spotify:track:inbound-${i}`);
+    mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockResolvedValue(uris);
+    const summary = await new SmartPlaylistSyncService().reconcilePlaylist(p.playlistId);
+    expect(mocks.spotify.getTrack).toHaveBeenCalledTimes(152);
+    expect(summary.metadataUpdatedCount).toBe(152);
+    expect(summary.failedPlaylistNames).toEqual([]);
+    expect(Object.keys(await writtenTracks())).toHaveLength(152);
+    expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual(uris);
+  });
+  it("shares the background cadence across bundle instances and retains deferred songs for the next pass", async () => {
+    vi.useFakeTimers();
+    try {
+      const p = playlist(); savePlaylists([p]); confirmMembershipBaseline(p);
+      const uris = Array.from({ length: 52 }, (_, i) => `spotify:track:automatic-${i}`);
+      mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockResolvedValue(uris);
+      const page = new SmartPlaylistSyncService(), extension = new SmartPlaylistSyncService();
+      await (page as any).reconcileNow(undefined, true);
+      expect(Object.keys(await writtenTracks())).toHaveLength(50);
+      const reads = mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mock.calls.length;
+      await (extension as any).reconcileNow(undefined, true);
+      expect(mocks.spotifyApi.getAllTrackUrisInPlaylistStrict).toHaveBeenCalledTimes(reads);
+      await vi.advanceTimersByTimeAsync(300000);
+      await (extension as any).reconcileNow(undefined, true);
+      expect(Object.keys(await writtenTracks())).toHaveLength(52);
+      expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual(uris);
+      expect(mocks.spotify.getTrack).toHaveBeenCalledWith(uris[0], undefined, "background", "smart-playlists");
+    } finally { vi.useRealTimers(); }
+  });
+  it("does not mark incomplete explicit sync successful when Spotify stops metadata work", async () => {
+    const p = playlist(); savePlaylists([p]); confirmMembershipBaseline(p);
+    mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockResolvedValue(["spotify:track:paused"]);
+    mocks.spotify.getTrack.mockRejectedValue({ spotifyRequestStopped: true });
+    await expect(new SmartPlaylistSyncService().reconcilePlaylist(p.playlistId)).rejects.toMatchObject({ spotifyRequestStopped: true });
+    expect(mocks.indexed.patchTracks).not.toHaveBeenCalled();
+    expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([]);
+  });
+  it("still evaluates local rule edits against version-confirmed background membership", async () => {
+    const uri = "spotify:track:kept";
+    const saved = playlist({ smartPlaylistTrackUris: [uri] });
+    savePlaylists([saved]); confirmMembershipBaseline(saved);
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks: { [uri]: track({ rating: 5, energy: 6, tagIds: ["house"] }) } });
+    mocks.spotifyApi.getTrackUrisForBackgroundSync.mockResolvedValue([uri]);
+    mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockResolvedValue([]);
+    const service = new SmartPlaylistSyncService();
+    await (service as any).reconcileNow(undefined, true);
+    expect(mocks.spotifyApi.updatePlaylistTracks).not.toHaveBeenCalled();
+    mocks.indexed.playlists[0].criteria = { ...criteria, ratingFilters: [1] };
+    (globalThis as any).__tagifySmartPlaylistSchedulesV1.clear();
+    await (service as any).reconcileNow(undefined, true);
+    expect(mocks.spotifyApi.updatePlaylistTracks).toHaveBeenCalledWith(saved.playlistId, [], [uri], [uri], expect.objectContaining({ priority: "background", feature: "smart-playlists" }));
+  });
+
+  it("processes 50,000 linked updates without rescanning growing membership", async () => {
+    const count = 50_000, tracks: Record<string, TrackData> = {};
+    for (let i = 0; i < count; i++) {
+      tracks[`spotify:track:${String(i).padStart(22, "0")}`] = track({ rating: 5, energy: 6, tagIds: ["house"], recordingGroupId: `pair-${Math.floor(i / 2)}`,
+        recordingIdentity: { isrc: "USABC2400001", artistIds: ["a".repeat(22)], durationMs: 180000, name: `song-${Math.floor(i / 2)}` } });
+    }
+    savePlaylists([playlist()]);
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks });
+    mocks.spotifyApi.updatePlaylistTracks.mockImplementation(async (_id, added, removed) => ({ success: true, added, removed }));
+    // Count operations, not wall time, so slow CI cannot make this flaky.
+    const original = Map.prototype.get;
+    let lookups = 0;
+    const spy = vi.spyOn(Map.prototype, "get").mockImplementation(function (this: Map<unknown, unknown>, key: unknown) {
+      lookups++;
+      if (lookups > count * 20) throw new Error("Bulk sync exceeded its linear lookup allowance");
+      return original.call(this, key);
+    });
+    try { await new SmartPlaylistSyncService().syncTracks(tracks); }
+    finally { spy.mockRestore(); }
+    expect(lookups).toBeLessThan(count * 20);
+    expect(mocks.spotifyApi.updatePlaylistTracks).toHaveBeenCalledTimes(1);
+    expect(mocks.spotifyApi.updatePlaylistTracks.mock.calls[0][1]).toHaveLength(count / 2);
+    expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toHaveLength(count / 2);
+  });
+
+  it("does not let an edited nonmatching release suppress a matching addition", async () => {
+    const a = `spotify:track:${"a".repeat(22)}`, b = `spotify:track:${"b".repeat(22)}`;
+    const identity = { isrc: "USABC2400001", artistIds: ["c".repeat(22)], durationMs: 180000, name: "Song" };
+    const data = track({ rating: 5, energy: 6, tagIds: ["house"], recordingGroupId: "same", recordingIdentity: identity });
+    const p = playlist({ smartPlaylistTrackUris: [a] }); savePlaylists([p]); confirmMembershipBaseline(p);
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks: { [a]: data, [b]: data } });
+    await new SmartPlaylistSyncService().syncTracks({ [a]: { ...data, rating: 1 }, [b]: data });
+    expect(mocks.spotifyApi.updatePlaylistTracks).toHaveBeenCalledWith(p.playlistId, [b], [a], undefined, expect.objectContaining({ feature: "smart-playlists" }));
+  });
+
+  it("retains a manual sync behind another bundle's healthy minute-long update", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("Timeout", "TimeoutError")), ms);
+      return controller.signal;
+    });
+    let release!: () => void;
+    let tail: Promise<unknown> = Promise.resolve();
+    const manager = { request<T>(_name: string, options: { signal?: AbortSignal }, run: () => Promise<T>): Promise<T> {
+      const turn = tail.then(() => { options.signal?.throwIfAborted(); return run(); });
+      tail = turn.catch(() => {});
+      return new Promise<T>((resolve, reject) => {
+        options.signal?.addEventListener("abort", () => reject(options.signal!.reason), { once: true });
+        turn.then(resolve, reject);
+      });
+    } };
+    savePlaylists([playlist()]);
+    mocks.flushLocalPersistence.mockReturnValueOnce(new Promise<void>(resolve => { release = resolve; }));
+    const first = new SmartPlaylistSyncService(manager), second = new SmartPlaylistSyncService(manager);
+    try {
+      const holding = first.syncTrack("spotify:track:edited", track());
+      const done = vi.fn();
+      const waiting = second.reconcilePlaylist("playlist-1").then(done);
+      await vi.advanceTimersByTimeAsync(73_000);
+      expect(done).not.toHaveBeenCalled();
+      expect(mocks.spotifyApi.getAllTrackUrisInPlaylistStrict).not.toHaveBeenCalled();
+      release(); await holding; await waiting;
+      expect(done).toHaveBeenCalledOnce();
+      expect(mocks.spotifyApi.getAllTrackUrisInPlaylistStrict).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("retains the membership baseline when Spotify changes during a background read, then recovers", async () => {
+    const p = playlist({ smartPlaylistTrackUris: ["spotify:track:kept"] });
+    savePlaylists([p]); confirmMembershipBaseline(p);
+    const originalBaseline = localStorage.getItem(SMART_PLAYLIST_MEMBERSHIP_BASELINES_KEY);
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks: { "spotify:track:kept": track({ rating: 5, energy: 6, tagIds: ["house"] }) } });
+    mocks.spotifyApi.getTrackUrisForBackgroundSync.mockRejectedValueOnce({ spotifyRequestStopped: true })
+      .mockResolvedValueOnce(["spotify:track:kept"]);
+    const service = new SmartPlaylistSyncService();
+    expect(await (service as any).reconcileNow(undefined, true)).toMatchObject({ failedPlaylistNames: [p.playlistName] });
+    expect(mocks.indexed.playlists[0]).toEqual(p);
+    expect(localStorage.getItem(SMART_PLAYLIST_MEMBERSHIP_BASELINES_KEY)).toBe(originalBaseline);
+    expect(mocks.spotifyApi.updatePlaylistTracks).not.toHaveBeenCalled();
+    (globalThis as any).__tagifySmartPlaylistSchedulesV1.clear();
+    await (service as any).reconcileNow(undefined, true);
+    expect(mocks.spotifyApi.getTrackUrisForBackgroundSync).toHaveBeenCalledTimes(2);
+    expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual(["spotify:track:kept"]);
+  });
+
+  it("releases the operation queue after a stopped request so the next manual action succeeds", async () => {
+    savePlaylists([playlist()]);
+    const service = new SmartPlaylistSyncService();
+    mocks.flushLocalPersistence.mockRejectedValueOnce({ spotifyRequestStopped: true });
+    const first = service.syncTrack("spotify:track:first", track());
+    const stopped = expect(first).rejects.toMatchObject({ spotifyRequestStopped: true });
+    const waiting = service.syncTrack("spotify:track:next", track({ rating: 5, energy: 6, tagIds: ["house"] }));
+    await stopped; await waiting;
+    expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual(["spotify:track:next"]);
+  });
+
+  it("defers a background lock timeout and tries again on the next scheduled check", async () => {
+    vi.useFakeTimers();
+    savePlaylists([playlist()]);
+    let blocked = true;
+    const manager = { async request<T>(_name: string, options: { signal?: AbortSignal }, run: () => Promise<T>): Promise<T> {
+      if (blocked && options.signal) throw new DOMException("Timeout", "TimeoutError");
+      return run();
+    } };
+    const request = vi.spyOn(manager, "request");
+    const service = new SmartPlaylistSyncService(manager);
+    try {
+      service.startBackgroundReconciliation();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request).toHaveBeenCalledOnce();
+      expect(mocks.spotifyApi.getTrackUrisForBackgroundSync).not.toHaveBeenCalled();
+      blocked = false;
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(mocks.spotifyApi.getTrackUrisForBackgroundSync).toHaveBeenCalledOnce();
+    } finally { service.stopBackgroundReconciliation(); vi.clearAllTimers(); vi.useRealTimers(); }
+  });
+
 });

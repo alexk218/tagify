@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { runMetadataBackfill, useMetadataBackfill } from "@/features/metadata-backfill/hooks/useMetadataBackfill";
+import { resetMetadataBackfillSessionForTests, runMetadataBackfill, useMetadataBackfill } from "@/features/metadata-backfill/hooks/useMetadataBackfill";
 import { TagDataStructure } from "@/types/tagData";
 import { createEmptyTaxonomy, TAG_DATA_SCHEMA_VERSION } from "@/utils/tagTaxonomy";
 
@@ -50,6 +50,7 @@ vi.mock("@/services/SpotifyApiService", () => ({
 describe("runMetadataBackfill", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetMetadataBackfillSessionForTests();
 
     mockStorageService.isReady.mockReturnValue(true);
     mockStorageService.initialize.mockResolvedValue({ status: "ready" });
@@ -112,8 +113,8 @@ describe("runMetadataBackfill", () => {
 
     await expect(runMetadataBackfill()).resolves.toBe(3);
 
-    expect(mockStorageService.savePlaylists).toHaveBeenCalledTimes(1);
-    const savedPlaylists = mockStorageService.savePlaylists.mock.calls[0][0] as Map<
+    expect(mockStorageService.savePlaylists).toHaveBeenCalledTimes(2);
+    const savedPlaylists = new Map(mockStorageService.savePlaylists.mock.calls.flatMap(call => [...call[0]])) as Map<
       string,
       TagDataStructure["playlists"][string]
     >;
@@ -164,7 +165,7 @@ describe("runMetadataBackfill", () => {
     expect(updatedCount).toBe(1);
     expect(mockSpotifyService.getTrack).not.toHaveBeenCalled();
     expect(mockAudioFeaturesService.getAudioFeaturesFromUri).toHaveBeenCalledWith(
-      "spotify:track:abc",
+      "spotify:track:abc", { priority: "background", feature: "metadata-backfill" },
     );
     expect(mockStorageService.saveTracks).toHaveBeenCalledTimes(1);
 
@@ -210,7 +211,7 @@ describe("runMetadataBackfill", () => {
 
     expect(updatedCount).toBe(1);
     expect(mockAudioFeaturesService.getAudioFeaturesFromUri).toHaveBeenCalledWith(
-      "spotify:track:max-attempts",
+      "spotify:track:max-attempts", { priority: "background", feature: "metadata-backfill" },
     );
 
     const savedTracks = mockStorageService.saveTracks.mock.calls[0][0] as Map<
@@ -301,7 +302,7 @@ describe("runMetadataBackfill", () => {
 
     await waitFor(() => {
       expect(mockSpotifyService.getTrack).toHaveBeenCalledWith(
-        "spotify:track:restored",
+        "spotify:track:restored", undefined, "background", "metadata-backfill",
       );
       expect(onComplete).toHaveBeenCalled();
     });
@@ -316,7 +317,7 @@ describe("runMetadataBackfill", () => {
     const onProgress = vi.fn();
     await runMetadataBackfill({ batchDelayMs: 0, onProgress });
     expect(mockSpotifyService.getTrack).toHaveBeenCalledTimes(50);
-    expect(mockStorageService.saveTracks).toHaveBeenCalledTimes(5);
+    expect(mockStorageService.saveTracks).toHaveBeenCalledTimes(50);
     for (const [saved] of mockStorageService.saveTracks.mock.calls) {
       for (const track of saved.values()) {
         expect(track.dateModified).toBe(123);
@@ -324,6 +325,28 @@ describe("runMetadataBackfill", () => {
       }
     }
     expect(onProgress).toHaveBeenLastCalledWith({ processed: 50, total: 50, updated: 50, remaining: 70 });
+  });
+
+  it("holds its budget across repeated scans of a 50,000-song library", async () => {
+    const tracks = Object.fromEntries(Array.from({ length: 50_000 }, (_, index) => [`spotify:track:scale-${index}`,
+      { rating: 4, energy: 0, tagIds: [], bpm: 120, camelotKey: "8A", dateModified: 123 }]));
+    const artists = Object.fromEntries(Array.from({ length: 120 }, (_, index) => [`spotify:artist:${index}`, { rating: 4, energy: 0, tagIds: [], name: "Unknown Artist" }]));
+    const playlists = Object.fromEntries(Array.from({ length: 120 }, (_, index) => [`spotify:playlist:${index}`, { rating: 4, energy: 0, tagIds: [], name: "Unknown Playlist" }]));
+    mockStorageService.loadAll.mockResolvedValue({ tracks, artists, playlists });
+    mockSpotifyService.getTrack.mockResolvedValue(null);
+    mockSpotifyApiService.getPlaylistMetadata.mockResolvedValue(null);
+    mockSpotifyApiService.getArtistMetadata.mockResolvedValue(null);
+    await runMetadataBackfill({ batchDelayMs: 0 });
+    await runMetadataBackfill({ batchDelayMs: 0 });
+    expect(mockSpotifyService.getTrack).toHaveBeenCalledTimes(50);
+    expect(mockSpotifyApiService.getPlaylistMetadata).toHaveBeenCalledTimes(20);
+    expect(mockSpotifyApiService.getArtistMetadata).toHaveBeenCalledTimes(20);
+  });
+  it("counts failed album attempts without changing Last Updated", async () => {
+    mockStorageService.loadAll.mockResolvedValue({ tracks: { "spotify:track:failed": { rating: 4, energy: 0, tagIds: [], bpm: 120, camelotKey: "8A", dateModified: 123 } }, artists: {}, playlists: {} });
+    mockSpotifyService.getTrack.mockRejectedValue(new Error("offline"));
+    await runMetadataBackfill({ batchDelayMs: 0 });
+    expect(mockStorageService.saveTracks.mock.calls[0][0].get("spotify:track:failed")).toMatchObject({ albumBackfillAttempts: 1, dateModified: 123 });
   });
 
 });

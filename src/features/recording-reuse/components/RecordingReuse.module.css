@@ -1,9 +1,0 @@
-.panel { background: var(--spice-card); margin: 16px 0; padding: 16px; border: 1px solid var(--spice-button); border-radius: 8px; }
-.panel summary { cursor: pointer; font-size: 18px; font-weight: 700; }
-.panel p { color: var(--spice-subtext); margin: 12px 0; }
-.panel button, .panel select { background: var(--spice-main); color: var(--spice-text); border: 1px solid var(--spice-button); border-radius: 4px; padding: 8px 12px; margin: 4px 8px 4px 0; }
-.panel button { cursor: pointer; }
-.panel button:disabled { opacity: .5; cursor: default; }
-.panel label { display: block; margin: 8px 0; }
-.panel ul { padding-left: 20px; }
-.panel li { margin: 6px 0; }

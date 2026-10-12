@@ -1,3 +1,4 @@
+import { spotifyRead, throwIfSpotifyRequestStopped } from "@/services/SpotifyRequests";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./SmartPlaylistModal.module.css";
 import { Portal } from "@/components/ui";
@@ -220,54 +221,32 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     const syncPlaylistNames = async () => {
-      let hasUpdates = false;
-
-      const updatedPlaylists = await Promise.all(
-        smartPlaylists.map(async (playlist) => {
-          if (!playlist.playlistId) return playlist;
-          try {
-            const playlistUri = `spotify:playlist:${playlist.playlistId}`;
-            const metadata = await (
-              Spicetify.Platform.PlaylistAPI as { getMetadata: (uri: string) => Promise<{ name?: string }> }
-            ).getMetadata(playlistUri);
-
-            if (metadata?.name && metadata.name !== playlist.playlistName) {
-              hasUpdates = true;
-              return {
-                ...playlist,
-                playlistName: metadata.name,
-              };
-            }
-
-            return playlist;
-          } catch (error) {
-            console.error(
-              `Failed to fetch metadata for playlist ${playlist.playlistId}:`,
-              error,
-            );
-            return playlist;
-          }
-        }),
-      );
-
-      if (hasUpdates) {
-        await onUpdateSmartPlaylists((current) => current.map((playlist) => {
-          const updated = updatedPlaylists.find((candidate) =>
-            playlist.id ? candidate.id === playlist.id : candidate.playlistId === playlist.playlistId,
-          );
-          return updated && updated.playlistName !== playlist.playlistName
-            ? { ...playlist, playlistName: updated.playlistName }
-            : playlist;
-        }));
+      const names = new Map<string, string>();
+      for (const playlist of smartPlaylists) {
+        if (controller.signal.aborted) return;
+        if (!playlist.playlistId) continue;
+        const uri = `spotify:playlist:${playlist.playlistId}`;
+        try {
+          const metadata = await spotifyRead<{ name?: string }>(`desktop:playlist:getMetadata:${JSON.stringify([uri])}`,
+            () => (Spicetify.Platform.PlaylistAPI as { getMetadata: (uri: string) => Promise<{ name?: string }> }).getMetadata(uri),
+            { signal: controller.signal, priority: "background", feature: "playlist-details" });
+          if (metadata?.name && metadata.name !== playlist.playlistName) names.set(playlist.playlistId, metadata.name);
+        } catch (error) {
+          throwIfSpotifyRequestStopped(error);
+          console.error("Could not check a smart playlist name:", error);
+        }
       }
+      if (!controller.signal.aborted && names.size) await onUpdateSmartPlaylists(current => current.map(playlist => {
+        const name = names.get(playlist.playlistId);
+        return name ? { ...playlist, playlistName: name } : playlist;
+      }));
     };
-
-    if (smartPlaylists.length > 0) {
-      void syncPlaylistNames().catch((error) => {
-        console.error("Could not save updated smart playlist names:", error);
-      });
-    }
+    void syncPlaylistNames().catch(error => {
+      if (!controller.signal.aborted) console.error("Could not check smart playlist names:", error);
+    });
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {

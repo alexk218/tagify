@@ -135,7 +135,7 @@ describe("desktop sync protocol invariants", () => {
       "x-tagify-sync-protocol": "2",
       "x-tagify-sync-generation": "event-driven-v1",
     });
-    expect(capabilitiesCacheKey("https://community.example/path")).toContain(`${packageJson.version}:notes-v1:https://community.example`);
+    expect(capabilitiesCacheKey("https://community.example/path")).toContain(`${packageJson.version}:notes-v1:merge-v2:https://community.example`);
   });
 
   it("compresses reviewed initial libraries before sending them through Vercel", async () => {

@@ -4,7 +4,11 @@ import path from "path";
 export default defineConfig({
   test: {
     globals: true,
-    exclude: [...configDefaults.exclude, "scripts/install/.build/**"],
+    // Keep concurrent local chats from starting one test worker per CPU core.
+    maxWorkers: 2,
+    minWorkers: 1,
+    // Installer analytics and the landing page use node:test, run by their own test scripts.
+    exclude: [...configDefaults.exclude, "scripts/install/.build/**", "scripts/install/analytics/*.test.mjs", "landing-page/tests/**"],
     environment: "jsdom",
     setupFiles: ["./src/tests/setup.ts"],
     onConsoleLog: (log) => {

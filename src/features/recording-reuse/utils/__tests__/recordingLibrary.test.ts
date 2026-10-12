@@ -8,7 +8,7 @@ it("only uses titles to find candidates, then requires confirmed identity and ev
   const tracks = { [a]: song, [b]: { ...song, recordingIdentity: { ...identity, durationMs: 180800 } }, [c]: { ...song, recordingIdentity: { ...identity, durationMs: 181600 } }, "spotify:local:a": song };
   expect(recordingCandidates(tracks)).toEqual([[a, b, c]]);
   expect(confirmedRecordingSets(tracks).map(set => set.entries.map(([uri]) => uri))).toEqual([[a, b]]);
-  expect(confirmedRecordingSets({ [a]: song, [b]: { ...song, recordingIdentity: { ...identity, isrc: "USABC2400002" } } })).toEqual([]);
+  expect(confirmedRecordingSets({ [a]: song, [b]: { ...song, recordingIdentity: { ...identity, isrc: "USABC2400002", durationMs: 180001 } } })).toEqual([]);
 });
 it("leaves conflicting, unconfirmed, and opted-out copies visible and collapses after filtering/sorting", () => {
   const tracks = { [a]: song, [b]: { ...song, albumName: "Other album", dateModified: 20 } };
@@ -19,7 +19,7 @@ it("leaves conflicting, unconfirmed, and opted-out copies visible and collapses 
     const different = { [a]: song, [b]: { ...song, ...change } };
     expect(collapseRecordingEntries(Object.entries(different), recordingDisplayKeys(different))).toHaveLength(2);
   }
-  expect(hasRecordingConflict(confirmedRecordingSets({ [a]: song, [b]: { ...song, tagIds: ["ambient"] } })[0])).toBe(true);
+  expect(hasRecordingConflict(confirmedRecordingSets({ [a]: song, [b]: { ...song, rating: 5 } })[0])).toBe(true);
 });
 it("new playlists use one confirmed copy and full sync prefers a copy already in the playlist", () => {
   const criteria = { includeTagClauses: [], clauseConnectors: [], ratingFilters: [], energyMinFilter: null, energyMaxFilter: null, bpmMinFilter: null, bpmMaxFilter: null };

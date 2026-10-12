@@ -237,7 +237,7 @@ export interface SyncCapabilitiesV1 {
   maxBatchOperations: number;
   maxSnapshotChunkBytes: number;
   retentionDays: number;
-  initialMergeReviewVersion?: 1;
+  initialMergeReviewVersion?: 1 | 2;
 }
 
 export interface SyncCapabilitiesV2 extends SyncCapabilitiesV1 {

@@ -331,7 +331,8 @@ export function findTagAccentId(
   taxonomy: TagTaxonomy,
   tagId: string,
 ) {
-  return normalizeTagAccentId(taxonomy.tagsById[tagId]?.accentId);
+  // Custom colors are only valid while the taxonomy still defines them.
+  return normalizeTagAccentId(taxonomy.tagsById[tagId]?.accentId, taxonomy.customAccentsById);
 }
 
 export function buildDuplicateTagNameSet(taxonomy: TagTaxonomy): Set<string> {

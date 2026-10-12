@@ -5,6 +5,7 @@ import Darwin
 
 struct InstallerFailure: LocalizedError {
     let message: String
+    var reason = "setup"
     var errorDescription: String? { message }
 }
 
@@ -13,19 +14,19 @@ struct Release: Decodable {
         let name: String
         let browser_download_url: URL
         let digest: String?
+        var size: Int64?
     }
     let tag_name: String
     let draft: Bool
     let prerelease: Bool
     let assets: [Asset]
 
-    func asset(repository: String, architecture: String) throws -> Asset {
-        guard !draft, !prerelease else {
+    func asset(repository: String, architecture: String, allowPrerelease: Bool = false) throws -> Asset {
+        guard !draft, (!prerelease || allowPrerelease) else {
             throw InstallerFailure(message: "A stable update couldn't be found. Try again later.")
         }
         let version = tag_name.hasPrefix("v") ? String(tag_name.dropFirst()) : tag_name
-        let pattern = #"^\d+\.\d+\.\d+$"#
-        guard version.range(of: pattern, options: .regularExpression) != nil else {
+        guard InstalledVersion(version) != nil, allowPrerelease || StableVersion(version) != nil else {
             throw InstallerFailure(message: "The update information couldn't be read. Try again later.")
         }
         let names = repository == "alexk218/tagify"
@@ -33,8 +34,10 @@ struct Release: Decodable {
             : ["spicetify-\(version)-darwin-\(architecture).tar.gz"]
         guard let asset = assets.first(where: { names.contains($0.name) }),
               asset.browser_download_url.scheme == "https",
-              asset.browser_download_url.host == "github.com",
-              asset.browser_download_url.path.hasPrefix("/\(repository)/releases/download/\(tag_name)/"),
+              asset.browser_download_url.host == (repository == "alexk218/tagify" ? "tagify.fm" : "github.com"),
+              asset.browser_download_url.user == nil, asset.browser_download_url.password == nil,
+              asset.browser_download_url.query == nil, asset.browser_download_url.fragment == nil,
+              asset.browser_download_url.path == (repository == "alexk218/tagify" ? "/releases/client/\(tag_name)/\(asset.name)" : "/\(repository)/releases/download/\(tag_name)/\(asset.name)"),
               let digest = asset.digest,
               digest.range(of: #"^sha256:[a-fA-F0-9]{64}$"#, options: .regularExpression) != nil else {
             throw InstallerFailure(message: "A verified download couldn't be found. Try again later.")
@@ -73,7 +76,7 @@ enum InstallerSystem {
             Thread.sleep(forTimeInterval: 0.5)
             if process.isRunning { kill(process.processIdentifier, SIGKILL) }
             process.waitUntilExit()
-            throw InstallerFailure(message: "Setup took too long. Close Spotify and try again.")
+            throw InstallerFailure(message: "Setup took too long. Close Spotify and try again.", reason: "timeout")
         }
         process.waitUntilExit()
         return CommandResult(status: process.terminationStatus, output: (try? String(contentsOf: output, encoding: .utf8)) ?? "")
@@ -86,14 +89,14 @@ enum InstallerSystem {
         request.timeoutInterval = 120
         request.setValue("Tagify-Mac-Installer", forHTTPHeaderField: "User-Agent")
         let complete = DispatchSemaphore(value: 0)
-        var outcome: Result<Void, Error> = .failure(InstallerFailure(message: "The download took too long. Check your connection and try again."))
+        var outcome: Result<Void, Error> = .failure(InstallerFailure(message: "The download took too long. Check your connection and try again.", reason: "network_timeout"))
         let task = session.downloadTask(with: request) { temporary, response, error in
             defer { complete.signal() }
             do {
                 if let error = error { throw error }
                 guard let response = response as? HTTPURLResponse, response.statusCode == 200,
                       let temporary = temporary else {
-                    throw InstallerFailure(message: "The download is unavailable. Check your connection and try again later.")
+                    throw InstallerFailure(message: "The download is unavailable. Check your connection and try again later.", reason: "download_unavailable")
                 }
                 try FileManager.default.moveItem(at: temporary, to: destination)
                 outcome = .success(())
@@ -102,7 +105,7 @@ enum InstallerSystem {
         task.resume()
         guard complete.wait(timeout: .now() + 130) == .success else {
             task.cancel()
-            throw InstallerFailure(message: "The download took too long. Check your connection and try again.")
+            throw InstallerFailure(message: "The download took too long. Check your connection and try again.", reason: "network_timeout")
         }
         try outcome.get()
     }
@@ -114,25 +117,39 @@ struct InstallerPaths {
     let state: URL
     let stateOverride: String?
     let binary: URL
+    let spicetifySource: SpicetifySource
     let spotify: URL
     var resources: URL { spotify.appendingPathComponent("Contents/Resources") }
-    var prefs: URL { home.appendingPathComponent("Library/Application Support/Spotify/prefs") }
+    let prefs: URL
     var spotifyUpdates: URL { home.appendingPathComponent("Library/Application Support/Spotify/PersistentCache/Update") }
     var tagify: URL { config.appendingPathComponent("CustomApps/tagify") }
     var key: URL { home.appendingPathComponent(".config/tagify/install-recovery-key") }
     var backups: URL { home.appendingPathComponent("Library/Application Support/Tagify/Installer Backups") }
     var logs: URL { home.appendingPathComponent("Library/Logs/Tagify") }
 
+    var protectedPaths: [URL] {
+        let paths = [tagify, config.appendingPathComponent("config-xpui.ini"), state,
+                     config.appendingPathComponent("Backup"), config.appendingPathComponent("Extracted"),
+                     resources.appendingPathComponent("Apps"), resources.appendingPathComponent("xpui.spa"), key]
+            + (spicetifySource == .manager ? [binary.deletingLastPathComponent()] : [])
+        return Array(Set(paths.filter { candidate in
+            !paths.contains { $0 != candidate && candidate.path.hasPrefix($0.path + "/") }
+        })).sorted { $0.path < $1.path }
+    }
+
     init(home: URL = FileManager.default.homeDirectoryForCurrentUser, spotify: URL, environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.home = home
         self.spotify = spotify
-        config = URL(fileURLWithPath: environment["SPICETIFY_CONFIG"].flatMap { $0.isEmpty ? nil : $0 } ?? home.appendingPathComponent(".config/spicetify").path)
-        state = URL(fileURLWithPath: environment["SPICETIFY_STATE"].flatMap { $0.isEmpty ? nil : $0 } ?? home.appendingPathComponent(".local/state/spicetify").path)
+        config = InstallerDiscovery.expandedPath(environment["SPICETIFY_CONFIG"], home: home) ?? home.appendingPathComponent(".config/spicetify")
+        state = InstallerDiscovery.expandedPath(environment["SPICETIFY_STATE"], home: home) ?? home.appendingPathComponent(".local/state/spicetify")
         // The CLI treats an explicit override as the exact state folder, while its default adds
         // Backup/Extracted subdirectories. Keep that distinction for existing installations.
-        stateOverride = environment["SPICETIFY_STATE"].flatMap { $0.isEmpty ? nil : $0 }
+        stateOverride = InstallerDiscovery.expandedPath(environment["SPICETIFY_STATE"], home: home)?.path
             ?? (home.standardizedFileURL == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL ? nil : state.path)
-        binary = home.appendingPathComponent(".spicetify/spicetify")
+        (binary, spicetifySource) = InstallerDiscovery.spicetify(home: home, environment: environment)
+        let contents = (try? String(contentsOf: config.appendingPathComponent("config-xpui.ini"), encoding: .utf8)) ?? ""
+        let configuredPrefs = InstallerDiscovery.expandedPath(TagifyInstaller.iniValue(contents, section: "Setting", key: "prefs_path"), home: home)
+        prefs = configuredPrefs.flatMap { InstallerFiles.exists($0) ? $0 : nil } ?? home.appendingPathComponent("Library/Application Support/Spotify/prefs")
     }
 }
 
@@ -236,6 +253,7 @@ final class InstallSnapshot {
         let original: URL
         let saved: URL
         let existed: Bool
+        let fingerprint: String?
     }
     let directory: URL
     private(set) var entries: [Entry] = []
@@ -246,27 +264,42 @@ final class InstallSnapshot {
         try files.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         for (index, path) in paths.enumerated() {
             let saved = directory.appendingPathComponent(String(index))
-            let existed = files.fileExists(atPath: path.path)
+            let existed = InstallerFiles.exists(path)
             if existed { try files.copyItem(at: path, to: saved) }
-            entries.append(Entry(original: path, saved: saved, existed: existed))
+            entries.append(Entry(original: path, saved: saved, existed: existed, fingerprint: existed ? try InstallerFiles.hash(saved) : nil))
         }
-        try JSONEncoder().encode(entries).write(to: directory.appendingPathComponent("restore.json"), options: .atomic)
+        try InstallerFiles.save(entries, to: directory.appendingPathComponent("restore.json"))
+    }
+
+    init(directory: URL, allowedPaths: [URL]) throws {
+        self.directory = directory
+        entries = try JSONDecoder().decode([Entry].self, from: Data(contentsOf: directory.appendingPathComponent("restore.json")))
+        guard !entries.isEmpty, entries.allSatisfy({ entry in
+            allowedPaths.contains(where: { $0.standardizedFileURL.path == entry.original.standardizedFileURL.path }) && entry.saved.deletingLastPathComponent().standardizedFileURL.path == directory.standardizedFileURL.path &&
+            Int(entry.saved.lastPathComponent) != nil
+        }) else { throw InstallerFailure(message: "Your saved setup couldn't be restored automatically. View details for help.") }
+    }
+
+    func validate() throws {
+        for entry in entries where entry.existed {
+            guard let fingerprint = entry.fingerprint, try InstallerFiles.hash(entry.saved) == fingerprint else {
+                throw InstallerFailure(message: "Your saved setup couldn't be verified. Your current files have been left in place. View details for help.")
+            }
+        }
     }
 
     func restore() throws {
-        // Attempt every entry, even if one restore fails; retain the backup for manual recovery.
+        try validate()
         var failures: [String] = []
         for entry in entries.reversed() {
             do {
-                if files.fileExists(atPath: entry.original.path) { try files.removeItem(at: entry.original) }
-                if entry.existed {
-                    try files.createDirectory(at: entry.original.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    try files.copyItem(at: entry.saved, to: entry.original)
-                }
+                if entry.existed { try InstallerFiles.restore(entry.saved, to: entry.original) }
+                else if InstallerFiles.exists(entry.original) { try files.removeItem(at: entry.original) }
             } catch { failures.append("\(entry.original.path): \(error)") }
         }
         if !failures.isEmpty { throw NSError(domain: "TagifyRestore", code: 1, userInfo: [NSLocalizedDescriptionKey: failures.joined(separator: "\n")]) }
     }
+
 }
 
 final class TagifyInstaller {
@@ -276,11 +309,16 @@ final class TagifyInstaller {
     var progress: (Int, String) -> Void = { _, _ in }
     var diagnostic: (String) -> Void = { _ in }
     var closeSpotify: () throws -> Void = {}
+    var prepareAnalyticsHandoff: (URL) -> Void = { _ in }
     var authorizeSpotify: (URL) throws -> Void = { _ in
         throw InstallerFailure(message: "Spotify can't be updated here. Choose a writable copy of Spotify and try again.")
     }
     var command: (URL, [String], [String: String]) throws -> CommandResult = InstallerSystem.run
     var download: (URL, URL) throws -> Void = InstallerSystem.download
+    var diskVolume: (URL) throws -> InstallerVolume = InstallerDiskSpace.volume
+    var changeUpdateFlags: (URL, UInt32) throws -> Void = { url, flags in
+        guard chflags(url.path, flags) == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+    }
     private let files = FileManager.default
     private let work: URL
     private let log: FileHandle
@@ -311,31 +349,42 @@ final class TagifyInstaller {
 
     func preflight() throws {
         guard getuid() != 0 else {
-            throw InstallerFailure(message: "Open Tagify Installer normally from Finder, using your own Mac account.")
+            throw InstallerFailure(message: "Open Tagify Manager normally from Finder, using your own Mac account.")
         }
-        let info = paths.spotify.appendingPathComponent("Contents/Info.plist")
-        guard let plist = NSDictionary(contentsOf: info), plist["CFBundleIdentifier"] as? String == "com.spotify.client",
-              files.fileExists(atPath: paths.resources.appendingPathComponent("Apps").path) else {
-            throw InstallerFailure(message: "Choose the Spotify desktop app. If it isn't installed, download it from spotify.com/download first.")
+        guard InstallerDiscovery.spotifyApp(paths.spotify) else {
+            throw InstallerFailure(message: "Choose the Spotify desktop app. If it isn't installed, download it from spotify.com/download first.", reason: "spotify_missing")
         }
-        guard files.fileExists(atPath: paths.prefs.path) else {
-            throw InstallerFailure(message: "Open Spotify, sign in, and leave it open for at least a minute. Then return here and try again.")
+        guard (try paths.spotify.resourceValues(forKeys: [.volumeIsReadOnlyKey])).volumeIsReadOnly != true else {
+            throw InstallerFailure(message: "Move Spotify to Applications, open that copy, then choose it here. Spotify can't be changed on this read-only drive.", reason: "read_only")
+        }
+        guard InstallerDiscovery.spotifyPrepared(paths.prefs) else {
+            throw InstallerFailure(message: "Open Spotify, sign in, and leave it open for at least a minute. Then return here and try again.", reason: "spotify_unprepared")
+        }
+        for path in paths.protectedPaths where InstallerFiles.exists(path) {
+            if try files.attributesOfItem(atPath: path.path)[.type] as? FileAttributeType == .typeSymbolicLink {
+                writeLog("Cannot safely snapshot a linked installation target: \(path.path)")
+                throw InstallerFailure(message: "Your setup uses a linked folder or file that can't be safely backed up. Nothing has changed. View details for help.")
+            }
         }
         guard paths.config.path.hasPrefix("/"), paths.state.path.hasPrefix("/") else {
             throw InstallerFailure(message: "Your Spicetify location couldn't be read. Open Spicetify once and try again.")
         }
     }
 
-    func release(_ repository: String) throws -> Release {
+    func release(_ repository: String, version: String? = nil) throws -> Release {
         let destination = work.appendingPathComponent("release-\(UUID().uuidString).json")
-        try download(URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!, destination)
+        let endpoint = URL(string: "https://api.github.com/repos/\(repository)/releases")!
+        let url = repository == "alexk218/tagify"
+            ? URL(string: "https://tagify.fm/releases/client/" + (version.map { "v" + $0 + "/release.json" } ?? "latest.json"))!
+            : version.map { endpoint.appendingPathComponent("tags").appendingPathComponent("v" + $0) } ?? endpoint.appendingPathComponent("latest")
+        try download(url, destination)
         return try JSONDecoder().decode(Release.self, from: Data(contentsOf: destination))
     }
 
     static func verify(_ file: URL, digest: String) throws {
         let hash = SHA256.hash(data: try Data(contentsOf: file, options: .mappedIfSafe)).map { String(format: "%02x", $0) }.joined()
         guard digest.lowercased() == "sha256:\(hash)" else {
-            throw InstallerFailure(message: "The download couldn't be verified. Nothing has been installed. Try again.")
+            throw InstallerFailure(message: "The download couldn't be verified. Nothing has been installed. Try again.", reason: "download_verification")
         }
     }
 
@@ -344,17 +393,19 @@ final class TagifyInstaller {
         guard !entries.isEmpty, entries.allSatisfy({ entry in
             !entry.hasPrefix("/") && !entry.contains("\\") && !entry.split(separator: "/").contains("..")
         }), details.split(separator: "\n").allSatisfy({ $0.hasPrefix("-") || $0.hasPrefix("d") }) else {
-            throw InstallerFailure(message: "The download couldn't be opened safely. Nothing has been installed. Try again later.")
+            throw InstallerFailure(message: "The download couldn't be opened safely. Nothing has been installed. Try again later.", reason: "archive_invalid")
         }
     }
 
     private func unpack(_ asset: Release.Asset, label: String) throws -> URL {
         let archive = work.appendingPathComponent("\(UUID().uuidString)-\(asset.name)")
+        try InstallerDiskSpace.check([.init(path: work, bytes: max(InstallerDiskSpace.reserve, asset.size ?? 0))], volume: diskVolume)
         try download(asset.browser_download_url, archive)
         try Self.verify(archive, digest: asset.digest ?? "")
         let names = try run("/usr/bin/tar", ["-tf", archive.path], failure: "The download couldn't be opened. Try again.")
-        let details = try run("/usr/bin/tar", ["-tvf", archive.path], failure: "The download couldn't be opened. Try again.")
+        let details = try run("/usr/bin/tar", ["-tvf", archive.path, "--numeric-owner"], failure: "The download couldn't be opened. Try again.")
         try Self.validateArchiveListing(names: names, details: details)
+        try InstallerDiskSpace.check([.init(path: work, bytes: InstallerDiskSpace.expandedArchiveBytes(details))], volume: diskVolume)
         let folder = work.appendingPathComponent("\(label)-\(UUID().uuidString)")
         try files.createDirectory(at: folder, withIntermediateDirectories: true)
         try run("/usr/bin/tar", ["-xf", archive.path, "-C", folder.path, "--no-same-owner", "--no-same-permissions"], failure: "The download couldn't be opened. Try again.")
@@ -397,41 +448,112 @@ final class TagifyInstaller {
     func applySpotifyUpdateSetting(blocked: Bool) throws {
         var lock: Int32 = -1
         defer { if lock >= 0 { flock(lock, LOCK_UN); Darwin.close(lock) } }
-        try preflight()
-        guard files.isExecutableFile(atPath: paths.binary.path) else {
-            throw InstallerFailure(message: "Install Tagify first, then apply this change.")
+        guard getuid() != 0 else { throw InstallerFailure(message: "Open Tagify Manager from Finder using your own Mac account.") }
+        if blocked {
+            try preflight()
+            guard files.isExecutableFile(atPath: paths.binary.path) else {
+                throw InstallerFailure(message: "Install Tagify first, then apply this change.")
+            }
         }
         try files.createDirectory(at: paths.backups, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         lock = Darwin.open(paths.backups.appendingPathComponent(".install.lock").path, O_CREAT | O_RDWR, 0o600)
         guard lock >= 0, flock(lock, LOCK_EX | LOCK_NB) == 0 else {
-            throw InstallerFailure(message: "Another Tagify installation is running. Wait for it to finish and try again.")
+            throw InstallerFailure(message: "Another Tagify installation is running. Wait for it to finish and try again.", reason: "busy")
         }
+        try requireNoPendingRecovery()
+        pruneBackups()
         if blocked {
             if try SpotifyUpdateState.isBlocked(paths.spotifyUpdates) {
                 try SpotifyUpdateState.verifyBlocked(paths.spotifyUpdates)
                 return
             }
         } else if ((try SpotifyUpdateState.directoryFlags(paths.spotifyUpdates)) ?? 0) & UInt32(UF_IMMUTABLE) == 0 { return }
+        try InstallerDiskSpace.check([.init(path: paths.backups, bytes: Int64(64 * 1024))], reserve: Int64(64 * 1024), volume: diskVolume)
         let backup = paths.backups.appendingPathComponent("update-setting-\(UUID().uuidString)")
         try files.createDirectory(at: backup, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let before = try SpotifyUpdateState(directory: paths.spotifyUpdates, backup: backup)
         try JSONEncoder().encode(before).write(to: backup.appendingPathComponent("spotify-updates.json"), options: .atomic)
         backupURL = backup
+        var journal = InstallJournal(spotify: paths.spotify, updateState: before)
+        try journal.save(in: backup)
         do {
             // Quitting Spotify may hand off a cached update. Protect staging before that handoff.
             if blocked { try before.prepareForBlock() }
             try closeSpotify()
-            try setSpotifyUpdates(blocked: blocked)
+            if blocked { try setSpotifyUpdates(blocked: true) }
+            else {
+                if let flags = try SpotifyUpdateState.directoryFlags(paths.spotifyUpdates) {
+                    try changeUpdateFlags(paths.spotifyUpdates, flags & ~UInt32(UF_IMMUTABLE))
+                }
+                guard ((try SpotifyUpdateState.directoryFlags(paths.spotifyUpdates)) ?? 0) & UInt32(UF_IMMUTABLE) == 0 else {
+                    throw InstallerFailure(message: "Spotify updates are still blocked. View details for help, then try again.")
+                }
+            }
+            journal.status = .committed
+            try journal.save(in: backup)
+            pruneBackups()
             writeLog("Spotify updates are \(blocked ? "blocked" : "allowed").")
         } catch {
             writeLog("Update setting failed: \(error)")
-            do { try before.restore() }
+            do {
+                try before.restore()
+                journal.status = .restored
+                try journal.save(in: backup)
+            }
             catch {
                 writeLog("Update setting restore failed: \(error)")
                 throw InstallerFailure(message: "The update setting couldn't be restored. View details for help, then try again.")
             }
             throw error
         }
+    }
+
+    private func requireNoPendingRecovery() throws {
+        guard try InstallJournal.pending(in: paths.backups).isEmpty else {
+            throw InstallerFailure(message: "A previous setup was interrupted. Restore your previous setup before trying again.", reason: "recovery_required")
+        }
+    }
+
+    private func pruneBackups() {
+        do { try InstallerBackupRetention.prune(in: paths.backups, log: writeLog) }
+        catch { writeLog("Backup cleanup deferred: \(error)") }
+    }
+
+    func recoverInterruptedInstallation() throws {
+        guard getuid() != 0 else { throw InstallerFailure(message: "Open Tagify Manager from Finder using your own Mac account.") }
+        try files.createDirectory(at: paths.backups, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let lock = Darwin.open(paths.backups.appendingPathComponent(".install.lock").path, O_CREAT | O_RDWR, 0o600)
+        defer { if lock >= 0 { flock(lock, LOCK_UN); Darwin.close(lock) } }
+        guard lock >= 0, flock(lock, LOCK_EX | LOCK_NB) == 0 else {
+            throw InstallerFailure(message: "Another Tagify installation is running. Wait for it to finish and try again.", reason: "busy")
+        }
+        let pending = try InstallJournal.pending(in: paths.backups)
+        for (backup, record) in pending {
+            guard record.spotify.standardizedFileURL.path == paths.spotify.standardizedFileURL.path,
+                  record.updateState.directory.standardizedFileURL.path == paths.spotifyUpdates.standardizedFileURL.path,
+                  record.updateState.pendingDirectory == nil || record.updateState.pendingDirectory?.standardizedFileURL.path == backup.appendingPathComponent("pending-spotify-update").standardizedFileURL.path else {
+                throw InstallerFailure(message: "Choose the Spotify copy used by your interrupted setup, then try restoring again. View details for help.")
+            }
+            // A crash may remove the managed CLI before its replacement arrives. Discovery
+            // can then find Homebrew; the original private runtime is still a valid restore target.
+            let recoveryPaths = paths.protectedPaths + [paths.home.appendingPathComponent(".spicetify")]
+            let snapshot = try record.hasSnapshot ? InstallSnapshot(directory: backup, allowedPaths: recoveryPaths) : nil
+            try snapshot?.validate()
+            if let snapshot = snapshot {
+                try InstallerDiskSpace.check(try snapshot.entries.filter(\.existed).map { .init(path: $0.original, bytes: try InstallerDiskSpace.size($0.saved)) }, reserve: Int64(64 * 1024 * 1024), volume: diskVolume)
+            }
+            backupURL = backup
+            try closeSpotify()
+            if snapshot != nil && !files.isWritableFile(atPath: paths.resources.path) { try authorizeSpotify(paths.resources) }
+            // Restore app files before allowing a previously queued Spotify update again.
+            try snapshot?.restore()
+            try record.updateState.restore()
+            var finished = record
+            finished.status = .restored
+            try finished.save(in: backup)
+            writeLog("Restored interrupted setup from \(backup.path)")
+        }
+        pruneBackups()
     }
 
     private func bootstrap(_ folder: URL) throws {
@@ -449,14 +571,19 @@ final class TagifyInstaller {
         try files.setAttributes([.posixPermissions: 0o600], ofItemAtPath: paths.key.path)
         let extensionFile = folder.appendingPathComponent("extension.js")
         var contents = Data("globalThis.__tagifyInstallRecoveryKey=\"\(key)\";\n".utf8)
-        contents.append(try Data(contentsOf: extensionFile))
+        let source = try String(contentsOf: extensionFile, encoding: .utf8)
+        let clean = source.replacingOccurrences(of: #"^(globalThis\.__tagifyInstallRecoveryKey=\"tgfy_install_[A-Za-z0-9_-]{43}\";\n)+"#, with: "", options: .regularExpression)
+        contents.append(Data(clean.utf8))
         try contents.write(to: extensionFile, options: .atomic)
         // Never log the recovery key or the contents of extension.js.
     }
 
-    func install(architecture: String, blockSpotifyUpdates: Bool = true) throws -> String {
+    enum Intent { case update, repair, updateSpicetify }
+
+    func install(architecture: String, blockSpotifyUpdates: Bool = true, intent: Intent = .update) throws -> String {
         var snapshot: InstallSnapshot?
         var updateSnapshot: SpotifyUpdateState?
+        var journal: InstallJournal?
         var lock: Int32 = -1
         defer { if lock >= 0 { flock(lock, LOCK_UN); Darwin.close(lock) } }
         do {
@@ -466,66 +593,124 @@ final class TagifyInstaller {
             try files.createDirectory(at: paths.backups, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             lock = Darwin.open(paths.backups.appendingPathComponent(".install.lock").path, O_CREAT | O_RDWR, 0o600)
             guard lock >= 0, flock(lock, LOCK_EX | LOCK_NB) == 0 else {
-                throw InstallerFailure(message: "Another Tagify installation is running. Wait for it to finish and try again.")
+                throw InstallerFailure(message: "Another Tagify installation is running. Wait for it to finish and try again.", reason: "busy")
             }
-            progress(1, "Downloading verified updates")
-            let tagifyRelease = try release("alexk218/tagify")
-            let spiceRelease = try release("spicetify/cli")
-            let tagifyFolder = try unpack(tagifyRelease.asset(repository: "alexk218/tagify", architecture: architecture), label: "tagify-download")
-            let spiceFolder = try unpack(spiceRelease.asset(repository: "spicetify/cli", architecture: architecture), label: "spicetify-download")
-            let appFolder = files.fileExists(atPath: tagifyFolder.appendingPathComponent("tagify").path)
-                ? tagifyFolder.appendingPathComponent("tagify") : tagifyFolder
-            for name in ["index.js", "extension.js", "style.css", "manifest.json", "package.json"] {
-                guard files.fileExists(atPath: appFolder.appendingPathComponent(name).path) else {
-                    throw InstallerFailure(message: "The Tagify download is incomplete. Nothing has been installed. Try again later.")
+            try requireNoPendingRecovery()
+            pruneBackups()
+            try InstallerDiskSpace.check(try InstallerDiskSpace.installationNeeds(paths: paths, tagifyBytes: 0, spiceBytes: 0) + [.init(path: work, bytes: InstallerDiskSpace.reserve)], volume: diskVolume)
+            progress(1, "Preparing verified installation files")
+            let installed = SetupStatus.inspect(paths: paths, command: { executable, args, _ in try self.command(executable, args, self.environment) })
+            if paths.spicetifySource != .manager {
+                guard installed.spicetifyVersion != nil,
+                      TagifyPackage.nonemptyFile(paths.binary.deletingLastPathComponent().appendingPathComponent("jsHelper/spicetifyWrapper.js")), intent != .updateSpicetify else {
+                    throw InstallerFailure(message: paths.spicetifySource == .homebrew
+                        ? "Update or repair Spicetify with Homebrew, then choose Check again. Your Spotify setup has not changed."
+                        : "Update or repair your existing Spicetify installation, then choose Check again. Your Spotify setup has not changed.")
                 }
             }
-            let package = try JSONSerialization.jsonObject(with: Data(contentsOf: appFolder.appendingPathComponent("package.json"))) as? [String: Any]
-            let version = String(tagifyRelease.tag_name.drop(while: { $0 == "v" }))
-            guard package?["version"] as? String == version,
-                  files.isExecutableFile(atPath: spiceFolder.appendingPathComponent("spicetify").path) else {
-                throw InstallerFailure(message: "The download doesn't match the update. Nothing has been installed. Try again later.")
+            let installedTagify = installed.tagifyVersion.flatMap(InstalledVersion.init)
+            if InstallerFiles.exists(paths.tagify.appendingPathComponent("package.json")), installedTagify == nil {
+                throw InstallerFailure(message: "Your installed Tagify version couldn't be identified. Nothing has changed. View details for help before replacing it.")
             }
+            var tagifyRelease: Release?
+            var keepTagify = intent != .update && installedTagify != nil || installedTagify?.prerelease != nil
+            if !keepTagify {
+                let latest = try release("alexk218/tagify")
+                _ = try latest.asset(repository: "alexk218/tagify", architecture: architecture)
+                tagifyRelease = latest
+                if let current = installedTagify, let target = InstalledVersion(latest.tag_name), current > target { keepTagify = true }
+            }
+            let appFolder: URL
+            let version: String
+            if keepTagify, TagifyPackage.valid(at: paths.tagify), let current = installedTagify {
+                appFolder = work.appendingPathComponent("retained-tagify-\(UUID().uuidString)")
+                try files.copyItem(at: paths.tagify, to: appFolder)
+                version = current.string
+                writeLog("Keeping installed Tagify \(version).")
+            } else {
+                if keepTagify, let current = installedTagify {
+                    do { tagifyRelease = try release("alexk218/tagify", version: current.string) }
+                    catch { throw InstallerFailure(message: "Tagify \(current.string) couldn't be downloaded for repair. Your installed version has been kept. Check your connection or reinstall the same version from its original download.") }
+                }
+                guard let selected = tagifyRelease, let target = InstalledVersion(selected.tag_name),
+                      !keepTagify || target == installedTagify else {
+                    throw InstallerFailure(message: "The repair download doesn't match your installed version. Nothing has changed. View details for help.")
+                }
+                let folder = try unpack(selected.asset(repository: "alexk218/tagify", architecture: architecture, allowPrerelease: keepTagify), label: "tagify-download")
+                appFolder = files.fileExists(atPath: folder.appendingPathComponent("tagify").path) ? folder.appendingPathComponent("tagify") : folder
+                version = target.string
+            }
+            guard TagifyPackage.valid(at: appFolder), TagifyPackage.version(at: appFolder) == version else {
+                throw InstallerFailure(message: "The Tagify download is incomplete or doesn't match the update. Nothing has changed. Try again later.")
+            }
+            let currentSpice = installed.spicetifyVersion.flatMap(InstalledVersion.init)
+            var keepSpice = paths.spicetifySource != .manager || intent == .repair && currentSpice != nil || currentSpice?.prerelease != nil
+            var spiceFolder: URL?
+            var spiceVersion = currentSpice?.string ?? ""
+            if !keepSpice {
+                let selected = try release("spicetify/cli")
+                let asset = try selected.asset(repository: "spicetify/cli", architecture: architecture)
+                guard let target = InstalledVersion(selected.tag_name) else { throw InstallerFailure(message: "The Spicetify update couldn't be read. Try again later.") }
+                keepSpice = currentSpice.map { $0 > target } ?? false
+                if !keepSpice {
+                    let folder = try unpack(asset, label: "spicetify-download")
+                    guard files.isExecutableFile(atPath: folder.appendingPathComponent("spicetify").path) else {
+                        throw InstallerFailure(message: "The Spicetify download is incomplete. Nothing has changed. Try again later.")
+                    }
+                    spiceFolder = folder; spiceVersion = target.string
+                }
+            }
+            if keepSpice, let current = currentSpice,
+               !TagifyPackage.nonemptyFile(paths.binary.deletingLastPathComponent().appendingPathComponent("jsHelper/spicetifyWrapper.js")) {
+                let selected: Release
+                do { selected = try release("spicetify/cli", version: current.string) }
+                catch { throw InstallerFailure(message: "Spicetify \(current.string) couldn't be downloaded for repair. Your installed version has been kept. Check your connection and try again.") }
+                guard InstalledVersion(selected.tag_name) == current else {
+                    throw InstallerFailure(message: "The Spicetify repair download doesn't match your installed version. Nothing has changed.")
+                }
+                spiceFolder = try unpack(selected.asset(repository: "spicetify/cli", architecture: architecture, allowPrerelease: true), label: "spicetify-repair")
+            }
+            if let folder = spiceFolder {
+                guard files.isExecutableFile(atPath: folder.appendingPathComponent("spicetify").path),
+                      TagifyPackage.nonemptyFile(folder.appendingPathComponent("jsHelper/spicetifyWrapper.js")) else {
+                    throw InstallerFailure(message: "The Spicetify download is incomplete. Nothing has changed. Try again later.")
+                }
+            }
+            writeLog("Plan: Tagify \(installed.tagifyVersion ?? "not installed") → \(version); Spicetify \(installed.spicetifyVersion ?? "not installed") → \(spiceVersion).")
+            try InstallerDiskSpace.check(try InstallerDiskSpace.installationNeeds(paths: paths, tagifyBytes: InstallerDiskSpace.size(appFolder), spiceBytes: spiceFolder.map { try InstallerDiskSpace.size($0) } ?? 0), volume: diskVolume)
             progress(2, "Saving your current setup")
             let backup = paths.backups.appendingPathComponent("setup-\(UUID().uuidString)")
             try files.createDirectory(at: backup, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             backupURL = backup
             let updateState = try SpotifyUpdateState(directory: paths.spotifyUpdates, backup: backup)
             updateSnapshot = updateState
-            try JSONEncoder().encode(updateState).write(to: backup.appendingPathComponent("spotify-updates.json"), options: .atomic)
+            try InstallerFiles.save(updateState, to: backup.appendingPathComponent("spotify-updates.json"))
+            journal = InstallJournal(spotify: paths.spotify, updateState: updateState)
+            try journal!.save(in: backup)
             if blockSpotifyUpdates { try updateState.prepareForBlock() }
             try closeSpotify()
             let enumerator = files.enumerator(at: paths.resources, includingPropertiesForKeys: nil)
             let writable = files.isWritableFile(atPath: paths.resources.path) && (enumerator?.allObjects as? [URL] ?? []).allSatisfy { files.isWritableFile(atPath: $0.path) }
             if !writable { try authorizeSpotify(paths.resources) }
-            let protected = [paths.tagify, paths.config.appendingPathComponent("config-xpui.ini"),
-                             paths.binary.deletingLastPathComponent(), paths.state,
-                             paths.config.appendingPathComponent("Backup"), paths.config.appendingPathComponent("Extracted"),
-                             paths.resources.appendingPathComponent("Apps"), paths.resources.appendingPathComponent("xpui.spa")]
-            // Some older installations put state and config in the same folder. Avoid overlapping snapshots.
-            let distinct = protected.filter { candidate in
-                !protected.contains { $0 != candidate && candidate.path.hasPrefix($0.path + "/") }
-            }
-            snapshot = try InstallSnapshot(directory: backup, paths: Array(Set(distinct)))
+            snapshot = try InstallSnapshot(directory: backup, paths: paths.protectedPaths)
+            journal!.hasSnapshot = true
+            try journal!.save(in: backup)
             writeLog("Backup: \(backup.path)")
             progress(3, "Setting up Spicetify")
-            let binaryFolder = paths.binary.deletingLastPathComponent()
-            try files.createDirectory(at: binaryFolder, withIntermediateDirectories: true)
-            // Use the full release, including its matching jsHelper files; leave themes and extensions alone.
-            for source in try files.contentsOfDirectory(at: spiceFolder, includingPropertiesForKeys: nil) {
-                let destination = binaryFolder.appendingPathComponent(source.lastPathComponent)
-                if files.fileExists(atPath: destination.path) { try files.removeItem(at: destination) }
-                try files.copyItem(at: source, to: destination)
+            if let source = spiceFolder {
+                try SpicetifyDistribution.install(from: source, to: paths.binary.deletingLastPathComponent(), log: writeLog)
             }
             let reported = try run(paths.binary.path, ["-v"], failure: "Spicetify couldn't start on this Mac. Try again.")
-            guard reported == spiceRelease.tag_name.replacingOccurrences(of: "v", with: "") else {
-                throw InstallerFailure(message: "Spicetify couldn't be verified. Try again.")
+            guard InstalledVersion(reported) == InstalledVersion(spiceVersion) else {
+                throw InstallerFailure(message: "Spicetify couldn't be verified. Try again.", reason: "spicetify_verification")
             }
             progress(4, "Installing Tagify")
             try bootstrap(appFolder)
             try files.createDirectory(at: paths.tagify.deletingLastPathComponent(), withIntermediateDirectories: true)
             if files.fileExists(atPath: paths.tagify.path) { try files.removeItem(at: paths.tagify) }
             try files.copyItem(at: appFolder, to: paths.tagify)
+            // Optional historical linking must never block installation or change app consent.
+            prepareAnalyticsHandoff(paths.tagify)
             try spice(["config", "spotify_path", paths.resources.path, "prefs_path", paths.prefs.path])
             try spice(["config", "custom_apps", "tagify"])
             progress(5, "Checking Tagify in Spotify")
@@ -538,14 +723,17 @@ final class TagifyInstaller {
                [paths.state.appendingPathComponent("Backup/xpui.spa"), paths.state.appendingPathComponent("xpui.spa")].contains(where: { files.fileExists(atPath: $0.path) }) {
                 try spice(["restore", "backup", "apply"])
             } else { try spice(["backup", "apply"]) }
-            let appliedConfig = try String(contentsOf: paths.config.appendingPathComponent("config-xpui.ini"), encoding: .utf8)
-            guard Self.iniValue(appliedConfig, section: "AdditionalOptions", key: "custom_apps")?.split(separator: "|").map({ $0.trimmingCharacters(in: .whitespaces) }).contains("tagify") == true,
-                  files.fileExists(atPath: paths.resources.appendingPathComponent("Apps/xpui/spicetify-routes-tagify.js").path),
-                  files.fileExists(atPath: paths.resources.appendingPathComponent("Apps/xpui/extensions/tagify/extension.js").path) else {
-                throw InstallerFailure(message: "Tagify couldn't be confirmed in Spotify. Try again.")
-            }
             progress(5, blockSpotifyUpdates ? "Blocking Spotify updates" : "Allowing Spotify updates")
             try setSpotifyUpdates(blocked: blockSpotifyUpdates)
+            let verified = SetupStatus.inspect(paths: paths, command: { executable, args, _ in try self.command(executable, args, self.environment) })
+            guard verified.ready, verified.tagifyVersion == version,
+                  InstalledVersion(verified.spicetifyVersion ?? "") == InstalledVersion(spiceVersion),
+                  verified.updatesBlocked == blockSpotifyUpdates else {
+                throw InstallerFailure(message: "Tagify couldn't be confirmed in Spotify. Your previous setup will be restored. Try again.", reason: "verification")
+            }
+            journal!.status = .committed
+            try journal!.save(in: backup)
+            pruneBackups()
             writeLog("RESULT: SUCCESS. Tagify \(version), Spicetify \(reported).")
             progress(6, "Tagify is ready")
             return version
@@ -554,17 +742,21 @@ final class TagifyInstaller {
             if snapshot != nil || updateSnapshot != nil {
                 progress(5, "Restoring your previous setup")
                 var restoreFailed = false
-                do { try updateSnapshot?.restore() }
-                catch { restoreFailed = true; writeLog("Update setting restore failed: \(error)") }
                 do { try snapshot?.restore() }
                 catch { restoreFailed = true; writeLog("Restore failed: \(error)") }
+                do { try updateSnapshot?.restore() }
+                catch { restoreFailed = true; writeLog("Update setting restore failed: \(error)") }
                 if restoreFailed {
-                    throw InstallerFailure(message: "Setup stopped, and your previous setup couldn't be fully restored. Open the installation log for help. Your saved copy is available in Installer Backups.")
+                    throw InstallerFailure(message: "Setup stopped, and your previous setup couldn't be fully restored. Open the installation log for help. Your saved copy is available in Installer Backups.", reason: "rollback")
+                }
+                if var record = journal, let backup = backupURL {
+                    record.status = .restored
+                    try record.save(in: backup)
                 }
                 writeLog("Previous setup restored.")
             }
             if let failure = error as? InstallerFailure { throw failure }
-            throw InstallerFailure(message: "Setup couldn't finish. Check your connection and available disk space, then try again. Open the log if you need help.")
+            throw InstallerFailure(message: "Setup couldn't finish. Check your connection and available disk space, then try again. Open the log if you need help.", reason: InstallerAnalyticsFailure.reason(error))
         }
     }
 

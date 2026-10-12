@@ -19,11 +19,15 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { faDiscord } from "@fortawesome/free-brands-svg-icons";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
+import { useProductAnalyticsView } from "@/features/product-analytics/useProductAnalyticsView";
+import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 
 interface DataManagerProps {
   onExportTagData: () => Promise<void>;
   onImportTagData: (data: unknown) => Promise<void>;
-  onExportRekordbox: () => void;
+  /** Opens or closes the full-size Stats view. */
+  onOpenStats: () => void;
+  statsOpen?: boolean;
   onResetTagifyData: () => Promise<void>;
   onRetryMigration: () => Promise<OrchestratorResult>;
   historyControls?: React.ReactNode;
@@ -36,7 +40,8 @@ const SHOW_UPDATE_PROTECTION_BUTTON_KEY =
 const DataManager: React.FC<DataManagerProps> = ({
   onExportTagData,
   onImportTagData,
-  onExportRekordbox,
+  onOpenStats,
+  statsOpen = false,
   onResetTagifyData,
   onRetryMigration,
   historyControls,
@@ -44,6 +49,7 @@ const DataManager: React.FC<DataManagerProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [showMainSettings, setShowMainSettings] = useState(false);
+  useProductAnalyticsView(showMainSettings ? "settings_opened" : null);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [showSpotifyUpdateHelp, setShowSpotifyUpdateHelp] = useState(false);
   const [showSupportButtons, setShowSupportButtons] = useLocalStorage(
@@ -61,6 +67,7 @@ const DataManager: React.FC<DataManagerProps> = ({
 
   // Update the export button handler to handle async
   const handleExportClick = async () => {
+    recordProductInteraction("export_requested");
     try {
       await onExportTagData();
     } catch (error) {
@@ -69,6 +76,7 @@ const DataManager: React.FC<DataManagerProps> = ({
   };
 
   const handleImportClick = () => {
+    recordProductInteraction("import_requested");
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
@@ -100,6 +108,7 @@ const DataManager: React.FC<DataManagerProps> = ({
           return;
         }
 
+        recordProductInteraction("import_submitted");
         await onImportTagData(data as TagDataStructure);
         // Notification is handled by the importer.
       } catch (error) {
@@ -137,8 +146,10 @@ const DataManager: React.FC<DataManagerProps> = ({
         </button>
         <button
           className={`${styles.pillButton} ${styles.statsButton}`}
-          onClick={onExportRekordbox}
-          title="View your tag stats"
+          onClick={onOpenStats}
+          title={statsOpen ? "Close your stats" : "View your stats"}
+          aria-label={statsOpen ? "Close your stats" : "View your stats"}
+          aria-pressed={statsOpen}
         >
           <FontAwesomeIcon icon={faChartSimple} />
         </button>

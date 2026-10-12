@@ -4,7 +4,7 @@ import { findMacInstallerDownload, INSTALLER_RELEASES_URL } from "../installerDo
 function release(version: string, name = "TagifyInstaller-mac.dmg") {
   return {
     tag_name: version, draft: false, prerelease: false,
-    assets: [{ name, browser_download_url: `${INSTALLER_RELEASES_URL}/download/${version}/${name}` }],
+    assets: [{ name, browser_download_url: `${INSTALLER_RELEASES_URL}/${version}/${name}` }],
   };
 }
 

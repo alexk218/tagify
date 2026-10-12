@@ -5,6 +5,7 @@ const params = new URLSearchParams(location.search);
 const layout = params.get("layout") || "modern";
 const legacy = layout === "legacy";
 const aliased = layout === "aliased";
+const recommended = layout === "recommended";
 const uris = ["spotify:track:example1", "spotify:track:example2"];
 const tracks = Object.fromEntries(uris.map((uri, index) => [uri, {
   rating: index ? 3.5 : 5, energy: 6, tagIds: [], dateCreated: 1, dateModified: 2,
@@ -22,6 +23,7 @@ export const loadSmartPlaylistsFromStorage = async () => [];
 export const smartPlaylistSyncService = { startBackgroundReconciliation() {}, async syncTrack() {} };
 export const storageService = { initialize: async () => ({ status: "ready" }) };
 export const flushLocalPersistence = async () => {};
+export const isLocalPersistencePaused = () => false;
 // Saved songs live in memory; edits change them like the real library does.
 export const indexedDBStorage = {
   init: async () => true,
@@ -60,10 +62,11 @@ function renderTracklist() {
   const grid = document.createElement("div");
   grid.className = legacy ? "main-trackList-indexable" : "ch63k01sHw xljhkx9cbmxKi0ds5o5e Kyg5ODGXtAjkKxfxWeNL";
   grid.setAttribute("role", "grid");
-  grid.setAttribute("aria-colcount", "4");
+  grid.setAttribute("aria-colcount", recommended ? "3" : "4");
+  if (recommended) grid.style.setProperty("--grid-template-columns", "[first] minmax(180px,4fr) [var1] minmax(0,2fr) [last] 120px");
   const body = document.createElement("div");
   body.setAttribute("role", "presentation");
-  const rows = [null, ...uris];
+  const rows = recommended ? uris : [null, ...uris];
   rows.forEach((uri, index) => {
     const row = document.createElement("div");
     row.className = legacy || aliased
@@ -74,13 +77,24 @@ function renderTracklist() {
     if (uri) Object.assign(row, { __reactFiber$fixture: { memoizedProps: { uri } } });
     const columns = !legacy && uri ? document.createElement("div") : row;
     if (columns !== row) { columns.className = "bfY_tgYxTRckp8L2joiq"; columns.setAttribute("role", "presentation"); row.append(columns); }
-    columns.style.cssText = "display:grid;grid-template-columns:16px 3fr 2fr minmax(120px,1fr);min-height:36px";
-    [uri ? String(index) : "#", uri ? `<a href="/track/example${index}">Example song ${index}</a>` : "Title", uri ? "Example album" : "Album", uri ? "3:42" : "Duration"].forEach((text, columnIndex) => {
+    columns.style.cssText = recommended
+      ? "display:grid;grid-template-columns:var(--grid-template-columns);min-height:56px"
+      : "display:grid;grid-template-columns:16px 3fr 2fr minmax(120px,1fr);min-height:36px";
+    const texts = recommended
+      ? [`<div style="display:flex;gap:12px;align-items:center;min-width:0"><div style="flex-shrink:0;width:48px;height:48px;background:#645139">♫</div><div style="min-width:0"><a data-testid="internal-track-link" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" href="/track/example${index + 1}">${index ? "A much longer recommended song title with a remix version" : "Not A Lot Left"}</a><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Example artist</div></div></div>`, "Not A Lot Left / The Beach", "<button>Add</button>"]
+      : [uri ? String(index) : "#", uri ? `<a href="/track/example${index}">Example song ${index}</a>` : "Title", uri ? "Example album" : "Album", uri ? "3:42" : "Duration"];
+    texts.forEach((text, columnIndex) => {
       const cell = document.createElement("div");
       cell.setAttribute("role", uri ? "gridcell" : "columnheader");
       cell.setAttribute("aria-colindex", String(columnIndex + 1));
       if (legacy) cell.className = columnIndex === 3 ? "main-trackList-rowSectionEnd" : "main-trackList-rowSectionVariable";
       else cell.className = "hashedSpotifyCell";
+      if (recommended) {
+        cell.style.minWidth = "0";
+        if (columnIndex === 0) cell.className = "main-trackList-rowSectionStart";
+        if (columnIndex === 1) cell.style.cssText = "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+        if (columnIndex === texts.length - 1) cell.style.gridColumn = "last";
+      }
       cell.innerHTML = text;
       columns.append(cell);
     });

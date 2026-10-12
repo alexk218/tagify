@@ -1,5 +1,5 @@
 import type { TrackData } from "@/types/tagData";
-import { normalizeRecordingIdentity, recordingAnnotations, recordingConflict, recordingName, sameRecording } from "./recordingReuse";
+import { compatibleRecordingLinks, normalizeRecordingIdentity, recordingAnnotations, recordingConflict, recordingName, sameRecording } from "./recordingReuse";
 
 export type RecordingSet = { key: string; entries: [string, TrackData][] };
 export type RecordingChoices = Pick<TrackData, "tagIds" | "rating" | "energy">;
@@ -23,7 +23,7 @@ export function confirmedRecordingSets(tracks: Record<string, TrackData>): Recor
   for (const [uri, data] of Object.entries(tracks).sort(([a], [b]) => a.localeCompare(b))) {
     const identity = normalizeRecordingIdentity(data.recordingIdentity);
     if (!isSpotifySong(uri) || data.recordingReuseDisabled || !identity) continue;
-    const key = JSON.stringify([identity.isrc, identity.artistIds, recordingName(identity.name)]);
+    const key = JSON.stringify([identity.artistIds, recordingName(identity.name)]);
     const sets = buckets.get(key) || [];
     // Every pair must fit the duration tolerance; a chain of near matches is unsafe.
     let set = sets.find(candidate => candidate.entries.every(([, member]) => sameRecording(identity, member.recordingIdentity)));
@@ -45,7 +45,7 @@ export function recordingDisplayKeys(tracks: Record<string, TrackData>) {
     const members = groups.get(group) || []; members.push(entry); groups.set(group, members);
   }
   for (const [group, members] of groups) {
-    if (!members.every(([, a]) => members.every(([, b]) => sameRecording(a.recordingIdentity, b.recordingIdentity) && recordingAnnotations(a) === recordingAnnotations(b)))) continue;
+    if (!members.every(([, a]) => members.every(([, b]) => compatibleRecordingLinks(a, b) && recordingAnnotations(a) === recordingAnnotations(b)))) continue;
     members.forEach(([uri]) => keys.set(uri, group));
   }
   return keys;

@@ -1,3 +1,4 @@
+import { recordMeaningfulAction } from "@/features/discovery-survey";
 import { trackEditHistory, type EditSession } from "@/services/TrackEditHistory";
 import { expandRecordingEdits } from "@/features/recording-reuse/utils/recordingReuse";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
@@ -115,7 +116,7 @@ export function useTagDataTrackActions({
           };
         }
 
-        const trackInfo = await spotifyService.getTrack(trackUri);
+        const trackInfo = await spotifyService.getTrack(trackUri, undefined, "background", "track-details");
         if (trackInfo) {
           return {
             name: trackInfo.name,
@@ -135,88 +136,52 @@ export function useTagDataTrackActions({
     [],
   );
 
-  // Creating a song waits for its details, so overlapping edits to the same
-  // new song share one creation and apply in the order they were made.
-  const pendingTrackCreationsRef = useRef(new Map<string, Promise<boolean>>());
+  const audioEdits = useRef(new Map<string, number>());
+  const pendingMetadata = useRef(new Map<string, object>());
+  const hydrateTrack = useCallback((trackUri: string, providedMetadata?: TrackMetadata, recreated = false) => {
+    const account = getTagifyDatabaseName(), key = `${account}:${trackUri}`;
+    if (pendingMetadata.current.has(key) && !recreated) return;
+    const original = latestTagDataRef.current.tracks[trackUri];
+    const token = {}, audioRevision = audioEdits.current.get(trackUri) ?? 0;
+    pendingMetadata.current.set(key, token);
+    void (async () => {
+      const metadata = providedMetadata || await getTrackMetadata(trackUri);
+      if (account !== getTagifyDatabaseName() || pendingMetadata.current.get(key) !== token) return;
+      let audio: { bpm: number | null; camelotKey: string | null } | null = null;
+      try {
+        if (!trackUri.startsWith("spotify:local:")) audio = await spotifyApiService.fetchAudioFeatures(trackUri, { priority: "background" });
+      } catch { /* Keep any metadata already available when audio lookup is paused. */ }
+      if (account !== getTagifyDatabaseName() || pendingMetadata.current.get(key) !== token) return;
+      const data = latestTagDataRef.current, current = data.tracks[trackUri];
+      if (!current || current.dateCreated !== original?.dateCreated) return;
+      const updated = metadata ? withTrackMetadata(current, metadata, current.dateModified ?? 0) : { ...current };
+      const canFillAudio = audioRevision === 0 && (audioEdits.current.get(trackUri) ?? 0) === audioRevision && !trackEditHistory.getSnapshot().redo.some(entry => entry.changes[trackUri]);
+      if (canFillAudio && current.bpm === original.bpm && current.bpm == null && audio?.bpm != null) updated.bpm = audio.bpm;
+      if (canFillAudio && current.camelotKey === original.camelotKey && !current.camelotKey && audio?.camelotKey) updated.camelotKey = audio.camelotKey;
+      if (JSON.stringify(updated) === JSON.stringify(current)) return;
+      commitDataSnapshot({ ...data, tracks: { ...data.tracks, [trackUri]: updated } });
+      syncTrackAfterDelay(trackUri);
+    })().catch(() => { /* Keep the saved edit; bounded backfill can retry optional details. */ })
+      .finally(() => { if (pendingMetadata.current.get(key) === token) pendingMetadata.current.delete(key); });
+  }, [commitDataSnapshot, getTrackMetadata, latestTagDataRef, syncTrackAfterDelay]);
 
-  const createTrackData = useCallback(
-    async (trackUri: string, providedMetadata?: TrackMetadata): Promise<boolean> => {
-      const metadata = providedMetadata || (await getTrackMetadata(trackUri));
-
-      let bpm: number | null = null;
-      let camelotKey: string | null = null;
-      if (!trackUri.startsWith("spotify:local:")) {
-        try {
-          const audioFeatures = await spotifyApiService.fetchAudioFeatures(trackUri);
-          bpm = audioFeatures.bpm;
-          camelotKey = audioFeatures.camelotKey;
-        } catch (error) {
-          console.error("Error fetching audio features for new track:", error);
-        }
-      }
-
-      // Other edits may have saved while this one waited.
-      const latestData = latestTagDataRef.current;
-      if (latestData.tracks[trackUri]) {
-        return false;
-      }
-
-      commitDataSnapshot({
-        ...latestData,
-        tracks: {
-          ...latestData.tracks,
-          [trackUri]: createInitialTrackData(
-            Date.now(),
-            bpm,
-            metadata || undefined,
-            camelotKey,
-          ),
-        },
-      });
-      return true;
-    },
-    [commitDataSnapshot, getTrackMetadata, latestTagDataRef],
-  );
-
-  /** Saves the song if needed; resolves true when this call created it. */
   const ensureTrackData = useCallback(
-    async (trackUri: string, providedMetadata?: TrackMetadata): Promise<boolean> => {
-      const existingTrack = latestTagDataRef.current.tracks[trackUri];
-
-      if (!existingTrack) {
-        const pendingCreation = pendingTrackCreationsRef.current.get(trackUri);
-        if (pendingCreation) {
-          await pendingCreation;
-          return false;
-        }
-
-        const creation = createTrackData(trackUri, providedMetadata).finally(() => {
-          pendingTrackCreationsRef.current.delete(trackUri);
-        });
-        pendingTrackCreationsRef.current.set(trackUri, creation);
-        // Awaiting here, as later edits do above, keeps them in order.
-        return await creation;
+    (trackUri: string, providedMetadata?: TrackMetadata): boolean => {
+      const data = latestTagDataRef.current, existing = data.tracks[trackUri];
+      if (!existing) {
+        commitDataSnapshot({ ...data, tracks: { ...data.tracks,
+          [trackUri]: createInitialTrackData(Date.now(), null, providedMetadata),
+        } });
+        hydrateTrack(trackUri, providedMetadata, true);
+        return true;
       }
-
-      if (!existingTrack.name || !existingTrack.artists) {
-        const metadata = providedMetadata || (await getTrackMetadata(trackUri));
-        const latestData = latestTagDataRef.current;
-        const latestTrack = latestData.tracks[trackUri];
-
-        if (metadata && latestTrack) {
-          commitDataSnapshot({
-            ...latestData,
-            tracks: {
-              ...latestData.tracks,
-              [trackUri]: withTrackMetadata(latestTrack, metadata, Date.now()),
-            },
-          });
-        }
-      }
-
+      if ((!existing.name || !existing.artists) && providedMetadata) {
+        commitDataSnapshot({ ...data, tracks: { ...data.tracks,
+          [trackUri]: withTrackMetadata(existing, providedMetadata, existing.dateModified ?? 0),
+        } });
+      } else if (!existing.name || !existing.artists) hydrateTrack(trackUri);
       return false;
-    },
-    [commitDataSnapshot, createTrackData, getTrackMetadata, latestTagDataRef],
+    }, [commitDataSnapshot, hydrateTrack, latestTagDataRef],
   );
 
   /**
@@ -250,6 +215,11 @@ export function useTagDataTrackActions({
       await flushLocalPersistence();
       const currentData = latestTagDataRef.current;
       const finalTrackDataMap = await indexedDBStorage.applyBulkTagUpdates(updates, databaseName);
+      if (databaseName === getTagifyDatabaseName()) {
+        const manual = updates.filter(update => !update.automaticRuleIds?.length && Object.hasOwn(finalTrackDataMap, update.trackUri));
+        if (manual.some(update => JSON.stringify(currentData.tracks[update.trackUri]?.tagIds ?? []) !== JSON.stringify(finalTrackDataMap[update.trackUri]?.tagIds ?? []))) void recordMeaningfulAction("tagging");
+        if (manual.some(update => update.newRating !== undefined && update.newRating !== (currentData.tracks[update.trackUri]?.rating ?? 0))) void recordMeaningfulAction("rating");
+      }
       if (refreshPersistedTagData) await refreshPersistedTagData();
       else commitDataSnapshot(await indexedDBStorage.loadAllStrict());
       const addedUris = Object.keys(finalTrackDataMap).filter((uri) =>
@@ -276,7 +246,9 @@ export function useTagDataTrackActions({
         return;
       }
 
-      await ensureTrackData(trackUri);
+      audioEdits.current.set(trackUri, (audioEdits.current.get(trackUri) ?? 0) + 1);
+      while (audioEdits.current.size > 1000) audioEdits.current.delete(audioEdits.current.keys().next().value!);
+      ensureTrackData(trackUri);
       const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
 
@@ -306,7 +278,9 @@ export function useTagDataTrackActions({
         return;
       }
 
-      await ensureTrackData(trackUri);
+      audioEdits.current.set(trackUri, (audioEdits.current.get(trackUri) ?? 0) + 1);
+      while (audioEdits.current.size > 1000) audioEdits.current.delete(audioEdits.current.keys().next().value!);
+      ensureTrackData(trackUri);
       const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
 
@@ -353,7 +327,7 @@ export function useTagDataTrackActions({
     ) => {
       const session = trackEditHistory.capture("single", [trackUri]);
       if (session && isHistoryBusy()) return;
-      const createdTrack = await ensureTrackData(trackUri, metadata);
+      const createdTrack = ensureTrackData(trackUri, metadata);
       const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
 
@@ -369,6 +343,7 @@ export function useTagDataTrackActions({
       );
 
       commitDataSnapshot(nextData, session);
+      void recordMeaningfulAction("tagging");
       syncTrackAfterDelay(trackUri);
 
       if (createdTrack && finalTrackData !== null) {
@@ -392,7 +367,7 @@ export function useTagDataTrackActions({
     ) => {
       const session = trackEditHistory.capture("single", [trackUri]);
       if (session && isHistoryBusy()) return;
-      const createdTrack = await ensureTrackData(trackUri, metadata);
+      const createdTrack = ensureTrackData(trackUri, metadata);
       const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
 
@@ -408,6 +383,7 @@ export function useTagDataTrackActions({
       );
 
       commitDataSnapshot(nextData, session);
+      if (trackData.rating !== rating) void recordMeaningfulAction("rating");
       syncTrackAfterDelay(trackUri);
 
       if (createdTrack && finalTrackData !== null) {
@@ -431,7 +407,7 @@ export function useTagDataTrackActions({
     ) => {
       const session = trackEditHistory.capture("single", [trackUri]);
       if (session && isHistoryBusy()) return;
-      const createdTrack = await ensureTrackData(trackUri, metadata);
+      const createdTrack = ensureTrackData(trackUri, metadata);
       const currentData = latestTagDataRef.current;
       const trackData = currentData.tracks[trackUri];
 

@@ -14,7 +14,10 @@ describe("requestSpicetifyGraphQL", () => {
   it("does not treat a GraphQL rate-limit answer as successful data", async () => {
     const error = { message: "Too many requests", extensions: { http: { status: 429 } } };
     Object.defineProperty(Spicetify, "GraphQL", { value: { Request: vi.fn().mockResolvedValue({ errors: [error] }) }, configurable: true });
-    await expect(requestSpicetifyGraphQL({ name: "getTrack" })).rejects.toEqual(error);
+    await expect(requestSpicetifyGraphQL({ name: "getTrack" })).rejects.toMatchObject({
+      ...error,
+      spotifyFailure: { kind: "server-429", dispatched: true, status: 429 },
+    });
   });
 
   it("falls back to GraphQL.Handler when GraphQL.Request is unavailable", async () => {

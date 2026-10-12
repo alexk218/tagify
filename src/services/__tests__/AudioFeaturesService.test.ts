@@ -38,43 +38,17 @@ describe("AudioFeaturesService", () => {
       "https://spclient.wg.spotify.com/audio-attributes/v1/audio-analysis/client-fallback",
       {
         headers: { Authorization: "Bearer test-token" },
+        signal: expect.any(AbortSignal),
       },
     );
   });
 
-  it("falls back to Spotify Web API audio analysis when client audio analysis is unavailable", async () => {
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 403,
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({
-          track: {
-            tempo: 127.6,
-            key: 9,
-            mode: 0,
-          },
-        }),
-      } as unknown as Response);
-
+  it("does not probe restricted Web APIs when desktop audio data is unavailable", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 404 }));
     const service = new AudioFeaturesService();
-    const features = await service.getAudioFeaturesByTrackId("analysis-fallback");
-
-    expect(features).toEqual({
-      bpm: 128,
-      key: "A",
-      mode: 0,
-      camelotKey: "8A",
-    });
+    expect(await service.getAudioFeaturesByTrackId("analysis-fallback")).toBeNull();
+    expect(await service.getAudioFeaturesByTrackId("analysis-fallback")).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls.every(([url]) => String(url).startsWith("https://spclient.wg.spotify.com/"))).toBe(true);
   });
 });

@@ -57,8 +57,8 @@ describe("Update reminder", () => {
   });
 });
 
-const releasesUrl = "https://github.com/alexk218/tagify-installer/releases";
-const macUrl = `${releasesUrl}/download/v1.0.2/TagifyInstaller-mac.dmg`;
+const releasesUrl = "https://tagify.fm/releases/manager";
+const macUrl = `${releasesUrl}/v1.0.2/TagifyInstaller-mac.dmg`;
 const macReleases = [
   { tag_name: "v1.0.3", draft: false, prerelease: false, assets: [{ name: "TagifyInstaller.exe" }] },
   { tag_name: "v1.0.2", draft: false, prerelease: false, assets: [{ name: "TagifyInstaller-mac.dmg", browser_download_url: macUrl }] },
@@ -120,7 +120,7 @@ describe("Platform installer guidance", () => {
     expect(fetch).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "I Need Installer" }));
     fireEvent.click(screen.getByRole("button", { name: "Download Installer" }));
-    expect(window.open).toHaveBeenCalledWith(`${releasesUrl}/latest/download/TagifyInstaller.exe`, "_blank", "noopener,noreferrer");
+    expect(window.open).toHaveBeenCalledWith("https://tagify.fm/download/windows", "_blank", "noopener,noreferrer");
   });
 
   it("shows manual instructions on Linux without Windows installer tabs", () => {

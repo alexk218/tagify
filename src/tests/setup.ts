@@ -14,6 +14,9 @@ const localStorageMock = {
   }),
   clear: vi.fn(() => {
     storage.clear();
+    (globalThis as any).__tagifyBackgroundPolicyV1?.clear();
+    (globalThis as any).__tagifyRequestAccountingV1?.reset();
+    (globalThis as any).__tagifyPlaylistVersionsV1?.clear();
   }),
   key: vi.fn((index: number) => Array.from(storage.keys())[index] ?? null),
   get length() {
@@ -129,6 +132,9 @@ if (!HTMLElement.prototype.scrollIntoView) {
 
 beforeEach(() => {
   storage.clear();
+  (globalThis as any).__tagifyBackgroundPolicyV1?.clear();
+  (globalThis as any).__tagifyRequestAccountingV1?.reset();
+  (globalThis as any).__tagifyPlaylistVersionsV1?.clear();
   localStorageMock.getItem.mockClear();
   localStorageMock.setItem.mockClear();
   localStorageMock.removeItem.mockClear();
@@ -138,4 +144,10 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  (globalThis as any).__tagifySpotifyRequestsV1?.reset();
+  (globalThis as any).__tagifySmartPlaylistSchedulesV1?.clear();
+  (globalThis as any).__tagifyPendingWritesV1?.clear();
+  delete (globalThis as any).__tagifySpotifyRecoveryNoticeAt;
+  const versions = (globalThis as any).__tagifyReadVersionsV2;
+  if (versions) { versions.epoch++; versions.resources.clear(); }
 });

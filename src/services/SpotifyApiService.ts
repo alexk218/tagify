@@ -1,14 +1,21 @@
+import { rememberPlaylistAdditions } from "./SpotifyPlaylistWriteOrigins";
+import { spotifyRequestAccounting } from "@/utils/spotifyRequestAccounting";
+import type { RequestOptions } from "@/utils/RateLimiter";
+import { spotifyFetch, spotifyRead, spotifyWrite, spotifyAccountKey, promoteSpotifyRequest, spotifyReadGeneration, assertSpotifyWriteSettled, throwIfSpotifyRequestStopped } from "./SpotifyRequests";
 import { rememberRuleFacts } from "@/features/automatic-tags/facts";
 import { normalizeRecordingIdentity } from "@/features/recording-reuse/utils/recordingReuse";
 import { normalizeQueuePage } from "@/features/track-session/utils/taggingQueue.logic";
 import { trackArtistIdentitiesStore, type TrackArtist } from "@/services/trackArtistIdentities";
 import { audioFeaturesService } from "@/services/AudioFeaturesService";
 import { requestSpicetifyGraphQL } from "@/services/spicetifyGraphQL";
-import { graphqlRateLimiter } from "@/utils/RateLimiter";
 
 const ALBUM_GRAPHQL_PAGE_SIZE = 50;
 // Ten pages cover even very long compilations without endless paging.
 const ALBUM_TRACK_PAGE_LIMIT = 10;
+
+export interface PlaylistTrackUpdateOptions extends RequestOptions {
+  beforeWrite?: (uris: string[], action: "add" | "remove") => Promise<void>;
+}
 
 export interface TrackAudioFeaturesResult {
   bpm: number | null;
@@ -55,6 +62,7 @@ export interface SpotifyArtistMetadata {
 
 class SpotifyApiService {
   private playlistReadsBlockedUntil = 0;
+  private recordingReadsBlockedUntil = 0;
   private getAccessToken(): string | null {
     return (
       Spicetify.Platform.AuthorizationAPI?.getState?.()?.token?.accessToken ||
@@ -63,13 +71,44 @@ class SpotifyApiService {
     );
   }
 
-  getRecordingIdentity = async (uri: string, signal?: AbortSignal) => {
+  getRecordingIdentity = async (uri: string, signal?: AbortSignal, options?: RequestOptions) => {
     const id = uri.match(/^spotify:track:([A-Za-z0-9]{22})$/)?.[1];
     if (!id) throw new Error("Recording matching is available for Spotify songs.");
-    if (Date.now() < this.playlistReadsBlockedUntil) throw new Error("Spotify needs a short break. Wait a moment, then try again.");
     const token = this.getAccessToken();
     if (!token) throw new Error("Sign in to Spotify again to check this recording.");
-    const response = await fetch(`https://api.spotify.com/v1/tracks/${id}`, { headers: { Authorization: `Bearer ${token}` }, signal });
+    // Desktop metadata carries the same ISRC without relying on Web API availability.
+    if (Spicetify.URI?.idToHex && Spicetify.URI?.hexToId && Date.now() >= this.recordingReadsBlockedUntil) {
+      try {
+        const hex = Spicetify.URI.idToHex(id);
+        if (!/^[a-f0-9]{32}$/i.test(hex)) throw new Error("Invalid Spotify song identity");
+        const response = await spotifyFetch(`https://spclient.wg.spotify.com/metadata/4/track/${hex}`, {
+          headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal,
+        }, undefined, options);
+        if (response.status === 429) {
+          const retry = Number(response.headers.get("Retry-After"));
+          this.recordingReadsBlockedUntil = Date.now() + (Number.isFinite(retry) && retry > 0 ? retry : 60) * 1000;
+        }
+        if (response.ok) {
+          const value = await response.json();
+          if (typeof value.gid === "string" && value.gid.toLowerCase() === hex.toLowerCase()) {
+            const identity = normalizeRecordingIdentity({
+              isrc: value.external_id?.find((entry: { type?: string }) => entry.type?.toLowerCase() === "isrc")?.id?.toUpperCase(),
+              artistIds: value.artist?.map((artist: { gid?: string }) =>
+                typeof artist.gid === "string" && /^[a-f0-9]{32}$/i.test(artist.gid) ? Spicetify.URI.hexToId(artist.gid) : undefined),
+              durationMs: value.duration, name: value.name,
+            });
+            if (identity) return identity;
+          }
+        }
+      } catch (error) {
+      throwIfSpotifyRequestStopped(error);
+        if (signal?.aborted) throw error;
+        // Unsupported desktop metadata can still be confirmed by the Web API.
+      }
+    }
+    if (signal?.aborted) throw new DOMException("Recording check cancelled", "AbortError");
+    if (Date.now() < this.playlistReadsBlockedUntil) throw new Error("Spotify needs a short break. Wait a moment, then try again.");
+    const response = await spotifyFetch(`https://api.spotify.com/v1/tracks/${id}`, { headers: { Authorization: `Bearer ${token}` }, signal }, undefined, options);
     if (!response.ok) {
       if (response.status === 429) {
         const retry = Number(response.headers.get("Retry-After"));
@@ -87,13 +126,14 @@ class SpotifyApiService {
     try {
       if (useWebApi) throw new Error("Use precise library paging");
       const native = playlistId
-        ? await (Spicetify.Platform.PlaylistAPI as any).getContents(`spotify:playlist:${playlistId}`, { offset, limit })
-        : await (Spicetify.Platform.LibraryAPI as any).getTracks({ offset, limit });
+        ? await spotifyRead<any>(`desktop:playlist:getContents:${JSON.stringify([`spotify:playlist:${playlistId}`,{ offset, limit }])}`, () => (Spicetify.Platform.PlaylistAPI as any).getContents(`spotify:playlist:${playlistId}`, { offset, limit }), { signal })
+        : await spotifyRead<any>(`desktop:library:getTracks:${JSON.stringify([{ offset, limit }])}`, () => (Spicetify.Platform.LibraryAPI as any).getTracks({ offset, limit }), { signal });
       if (!Array.isArray(native?.items) || native.items.length > limit || (typeof native.offset === "number" && native.offset !== offset)) {
         throw new Error("Desktop library paging is unavailable");
       }
       return { ...normalizeQueuePage(native, offset), backend: "desktop" as const };
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       if (signal?.aborted) throw error;
       if ((error as any)?.status === 429) {
         this.playlistReadsBlockedUntil = Date.now() + 60_000;
@@ -103,7 +143,7 @@ class SpotifyApiService {
     const token = this.getAccessToken();
     if (!token) throw new Error("Spotify needs you to sign in again before checking your library.");
     const endpoint = playlistId ? `playlists/${encodeURIComponent(playlistId)}/items` : "me/tracks";
-    const response = await fetch(`https://api.spotify.com/v1/${endpoint}?limit=${limit}&offset=${offset}`, { headers: { Authorization: `Bearer ${token}` }, signal });
+    const response = await spotifyFetch(`https://api.spotify.com/v1/${endpoint}?limit=${limit}&offset=${offset}`, { headers: { Authorization: `Bearer ${token}` }, signal });
     if (!response.ok) {
       if (response.status === 429) {
         const retry = Number(response.headers.get("Retry-After"));
@@ -112,7 +152,9 @@ class SpotifyApiService {
       }
       throw new Error("Spotify couldn't check those tracks. Make sure you're online and can open this library, then try again.");
     }
-    return { ...normalizeQueuePage(await response.json(), offset), backend: "web" as const };
+    const page = await response.json();
+    if (typeof page.offset === "number" && page.offset !== offset) throw new Error("Spotify repeated a page of your library. Your progress is kept; try again later.");
+    return { ...normalizeQueuePage(page, offset), backend: "web" as const };
   };
 
   createPrivatePlaylist = async (name: string, description = ""): Promise<string> => {
@@ -120,7 +162,7 @@ class SpotifyApiService {
     if (!token) throw new Error("Spotify needs you to sign in again before creating a playlist.");
     let response: Response;
     try {
-      response = await fetch("https://api.spotify.com/v1/me/playlists", {
+      response = await spotifyFetch("https://api.spotify.com/v1/me/playlists", {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ name, description, public: false, collaborative: false }),
       });
@@ -183,16 +225,17 @@ class SpotifyApiService {
 
   getPlaylistMetadata = async (
     playlistUriOrId: string,
+    options?: RequestOptions,
   ): Promise<SpotifyPlaylistMetadata | null> => {
     const playlistUri = this.normalizePlaylistUri(playlistUriOrId);
     if (playlistUri.startsWith("spotify:album:")) {
-      return this.getAlbumMetadata(playlistUri);
+      return this.getAlbumMetadata(playlistUri, options);
     }
 
     try {
-      const metadata = await (
+      const metadata = await spotifyRead<any>(`desktop:playlist:getMetadata:${JSON.stringify([playlistUri])}`, () => (
         Spicetify.Platform.PlaylistAPI as any
-      ).getMetadata(playlistUri);
+      ).getMetadata(playlistUri), options);
 
       if (this.hasUsableName(metadata?.name, "Unknown Playlist")) {
         return {
@@ -221,14 +264,16 @@ class SpotifyApiService {
         };
       }
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.warn("PlaylistAPI metadata lookup failed; trying Web API:", error);
     }
 
-    return this.getPlaylistMetadataFromWebApi(playlistUri);
+    return this.getPlaylistMetadataFromWebApi(playlistUri, options);
   };
 
   private getPlaylistMetadataFromWebApi = async (
     playlistUri: string,
+    options?: RequestOptions,
   ): Promise<SpotifyPlaylistMetadata | null> => {
     try {
       const playlistId = this.extractPlaylistId(playlistUri);
@@ -238,9 +283,9 @@ class SpotifyApiService {
         return null;
       }
 
-      const response = await fetch(
+      const response = await spotifyFetch(
         `https://api.spotify.com/v1/playlists/${playlistId}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+        { headers: { Authorization: `Bearer ${token}` } }, undefined, options,
       );
       if (!response.ok) {
         return null;
@@ -266,6 +311,7 @@ class SpotifyApiService {
         snapshotId: playlist?.snapshot_id || null,
       };
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.warn("Error fetching playlist metadata from Spotify Web API:", error);
       return null;
     }
@@ -273,19 +319,21 @@ class SpotifyApiService {
 
   private getAlbumMetadata = async (
     albumUri: string,
+    options?: RequestOptions,
   ): Promise<SpotifyPlaylistMetadata | null> => {
-    const webApiMetadata = await this.getAlbumMetadataFromWebApi(albumUri);
+    const webApiMetadata = await this.getAlbumMetadataFromWebApi(albumUri, options);
     if (webApiMetadata) {
       return webApiMetadata;
     }
 
-    return this.getAlbumMetadataFromGraphQL(albumUri);
+    return this.getAlbumMetadataFromGraphQL(albumUri, undefined, options);
   };
 
   /** Album details from Spotify's own client API, which keeps working when the Web API is throttled. */
   private getAlbumMetadataFromGraphQL = async (
     albumUri: string,
     pageSize: number = ALBUM_GRAPHQL_PAGE_SIZE,
+    options?: RequestOptions,
   ): Promise<SpotifyPlaylistMetadata | null> => {
     try {
       const { GraphQL, Locale } = Spicetify;
@@ -303,7 +351,7 @@ class SpotifyApiService {
           locale,
           offset: 0,
           limit: pageSize,
-        });
+        }, undefined, options);
         const album = this.findAlbumMetadataNode(response?.data, albumUri);
         const metadata = this.mapAlbumMetadata(albumUri, album, pageSize);
 
@@ -314,6 +362,7 @@ class SpotifyApiService {
 
       return null;
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.error("Error fetching album metadata:", error);
       return null;
     }
@@ -323,30 +372,30 @@ class SpotifyApiService {
    * How many tracks an album has, asked of Spotify's own client API one album
    * at a time. Returns null when Spotify cannot say.
    */
-  getAlbumTrackTotal = async (albumUri: string): Promise<number | null> =>
-    graphqlRateLimiter.execute(`albumTrackTotal:${albumUri}`, async () => {
+  getAlbumTrackTotal = async (albumUri: string, options?: RequestOptions): Promise<number | null> =>
+    (async () => {
       // One track per page keeps the answer small; the total comes with it.
-      const metadata = await this.getAlbumMetadataFromGraphQL(albumUri, 1);
+      const metadata = await this.getAlbumMetadataFromGraphQL(albumUri, 1, options);
       return metadata?.trackCount ?? null;
-    });
+    })();
 
   /**
    * An album's tracks in album order, from Spotify's own client API first (it
-   * keeps working when the Web API is throttled). Null when Spotify cannot say.
+   * shares the same cooldown as the Web API). Null when Spotify cannot say.
    */
-  getAlbumTracks = async (albumUri: string): Promise<SpotifyAlbumTrack[] | null> => {
-    const graphQLTracks = await graphqlRateLimiter
-      .execute(`albumTracks:${albumUri}`, () => this.getAlbumTracksFromGraphQL(albumUri))
-      .catch(() => null);
+  getAlbumTracks = async (albumUri: string, options?: RequestOptions): Promise<SpotifyAlbumTrack[] | null> => {
+    const graphQLTracks = await (() => this.getAlbumTracksFromGraphQL(albumUri, options))()
+      .catch((error) => { throwIfSpotifyRequestStopped(error); return null; });
     if (graphQLTracks && graphQLTracks.length > 0) {
       return graphQLTracks;
     }
 
-    return this.getAlbumTracksFromWebApi(albumUri);
+    return this.getAlbumTracksFromWebApi(albumUri, options);
   };
 
   private getAlbumTracksFromGraphQL = async (
     albumUri: string,
+    options?: RequestOptions,
   ): Promise<SpotifyAlbumTrack[] | null> => {
     const { GraphQL, Locale } = Spicetify;
     const definition =
@@ -364,7 +413,7 @@ class SpotifyApiService {
         locale,
         offset,
         limit: ALBUM_GRAPHQL_PAGE_SIZE,
-      });
+      }, undefined, options);
       const trackPage: { items?: unknown; totalCount?: unknown } | undefined =
         this.findAlbumMetadataNode(response?.data, albumUri)?.tracksV2;
       const items: GraphQLAlbumTrackItem[] = Array.isArray(trackPage?.items)
@@ -407,6 +456,7 @@ class SpotifyApiService {
 
   private getAlbumTracksFromWebApi = async (
     albumUri: string,
+    options?: RequestOptions,
   ): Promise<SpotifyAlbumTrack[] | null> => {
     const albumId = this.extractAlbumId(albumUri);
     const token = this.getAccessToken();
@@ -417,9 +467,9 @@ class SpotifyApiService {
     try {
       const tracks: SpotifyAlbumTrack[] = [];
       for (let page = 0; page < ALBUM_TRACK_PAGE_LIMIT; page += 1) {
-        const response = await fetch(
+        const response = await spotifyFetch(
           `https://api.spotify.com/v1/albums/${albumId}/tracks?limit=50&offset=${page * 50}`,
-          { headers: { Authorization: `Bearer ${token}` } },
+          { headers: { Authorization: `Bearer ${token}` } }, undefined, options,
         );
         if (!response.ok) {
           return null;
@@ -459,64 +509,18 @@ class SpotifyApiService {
       }
       return null;
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.warn("Error fetching album tracks from Spotify Web API:", error);
       return null;
     }
   };
 
-  /**
-   * Look up how many tracks each album has, 20 albums per Web API request.
-   * Returns null when Spotify cannot answer; albums it does not know are omitted.
-   */
-  getAlbumTrackTotals = async (
-    albumUris: string[],
-  ): Promise<Map<string, number> | null> => {
-    const token = this.getAccessToken();
-    if (!token) {
-      return null;
-    }
-
-    const totals = new Map<string, number>();
-    const albumIds = Array.from(
-      new Set(
-        albumUris
-          .map((albumUri) => this.extractAlbumId(albumUri))
-          .filter((albumId): albumId is string => Boolean(albumId)),
-      ),
-    );
-
-    try {
-      for (let index = 0; index < albumIds.length; index += 20) {
-        const groupIds = albumIds.slice(index, index + 20);
-        const response = await fetch(
-          `https://api.spotify.com/v1/albums?ids=${groupIds.join(",")}`,
-          { headers: { Authorization: `Bearer ${token}` } },
-        );
-        if (!response.ok) {
-          return null;
-        }
-
-        const body: { albums?: Array<{ total_tracks?: unknown } | null> } =
-          await response.json();
-        const albums = Array.isArray(body?.albums) ? body.albums : [];
-        // Spotify answers in request order, with null for albums it cannot find.
-        groupIds.forEach((albumId, albumIndex) => {
-          const totalTracks = albums[albumIndex]?.total_tracks;
-          if (typeof totalTracks === "number" && totalTracks > 0) {
-            totals.set(`spotify:album:${albumId}`, totalTracks);
-          }
-        });
-      }
-    } catch (error) {
-      console.warn("Error fetching album lengths from Spotify Web API:", error);
-      return null;
-    }
-
-    return totals;
-  };
+  /** Batch Web API reads are unavailable; the caller retains bounded cached single lookups. */
+  getAlbumTrackTotals = async (_albumUris: string[], _options?: RequestOptions): Promise<Map<string, number> | null> => null;
 
   private getAlbumMetadataFromWebApi = async (
     albumUri: string,
+    options?: RequestOptions,
   ): Promise<SpotifyPlaylistMetadata | null> => {
     try {
       const albumId = this.extractAlbumId(albumUri);
@@ -526,11 +530,11 @@ class SpotifyApiService {
         return null;
       }
 
-      const response = await fetch(`https://api.spotify.com/v1/albums/${albumId}`, {
+      const response = await spotifyFetch(`https://api.spotify.com/v1/albums/${albumId}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
-      });
+      }, undefined, options);
 
       if (!response.ok) {
         return null;
@@ -557,6 +561,7 @@ class SpotifyApiService {
         snapshotId: null,
       };
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.warn("Error fetching album metadata from Spotify Web API:", error);
       return null;
     }
@@ -683,65 +688,60 @@ class SpotifyApiService {
     };
   }
 
-  getArtistMetadata = async (
-    artistUriOrId: string,
-  ): Promise<SpotifyArtistMetadata | null> => {
-    const artistUri = this.normalizeArtistUri(artistUriOrId);
-    const webApiMetadata = await this.getArtistMetadataFromWebApi(artistUri);
-    if (webApiMetadata) {
-      return webApiMetadata;
+  private artistMetadataCache = (() => {
+    const shared = globalThis as typeof globalThis & { __tagifyArtistMetadataV1?: Map<string, { until: number; priorityToken: { current: "foreground" | "background" }; value: Promise<SpotifyArtistMetadata | null> }> };
+    return shared.__tagifyArtistMetadataV1 ??= new Map();
+  })();
+
+  getArtistMetadata = async (artistUriOrId: string, options?: RequestOptions): Promise<SpotifyArtistMetadata | null> => {
+    options?.assertCurrent?.();
+    const artistUri = this.normalizeArtistUri(artistUriOrId), account = spotifyAccountKey();
+    const key = `${account}:${artistUri}`, cached = this.artistMetadataCache.get(key);
+    let value: Promise<SpotifyArtistMetadata | null>;
+    if (cached && cached.until > Date.now()) {
+      spotifyRequestAccounting.record(options?.feature ?? "artist-identities", "cached");
+      if ((options?.priorityToken?.current ?? options?.priority) !== "background") promoteSpotifyRequest({ priorityToken: cached.priorityToken });
+      value = cached.value;
+    } else {
+      const priorityToken = { current: options?.priorityToken?.current ?? options?.priority ?? "foreground" };
+      const entry = { until: Date.now() + 10 * 60_000, priorityToken, value: Promise.resolve(null) as Promise<SpotifyArtistMetadata | null> };
+      value = entry.value = this.readArtistMetadata(artistUri, { ...options, priorityToken }).then(metadata => {
+        entry.until = Date.now() + (metadata ? 10 * 60_000 : 60_000);
+        return metadata;
+      }).catch(error => {
+        if (this.artistMetadataCache.get(key) === entry) this.artistMetadataCache.delete(key);
+        throw error;
+      });
+      this.artistMetadataCache.set(key, entry);
+      while (this.artistMetadataCache.size > 200) this.artistMetadataCache.delete(this.artistMetadataCache.keys().next().value!);
     }
-
-    try {
-      const { GraphQL, Locale } = Spicetify;
-      const definitions = [
-        GraphQL.Definitions.queryArtistOverview,
-        GraphQL.Definitions.queryArtistMinimal,
-        GraphQL.Definitions.browseArtist,
-      ].filter(Boolean);
-
-      for (const definition of definitions) {
-        const response = await requestSpicetifyGraphQL<any>(definition, {
-          uri: artistUri,
-          locale: Locale?.getLocale?.() || "en",
-        });
-        const artist = this.findArtistMetadataNode(response?.data, artistUri);
-        const metadata = this.mapArtistMetadata(artistUri, artist);
-        if (metadata) {
-          return metadata;
-        }
-      }
-
-      return null;
-    } catch (error) {
-      console.error("Error fetching artist metadata:", error);
-      return null;
-    }
+    const metadata = await value;
+    options?.assertCurrent?.();
+    if (account !== spotifyAccountKey()) throw new DOMException("Spotify account changed", "AbortError");
+    return metadata ? { ...metadata, genres: [...metadata.genres] } : null;
   };
 
-  private getArtistMetadataFromWebApi = async (
-    artistUri: string,
-  ): Promise<SpotifyArtistMetadata | null> => {
-    try {
-      const artistId = this.extractArtistId(artistUri);
-      const token = this.getAccessToken();
-      if (!artistId || !token) {
+  private readArtistMetadata = async (artistUri: string, options?: RequestOptions): Promise<SpotifyArtistMetadata | null> => {
+    const { GraphQL, Locale } = Spicetify;
+    const definitions = [...new Set([
+      GraphQL?.Definitions?.queryArtistOverview,
+      GraphQL?.Definitions?.queryArtistMinimal,
+      GraphQL?.Definitions?.browseArtist,
+    ].filter(Boolean))];
+    for (const definition of definitions) {
+      try {
+        const response = await requestSpicetifyGraphQL<any>(definition, {
+          uri: artistUri, locale: Locale?.getLocale?.() || "en",
+        }, undefined, options);
+        const metadata = this.mapArtistMetadata(artistUri, this.findArtistMetadataNode(response?.data, artistUri));
+        if (metadata) return metadata;
+      } catch (error) {
+        throwIfSpotifyRequestStopped(error);
+        // Stop this lookup on transport failure; do not fan out across APIs.
         return null;
       }
-
-      const response = await fetch(`https://api.spotify.com/v1/artists/${artistId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        return null;
-      }
-
-      const artist = await response.json();
-      return this.mapArtistMetadata(artistUri, artist);
-    } catch (error) {
-      console.warn("Error fetching artist metadata from Spotify Web API:", error);
-      return null;
     }
+    return null;
   };
 
   private findArtistMetadataNode(value: any, artistUri: string): any {
@@ -834,14 +834,15 @@ class SpotifyApiService {
   getAllTrackUrisInPlaylist = async (playlistId: string): Promise<string[]> => {
     try {
       const playlistUri = `spotify:playlist:${playlistId}`;
-      const contents = await (
+      const contents = await spotifyRead<any>(`desktop:playlist:getContents:${JSON.stringify([playlistUri])}`, () => (
         Spicetify.Platform.PlaylistAPI as any
-      ).getContents(playlistUri);
+      ).getContents(playlistUri));
 
       return contents.items
         .filter((item: any) => item.uri)
         .map((item: any) => item.uri);
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.error("Error fetching tracks in playlist:", error);
       return [];
     }
@@ -852,23 +853,79 @@ class SpotifyApiService {
    * playlist. Reconciliation callers must distinguish those two states so a
    * transient Spotify failure cannot overwrite the last confirmed membership.
    */
-  getAllTrackUrisInPlaylistStrict = async (
-    playlistId: string,
-  ): Promise<string[]> => {
-    const playlistUri = `spotify:playlist:${playlistId}`;
+  private membershipCache = (() => {
+    const shared = globalThis as typeof globalThis & { __tagifyPlaylistMembershipV1?: Map<string, { at: number; uris: string[]; generation: string }> };
+    return shared.__tagifyPlaylistMembershipV1 ??= new Map();
+  })();
+  getAllTrackUrisInPlaylistStrict = async (playlistId: string, maxAgeMs = 0, options?: RequestOptions): Promise<string[]> => {
+    assertSpotifyWriteSettled(`spotify:playlist:${playlistId}`);
+    const account = spotifyAccountKey(), resource = `spotify:playlist:${playlistId}`;
+    const generation = spotifyReadGeneration(resource, account);
+    const key = `${account}:${playlistId}`;
+    const cached = this.membershipCache.get(key);
+    if (cached && cached.generation === generation && maxAgeMs > 0 && Date.now() - cached.at < maxAgeMs) { spotifyRequestAccounting.record(options?.feature ?? "playlist-contents", "cached"); return [...cached.uris]; }
+    const uris = await this.readPlaylistMembership(playlistId, options);
+    if (generation === spotifyReadGeneration(resource, account)) this.membershipCache.delete(key);
+    if (uris.length <= 5000 && generation === spotifyReadGeneration(resource, account)) {
+      this.membershipCache.set(key, { at: Date.now(), uris, generation });
+      while (this.membershipCache.size > 100 || [...this.membershipCache.values()].reduce((sum, entry) => sum + entry.uris.length, 0) > 50_000)
+        this.membershipCache.delete(this.membershipCache.keys().next().value!);
+    }
+    return [...uris];
+  };
+
+  private versionedMembership = (() => {
+    const shared = globalThis as typeof globalThis & { __tagifyPlaylistVersionsV1?: Map<string, { version: string; generation: string; at: number; uris: string[] }> };
+    return shared.__tagifyPlaylistVersionsV1 ??= new Map();
+  })();
+  private getPlaylistVersion = async (playlistId: string, options: RequestOptions): Promise<string | null> => {
+    const uri = `spotify:playlist:${playlistId}`;
     try {
-      const contents = await (
-        Spicetify.Platform.PlaylistAPI as any
-      ).getContents(playlistUri);
-      if (!Array.isArray(contents?.items)) {
-        throw new Error(`Spotify returned invalid contents for ${playlistUri}`);
-      }
-      if (
-        typeof contents.totalLength === "number" &&
-        contents.totalLength > contents.items.length
-      ) {
-        return this.getPlaylistTrackUrisFromWebApi(playlistId);
-      }
+      const metadata = await spotifyRead<any>(`desktop:playlist:getMetadata:${JSON.stringify([uri])}`, () => (Spicetify.Platform.PlaylistAPI as any).getMetadata(uri), options);
+      const version = metadata?.snapshotId ?? metadata?.snapshot_id;
+      return typeof version === "string" && version.length > 0 ? version : null;
+    } catch (error) { throwIfSpotifyRequestStopped(error); return null; }
+  };
+  /** Only automatic reads reuse versioned contents. Manual sync and write confirmations stay fresh. */
+  getTrackUrisForBackgroundSync = async (playlistId: string, options: RequestOptions, knownSize: number): Promise<string[]> => {
+    // Small playlists are already a single cheap read; version probes would add requests.
+    if (knownSize < 200) return this.getAllTrackUrisInPlaylistStrict(playlistId, 0, options);
+    const account = spotifyAccountKey(), resource = `spotify:playlist:${playlistId}`, key = `${account}:${playlistId}`;
+    assertSpotifyWriteSettled(resource);
+    const generation = spotifyReadGeneration(resource, account);
+    const assertCurrent = () => {
+      if (spotifyAccountKey() !== account) throw new DOMException("Spotify account changed", "AbortError");
+      assertSpotifyWriteSettled(resource);
+      if (spotifyReadGeneration(resource, account) !== generation) throw Object.assign(
+        new Error("This playlist changed while it was being checked. It will be checked again."), { spotifyRequestStopped: true },
+      );
+    };
+    const before = await this.getPlaylistVersion(playlistId, options);
+    assertCurrent();
+    const cached = this.versionedMembership.get(key);
+    if (spotifyReadGeneration(resource, account) === generation && before && cached?.version === before && cached.generation === generation && Date.now() - cached.at < 60 * 60_000) {
+      spotifyRequestAccounting.record("smart-playlists", "cached");
+      return [...cached.uris];
+    }
+    this.versionedMembership.delete(key);
+    const uris = await this.getAllTrackUrisInPlaylistStrict(playlistId, 0, options);
+    assertCurrent();
+    // Do not pair new contents with a version obtained before a concurrent Spotify edit.
+    const after = before ? await this.getPlaylistVersion(playlistId, options) : null;
+    assertCurrent();
+    if (before && after && before !== after) throw Object.assign(
+      new Error("This playlist changed while it was being checked. It will be checked again."), { spotifyRequestStopped: true },
+    );
+    if (before && before === after && uris.length <= 50_000) {
+      this.versionedMembership.set(key, { version: before, generation, at: Date.now(), uris });
+      while (this.versionedMembership.size > 20 || [...this.versionedMembership.values()].reduce((sum, entry) => sum + entry.uris.length, 0) > 50_000)
+        this.versionedMembership.delete(this.versionedMembership.keys().next().value!);
+    }
+    return [...uris];
+  };
+
+  private readPlaylistMembership = async (playlistId: string, options?: RequestOptions): Promise<string[]> => {
+    const contents = { items: await this.readPlaylistItems(playlistId, options) };
       trackArtistIdentitiesStore.rememberMany(contents.items.flatMap((item: { uri?: string; link?: string; artists?: Array<{ uri?: string; link?: string; name?: string }> }) => {
         const uri = item.uri ?? item.link;
         const artists = (Array.isArray(item.artists) ? item.artists : []).flatMap((artist): TrackArtist[] => {
@@ -881,72 +938,9 @@ class SpotifyApiService {
         durationMs: item.duration?.milliseconds ?? item.duration?.totalMilliseconds ?? item.duration_ms,
         albumUri: item.album?.uri ?? item.album?.link, name: item.name, artists: item.artists?.map(artist => artist.name).filter(Boolean).join(", "),
       }));
-      const uris = contents.items.map((item: any) => item?.uri ?? item?.link);
-      if (uris.some((uri: unknown) => typeof uri !== "string")) {
-        throw new Error(`Spotify returned incomplete contents for ${playlistUri}`);
-      }
-      return uris;
-    } catch (desktopError) {
-      try {
-        return await this.getPlaylistTrackUrisFromWebApi(playlistId);
-      } catch (webError) {
-        console.error("Spotify playlist reads failed in both clients:", { desktopError, webError });
-        throw webError;
-      }
-    }
+    return contents.items.map((item: any) => item.uri ?? item.link);
   };
 
-  private getPlaylistTrackUrisFromWebApi = async (playlistId: string): Promise<string[]> => {
-    if (Date.now() < this.playlistReadsBlockedUntil) {
-      throw new Error("Spotify playlist reads are waiting for the rate limit to clear");
-    }
-    const token = this.getAccessToken();
-    if (!token) throw new Error("Spotify access token is unavailable");
-
-    const trackUris: string[] = [];
-    let offset = 0;
-    for (;;) {
-      const response = await fetch(
-        `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/items?limit=100&offset=${offset}`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      if (!response.ok) {
-        if (response.status === 429) {
-          const retryAfter = response.headers.get("Retry-After");
-          const seconds = retryAfter ? Number(retryAfter) : NaN;
-          const until = Number.isFinite(seconds)
-            ? Date.now() + Math.max(1, seconds) * 1000
-            : Date.parse(retryAfter || "");
-          this.playlistReadsBlockedUntil = Number.isFinite(until) ? until : Date.now() + 60_000;
-        }
-        throw new Error(`Spotify playlist items request failed (${response.status})`);
-      }
-      const page = await response.json();
-      if (!Array.isArray(page?.items)) {
-        throw new Error("Spotify playlist items response is incomplete");
-      }
-      trackArtistIdentitiesStore.rememberMany(page.items.map((item: { track?: { uri: string; artists?: TrackArtist[] }; item?: { uri: string; artists?: TrackArtist[] } }) => {
-        const track = item.track ?? item.item;
-        return [track?.uri ?? "", track?.artists ?? []] as const;
-      }));
-      for (const item of page.items) {
-        const track = item.track ?? item.item;
-        rememberRuleFacts(track?.uri ?? "", { durationMs: track?.duration_ms, albumUri: track?.album?.uri, name: track?.name, artists: track?.artists?.map((artist: { name?: string }) => artist.name).filter(Boolean).join(", ") });
-        const uri = item?.track?.uri ?? item?.item?.uri;
-        if (typeof uri !== "string") {
-          throw new Error("Spotify playlist items response has unavailable identities");
-        }
-        if (uri.startsWith("spotify:track:") || uri.startsWith("spotify:local:")) {
-          trackUris.push(uri);
-        }
-      }
-      if (!page.next) return trackUris;
-      if (page.items.length === 0) {
-        throw new Error("Spotify playlist items pagination stopped unexpectedly");
-      }
-      offset += page.items.length;
-    }
-  };
 
   /**
    * Get all track URIs in an album using Web API with GraphQL fallback.
@@ -979,9 +973,11 @@ class SpotifyApiService {
       let offset = 0;
       const limit = 50;
       let total: number | null = null;
+      let pages = 0;
 
       do {
-        const response = await fetch(
+        if (++pages > 100) throw new Error("Spotify album pagination exceeded its limit");
+        const response = await spotifyFetch(
           `https://api.spotify.com/v1/albums/${albumId}/tracks?limit=${limit}&offset=${offset}`,
           {
             headers: {
@@ -1013,6 +1009,7 @@ class SpotifyApiService {
 
       return trackUris;
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.warn("Error fetching album tracks from Spotify Web API:", error);
       return [];
     }
@@ -1074,6 +1071,7 @@ class SpotifyApiService {
 
       return [];
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.error("Error fetching tracks in album:", error);
       return [];
     }
@@ -1129,9 +1127,9 @@ class SpotifyApiService {
    * Get all user playlist IDs using Platform API
    */
   getAllUserPlaylistsStrict = async (): Promise<string[]> => {
-    const contents = await (
+    const contents = await spotifyRead<any>(`desktop:rootlist:getContents:${JSON.stringify([])}`, () => (
       Spicetify.Platform.RootlistAPI as any
-    ).getContents();
+    ).getContents());
 
     const extractPlaylistIds = (items: any[]): string[] => {
       const ids: string[] = [];
@@ -1151,28 +1149,31 @@ class SpotifyApiService {
     return extractPlaylistIds(contents.items);
   };
 
-  getAllUserPlaylistReferencesStrict = async (): Promise<
+  getAllUserPlaylistReferencesStrict = async (signal?: AbortSignal): Promise<
     Array<{ playlistId: string; playlistName: string }>
   > => {
-    const playlistIds = await this.getAllUserPlaylistsStrict();
-    const references = await Promise.all(
-      playlistIds.map(async (playlistId) => {
-        try {
-          const metadata = await (
-            Spicetify.Platform.PlaylistAPI as any
-          ).getMetadata(`spotify:playlist:${playlistId}`);
-          return typeof metadata?.name === "string" && metadata.name.trim()
-            ? { playlistId, playlistName: metadata.name }
-            : null;
-        } catch (error) {
-          console.error(
-            `Error fetching playlist metadata for ${playlistId}:`,
-            error,
-          );
-          return null;
-        }
-      }),
-    );
+    const root = await spotifyRead<any>("desktop:rootlist:getContents:[]", () => (Spicetify.Platform.RootlistAPI as any).getContents(), { signal });
+    if (!Array.isArray(root?.items)) throw new Error("Spotify did not return your playlists");
+    const names = new Map<string, string>();
+    const collect = (items: any[]) => {
+      for (const item of items) {
+        if (item.type === "playlist" && typeof item.uri === "string") names.set(item.uri.split(":").pop()!, typeof item.name === "string" ? item.name : "");
+        else if (item.type === "folder" && Array.isArray(item.items)) collect(item.items);
+      }
+    };
+    collect(root.items);
+    const playlistIds = [...names.keys()];
+    const references: Array<{ playlistId: string; playlistName: string } | null> = [];
+    for (const playlistId of [...new Set(playlistIds)]) {
+      if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
+      if (names.get(playlistId)?.trim()) { references.push({ playlistId, playlistName: names.get(playlistId)! }); continue; }
+      try {
+        const metadata = await spotifyRead<any>(`desktop:playlist:getMetadata:${JSON.stringify([`spotify:playlist:${playlistId}`])}`, () =>
+          (Spicetify.Platform.PlaylistAPI as any).getMetadata(`spotify:playlist:${playlistId}`), { signal });
+        references.push(typeof metadata?.name === "string" && metadata.name.trim()
+          ? { playlistId, playlistName: metadata.name } : null);
+      } catch (error) { throwIfSpotifyRequestStopped(error); }
+    }
 
     return references.filter(
       (reference): reference is { playlistId: string; playlistName: string } =>
@@ -1186,11 +1187,12 @@ class SpotifyApiService {
   getPlaylistTrackCount = async (playlistId: string): Promise<number> => {
     try {
       const playlistUri = `spotify:playlist:${playlistId}`;
-      const metadata = await (
+      const metadata = await spotifyRead<any>(`desktop:playlist:getMetadata:${JSON.stringify([playlistUri])}`, () => (
         Spicetify.Platform.PlaylistAPI as any
-      ).getMetadata(playlistUri);
+      ).getMetadata(playlistUri));
       return metadata?.totalLength || 0;
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.error("Error fetching playlist track count:", error);
       return 0;
     }
@@ -1204,11 +1206,9 @@ class SpotifyApiService {
   ): Promise<Record<string, number>> => {
     const counts: Record<string, number> = {};
 
-    await Promise.all(
-      playlistIds.map(async (playlistId) => {
-        counts[playlistId] = await this.getPlaylistTrackCount(playlistId);
-      })
-    );
+    for (const playlistId of new Set(playlistIds)) {
+      counts[playlistId] = await this.getPlaylistTrackCount(playlistId);
+    }
 
     return counts;
   };
@@ -1227,7 +1227,7 @@ class SpotifyApiService {
    * Fetch audio features for a track
    */
   fetchAudioFeatures = async (
-    trackUri: string
+    trackUri: string, options?: RequestOptions
   ): Promise<TrackAudioFeaturesResult> => {
     const trackId = this.extractTrackId(trackUri);
     if (!trackId) {
@@ -1237,7 +1237,7 @@ class SpotifyApiService {
       };
     }
 
-    const features = await audioFeaturesService.getAudioFeaturesByTrackId(trackId);
+    const features = await audioFeaturesService.getAudioFeaturesByTrackId(trackId, options);
 
     return {
       bpm: features?.bpm ?? null,
@@ -1251,6 +1251,65 @@ class SpotifyApiService {
   fetchBpm = async (trackUri: string): Promise<number | null> => {
     const features = await this.fetchAudioFeatures(trackUri);
     return features.bpm;
+  };
+
+  /** A reconciliation pass reads once, writes in bounded batches, then its caller confirms. */
+  updatePlaylistTracks = async (playlistId: string, additions: string[], removals: string[], knownMembership?: string[], options?: PlaylistTrackUpdateOptions) => {
+    const account = spotifyAccountKey();
+    const suppliedCheck = options?.assertCurrent;
+    options = { ...options, assertCurrent: () => {
+      suppliedCheck?.();
+      if (spotifyAccountKey() !== account) throw new DOMException("Spotify account changed", "AbortError");
+    } };
+    const added: string[] = [], removed: string[] = [];
+    this.membershipCache.delete(`${spotifyAccountKey()}:${playlistId}`);
+    const uri = `spotify:playlist:${playlistId}`;
+    const api = Spicetify.Platform.PlaylistAPI as any;
+    try {
+      assertSpotifyWriteSettled(uri);
+      const membership = new Set(knownMembership ?? (additions.length ? await this.getAllTrackUrisInPlaylistStrict(playlistId, 0, options) : []));
+      if (removals.length) {
+        const contents = { items: (await this.readPlaylistItems(playlistId, options)).map(item => ({ uri: item.uri ?? item.link, uid: item.uid })) };
+        const removing = new Set(removals);
+        const items = contents.items.filter((item: any) => removing.has(item.uri));
+        if (items.some((item: any) => !item.uid)) throw new Error("Spotify did not identify the songs to remove");
+        const occurrences = new Map<string, number>();
+        items.forEach((item: any) => occurrences.set(item.uri, (occurrences.get(item.uri) ?? 0) + 1));
+        for (let index = 0; index < items.length; index += 100) {
+          const batch = items.slice(index, index + 100).map((item: any) => ({ uri: item.uri, uid: item.uid }));
+          await spotifyWrite(async signal => {
+            await options?.beforeWrite?.([...new Set(batch.map((item: { uri: string }) => item.uri))], "remove");
+            signal.throwIfAborted();
+            options?.assertCurrent?.();
+            return api.remove(uri, batch);
+          }, { ...options, resource: uri });
+          for (const item of batch) {
+            const left = occurrences.get(item.uri)! - 1;
+            occurrences.set(item.uri, left);
+            if (!left) removed.push(item.uri);
+          }
+        }
+      }
+      const missing = [...new Set(additions)].filter(track => track.startsWith("spotify:track:") && !membership.has(track));
+      for (let index = 0; index < missing.length; index += 100) {
+        const batch = missing.slice(index, index + 100);
+        await spotifyWrite(async signal => {
+          await options?.beforeWrite?.(batch, "add");
+          signal.throwIfAborted();
+          options?.assertCurrent?.();
+          if (options?.feature === "smart-playlists") rememberPlaylistAdditions(playlistId, batch);
+          return api.add(uri, batch, { after: "end" });
+        }, { ...options, resource: uri });
+        added.push(...batch);
+      }
+      this.membershipCache.delete(`${spotifyAccountKey()}:${playlistId}`);
+      return { added: [...new Set(added)], removed: [...new Set(removed)], success: true };
+    } catch (error) {
+      // Preserve confirmed batches; never retry an ambiguous mutation in this pass.
+      console.warn("Spotify playlist update stopped", error);
+      this.membershipCache.delete(`${spotifyAccountKey()}:${playlistId}`);
+      return { added: [...new Set(added)], removed: [...new Set(removed)], success: false };
+    }
   };
 
   /**
@@ -1275,11 +1334,11 @@ class SpotifyApiService {
         return { success: true, wasAdded: false };
       }
 
-      await (Spicetify.Platform.PlaylistAPI as any).add(
+      await spotifyWrite(() => (Spicetify.Platform.PlaylistAPI as any).add(
         playlistUri,
         [trackUri],
         { after: "end" }
-      );
+      ), { resource: playlistUri });
 
       return { success: true, wasAdded: true };
     } catch (error) {
@@ -1291,53 +1350,61 @@ class SpotifyApiService {
   /**
    * Remove track from playlist using Platform API
    */
-  removeTrackFromPlaylist = async (
-    trackUri: string,
-    playlistId: string
-  ): Promise<boolean> => {
-    try {
-      const playlistUri = `spotify:playlist:${playlistId}`;
-      const contents = await (
-        Spicetify.Platform.PlaylistAPI as any
-      ).getContents(playlistUri);
-
-      const tracksToRemove = contents.items
-        .filter((item: any) => item.uri === trackUri)
-        .map((item: any) => ({ uri: item.uri, uid: item.uid }));
-
-      if (tracksToRemove.length > 0) {
-        await (Spicetify.Platform.PlaylistAPI as any).remove(
-          playlistUri,
-          tracksToRemove
-        );
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      console.error("Error removing track from playlist:", error);
-      return false;
-    }
+  removeTrackFromPlaylist = async (trackUri: string, playlistId: string): Promise<boolean> => {
+    const result = await this.updatePlaylistTracks(playlistId, [], [trackUri]);
+    return result.success && result.removed.includes(trackUri);
   };
 
-  /** Remove only repeated occurrences, including local files which cannot be re-added. */
-  removeDuplicatePlaylistOccurrences = async (playlistId: string): Promise<number> => {
+  private readPlaylistItems = async (playlistId: string, options?: RequestOptions): Promise<any[]> => {
+    const uri = `spotify:playlist:${playlistId}`;
+    assertSpotifyWriteSettled(uri);
+    const api = Spicetify.Platform.PlaylistAPI as any;
+    const items: any[] = [];
+    const account = spotifyAccountKey();
+    let snapshot: string | undefined;
+    const seenPages = new Set<string>();
+    let total: number | undefined;
+    for (let page = 0; page < 1000; page++) {
+      if (account !== spotifyAccountKey()) throw new DOMException("Spotify account changed", "AbortError");
+      options?.assertCurrent?.();
+      const offset = items.length;
+      const args = page === 0 ? [uri] : [uri, { offset, limit: 100 }];
+      const result = await spotifyRead<any>(`desktop:playlist:getContents:${JSON.stringify(args)}`, () => api.getContents(...args), options);
+      if (!Array.isArray(result?.items) || result.items.some((item: any) => typeof (item?.uri ?? item?.link) !== "string"))
+        throw new Error("Spotify returned incomplete playlist occurrences");
+      if (result.offset !== undefined && result.offset !== offset) throw new Error("Spotify repeated a playlist page");
+      const currentTotal = typeof result.totalLength === "number" ? result.totalLength : undefined;
+      if (total !== undefined && currentTotal !== undefined && currentTotal !== total) throw new Error("Spotify playlist changed during pagination");
+      if (currentTotal !== undefined && (!Number.isSafeInteger(currentTotal) || currentTotal < 0)) throw new Error("Spotify returned an invalid playlist size");
+      total ??= currentTotal;
+      const currentSnapshot = result.snapshotId ?? result.snapshot_id;
+      if (snapshot && currentSnapshot && snapshot !== currentSnapshot) throw new Error("Spotify playlist changed during pagination");
+      if (typeof currentSnapshot === "string") snapshot ??= currentSnapshot;
+      const signature = JSON.stringify(result.items.map((item: any) => [item.uri ?? item.link, item.uid]));
+      if (seenPages.has(signature)) throw new Error("Spotify repeated a playlist page");
+      seenPages.add(signature);
+      for (const item of result.items) items.push(item);
+      if (total === undefined || items.length === total) return items;
+      if (items.length > total || !result.items.length) throw new Error("Spotify playlist pagination stopped unexpectedly");
+    }
+    throw new Error("Spotify playlist check exceeded its page limit");
+  };
+
+  /** Collect stable occurrence IDs before deleting so pagination cannot skip shifted rows. */
+  removeDuplicatePlaylistOccurrences = async (playlistId: string, options?: RequestOptions): Promise<number> => {
     const playlistUri = `spotify:playlist:${playlistId}`;
-    const api = Spicetify.Platform.PlaylistAPI as unknown as {
-      getContents(uri: string): Promise<{ items: Array<{ uri: string; uid?: string }> }>;
-      remove(uri: string, items: Array<{ uri: string; uid: string }>): Promise<unknown>;
-    };
-    const contents = await api.getContents(playlistUri);
+    const api = Spicetify.Platform.PlaylistAPI as any;
+    const items = (await this.readPlaylistItems(playlistId, options)).map(item => ({ uri: item.uri ?? item.link, uid: item.uid }));
     const seen = new Set<string>();
-    const duplicates = contents.items.filter((item: { uri: string }) => {
+    const duplicates = items.filter(item => {
       if (seen.has(item.uri)) return true;
       seen.add(item.uri);
       return false;
     });
-    if (duplicates.some((item: { uid?: string }) => !item.uid)) {
-      throw new Error("Spotify could not identify the duplicate songs. Please try again.");
+    if (duplicates.some(item => !item.uid)) throw new Error("Spotify could not identify the duplicate songs. Please try again.");
+    for (let index = 0; index < duplicates.length; index += 100) {
+      await spotifyWrite(() => api.remove(playlistUri, duplicates.slice(index, index + 100)), { ...options, resource: playlistUri });
     }
-    if (duplicates.length) await api.remove(playlistUri, duplicates.map((item) => ({ uri: item.uri, uid: item.uid! })));
     return duplicates.length;
   };
 }

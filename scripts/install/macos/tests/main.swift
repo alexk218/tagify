@@ -2,12 +2,15 @@ import Foundation
 import Darwin
 
 func runTests() throws {
+    try testAnalytics()
+    try testMaintenance()
+    try testHardening()
     try testUpdateProtection()
     let fresh = try Fixture(fresh: true)
     try expect(try fresh.installer.install(architecture: "arm64") == "3.0.0", "Fresh install failed")
     try expect(fresh.closed, "Spotify wasn't closed")
     try expect(fresh.spiceCommands.contains(["--no-restart", "backup", "apply"]), "Fresh install didn't apply")
-    try expect(fresh.spiceCommands.last == ["--no-restart", "spotify-updates", "block"], "Spotify updates weren't blocked by default")
+    try expect(fresh.spiceCommands.last(where: { $0 != ["-v"] }) == ["--no-restart", "spotify-updates", "block"], "Spotify updates weren't blocked by default")
     try expect(try SpotifyUpdateState.directoryFlags(fresh.paths.spotifyUpdates)! & UInt32(UF_IMMUTABLE) != 0, "Update folder wasn't locked")
     try expect(text(fresh.paths.key).trimmingCharacters(in: .newlines).count == 56, "Recovery key missing")
     try expect((try files.attributesOfItem(atPath: fresh.paths.key.path)[.posixPermissions] as? NSNumber)?.intValue == 0o600, "Recovery key isn't private")
@@ -29,7 +32,7 @@ func runTests() throws {
     try expect(existing.spiceCommands.filter { $0.contains("apply") }.count == 2, "Reinstall skipped apply")
     try expect(!text(existing.installer.logURL).contains(originalKey.trimmingCharacters(in: .newlines)), "Recovery key leaked to log")
     _ = try existing.installer.install(architecture: "arm64", blockSpotifyUpdates: false)
-    try expect(existing.spiceCommands.last == ["--no-restart", "spotify-updates", "unblock"], "Unchecking didn't use Spicetify unblock")
+    try expect(existing.spiceCommands.last(where: { $0 != ["-v"] }) == ["--no-restart", "spotify-updates", "unblock"], "Unchecking didn't use Spicetify unblock")
     try expect(try SpotifyUpdateState.directoryFlags(existing.paths.spotifyUpdates)! & UInt32(UF_IMMUTABLE) == 0, "Unchecking didn't unlock the update folder")
 
     let updateFailure = try Fixture()
@@ -137,8 +140,8 @@ func runTests() throws {
     try settingOnly.installer.applySpotifyUpdateSetting(blocked: true)
     try expect(!settingOnly.closed && settingOnly.spiceCommands.count == installedCommands, "Unchanged protection closed Spotify or reran commands")
     try settingOnly.installer.applySpotifyUpdateSetting(blocked: false)
-    try expect(settingOnly.closed && settingOnly.spiceCommands.count == installedCommands + 1, "Changing protection reinstalled Tagify or failed to close Spotify gracefully")
-    try expect(settingOnly.spiceCommands.last == ["--no-restart", "spotify-updates", "unblock"], "Separate setting didn't unblock Spotify")
+    try expect(settingOnly.closed && settingOnly.spiceCommands.count == installedCommands, "Native unblock called Spicetify or failed to close Spotify gracefully")
+    try expect(!SpotifyUpdateState.isBlocked(settingOnly.paths.spotifyUpdates), "Separate setting didn't unblock Spotify")
     try expect(text(settingOnly.paths.tagify.appendingPathComponent("extension.js")) == installedTagify && text(settingOnly.paths.resources.appendingPathComponent("Apps/xpui/original.js")) == installedSpotify, "Setting-only operation replaced Tagify or Spotify files")
     settingOnly.failUpdateSetting = true
     try fails("Setting-only failure accepted") { try settingOnly.installer.applySpotifyUpdateSetting(blocked: true) }
@@ -172,27 +175,17 @@ func runTests() throws {
         try expect(StableVersion(invalid) == nil, "Invalid version accepted: \(invalid)")
     }
     func macRelease(_ tag: String, name: String = "TagifyInstaller-mac.dmg", url: String? = nil, hash: String? = nil, prerelease: Bool = false, draft: Bool = false) -> InstallerRelease {
-        InstallerRelease(tag_name: tag, draft: draft, prerelease: prerelease, body: "A useful update", assets: [InstallerRelease.Asset(name: name, browser_download_url: URL(string: url ?? "https://github.com/alexk218/tagify-installer/releases/download/\(tag)/\(name)")!, digest: hash ?? "sha256:" + String(repeating: "a", count: 64))])
+        InstallerRelease(tag_name: tag, draft: draft, prerelease: prerelease, body: "A useful update", assets: [InstallerRelease.Asset(name: name, browser_download_url: URL(string: url ?? "https://tagify.fm/releases/manager/\(tag)/\(name)")!, digest: hash ?? "sha256:" + String(repeating: "a", count: 64))])
     }
     let mac = macRelease("v1.0.2")
     let newerWindows = macRelease("v1.0.9", name: "Tagify Manager.exe")
     try expect(InstallerUpdates.select([newerWindows, mac], installed: "1.0.1")?.version.string == "1.0.2", "Windows-only release hid or replaced a Mac update")
     try expect(InstallerUpdates.select([mac], installed: "1.0.2") == nil && InstallerUpdates.select([mac], installed: "1.0.3") == nil, "Current installer or a downgrade was offered")
-    for candidate in [macRelease("v1.0.3", prerelease: true), macRelease("v1.0.3", draft: true), macRelease("v1.0.3-beta"), macRelease("v1.0.3", hash: ""), macRelease("v1.0.3", url: "https://github.com/other/repo/releases/download/v1.0.3/TagifyInstaller-mac.dmg"), macRelease("v1.0.3", url: "https://github.com/alexk218/tagify-installer/releases/download/v1.0.3/TagifyInstaller-mac.dmg?redirect=bad")] {
+    for candidate in [macRelease("v1.0.3", prerelease: true), macRelease("v1.0.3", draft: true), macRelease("v1.0.3-beta"), macRelease("v1.0.3", hash: ""), macRelease("v1.0.3", url: "https://github.com/other/repo/releases/download/v1.0.3/TagifyInstaller-mac.dmg"), macRelease("v1.0.3", url: "https://tagify.fm/releases/manager/v1.0.3/TagifyInstaller-mac.dmg?redirect=bad")] {
         try expect(InstallerUpdates.select([candidate], installed: "1.0.1") == nil, "Untrusted or unstable Mac update was offered")
     }
     try expect(InstallerUpdates.select([macRelease("v1.0.3", name: "TagifyInstaller-mac.zip")], installed: "1.0.1") != nil, "Mac ZIP fallback wasn't supported")
     try expect(InstallerUpdates.select([mac, macRelease("v1.0.10")], installed: "1.0.1")?.version.string == "1.0.10", "Newest stable Mac update wasn't selected")
-    let updateSource = fresh.root.appendingPathComponent("installer.dmg")
-    try put(updateSource, "Verified installer download")
-    let validUpdate = InstallerUpdate(version: StableVersion("1.0.2")!, notes: "Notes", asset: InstallerRelease.Asset(name: mac.assets[0].name, browser_download_url: mac.assets[0].browser_download_url, digest: try digest(updateSource)))
-    let downloads = fresh.paths.home.appendingPathComponent("Downloads")
-    let originalDownload = downloads.appendingPathComponent("TagifyInstaller-mac-1.0.2.dmg")
-    try put(originalDownload, "Keep my old download")
-    let downloaded = try InstallerUpdates.download(validUpdate, downloads: downloads, transfer: { _, target in try files.copyItem(at: updateSource, to: target) })
-    try expect(downloaded != originalDownload && text(originalDownload) == "Keep my old download" && text(downloaded) == "Verified installer download", "Update download overwrote an existing file or saved unverified content")
-    try fails("Corrupt installer update accepted") { _ = try InstallerUpdates.download(validUpdate, downloads: downloads, transfer: { _, target in try put(target, "Wrong content") }) }
-    try expect(try files.contentsOfDirectory(at: downloads, includingPropertiesForKeys: nil).count == 2, "Corrupt update left a file in Downloads")
     var reportedSteps: [Int] = []
     var liveLogs = ""
     let staged = try Fixture(fresh: true)
@@ -204,5 +197,5 @@ func runTests() throws {
     print("Passed \(assertions) Mac installer assertions: fresh install, reinstall, setup detection, update-only changes, tutorial preferences, Mac release checks, verified downloads, retries, rollback, data preservation, archive safety, and concurrency.")
 }
 
-do { try runTests() }
+do { if try !runVolumeFixtureIfRequested() { try runCrashFixtureIfRequested(); try runTests() } }
 catch { fputs("FAIL: \(error.localizedDescription)\n", stderr); exit(1) }

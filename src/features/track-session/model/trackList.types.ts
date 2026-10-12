@@ -6,7 +6,7 @@ import type {
   TagFilterOperator,
 } from "@/utils/tagFilterGroups";
 
-export interface TrackListTrackData extends Pick<TrackData, "recordingIdentity" | "recordingGroupId" | "recordingReuseDisabled"> {
+export interface TrackListTrackData extends Pick<TrackData, "recordingIdentity" | "recordingGroupId" | "recordingGroupConfirmed" | "recordingReuseDisabled"> {
   rating: number;
   energy: number;
   bpm: number | null;

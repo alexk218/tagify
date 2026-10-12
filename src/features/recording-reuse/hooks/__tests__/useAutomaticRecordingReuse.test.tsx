@@ -14,6 +14,7 @@ const original = { rating: 3, energy: 4, bpm: 120, tagIds: [], name: "Song", dat
 const blank = { ...original, rating: 0, energy: 0, dateModified: 30 };
 const track = { uri: a, name: "Song", duration_ms: 180000, artists: [{ name: "Artist" }], album: { name: "Album", uri: "spotify:album:example", images: [] } } as SpotifyTrack;
 beforeEach(async () => {
+  delete window.__tagifyRecordingChecks;
   indexedDBStorage.resetConnection(); localStorage.clear(); localStorage.setItem("tagify:sync:account-id", "recording-automatic");
   vi.stubGlobal("indexedDB", new IDBFactory()); await indexedDBStorage.init();
   await indexedDBStorage.saveAll({ ...defaultTagData, tracks: { [a]: blank, [b]: original } });
@@ -23,7 +24,7 @@ it("quietly reuses confirmed compatible tagging without changing existing dates 
   const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity");
   const changed = vi.fn();
   renderHook(() => useAutomaticRecordingReuse(track, { [a]: blank, [b]: original }, changed));
-  await waitFor(() => expect(changed).toHaveBeenCalled());
+  await waitFor(async () => expect((await indexedDBStorage.getTrack(a))?.rating).toBe(3));
   const first = (await indexedDBStorage.getTrack(a))!;
   const second = (await indexedDBStorage.getTrack(b))!;
   expect(first).toMatchObject({ rating: 3, energy: 4, dateModified: 30 });
@@ -40,7 +41,7 @@ it("leaves conflicting saved choices separate", async () => {
   const different = { ...blank, rating: 5 };
   await indexedDBStorage.saveTrack(a, different);
   const link = vi.spyOn(indexedDBStorage, "linkRecordings");
-  const load = vi.spyOn(indexedDBStorage, "loadAllStrict");
+  const load = vi.spyOn(indexedDBStorage, "getRecordingTracks");
   renderHook(() => useAutomaticRecordingReuse(track, { [a]: different, [b]: original }, vi.fn()));
   await waitFor(() => expect(load).toHaveBeenCalled());
   // Wait for the real database read, then drain the cached identity checks.
@@ -78,4 +79,22 @@ it("reuses a confirmed new release with its own metadata and fresh dates, keepin
   expect(await indexedDBStorage.getTrack(current)).toMatchObject({ rating: 3, energy: 4, bpm: null, albumName: "New release" });
   expect((await indexedDBStorage.getTrack(current))!.dateModified).toBeGreaterThan(30);
   expect((await indexedDBStorage.getTrack(b))!.dateModified).toBe(20);
+});
+
+it("retries a still-visible song after its outage cooldown, without repeated requests in the meantime", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const current = `spotify:track:${"s".repeat(22)}`;
+  const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity").mockRejectedValueOnce(new Error("Spotify unavailable")).mockResolvedValue(identity);
+  const changed = vi.fn(async () => undefined);
+  const view = renderHook(() => useAutomaticRecordingReuse({ ...track, uri: current }, { [b]: original }, changed));
+  try {
+    await vi.waitFor(() => expect(view.result.current).toBe("unavailable"));
+    expect(lookup).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(lookup).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_001);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+    expect(lookup).toHaveBeenCalledTimes(2);
+    expect(await indexedDBStorage.getTrack(current)).toMatchObject({ rating: 3, energy: 4 });
+  } finally { view.unmount(); vi.useRealTimers(); }
 });

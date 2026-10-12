@@ -118,8 +118,10 @@ function loadLegacySmartPlaylists(): SmartPlaylistCriteria[] {
   }
 }
 
-async function loadSmartPlaylistsUnqueued(): Promise<SmartPlaylistCriteria[]> {
+async function loadSmartPlaylistsUnqueued(assertCurrent?: () => void): Promise<SmartPlaylistCriteria[]> {
+  assertCurrent?.();
   const stored = await indexedDBStorage.getAllSmartPlaylists();
+  assertCurrent?.();
   if (stored.length > 0) {
     return stored;
   }
@@ -129,41 +131,57 @@ async function loadSmartPlaylistsUnqueued(): Promise<SmartPlaylistCriteria[]> {
     return [];
   }
 
-  if (!(await indexedDBStorage.saveSmartPlaylists(legacy))) {
+  if (!(await indexedDBStorage.saveSmartPlaylists(legacy, assertCurrent))) {
     throw new Error("Failed to migrate smart playlists to unified storage");
   }
+  assertCurrent?.();
   localStorage.removeItem(SMART_PLAYLIST_STORAGE_KEY);
   return legacy;
 }
 
-export async function loadSmartPlaylistsFromStorage(): Promise<SmartPlaylistCriteria[]> {
+export async function loadSmartPlaylistsFromStorage(assertCurrent?: () => void): Promise<SmartPlaylistCriteria[]> {
   await pendingSmartPlaylistWrite;
-  return loadSmartPlaylistsUnqueued();
+  return loadSmartPlaylistsUnqueued(assertCurrent);
 }
 
 async function saveSmartPlaylistsUnqueued(
   playlists: SmartPlaylistCriteria[],
+  assertCurrent?: () => void,
+  preserveMembership = false,
 ): Promise<void> {
-  if (!(await indexedDBStorage.saveSmartPlaylists(playlists))) {
+  assertCurrent?.();
+  if (!(await indexedDBStorage.saveSmartPlaylists(playlists, assertCurrent, preserveMembership))) {
     throw new Error("Failed to save smart playlists");
   }
+  assertCurrent?.();
   localStorage.removeItem(SMART_PLAYLIST_STORAGE_KEY);
   if (playlists.length > 0) clearExplicitSmartPlaylistClear();
 }
 
 export function saveSmartPlaylistsToStorage(
   playlists: SmartPlaylistCriteria[],
+  preserveMembership = false,
 ): Promise<void> {
-  return enqueueSmartPlaylistWrite(() => saveSmartPlaylistsUnqueued(playlists));
+  return enqueueSmartPlaylistWrite(() => saveSmartPlaylistsUnqueued(playlists, undefined, preserveMembership));
 }
 
 export function updateSmartPlaylistsInStorage(
   updater: (current: SmartPlaylistCriteria[]) => SmartPlaylistCriteria[],
+  assertCurrent?: () => void,
 ): Promise<SmartPlaylistCriteria[]> {
   return enqueueSmartPlaylistWrite(async () => {
-    const current = await loadSmartPlaylistsUnqueued();
-    const updated = updater(current);
-    if (updated !== current) await saveSmartPlaylistsUnqueued(updated);
+    // Finish any legacy import first. The read-modify-write itself must be one
+    // transaction, including when the app and extension save concurrently.
+    await loadSmartPlaylistsUnqueued(assertCurrent);
+    let updated: SmartPlaylistCriteria[] = [];
+    if (!(await indexedDBStorage.saveSmartPlaylists(current => {
+      assertCurrent?.();
+      updated = updater(current);
+      return updated;
+    }, assertCurrent))) throw new Error("Failed to save smart playlists");
+    assertCurrent?.();
+    localStorage.removeItem(SMART_PLAYLIST_STORAGE_KEY);
+    if (updated.length) clearExplicitSmartPlaylistClear();
     return updated;
   });
 }

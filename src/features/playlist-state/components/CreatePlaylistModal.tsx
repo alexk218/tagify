@@ -6,6 +6,7 @@ import { Lightbulb } from "lucide-react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faBolt,
+  faChartSimple,
   faMusic,
   faTag,
   faTrophy,
@@ -24,6 +25,8 @@ interface CreatePlaylistModalProps {
   bpmMaxFilter: number | null;
   camelotKeyFilters: string[];
   editingSmartPlaylistName?: string;
+  /** Set when the tracks come from a list opened in Stats rather than from filters. */
+  statsListLabel?: string;
   onClose: () => void;
   onCreatePlaylist: (
     playlistName: string,
@@ -46,6 +49,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   bpmMaxFilter,
   camelotKeyFilters,
   editingSmartPlaylistName,
+  statsListLabel,
   onClose,
   onCreatePlaylist,
 }) => {
@@ -54,6 +58,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   const normalizedCamelotKeyFilters = sortCamelotKeys(camelotKeyFilters);
 
   const getDefaultPlaylistName = () => {
+    if (statsListLabel) return `Tagify - ${statsListLabel}`.slice(0, 100);
     const filterParts = [];
 
     if (activeTagDisplayNames.length > 0) {
@@ -111,6 +116,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   };
 
   const getDefaultPlaylistDescription = () => {
+    if (statsListLabel) return `${statsListLabel}. Created from Tagify Stats.`.slice(0, 300);
     const filterParts = [];
 
     if (isSmartPlaylist) {
@@ -277,6 +283,8 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
                   />
                   <span className="checkbox-text">Public playlist</span>
                 </label>
+                {/* A list from Stats isn't built from filters, so it can't keep itself updated. */}
+                {!statsListLabel && (
                 <label className="form-checkbox-label">
                   <input
                     type="checkbox"
@@ -293,6 +301,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
                     </div>
                   </div>
                 </label>
+                )}
                 {showSearchTermWarning && (
                   <div className={styles.warningBox}>
                     <p className={styles.warning}>
@@ -307,7 +316,16 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
               )}
 
               <div className={styles.filtersContainer}>
-                {activeTagFormula.length === 0 &&
+                {statsListLabel ? (
+                  <div className={styles.filterRow}>
+                    <span className={styles.filterLabel}>
+                      <FontAwesomeIcon icon={faChartSimple} /> From Stats:
+                    </span>
+                    <div className={styles.tags}>
+                      <span className={styles.tag}>{statsListLabel}</span>
+                    </div>
+                  </div>
+                ) : activeTagFormula.length === 0 &&
                 ratingFilters.length === 0 &&
                 energyMinFilter === null &&
                 energyMaxFilter === null &&

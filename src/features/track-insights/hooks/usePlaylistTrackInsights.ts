@@ -22,16 +22,27 @@ export function usePlaylistTrackInsights(
     if (activeUri?.startsWith("spotify:playlist:") && !entries.some(([uri]) => uri === activeUri)) entries.unshift([activeUri, "", ""]);
     entries.sort(([left], [right]) => Number(right === activeUri) - Number(left === activeUri));
     let cancelled = false;
+    let refreshing = false;
+    let cursor = 0;
+    let refreshedAt: number | null = null;
     const refresh = async (force = false) => {
-      for (const [uri, revision, count] of entries) {
+      if (refreshing || document.visibilityState === "hidden" || (refreshedAt !== null && Date.now() - refreshedAt < 5 * 60_000)) return;
+      refreshedAt = Date.now();
+      refreshing = true;
+      try {
+      const rotated = [...entries.slice(cursor), ...entries.slice(0, cursor)];
+      const batch = rotated.slice(0, 20);
+      cursor = entries.length ? (cursor + 20) % entries.length : 0;
+      for (const [uri, revision, count] of batch) {
         if (cancelled) break;
-        await playlistMembershipStore.request(uri, `${revision}:${count}`, force);
+        await playlistMembershipStore.request(uri, `${revision}:${count}`, force, { priority: uri === activeUri ? "foreground" : "background" });
       }
+      } finally { refreshing = false; }
     };
-    const onFocus = () => { void refresh(true); };
+    const onFocus = () => { void refresh(); };
     const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
     void refresh();
-    const interval = window.setInterval(onVisible, 60_000);
+    const interval = window.setInterval(onVisible, 5 * 60_000);
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisible);
     return () => {

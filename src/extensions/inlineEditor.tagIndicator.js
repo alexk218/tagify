@@ -60,7 +60,7 @@ function positionPopover(popover, anchor) {
     : `${Math.max(margin, window.innerHeight - bounds.top + 6)}px`;
 }
 
-function showPopover(anchor, groups) {
+function showPopover(anchor, groups, emptyMessage) {
   closePopover();
   const tags = flattenTags(groups);
   const popover = document.createElement("div");
@@ -81,7 +81,7 @@ function showPopover(anchor, groups) {
 
   if (tags.length === 0) {
     const empty = document.createElement("div");
-    empty.textContent = "No tags assigned. Click to add tags.";
+    empty.textContent = emptyMessage || "No tags assigned. Click to add tags.";
     empty.style.color = "var(--spice-subtext)";
     empty.style.fontSize = "12px";
     popover.appendChild(empty);
@@ -126,6 +126,7 @@ function showPopover(anchor, groups) {
 
 export function createTagStatusIndicator({
   status = "none",
+  recordingStatus = "idle",
   groups = [],
   compact = false,
   detailed = false,
@@ -133,14 +134,17 @@ export function createTagStatusIndicator({
   onOpenEditor,
 }) {
   const tags = flattenTags(groups);
-  if (tags.length === 0 && !showEmpty) return null;
+  const checking = tags.length === 0 && recordingStatus === "checking";
+  const unavailable = tags.length === 0 && recordingStatus === "unavailable";
+  if (tags.length === 0 && !showEmpty && !checking && !unavailable) return null;
+  const checkMessage = checking ? "Checking saved tags…" : unavailable ? "Couldn’t check saved tags. Open Tagify to try again later." : undefined;
 
   const indicator = document.createElement("button");
   indicator.type = "button";
   indicator.className = "tagify-tag-status-indicator";
   indicator.dataset.tagifyStatus = status;
   if (tags.length === 0) {
-    indicator.textContent = "Add tags";
+    indicator.textContent = checking ? (detailed ? "Checking…" : "◌") : unavailable ? (detailed ? "Check tags" : "?") : "Add tags";
   } else if (detailed && !compact) {
     indicator.textContent = `${tags[0].name}${tags.length > 1 ? ` +${tags.length - 1}` : ""}`;
   } else if (detailed) {
@@ -152,7 +156,7 @@ export function createTagStatusIndicator({
     "aria-label",
     tags.length > 0
       ? `Edit applied tags: ${tags.map((tag) => tag.name).join(", ")}`
-      : "Add tags",
+      : checkMessage || "Add tags",
   );
   indicator.style.display = "inline-flex";
   indicator.style.alignItems = "center";
@@ -174,7 +178,9 @@ export function createTagStatusIndicator({
   indicator.style.lineHeight = "1";
   indicator.style.cursor = "pointer";
 
-  const reveal = () => showPopover(indicator, groups);
+  if (checkMessage) indicator.title = checkMessage;
+  if (checking) indicator.setAttribute("aria-busy", "true");
+  const reveal = () => showPopover(indicator, groups, checkMessage);
   indicator.addEventListener("mouseenter", reveal);
   indicator.addEventListener("mouseleave", scheduleClose);
   indicator.addEventListener("focus", reveal);

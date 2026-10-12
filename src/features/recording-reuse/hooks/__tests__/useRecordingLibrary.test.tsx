@@ -12,6 +12,7 @@ const uri = (index: number) => `spotify:track:${String(index).padStart(22, "0")}
 const identity = { isrc: "USABC2400001", artistIds: ["a".repeat(22)], durationMs: 180000, name: "Song" };
 const song = { name: "Song", rating: 3, energy: 4, bpm: 120, tagIds: [], dateModified: 20 };
 beforeEach(async () => {
+  delete window.__tagifyRecordingChecks;
   trackEditHistory.clear();
   indexedDBStorage.resetConnection(); localStorage.clear(); localStorage.setItem("tagify:sync:account-id", "library-recordings-test");
   vi.stubGlobal("indexedDB", new IDBFactory()); await indexedDBStorage.init();
@@ -25,8 +26,8 @@ async function preview(initial: Record<string, TrackData>) {
     return { tracks, conflicts };
   });
 }
-it("checks the whole saved library without opening songs or limiting matching copies to eight", async () => {
-  const tracks = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [uri(index), { ...song, rating: index ? 0 : 3, energy: index ? 0 : 4, dateModified: 20 + index, recordingIdentity: identity }]));
+it("automatically combines saved reissues with different codes without opening songs or limiting copies to eight", async () => {
+  const tracks = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [uri(index), { ...song, rating: index ? 0 : 3, energy: index ? 0 : 4, dateModified: 20 + index, recordingIdentity: { ...identity, isrc: index % 2 ? "USABC2400002" : identity.isrc } }]));
   const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity");
   const view = await preview(tracks);
   await waitFor(() => expect(Object.values(view.result.current.tracks).every(track => !!track.recordingGroupId)).toBe(true));
@@ -71,7 +72,7 @@ it("defers matching during reversible edits and resumes when the user starts ano
   trackEditHistory.record(session, { [uri(1)]: { ...tracks[uri(1)], rating: 1 } }, tracks, "saved");
   const link = vi.spyOn(indexedDBStorage, "linkRecordings");
   const view = await preview(tracks);
-  const load = vi.spyOn(indexedDBStorage, "loadAllStrict");
+  const load = vi.spyOn(indexedDBStorage, "getRecordingTracks");
   await waitFor(() => expect(load).toHaveBeenCalled());
   await load.mock.results[0].value;
   expect(link).not.toHaveBeenCalled();
@@ -89,3 +90,29 @@ it("an edited song does not prevent matching other saved songs", async () => {
   await waitFor(() => expect(view.result.current.tracks[uri(3)].recordingGroupId).toBeTruthy());
   expect(view.result.current.tracks[uri(1)].recordingGroupId).toBeUndefined();
 });
+
+it("checks duplicate titles gradually in a 50,000-song library without loading the whole library for each group", async () => {
+  const tracks: Record<string, TrackData> = Object.fromEntries(Array.from({ length: 50_000 }, (_, index) => [
+    uri(index), { ...song, tagIds: [Object.values(defaultTagData.taxonomy.tagsById)[0].id], name: index < 200 ? `Pair ${Math.floor(index / 2)}` : `Song ${index}`, dateModified: index + 1 },
+  ]));
+  await indexedDBStorage.saveAll({ ...defaultTagData, tracks });
+  const loadAll = vi.spyOn(indexedDBStorage, "loadAllStrict");
+  const reads = vi.spyOn(indexedDBStorage, "getRecordingTracks");
+  const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity").mockImplementation(async value => {
+    const pair = Math.floor(Number(value.slice(-22)) / 2);
+    return { ...identity, name: `Pair ${pair}`, isrc: `USABC24${String(pair).padStart(5, "0")}` };
+  });
+  const view = renderHook(() => {
+    const [saved, setSaved] = useState(tracks);
+    useRecordingLibrary(saved, true, async changes => { setSaved(previous => ({ ...previous, ...changes })); });
+    return saved;
+  });
+  // Measure request/read counts, not shared-runner speed while 50k records render.
+  await waitFor(() => expect(view.result.current[uri(10)].recordingGroupId).toBeTruthy(), { timeout: 45_000 });
+  await waitFor(() => expect(window.__tagifyRecordingChecks?.backgroundRunning).toBe(0));
+  expect(lookup).toHaveBeenCalledTimes(12);
+  expect(loadAll).not.toHaveBeenCalled();
+  expect(reads.mock.calls.every(([ids]) => ids.length === 2)).toBe(true);
+  for (let index = 0; index < 12; index++) expect(view.result.current[uri(index)].dateModified).toBe(index + 1);
+  view.unmount();
+}, 90_000);

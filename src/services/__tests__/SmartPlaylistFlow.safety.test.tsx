@@ -71,6 +71,12 @@ describe("smart playlist safety across storage, Community and Spotify", () => {
       members = members.filter((member) => member !== uri);
       return true;
     });
+    vi.spyOn(spotifyApiService, "updatePlaylistTracks").mockImplementation(async (_id, additions, removals) => {
+      const removed = removals.filter(uri => members.includes(uri));
+      const added = additions.filter(uri => !members.includes(uri));
+      members = [...members.filter(uri => !removed.includes(uri)), ...added];
+      return { added, removed, success: true };
+    });
     return () => members;
   }
 

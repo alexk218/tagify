@@ -1,0 +1,90 @@
+import { createRequire } from "node:module";
+import { createServer } from "node:http";
+import { mkdir, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import assert from "node:assert/strict";
+
+const require = createRequire(import.meta.url);
+const { build } = createRequire(createRequire(require.resolve("vitest")).resolve("vite"))("esbuild");
+const { chromium } = createRequire(new URL("../../../tagify-community/package.json", import.meta.url))("@playwright/test");
+const project = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const result = await build({ entryPoints: [resolve(project, "scripts/tests/fixtures/reconciliation.tsx")], bundle: true, write: false, format: "iife", outfile: "bundle.js", tsconfig: resolve(project, "tsconfig.json"), define: { "process.env.NODE_ENV": '"development"' } });
+const server = createServer((request, response) => {
+  const path = (request.url || "/").split("?")[0];
+  const file = result.outputFiles.find((item) => path !== "/" && item.path.endsWith(path.slice(1)));
+  response.setHeader("content-type", file ? (path.endsWith(".css") ? "text/css" : "text/javascript") : "text/html");
+  response.end(file?.text ?? `<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/bundle.css"><style>:root{--spice-text:#fff;--spice-subtext:#b3b3b3;--spice-main:#121212;--spice-main-elevated:#242424;--spice-highlight:#1a1a1a;--spice-card:#282828;--spice-button:#1db954;--spice-button-active:#1ed760;--spice-tab-active:#333;--spice-rgb-text:255,255,255}*{box-sizing:border-box}body{background:#121212;color:#fff;font:14px sans-serif;margin:0;padding:16px}output{display:block;overflow-wrap:anywhere;margin-top:16px}</style><div id="app"></div><script src="/bundle.js"></script></html>`);
+});
+await new Promise((done) => server.listen(4393, "127.0.0.1", done));
+const browser = await chromium.launch();
+const evidence = resolve(project, "node_modules/.cache/reconciliation");
+await mkdir(evidence, { recursive: true });
+try {
+  for (const source of ["device", "community"]) {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => { if (message.type() === "error") console.error(message.text()); });
+    await page.goto("http://127.0.0.1:4393");
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: resolve(evidence, `${source}-initial.png`), fullPage: true });
+    await page.getByRole("radio", { name: source === "device" ? "Use this device for differences" : "Use Community for differences" }).click();
+    await page.screenshot({ path: resolve(evidence, `${source}-review.png`), fullPage: true });
+    await page.getByRole("button", { name: "Combine libraries", exact: true }).click();
+    await page.waitForTimeout(300);
+    await page.getByRole("status").filter({ hasText: "Library combined" }).waitFor();
+    const read = async () => JSON.parse(await page.getByLabel("Reconciliation result").textContent());
+    const combined = await read();
+    await page.screenshot({ path: resolve(evidence, `${source}-stats.png`), fullPage: true });
+    await page.getByRole("button", { name: "Restore on a fresh device" }).click();
+    await page.locator('output[data-sequence="2"]').waitFor();
+    const fresh = await read();
+    await page.getByRole("button", { name: "Update another existing device" }).click();
+    await page.locator('output[data-sequence="3"]').waitFor();
+    const existing = await read();
+    await writeFile(resolve(evidence, `${source}-results.json`), JSON.stringify({ combined, fresh, existing }, null, 2));
+    assert.deepEqual(combined, fresh, `${source}: reconciled and freshly restored stats must match`);
+    assert.deepEqual(existing, fresh, `${source}: another existing device must match`);
+    assert.equal(combined.recentTracks, 0);
+    assert.equal(combined.rating, source === "device" ? 0 : 4);
+    assert.deepEqual(combined.tags, source === "device" ? [] : ["house"]);
+    assert.deepEqual(errors, [], "The browser must not raise uncaught errors");
+    await page.close();
+  }
+  for (const scenario of ["deleted", "empty"]) {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto(`http://127.0.0.1:4393?${scenario}`);
+    await page.getByRole("radio", { name: "Use this device for differences" }).click();
+    await page.getByRole("button", { name: "Combine libraries", exact: true }).click();
+    await page.locator('output[data-sequence="1"]').waitFor();
+    const saved = JSON.parse(await page.getByLabel("Reconciliation result").textContent());
+    assert.equal(saved.ranges.all.tracks, 0, "A fully cleared item must not count in Stats");
+    assert.equal(saved.exists, scenario === "empty", "An explicit item removal must survive review");
+    await page.getByRole("button", { name: "Restore on a fresh device" }).click();
+    await page.locator('output[data-sequence="2"]').waitFor();
+    assert.deepEqual(JSON.parse(await page.getByLabel("Reconciliation result").textContent()), saved);
+    await page.getByRole("button", { name: "Update another existing device" }).click();
+    await page.locator('output[data-sequence="3"]').waitFor();
+    assert.deepEqual(JSON.parse(await page.getByLabel("Reconciliation result").textContent()), saved);
+    assert.deepEqual(errors, []);
+    await writeFile(resolve(evidence, `${scenario}-results.json`), JSON.stringify(saved, null, 2));
+    await page.close();
+  }
+  const errorPage = await browser.newPage({ viewport: { width: 480, height: 850 } });
+  await errorPage.goto("http://127.0.0.1:4393?error");
+  await errorPage.getByRole("radio", { name: "Use this device for differences" }).click();
+  await errorPage.screenshot({ path: resolve(evidence, "narrow-review.png"), fullPage: true });
+  const beforeFailedSave = await errorPage.evaluate(() => window.reconciliationReadData());
+  await errorPage.getByRole("button", { name: "Combine libraries", exact: true }).click();
+  await errorPage.getByRole("alert").waitFor();
+  assert.match(await errorPage.getByRole("alert").textContent(), /Couldn.t combine your libraries yet/);
+  assert.deepEqual(await errorPage.evaluate(() => window.reconciliationReadData()), beforeFailedSave);
+  assert.equal(await errorPage.getByLabel("Reconciliation result").textContent(), "");
+  assert.equal(await errorPage.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth), true);
+  await errorPage.screenshot({ path: resolve(evidence, "failed-save.png"), fullPage: true });
+  await errorPage.close();
+  console.log("Both reconciliation choices, existing devices, fresh restore, cleared values and Stats verified.");
+} finally { await browser.close(); await new Promise((done) => server.close(done)); }

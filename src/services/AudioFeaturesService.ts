@@ -1,4 +1,7 @@
-import { RateLimiter } from "@/utils/RateLimiter";
+import { spotifyRequestAccounting } from "@/utils/spotifyRequestAccounting";
+import type { RequestOptions } from "@/utils/RateLimiter";
+import { spotifyFetch, spotifyAccountKey, promoteSpotifyRequest, throwIfSpotifyRequestStopped } from "./SpotifyRequests";
+import { graphqlRateLimiter } from "@/utils/RateLimiter";
 import { normalizeCamelotKey } from "@/utils/camelotKey";
 import protobuf from "protobufjs/light";
 
@@ -86,13 +89,7 @@ const audioFeaturesJsonDescriptor = {
   },
 };
 
-const audioFeaturesRateLimiter = new RateLimiter({
-  maxRequestsPerSecond: 10,
-  maxRequestsPerMinute: 1000,
-  circuitBreakerThreshold: 10,
-  circuitBreakerResetMs: 30000,
-  requestTimeoutMs: 15000,
-});
+const audioFeaturesRateLimiter = graphqlRateLimiter;
 
 export interface AudioFeatures {
   bpm: number;
@@ -163,6 +160,26 @@ export class AudioFeaturesService {
   private initialized: boolean = false;
   private audioFeaturesCache: Map<string, AudioFeaturesCacheEntry> = new Map();
 
+  private pending = new Map<string, Promise<AudioFeatures | null>>();
+  private pendingOptions = new Map<string, RequestOptions>();
+  private unavailable = new Map<string, number>();
+  private account = "";
+  private checkAccount() {
+    const account = spotifyAccountKey();
+    if (account !== this.account) {
+      this.account = account;
+      this.pending.clear(); this.pendingOptions.clear(); this.audioFeaturesCache.clear(); this.unavailable.clear();
+    }
+  }
+  private async fetchAudio(url: string, init: RequestInit, readKey?: string, options?: RequestOptions): Promise<Response> {
+    const endpoint = url.includes("extended-metadata") ? "extended" : "client-analysis";
+    if (Date.now() < (this.unavailable.get(endpoint) ?? 0)) return new Response(null, { status: 403 });
+    const response = await spotifyFetch(url, init, readKey, options);
+    // A forbidden capability is account-wide; a missing song (404) is not.
+    if (response.status === 403) this.unavailable.set(endpoint, Date.now() + 15 * 60_000);
+    return response;
+  }
+
   private getProtobufTypes() {
     if (!this.extendedMetadataRequest) {
       this.extendedMetadataRequest = protobuf.Root.fromJSON(
@@ -188,6 +205,7 @@ export class AudioFeaturesService {
       this.catalogue = productStateValues["catalogue"] ?? "premium";
       this.initialized = true;
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.error(
         "AudioFeaturesService: Failed to init product state",
         error
@@ -198,7 +216,7 @@ export class AudioFeaturesService {
 
   private async getExtendedMetadata(
     entityUris: string[],
-    extensionKind: number
+    extensionKind: number, options?: RequestOptions
   ): Promise<Uint8Array> {
     const { extendedMetadataRequest } = this.getProtobufTypes();
     if (!extendedMetadataRequest) {
@@ -227,7 +245,7 @@ export class AudioFeaturesService {
     const accessToken =
       Spicetify.Platform.AuthorizationAPI.getState().token.accessToken;
 
-    const resp = await fetch(
+    const resp = await this.fetchAudio(
       "https://spclient.wg.spotify.com/extended-metadata/v0/extended-metadata",
       {
         method: "POST",
@@ -238,7 +256,8 @@ export class AudioFeaturesService {
           "Spotify-App-Version": Spicetify.Platform.version,
           "App-Platform": Spicetify.Platform.PlatformData.app_platform,
         },
-      }
+      },
+      `audio-extended:${extensionKind}:${entityUris.join(",")}`, options,
     );
 
     if (!resp.ok) {
@@ -320,7 +339,7 @@ export class AudioFeaturesService {
   }
 
   private async getAudioFeaturesFromSpotifyClientApi(
-    trackIds: string[]
+    trackIds: string[], options?: RequestOptions
   ): Promise<(AudioFeatures | null)[]> {
     const accessToken = this.getAccessToken();
     if (!accessToken || trackIds.length === 0) {
@@ -332,9 +351,9 @@ export class AudioFeaturesService {
     return Promise.all(
       trackIds.map(async (trackId) => {
         try {
-          const response = await fetch(
+          const response = await this.fetchAudio(
             `https://spclient.wg.spotify.com/audio-attributes/v1/audio-analysis/${trackId}`,
-            { headers }
+            { headers }, undefined, options
           );
 
           if (!response.ok) {
@@ -346,72 +365,9 @@ export class AudioFeaturesService {
 
           return this.mapSpotifyAudioFeaturesPayload(await response.json());
         } catch (error) {
+      throwIfSpotifyRequestStopped(error);
           console.warn(
             `AudioFeaturesService: Spotify client audio-analysis request failed for ${trackId}`,
-            error
-          );
-          return null;
-        }
-      })
-    );
-  }
-
-  private async getAudioFeaturesFromWebApi(
-    trackIds: string[]
-  ): Promise<(AudioFeatures | null)[]> {
-    const accessToken = this.getAccessToken();
-    if (!accessToken || trackIds.length === 0) {
-      return new Array(trackIds.length).fill(null);
-    }
-
-    const headers = { Authorization: `Bearer ${accessToken}` };
-
-    try {
-      const response = await fetch(
-        `https://api.spotify.com/v1/audio-features?ids=${trackIds.join(",")}`,
-        { headers }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        const audioFeatures = Array.isArray(data?.audio_features)
-          ? data.audio_features
-          : [];
-
-        return trackIds.map((_, index) =>
-          this.mapSpotifyAudioFeaturesPayload(audioFeatures[index])
-        );
-      }
-
-      console.warn(
-        `AudioFeaturesService: Spotify Web API audio-features request failed: ${response.status}`
-      );
-    } catch (error) {
-      console.warn(
-        "AudioFeaturesService: Spotify Web API audio-features request failed",
-        error
-      );
-    }
-
-    return Promise.all(
-      trackIds.map(async (trackId) => {
-        try {
-          const response = await fetch(
-            `https://api.spotify.com/v1/audio-analysis/${trackId}`,
-            { headers }
-          );
-
-          if (!response.ok) {
-            console.warn(
-              `AudioFeaturesService: Spotify Web API audio-analysis request failed for ${trackId}: ${response.status}`
-            );
-            return null;
-          }
-
-          return this.mapSpotifyAudioFeaturesPayload(await response.json());
-        } catch (error) {
-          console.warn(
-            `AudioFeaturesService: Spotify Web API audio-analysis request failed for ${trackId}`,
             error
           );
           return null;
@@ -425,51 +381,41 @@ export class AudioFeaturesService {
    * @param trackIds Array of Spotify track IDs (not URIs)
    */
   async getAudioFeatures(
-    trackIds: string[]
+    trackIds: string[], options?: RequestOptions
   ): Promise<(AudioFeatures | null)[]> {
-    const results: (AudioFeatures | null)[] = new Array(trackIds.length).fill(
-      null
-    );
-    const missingIndexesByTrackId = new Map<string, number[]>();
-
-    trackIds.forEach((trackId, index) => {
-      const cached = this.getCachedAudioFeatures(trackId);
-      if (cached !== undefined) {
-        results[index] = cached;
-        return;
+    this.checkAccount();
+    const account = this.account;
+    const requested = new Map<string, Promise<AudioFeatures | null>>();
+    const missing: string[] = [];
+    for (const id of new Set(trackIds)) {
+      const cached = this.getCachedAudioFeatures(id);
+      if (cached !== undefined) { spotifyRequestAccounting.record(options?.feature ?? "audio-features", "cached"); requested.set(id, Promise.resolve(cached)); }
+      else if (this.pending.has(id)) {
+        spotifyRequestAccounting.record(options?.feature ?? "audio-features", "shared", "store");
+        if (options?.priority !== "background") promoteSpotifyRequest(this.pendingOptions.get(id));
+        requested.set(id, this.pending.get(id)!);
       }
-
-      const indexes = missingIndexesByTrackId.get(trackId);
-      if (indexes) {
-        indexes.push(index);
-      } else {
-        missingIndexesByTrackId.set(trackId, [index]);
-      }
-    });
-
-    const missingTrackIds = Array.from(missingIndexesByTrackId.keys());
-    if (missingTrackIds.length === 0) {
-      return results;
+      else missing.push(id);
     }
-
-    // Create a stable key for deduping the same batch, regardless of call order.
-    const cacheKey = `audioFeatures:${[...missingTrackIds].sort().join(",")}`;
-
-    const fetched = await audioFeaturesRateLimiter.execute(cacheKey, async () =>
-      this.getAudioFeaturesInternal(missingTrackIds)
-    );
-
-    missingTrackIds.forEach((trackId, index) => {
-      const features = fetched[index] ?? null;
-      this.setCachedAudioFeatures(trackId, features);
-
-      const positions = missingIndexesByTrackId.get(trackId) || [];
-      positions.forEach((position) => {
-        results[position] = features;
+    // Sequential groups bound both request fan-out and encoded payload size.
+    let preceding: Promise<unknown> = Promise.resolve();
+    for (let index = 0; index < missing.length; index += 20) {
+      const ids = missing.slice(index, index + 20);
+      const batchOptions: RequestOptions = { ...options, priorityToken: { current: options?.priority ?? "foreground" } };
+      const batch = preceding.then(() => this.getAudioFeaturesInternal(ids, batchOptions));
+      preceding = batch;
+      ids.forEach((id, position) => {
+        const task = batch.then(values => {
+          const value = values[position] ?? null;
+          if (account === this.account) this.setCachedAudioFeatures(id, value);
+          return value;
+        }).finally(() => { if (this.pending.get(id) === task) { this.pending.delete(id); this.pendingOptions.delete(id); } });
+        this.pending.set(id, task);
+        this.pendingOptions.set(id, batchOptions);
+        requested.set(id, task);
       });
-    });
-
-    return results;
+    }
+    return Promise.all(trackIds.map(id => requested.get(id)!));
   }
 
   /**
@@ -486,13 +432,14 @@ export class AudioFeaturesService {
       const features = await this.getAudioFeaturesByTrackId(trackId);
       return features?.bpm ?? null;
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.error("AudioFeaturesService: Failed to get BPM", error);
       throw error;
     }
   }
 
-  async getAudioFeaturesByTrackId(trackId: string): Promise<AudioFeatures | null> {
-    const [features] = await this.getAudioFeatures([trackId]);
+  async getAudioFeaturesByTrackId(trackId: string, options?: RequestOptions): Promise<AudioFeatures | null> {
+    const [features] = await this.getAudioFeatures([trackId], options);
     return features ?? null;
   }
 
@@ -500,7 +447,7 @@ export class AudioFeaturesService {
    * Internal method that does the actual fetch (called by rate limiter)
    */
   private async getAudioFeaturesInternal(
-    trackIds: string[]
+    trackIds: string[], options?: RequestOptions
   ): Promise<(AudioFeatures | null)[]> {
     await this.init();
 
@@ -515,7 +462,7 @@ export class AudioFeaturesService {
 
     try {
       // Extension kind 222 = audio features in Spotify's extended metadata API.
-      const buf = await this.getExtendedMetadata(trackUris, 222);
+      const buf = await this.getExtendedMetadata(trackUris, 222, options);
       const msg = audioFeaturesResponse.decode(buf) as any;
       const responses = Array.isArray(msg.response) ? msg.response : [];
 
@@ -531,6 +478,7 @@ export class AudioFeaturesService {
         };
       });
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.warn(
         "AudioFeaturesService: Extended metadata audio features failed, trying Spotify client audio-analysis fallback",
         error
@@ -543,20 +491,8 @@ export class AudioFeaturesService {
 
     if (missingIndexes.length > 0) {
       const fallbackTrackIds = missingIndexes.map((index) => trackIds[index]);
-      let fallbackResults =
-        await this.getAudioFeaturesFromSpotifyClientApi(fallbackTrackIds);
-
-      if (fallbackResults.some((features) => features === null)) {
-        const webApiTrackIds = fallbackTrackIds.filter(
-          (_, index) => fallbackResults[index] === null
-        );
-        const webApiResults = await this.getAudioFeaturesFromWebApi(webApiTrackIds);
-        let webApiIndex = 0;
-
-        fallbackResults = fallbackResults.map((features) =>
-          features ?? webApiResults[webApiIndex++] ?? null
-        );
-      }
+      const fallbackResults =
+        await this.getAudioFeaturesFromSpotifyClientApi(fallbackTrackIds, options);
 
       missingIndexes.forEach((originalIndex, fallbackIndex) => {
         results[originalIndex] = fallbackResults[fallbackIndex] ?? null;
@@ -585,7 +521,7 @@ export class AudioFeaturesService {
    * Fetch full audio features for a single track by URI
    * @param trackUri Spotify track URI (spotify:track:xxx)
    */
-  async getAudioFeaturesFromUri(trackUri: string): Promise<AudioFeatures | null> {
+  async getAudioFeaturesFromUri(trackUri: string, options?: RequestOptions): Promise<AudioFeatures | null> {
     if (trackUri.startsWith("spotify:local:")) {
       return null;
     }
@@ -595,7 +531,7 @@ export class AudioFeaturesService {
       return null;
     }
 
-    return this.getAudioFeaturesByTrackId(trackId);
+    return this.getAudioFeaturesByTrackId(trackId, options);
   }
 }
 

@@ -4,6 +4,8 @@ import { defaultTagData } from "@/constants/defaultTagData";
 import { TAG_DATA_SCHEMA_VERSION } from "@/utils/tagTaxonomy";
 import type { TagDataStructure, TrackData } from "@/types/tagData";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
+import { spotifyApiService } from "@/services/SpotifyApiService";
+import { discussion39Releases, discussion39Artists } from "../../../scripts/tests/fixtures/discussion39";
 import { storageService } from "@/services/storage/StorageService";
 import { registerLocalPersistenceFlusher } from "@/services/sync/SyncLocalState";
 import { LIBRARY_UNAVAILABLE_MESSAGE } from "../extensionEdits";
@@ -37,6 +39,7 @@ const library = (): TagDataStructure => ({
 
 const spicetify = (globalThis as unknown as { Spicetify: typeof Spicetify }).Spicetify;
 let extensionLoaded = false;
+let testAccount = 0;
 
 // Generous limits: the whole extension starts up inside the test page.
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
@@ -64,6 +67,10 @@ function pageSavesDuringNextWrite(change: (track: TrackData & { uri: string }) =
 }
 
 beforeEach(async () => {
+  delete window.__tagifyRecordingChecks;
+  // The extension stays mounted across tests; fresh databases need fresh accounts
+  // so a previous test's visibility/signature cache cannot suppress a new check.
+  localStorage.setItem("tagify:sync:account-id", `inline-edits-${++testAccount}`);
   vi.stubGlobal("indexedDB", new IDBFactory());
   indexedDBStorage.resetConnection();
   localStorage.setItem("tagify:idb-migration-status", JSON.stringify({ status: "completed" }));
@@ -212,4 +219,242 @@ it("applies an edit to the saved song, never an older copy, while the library vi
   // Only the rating changed on the saved song; nothing came from the older copy.
   await eventually(async () => expect(await savedSong()).toMatchObject({ name: "Slide", rating: 4, tagIds: [rock], dateCreated: 1_000 }));
   expect(spicetify.showNotification).not.toHaveBeenCalledWith(LIBRARY_UNAVAILABLE_MESSAGE, true);
+});
+
+
+it.each(["legacy", "modern"])("checks an exact duplicate in Spotify’s %s rows without playback or opening Tagify and updates immediately", async layout => {
+  const [sourceUri, duplicateUri] = discussion39Releases.map(release => `spotify:track:${release.id}`);
+  const name = discussion39Releases[0].name;
+  const identity = { isrc: "GBAHS2600027", artistIds: discussion39Artists.map(artist => artist.id), durationMs: 192000, name };
+  await indexedDBStorage.saveTrack(sourceUri, { ...song, name, recordingIdentity: identity });
+  window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+  await new Promise(resolve => setTimeout(resolve, 400));
+  let finish!: (value: typeof identity) => void;
+  const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity").mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const main = document.createElement("main");
+  main.innerHTML = `<div class="main-trackList-indexable" role="grid"><div role="row" class="main-trackList-trackListRow"><div role="gridcell" aria-colindex="1">1</div><div role="gridcell" aria-colindex="2"><div class="main-trackList-rowMainContentTitle">${name}</div></div><div role="gridcell" aria-colindex="3">3:12</div></div></div>`;
+  const row = main.querySelector("[role=row]")!;
+  if (layout === "modern") {
+    row.querySelector(".main-trackList-rowMainContentTitle")!.outerHTML = `<a href="/track/${duplicateUri.split(":")[2]}">${name}</a>`;
+  }
+  (row as unknown as Record<string, unknown>).__reactFiber$test = { memoizedProps: { uri: duplicateUri } };
+  document.body.appendChild(main);
+  window.dispatchEvent(new CustomEvent("tagify:settingsChanged", { detail: { tracklistDisplayMode: "combined" } }));
+  try {
+    await eventually(() => expect(lookup).toHaveBeenCalledTimes(1));
+    await eventually(() => expect(row.querySelector('[aria-label="Checking saved tags…"]')).not.toBeNull());
+    finish({ ...identity, isrc: "GBAHS2600028" });
+    await eventually(() => expect(row.querySelector('[aria-label="Edit applied tags: Rock"]')).not.toBeNull());
+    await eventually(async () => expect(await indexedDBStorage.getTrack(duplicateUri)).toMatchObject({ tagIds: [rock], rating: 2 }));
+    expect((await indexedDBStorage.getTrack(sourceUri))!.dateModified).toBe(song.dateModified);
+    row.querySelector<HTMLButtonElement>('[aria-label="Set rating to 4 stars"]')!.click();
+    await eventually(async () => expect(await indexedDBStorage.getTrack(sourceUri)).toMatchObject({ rating: 4, tagIds: [rock] }));
+    await eventually(() => expect(row.querySelector('[aria-label="Clear 4 star rating"]')).not.toBeNull());
+    expect(lookup).toHaveBeenCalledTimes(1);
+  } finally {
+    main.remove(); lookup.mockRestore();
+    window.dispatchEvent(new CustomEvent("tagify:settingsChanged", { detail: { tracklistDisplayMode: "disabled" } }));
+  }
+});
+
+it("checks an unopened matching release directly in the playbar without a track list", async () => {
+  const [sourceUri, duplicateUri] = discussion39Releases.map(release => `spotify:track:${release.id}`);
+  const name = discussion39Releases[0].name;
+  const identity = { isrc: "GBAHS2600027", artistIds: discussion39Artists.map(artist => artist.id), durationMs: 192000, name };
+  await indexedDBStorage.saveTrack(sourceUri, { ...song, name, recordingIdentity: identity });
+  const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity").mockResolvedValue(identity);
+  const player = spicetify.Player as unknown as { data: unknown };
+  const previous = player.data;
+  try {
+    player.data = { item: { uri: duplicateUri, name } };
+    window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+    await eventually(() => expect(control()?.dataset.tagifyTrackUri).toBe(duplicateUri));
+    await eventually(() => expect(button("Clear 2 star rating")).not.toBeNull());
+    await eventually(async () => expect(await indexedDBStorage.getTrack(duplicateUri)).toMatchObject({ tagIds: [rock], rating: 2 }));
+    expect((await indexedDBStorage.getTrack(sourceUri))!.dateModified).toBe(song.dateModified);
+    expect(lookup).toHaveBeenCalledWith(duplicateUri, undefined, { priority: "foreground", feature: "recording-matching" });
+  } finally {
+    player.data = previous;
+    lookup.mockRestore();
+    window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+  }
+});
+
+it("matches an unopened song in a 30,000-song tagged library without rereading the whole library", async () => {
+  const [sourceUri, duplicateUri] = discussion39Releases.map(release => `spotify:track:${release.id}`);
+  const name = discussion39Releases[0].name;
+  const identity = { isrc: "GBAHS2600027", artistIds: discussion39Artists.map(artist => artist.id), durationMs: 192000, name };
+  const tracks: Record<string, TrackData> = Object.fromEntries(Array.from({ length: 30_000 }, (_, index) => [
+    `spotify:track:${String(index).padStart(22, "0")}`, { ...song, name: `Tagged song ${index}`, dateModified: index + 1 },
+  ]));
+  tracks[sourceUri] = { ...song, name, recordingIdentity: identity };
+  window.dispatchEvent(new CustomEvent("tagify:settingsChanged", { detail: { tracklistDisplayMode: "combined" } }));
+  const initialLoad = vi.spyOn(indexedDBStorage, "loadAllStrict");
+  const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity").mockResolvedValue(identity);
+  const player = spicetify.Player as unknown as { data: unknown };
+  const previous = player.data;
+  try {
+    expect(await indexedDBStorage.saveAll({ ...library(), tracks })).toBe(true);
+    window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+    await eventually(() => expect(initialLoad).toHaveBeenCalled());
+    await initialLoad.mock.results.at(-1)!.value;
+    // The IDB promise resolves before the extension finishes normalizing and
+    // showing its new library. Starting playback earlier races that setup read.
+    await eventually(() => expect((window as unknown as { tagifyDebug: { getData: () => Record<string, TrackData> } }).tagifyDebug.getData()[`spotify:track:${String(29_999).padStart(22, "0")}`]?.name).toBe("Tagged song 29999"));
+    // A previous test's refresh can already be in flight when this fixture is
+    // saved. Drain its queued 200ms refresh before measuring playback's reads.
+    await eventually(async () => {
+      const count = initialLoad.mock.calls.length;
+      await Promise.all(initialLoad.mock.results.map(result => result.value));
+      await new Promise(resolve => setTimeout(resolve, 250));
+      expect(initialLoad.mock.calls.length).toBe(count);
+    });
+    initialLoad.mockClear();
+    player.data = { item: { uri: duplicateUri, name } };
+    const songChange = (vi.mocked(spicetify.Player.addEventListener).mock.calls as unknown as [string, () => void][]).find(([event]) => event === "songchange")![1] as () => void;
+    songChange();
+    await eventually(() => expect(control()?.dataset.tagifyTrackUri).toBe(duplicateUri));
+    await eventually(() => expect(button("Clear 2 star rating")).not.toBeNull());
+    await eventually(async () => expect(await indexedDBStorage.getTrack(duplicateUri)).toMatchObject({ tagIds: [rock], rating: 2 }));
+    expect((await indexedDBStorage.getTrack(sourceUri))!.dateModified).toBe(song.dateModified);
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(initialLoad).not.toHaveBeenCalled();
+  } finally {
+    player.data = previous; lookup.mockRestore(); initialLoad.mockRestore();
+    window.dispatchEvent(new CustomEvent("tagify:settingsChanged", { detail: { tracklistDisplayMode: "disabled" } }));
+    window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+  }
+}, 60_000);
+
+it("finds a newly tagged source after warming its title index without reloading the library", async () => {
+  const source = `spotify:track:${"s".repeat(22)}`, target = `spotify:track:${"t".repeat(22)}`;
+  const name = "Newly tagged recording";
+  const identity = { isrc: "USABC2400001", artistIds: ["c".repeat(22)], durationMs: 180000, name };
+  const player = spicetify.Player as unknown as { data: unknown };
+  const previous = player.data;
+  const songChange = (vi.mocked(spicetify.Player.addEventListener).mock.calls as unknown as [string, () => void][]).find(([event]) => event === "songchange")![1];
+  const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity").mockResolvedValue(identity);
+  const fullRead = vi.spyOn(indexedDBStorage, "loadAllStrict");
+  try {
+    player.data = { item: { uri: target, name } }; songChange();
+    await eventually(() => expect(control()?.dataset.tagifyTrackUri).toBe(target));
+    expect(lookup).not.toHaveBeenCalled();
+    const saved = { ...song, name, recordingIdentity: identity };
+    await indexedDBStorage.saveTrack(source, saved);
+    fullRead.mockClear();
+    window.dispatchEvent(new CustomEvent("tagify:trackChanged", { detail: { trackUri: source, trackData: saved, timestamp: Date.now() } }));
+    songChange();
+    await eventually(async () => expect(await indexedDBStorage.getTrack(target)).toMatchObject({ rating: 2, tagIds: [rock] }));
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(fullRead).not.toHaveBeenCalled();
+  } finally {
+    player.data = previous; lookup.mockRestore(); fullRead.mockRestore();
+    window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+  }
+});
+
+it("updates all three simultaneous playlist columns when tags are added or removed from any release", async () => {
+  const ids = ["0FM31M7JGTYVgwcXJRZyTi", "7vuklW2wWZysUHbQigchbX", "39vBNPpuGv5U6MlNMa346j"];
+  const codes = ["US2641219402", "US2641005202", "US2641299902"];
+  const uris = ids.map(id => `spotify:track:${id}`);
+  const name = "Altering the Future";
+  const identity = (i: number) => ({ isrc: codes[i], artistIds: ["4f5V3PQ66nIrBCqugJtaGn"], durationMs: 334440, name });
+  await indexedDBStorage.saveTrack(uris[0], { ...song, name, recordingIdentity: identity(0) });
+  window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity").mockImplementation(async uri => identity(uris.indexOf(uri)));
+  const main = document.createElement("main");
+  main.innerHTML = `<div class="main-trackList-indexable" role="grid">${ids.map((id, index) => `<div role="row" class="main-trackList-trackListRow"><div role="gridcell" aria-colindex="1">${index + 1}</div><div role="gridcell" aria-colindex="2"><a href="/track/${id}">${name}</a></div><div role="gridcell" aria-colindex="3">5:34</div></div>`).join("")}</div>`;
+  const rows = [...main.querySelectorAll<HTMLElement>("[role=row]")];
+  rows.forEach((row, index) => Object.assign(row, { __reactFiber$test: { memoizedProps: { uri: uris[index] } } }));
+  document.body.append(main);
+  window.dispatchEvent(new CustomEvent("tagify:settingsChanged", { detail: { tracklistDisplayMode: "combined" } }));
+  const checkTags = async (tags: string[]) => {
+    await eventually(async () => {
+      for (const uri of uris) expect((await indexedDBStorage.getTrack(uri))?.tagIds.slice().sort()).toEqual([...tags].sort());
+      for (const row of rows) {
+        const label = row.querySelector('[aria-label^="Edit applied tags"]')?.getAttribute("aria-label") || "";
+        expect(label.includes("Rock")).toBe(tags.includes(rock));
+        expect(label.includes("Jazz")).toBe(tags.includes(jazz));
+      }
+    });
+  };
+  const toggleTag = async (row: HTMLElement, tag: string) => {
+    row.querySelector<HTMLElement>(".tagify-inline-editor")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 }));
+    await eventually(() => expect(document.querySelector(`.tagify-inline-menu button[data-tagify-tag-id="${tag}"]`)).not.toBeNull());
+    document.querySelector<HTMLButtonElement>(`.tagify-inline-menu button[data-tagify-tag-id="${tag}"]`)!.click();
+    document.querySelector(".tagify-inline-menu")?.remove();
+  };
+  try {
+    await checkTags([rock]);
+    await toggleTag(rows[1], jazz); await checkTags([rock, jazz]);
+    await toggleTag(rows[2], rock); await checkTags([jazz]);
+    rows[1].querySelector<HTMLButtonElement>('[aria-label="Clear 2 star rating"]')!.click();
+    await eventually(async () => {
+      for (const uri of uris) expect((await indexedDBStorage.getTrack(uri))?.rating).toBe(0);
+    });
+    await toggleTag(rows[0], jazz); await checkTags([]);
+    // The Tagify page writes shared storage and broadcasts this save event.
+    await indexedDBStorage.saveTrack(uris[0], { ...(await indexedDBStorage.getTrack(uris[0]))!, tagIds: [rock], rating: 4, energy: 8 });
+    window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+    await checkTags([rock]);
+    await eventually(() => {
+      for (const row of rows) {
+        expect(row.querySelector('[aria-label="Clear 4 star rating"]')).not.toBeNull();
+        expect(row.querySelector('[aria-label="Edit energy 8"]')).not.toBeNull();
+      }
+    });
+    expect(lookup).toHaveBeenCalledTimes(2);
+  } finally {
+    main.remove(); lookup.mockRestore();
+    window.dispatchEvent(new CustomEvent("tagify:settingsChanged", { detail: { tracklistDisplayMode: "disabled" } }));
+  }
+});
+
+it("repairs a nameless five-star single from its visible row and updates the album column", async () => {
+  const single = "spotify:track:4PkAV9y5D0Cp7XAWBmh55t", album = "spotify:track:4JJODZSD4UqV4lQfM7gnD3";
+  const legacy = { rating: 5, energy: 0, bpm: 112, camelotKey: "11A", tagIds: [], dateModified: 42 };
+  await indexedDBStorage.saveTrack(single, legacy);
+  window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity").mockResolvedValue({ isrc: "QMDA62673614", artistIds: ["3SEr9Sytj074YnBHmoI4Bd"], durationMs: 370025, name: "Seventh Ciel" });
+  const main = document.createElement("main");
+  main.innerHTML = `<div class="main-trackList-indexable" role="grid">${[album, single].map((_, index) => `<div role="row" class="main-trackList-trackListRow"><div role="gridcell" aria-colindex="1">${index + 1}</div><div role="gridcell" aria-colindex="2"><div class="main-trackList-rowMainContentTitle"><mark>Seven</mark><span>th Ciel</span></div><div class="main-trackList-rowMainContentSubTitle">SimbaSōl</div></div><div role="gridcell" aria-colindex="3">6:10</div></div>`).join("")}</div>`;
+  const rows = [...main.querySelectorAll<HTMLElement>("[role=row]")];
+  rows.forEach((row, index) => Object.assign(row, { __reactFiber$test: { memoizedProps: { uri: [album, single][index] } } }));
+  document.body.append(main);
+  window.dispatchEvent(new CustomEvent("tagify:settingsChanged", { detail: { tracklistDisplayMode: "combined" } }));
+  try {
+    await eventually(async () => {
+      expect(await indexedDBStorage.getTrack(single)).toMatchObject({ name: "Seventh Ciel", artists: "SimbaSōl", rating: 5, dateModified: 42 });
+      expect(await indexedDBStorage.getTrack(album)).toMatchObject({ rating: 5 });
+      rows.forEach(row => expect(row.querySelector('[aria-label="Clear 5 star rating"]')).not.toBeNull());
+    });
+    expect(lookup).toHaveBeenCalledTimes(2);
+    rows[0].querySelector<HTMLButtonElement>('[aria-label="Set rating to 4 stars"]')!.click();
+    await eventually(async () => {
+      expect((await indexedDBStorage.getTrack(single))?.rating).toBe(4);
+      rows.forEach(row => expect(row.querySelector('[aria-label="Clear 4 star rating"]')).not.toBeNull());
+    });
+    expect(lookup).toHaveBeenCalledTimes(2);
+  } finally {
+    main.remove(); lookup.mockRestore();
+    window.dispatchEvent(new CustomEvent("tagify:settingsChanged", { detail: { tracklistDisplayMode: "disabled" } }));
+  }
+});
+
+it("retains the available title when rating a previously unsaved song from the playbar", async () => {
+  const uri = "spotify:track:4PkAV9y5D0Cp7XAWBmh55t";
+  const player = spicetify.Player as unknown as { data: unknown };
+  const previous = player.data;
+  const songChange = (vi.mocked(spicetify.Player.addEventListener).mock.calls as unknown as [string, () => void][]).find(([event]) => event === "songchange")![1];
+  const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity");
+  player.data = { item: { uri, name: "Seventh Ciel", metadata: { artist_name: "SimbaSōl" } } };
+  songChange();
+  try {
+    await eventually(() => expect(control()?.dataset.tagifyTrackUri).toBe(uri));
+    button("Set rating to 5 stars")!.click();
+    await eventually(async () => expect(await indexedDBStorage.getTrack(uri)).toMatchObject({ rating: 5, name: "Seventh Ciel", artists: "SimbaSōl" }));
+    expect(lookup).not.toHaveBeenCalled();
+  } finally { lookup.mockRestore(); player.data = previous; songChange(); }
 });

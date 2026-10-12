@@ -1,6 +1,9 @@
+import { recordingName } from "../features/recording-reuse/utils/recordingReuse";
+import { checkAutomaticRecordingReuse, getRecordingReuseStatus, getRecordingReuseRetryAt, RECORDING_REUSE_EVENT, recordingReuseSignature } from "../features/recording-reuse/services/automaticRecordingReuse";
+import { getTagifyDatabaseName } from "../services/sync/SyncLocalState";
 import { buildCategoryTree } from "../utils/tagTaxonomy";
 import { createQuickTagSearch } from "./inlineEditor.quickTags";
-import { flushLocalPersistence } from "../services/sync/SyncLocalState";
+import { flushLocalPersistence, isLocalPersistencePaused } from "../services/sync/SyncLocalState";
 /* global Spicetify */
 import { keyboardShortcutService } from "../services/KeyboardShortcutService";
 import { storageService } from "../services/storage/StorageService";
@@ -46,6 +49,7 @@ import {
   resolveExtensionTagFilterLabel,
 } from "./extensionTagLookup";
 import {
+  buildSpotifyColumnTemplate,
   getRowItemUri,
   getSpotifyPlayerAnchor,
   getSpotifyRowLayout,
@@ -561,7 +565,25 @@ function findUriInObject(root, maxDepth = 6) {
           else shown[uri] = normalize.call(this, record, state.tagLookup);
         });
       };
+      const index = tracklistEnhancer.recordingTitles;
+      if (index?.tracks === state.taggedTracks) {
+        Object.keys(tracks).forEach(uri => {
+          const before = state.taggedTracks[uri];
+          const title = recordingName(before?.recordingIdentity?.name || before?.name || "");
+          const members = index.titles.get(title);
+          if (members) { delete members[uri]; if (!Object.keys(members).length) index.titles.delete(title); }
+        });
+      }
       show(state.taggedTracks, tracks, this.normalizeTrackForExtension);
+      if (index?.tracks === state.taggedTracks) {
+        Object.keys(tracks).forEach(uri => {
+          const after = state.taggedTracks[uri];
+          const title = recordingName(after?.recordingIdentity?.name || after?.name || "");
+          if (!after || !title) return;
+          if (!index.titles.has(title)) index.titles.set(title, {});
+          index.titles.get(title)[uri] = after;
+        });
+      }
       show(state.taggedPlaylists, playlists, this.normalizePlaylistForExtension);
       show(state.taggedArtists, artists, this.normalizeArtistForExtension);
     },
@@ -588,8 +610,16 @@ function findUriInObject(root, maxDepth = 6) {
       // don't depend on this view having loaded; refresh the view meanwhile.
       if (!state.libraryAvailable) libraryRefresh.schedule(0);
       const uniqueTrackUris = [...new Set(trackUris)].filter(Boolean);
+      let observedTracks;
       const saved = await saveTrackEdits(uniqueTrackUris, edit, {
         undoable: uniqueTrackUris.length > 1,
+        details: uri => {
+          observedTracks ??= new Map(getSpotifyTrackRows(document).map(row => tracklistEnhancer.trackFromRow(row)).filter(Boolean).map(track => [track.uri, track]));
+          const observed = observedTracks.get(uri);
+          if (observed) return { name: observed.name, ...observed.details };
+          const item = Spicetify.Player.data?.item;
+          return item?.uri === uri ? { name: item.name || item.metadata?.title, artists: item.metadata?.artist_name } : {};
+        },
       });
       announceSavedTracks(saved);
       return saved;
@@ -1379,6 +1409,7 @@ function findUriInObject(root, maxDepth = 6) {
         rating,
         energy,
         tagStatus,
+        recordingStatus: getRecordingReuseStatus(trackUri),
         tagGroups,
         compact,
         displayMode,
@@ -2054,6 +2085,7 @@ function findUriInObject(root, maxDepth = 6) {
       let hasChanges = false;
 
       for (const tracklist of tracklists) {
+        getSpotifyTrackRows(tracklist).forEach(row => this.checkSavedTags(row));
         if (this.hasTracklistChanged(tracklist)) {
           hasChanges = true;
           this.processTracklist(tracklist);
@@ -2139,40 +2171,12 @@ function findUriInObject(root, maxDepth = 6) {
       });
     },
 
-    /**
-     * Build dynamic grid template based on column count
-     * @param {number} totalColumns - Total number of columns including ours
-     * @param {number} tagifyColumnIndex - The index where our Tagify column is positioned
-     * @returns {string} CSS grid template string
-     */
-    buildDynamicGrid(totalColumns, tagifyColumnIndex) {
-      let template = "[index] 16px [first] 3fr";
-
-      // Build variable columns
-      for (let i = 1; i < totalColumns - 2; i++) {
-        const columnIndex = i + 2; // Start from 3 since we have index(1) and first(2)
-
-        if (columnIndex === tagifyColumnIndex) {
-          // This is our Tagify column - make it narrow
-          template += ` [var${i}] 150px`;
-        } else {
-          // Other extension columns or standard columns
-          template += ` [var${i}] 2fr`;
-        }
-      }
-
-      // Add the last column (usually duration/menu)
-      template += " [last] minmax(120px,1fr)";
-
-      return template;
-    },
-
     insertColumn(row, column, layout) {
       const grid = row.closest('[role="grid"]');
       if (grid && !this.originalColumnCounts.has(grid)) {
         this.originalColumnCounts.set(grid, grid.getAttribute("aria-colcount"));
       }
-      const template = this.buildDynamicGrid(layout.columns.length + 1, layout.columnIndex);
+      const template = buildSpotifyColumnTemplate(layout);
       this.columnRestorers.set(column, insertSpotifyColumn(layout, column, template));
       if (grid) {
         grid.setAttribute("aria-colcount", String(Math.max(Number(grid.getAttribute("aria-colcount")) || 0, layout.columnIndex + 1)));
@@ -2217,7 +2221,67 @@ function findUriInObject(root, maxDepth = 6) {
      * Add Tagify info to track row with observer isolation
      * @param {HTMLElement} row - The track row element
      */
+    recordingChecks: new Map(),
+    recordingRetryTimers: new Map(),
+    retryRecording(uri) {
+      clearTimeout(this.recordingRetryTimers.get(uri));
+      this.recordingRetryTimers.set(uri, setTimeout(() => {
+        this.recordingRetryTimers.delete(uri);
+        this.recordingChecks.delete(uri);
+        if (state.activeExtensions.playbarEnhancer && Spicetify.Player.data?.item?.uri === uri) playbarEnhancer.updateNowPlayingWidget();
+        if (state.activeExtensions.tracklistEnhancer) getSpotifyTrackRows(document).filter(row => utils.getTracklistTrackUri(row) === uri).forEach(row => this.checkSavedTags(row));
+      }, Math.max(1000, getRecordingReuseRetryAt(uri) - Date.now())));
+    },
+    trackFromRow(row) {
+      const uri = utils.getTracklistTrackUri(row);
+      if (!uri) return;
+      const name = row.querySelector('.main-trackList-rowMainContentTitle, .main-trackList-rowTitle, [data-testid="internal-track-link"], [data-testid="track-title"]')?.textContent?.trim() ||
+        Array.from(row.querySelectorAll('a[href]')).find(link => {
+          const href = link.getAttribute("href") || "";
+          return (href === uri || href.split("?")[0].replace(/\/$/, "").endsWith(`/track/${uri.split(":")[2]}`)) && link.textContent?.trim();
+        })?.textContent?.trim();
+      if (!name) return;
+      const artists = row.querySelector(".main-trackList-rowMainContentSubTitle")?.textContent?.trim();
+      return { uri, name, details: artists ? { artists } : undefined };
+    },
+    checkSavedTags(row) {
+      if (!state.libraryAvailable || isLocalPersistencePaused()) return;
+      const track = this.trackFromRow(row);
+      if (!track) return;
+      const { uri } = track;
+      this.checkRecording(track, row, () => state.activeExtensions.tracklistEnhancer && row.isConnected && utils.getTracklistTrackUri(row) === uri);
+    },
+    checkRecording(track, target, isCurrent) {
+      if (!state.libraryAvailable || isLocalPersistencePaused()) return;
+      const { uri, name } = track;
+      if (!uri || !name) return;
+      if (this.recordingTitles?.tracks !== state.taggedTracks) {
+        const titles = new Map();
+        Object.entries(state.taggedTracks).forEach(([savedUri, data]) => {
+          const key = recordingName(data.recordingIdentity?.name || data.name || "");
+          if (!key) return;
+          if (!titles.has(key)) titles.set(key, {});
+          titles.get(key)[savedUri] = data;
+        });
+        this.recordingTitles = { tracks: state.taggedTracks, titles };
+      }
+      const candidates = this.recordingTitles.titles.get(recordingName(name)) || {};
+      const tracks = { ...candidates, ...(state.taggedTracks[uri] ? { [uri]: state.taggedTracks[uri] } : {}) };
+      const signature = recordingReuseSignature(track, tracks);
+      const previous = this.recordingChecks.get(uri);
+      if (previous?.signature === signature && previous.target === target && previous.isCurrent() && previous.until > Date.now()) return;
+      if (this.recordingChecks.size >= 500) this.recordingChecks.delete(this.recordingChecks.keys().next().value);
+      this.recordingChecks.set(uri, { signature, target, isCurrent, until: Date.now() + 5 * 60_000 });
+      void checkAutomaticRecordingReuse(track, tracks, async (changes, syncChanges = changes) => {
+        utils.showSavedRecords({ tracks: changes });
+        inlineEditor.refreshTracks(Object.keys(changes));
+        announceSavedTracks(changes);
+        await Promise.all(Object.entries(syncChanges).map(([trackUri, trackData]) => smartPlaylistSyncService.syncTrack(trackUri, trackData)));
+      }, isCurrent);
+    },
+
     addTagInfoToTrack(row) {
+      this.checkSavedTags(row);
       // Skip if already processed
       if (row.querySelector(".tagify-info")) return;
 
@@ -2550,6 +2614,17 @@ function findUriInObject(root, maxDepth = 6) {
         state.nowPlayingWidgetTagInfo.appendChild(
           inlineEditor.createControl(trackUri, true),
         );
+
+        const item = Spicetify.Player.data.item;
+        tracklistEnhancer.checkRecording({
+          uri: trackUri,
+          name: item.name || item.metadata?.title,
+          details: {
+            artists: item.metadata?.artist_name,
+            albumName: item.metadata?.album_title,
+            albumUri: item.metadata?.album_uri,
+          },
+        }, trackInfo, () => state.activeExtensions.playbarEnhancer && trackInfo.isConnected && Spicetify.Player.data?.item?.uri === trackUri);
 
         // Add a click handler to navigate to Tagify
         state.nowPlayingWidgetTagInfo.style.cursor = "pointer";
@@ -3983,6 +4058,12 @@ function findUriInObject(root, maxDepth = 6) {
     smartPlaylistIndicatorEnhancer.initialize();
     artistProfileIndicatorEnhancer.initialize();
 
+    window.addEventListener(RECORDING_REUSE_EVENT, (event) => {
+      if (event.detail?.account === getTagifyDatabaseName()) {
+        inlineEditor.refreshTracks([event.detail.uri]);
+        if (event.detail.status === "unavailable") tracklistEnhancer.retryRecording(event.detail.uri);
+      }
+    });
     window.addEventListener(DATA_UPDATED_EVENT, (event) => {
       // Saves from this bundle are already shown from their saved records.
       if (isUnshownTagDataUpdate(event.detail)) libraryRefresh.schedule();

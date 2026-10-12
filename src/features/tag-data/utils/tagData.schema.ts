@@ -1,4 +1,4 @@
-import { normalizeRecordingIdentity } from "@/features/recording-reuse/utils/recordingReuse";
+import { detachInconsistentRecordingGroups, normalizeRecordingIdentity } from "@/features/recording-reuse/utils/recordingReuse";
 import { defaultTagData } from "@/constants/defaultTagData";
 import type {
   LegacyTagDataStructure,
@@ -71,7 +71,7 @@ function normalizeLegacyTrackTags(trackData: Partial<LegacyTrackData>): string[]
  * replaced by a known field are listed so they are not kept.
  */
 const TRACK_FIELDS = [
-  "uri", "tags", "recordingIdentity", "recordingGroupId", "recordingReuseDisabled", "rating", "energy", "bpm",
+  "uri", "tags", "recordingIdentity", "recordingGroupId", "recordingGroupConfirmed", "recordingReuseDisabled", "rating", "energy", "bpm",
   "camelotKey", "tagIds", "dateCreated", "dateModified", "name", "artists", "albumName", "albumUri",
   "albumImageUrl", "backfillAttempts", "audioFeaturesBackfillRevision", "albumBackfillAttempts",
 ] as const;
@@ -110,6 +110,7 @@ function normalizeTrackData(trackData: unknown): TrackData {
     ...unknownFields(trackData, TRACK_FIELDS),
     ...(normalizeRecordingIdentity(candidate.recordingIdentity) ? { recordingIdentity: normalizeRecordingIdentity(candidate.recordingIdentity) } : {}),
     ...(normalizeRecordingIdentity(candidate.recordingIdentity) && typeof candidate.recordingGroupId === "string" && candidate.recordingGroupId && !candidate.recordingReuseDisabled ? { recordingGroupId: candidate.recordingGroupId } : {}),
+    ...(candidate.recordingGroupConfirmed === true && normalizeRecordingIdentity(candidate.recordingIdentity) && typeof candidate.recordingGroupId === "string" && candidate.recordingGroupId && !candidate.recordingReuseDisabled ? { recordingGroupConfirmed: true } : {}),
     ...(candidate.recordingReuseDisabled === true ? { recordingReuseDisabled: true } : {}),
     rating: typeof candidate.rating === "number" ? candidate.rating : 0,
     energy: typeof candidate.energy === "number" ? candidate.energy : 0,
@@ -311,7 +312,7 @@ export function normalizeTagDataStructure(value: unknown): TagDataStructure {
     return {
       schemaVersion: TAG_DATA_SCHEMA_VERSION,
       taxonomy: normalizeTaxonomy(candidate.taxonomy),
-      tracks: nextTracks,
+      tracks: detachInconsistentRecordingGroups(nextTracks),
       playlists: nextPlaylists,
       artists: nextArtists,
       smartPlaylists: normalizeSmartPlaylistCriteriaList(
@@ -325,12 +326,12 @@ export function normalizeTagDataStructure(value: unknown): TagDataStructure {
     return {
       schemaVersion: TAG_DATA_SCHEMA_VERSION,
       taxonomy: buildTaxonomyFromCategoryTree(candidate.categories),
-      tracks: Object.fromEntries(
+      tracks: detachInconsistentRecordingGroups(Object.fromEntries(
         Object.entries(candidate.tracks).map(([trackUri, trackData]) => [
           trackUri,
           normalizeTrackData(trackData),
         ]),
-      ),
+      )),
       playlists: {},
       artists: {},
       smartPlaylists: [],

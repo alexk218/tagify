@@ -60,7 +60,7 @@ const SpotifyUpdateHelpModal: React.FC<SpotifyUpdateHelpModalProps> = ({
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const platform = detectPlatform();
   const installerUrl = platform === "windows"
-    ? "https://github.com/alexk218/tagify-installer/releases/latest"
+    ? "https://tagify.fm/download/windows"
     : "https://tagify.fm";
 
   useEffect(() => {

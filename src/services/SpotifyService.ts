@@ -1,7 +1,7 @@
+import { spotifyRequestAccounting, type SpotifyRequestFeature } from "@/utils/spotifyRequestAccounting";
+import { spotifyAccountKey, throwIfSpotifyRequestStopped } from "./SpotifyRequests";
 import { rememberRuleFacts } from "@/features/automatic-tags/facts";
 import { trackArtistIdentitiesStore } from "@/services/trackArtistIdentities";
-import { debugLog } from "@/utils/debug";
-import { graphqlRateLimiter } from "@/utils/RateLimiter";
 import { requestSpicetifyGraphQL } from "@/services/spicetifyGraphQL";
 
 interface GraphQLTrackAlbum {
@@ -91,8 +91,9 @@ export interface ContextInfo {
  */
 class SpotifyService {
   private locale: string = "en";
-  private getTrackGraphQLCallCount = 0;
-  private trackReads = new Map<string, Promise<GraphQLTrackResponse>>();
+  private trackCache = ((globalThis as any).__tagifyTrackResponsesV1 ??= new Map<string, { at: number; response: GraphQLTrackResponse }>()) as Map<string, { at: number; response: GraphQLTrackResponse }>;
+  private playlistNames = new Map<string, { at: number; name: string }>();
+  clearCache(): void { this.trackCache.clear(); this.playlistNames.clear(); }
 
   constructor() {
     this.initLocale();
@@ -104,69 +105,66 @@ class SpotifyService {
         this.locale = Spicetify.Locale.getLocale();
       }
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.warn("SpotifyService: Could not get locale, using default 'en'");
     }
   }
 
   private async requestTrackGraphQL(
     trackUri: string,
-    caller: string,
+    _caller: string,
+    signal?: AbortSignal,
+    priority: "foreground" | "background" = "foreground",
+    feature: SpotifyRequestFeature = "track-details",
   ): Promise<GraphQLTrackResponse> {
-    const pending = this.trackReads.get(trackUri);
-    if (pending) return pending;
-    this.getTrackGraphQLCallCount += 1;
-    debugLog(`[API #${this.getTrackGraphQLCallCount}] GraphQL.getTrack (${caller}): ${trackUri}`);
-    const { GraphQL, Locale } = Spicetify;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const task = Promise.race([
-      requestSpicetifyGraphQL<GraphQLTrackResponse>(GraphQL.Definitions.getTrack, {
-        uri: trackUri, locale: Locale?.getLocale() || this.locale,
-      }),
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error("Spotify track request timed out")), 10_000);
-      }),
-    ]).then((response) => {
-      if (!response.errors?.length && response.data?.trackUnion) {
-        trackArtistIdentitiesStore.remember(trackUri, this.extractArtists(response.data.trackUnion));
-        rememberRuleFacts(trackUri, { durationMs: response.data.trackUnion.duration?.totalMilliseconds, albumUri: response.data.trackUnion.albumOfTrack?.uri, name: response.data.trackUnion.name, artists: this.extractArtists(response.data.trackUnion).map(artist => artist.name).join(", ") });
-      }
-      return response;
-    }).finally(() => {
-      if (timeout) clearTimeout(timeout);
-      this.trackReads.delete(trackUri);
-    });
-    this.trackReads.set(trackUri, task);
-    return task;
+    const locale = Spicetify.Locale?.getLocale() || this.locale;
+    const key = `${spotifyAccountKey()}:${locale}:${trackUri}`;
+    const cached = this.trackCache.get(key);
+    if (cached && Date.now() - cached.at < 5 * 60_000) { spotifyRequestAccounting.record(feature, "cached"); return cached.response; }
+    const { GraphQL } = Spicetify;
+    const response = await requestSpicetifyGraphQL<GraphQLTrackResponse>(GraphQL.Definitions.getTrack, {
+      uri: trackUri, locale,
+    }, undefined, { signal, priority, feature });
+    if (!response.errors?.length && response.data?.trackUnion) {
+      this.trackCache.delete(key);
+      this.trackCache.set(key, { at: Date.now(), response });
+      if (this.trackCache.size > 1000) this.trackCache.delete(this.trackCache.keys().next().value!);
+      trackArtistIdentitiesStore.remember(trackUri, this.extractArtists(response.data.trackUnion));
+      rememberRuleFacts(trackUri, { durationMs: response.data.trackUnion.duration?.totalMilliseconds, albumUri: response.data.trackUnion.albumOfTrack?.uri, name: response.data.trackUnion.name, artists: this.extractArtists(response.data.trackUnion).map(artist => artist.name).join(", ") });
+    }
+    return response;
   }
 
   /**
    * Get track info using GraphQL
    * Replacement for CosmosAsync.get(`https://api.spotify.com/v1/tracks/${trackId}`)
    */
-  async getTrack(trackUri: string): Promise<TrackInfo | null> {
-    return graphqlRateLimiter.execute(`getTrack:${trackUri}`, async () => {
-      try {
-        const response = await this.requestTrackGraphQL(
-          trackUri,
-          "getTrack",
-        );
+  async getTrack(trackUri: string, signal?: AbortSignal, priority: "foreground" | "background" = "foreground", feature: SpotifyRequestFeature = "track-details"): Promise<TrackInfo | null> {
+    try {
+      const response = await this.requestTrackGraphQL(
+        trackUri,
+        "getTrack",
+        signal,
+        priority,
+        feature,
+      );
 
-        if (response.errors) {
-          console.error("SpotifyService: GraphQL errors:", response.errors);
-          return null;
-        }
-
-        const trackUnion = response.data?.trackUnion;
-        if (!trackUnion) {
-          return null;
-        }
-
-        return this.parseGraphQLTrack(trackUnion);
-      } catch (error) {
-        console.error("SpotifyService: Failed to get track:", error);
-        throw error; // Re-throw so rate limiter can track errors
+      if (response.errors) {
+        console.error("SpotifyService: GraphQL errors:", response.errors);
+        return null;
       }
-    });
+
+      const trackUnion = response.data?.trackUnion;
+      if (!trackUnion) {
+        return null;
+      }
+
+      return this.parseGraphQLTrack(trackUnion);
+    } catch (error) {
+    throwIfSpotifyRequestStopped(error);
+      console.error("SpotifyService: Failed to get track:", error);
+      throw error; // Re-throw so rate limiter can track errors
+    }
   }
 
   /**
@@ -177,18 +175,22 @@ class SpotifyService {
   async getBatchTracks(
     trackUris: string[],
     concurrency: number = 2,
+    signal?: AbortSignal,
   ): Promise<BatchTrackResult> {
     const results: BatchTrackResult = {};
-    const spotifyUris = trackUris.filter(
+    concurrency = Math.max(1, Math.min(4, Math.floor(concurrency) || 2));
+    const spotifyUris = [...new Set(trackUris)].filter(
       (uri) => !uri.startsWith("spotify:local:")
     );
 
     for (let index = 0; index < spotifyUris.length; index += concurrency) {
+      if (signal?.aborted) break;
       const batchUris = spotifyUris.slice(index, index + concurrency);
       const batchResults = await Promise.allSettled(
-        batchUris.map((uri) => this.getTrack(uri)),
+        batchUris.map((uri) => this.getTrack(uri, signal)),
       );
 
+      for (const result of batchResults) if (result.status === "rejected") throwIfSpotifyRequestStopped(result.reason);
       batchResults.forEach((result, resultIndex) => {
         const uri = batchUris[resultIndex];
         if (result.status === "fulfilled" && result.value) {
@@ -213,22 +215,18 @@ class SpotifyService {
       return null;
     }
 
-    return graphqlRateLimiter.execute(
-      `getTrackAlbumUri:${trackUri}`,
-      async () => {
-        try {
-          const response = await this.requestTrackGraphQL(
-            trackUri,
-            "getTrackAlbumUri",
-          );
+    try {
+        const response = await this.requestTrackGraphQL(
+          trackUri,
+          "getTrackAlbumUri",
+        );
 
-          return response.data?.trackUnion?.albumOfTrack?.uri || null;
-        } catch (error) {
-          console.error("SpotifyService: Failed to get album URI:", error);
-          throw error;
-        }
+        return response.data?.trackUnion?.albumOfTrack?.uri || null;
+      } catch (error) {
+    throwIfSpotifyRequestStopped(error);
+        console.error("SpotifyService: Failed to get album URI:", error);
+        throw error;
       }
-    );
   }
 
   /**
@@ -236,7 +234,7 @@ class SpotifyService {
    * Returns array of artists with their URIs
    */
   async getTrackArtists(
-    trackUri: string
+    trackUri: string, priority: "foreground" | "background" = "foreground"
   ): Promise<Array<{ name: string; uri: string }>> {
     if (trackUri.startsWith("spotify:local:")) {
       return [];
@@ -244,33 +242,32 @@ class SpotifyService {
 
     const cached = trackArtistIdentitiesStore.getSnapshot()[trackUri];
     if (cached) return cached.artists;
-    return graphqlRateLimiter.execute(
-      `getTrackArtists:${trackUri}`,
-      async () => {
-        try {
-          const response = await this.requestTrackGraphQL(
-            trackUri,
-            "getTrackArtists",
-          );
+    try {
+        const response = await this.requestTrackGraphQL(
+          trackUri,
+          "getTrackArtists", undefined, priority,
+        );
 
-          const trackUnion = response.data?.trackUnion;
-          if (!trackUnion) {
-            return [];
-          }
-
-          return this.extractArtists(trackUnion);
-        } catch (error) {
-          console.error("SpotifyService: Failed to get artists:", error);
-          throw error;
+        const trackUnion = response.data?.trackUnion;
+        if (!trackUnion) {
+          return [];
         }
+
+        return this.extractArtists(trackUnion);
+      } catch (error) {
+    throwIfSpotifyRequestStopped(error);
+        console.error("SpotifyService: Failed to get artists:", error);
+        throw error;
       }
-    );
   }
 
   /**
    * Get playlist name by URI
    */
   async getPlaylistName(playlistUri: string): Promise<string | null> {
+    const key = `${spotifyAccountKey()}:${playlistUri}`;
+    const cached = this.playlistNames.get(key);
+    if (cached && Date.now() - cached.at < 60_000) return cached.name;
     try {
       const { GraphQL, Locale } = Spicetify;
       const definition = GraphQL.Definitions.getPlaylist;
@@ -287,8 +284,14 @@ class SpotifyService {
         },
       );
 
-      return response.data?.playlistV2?.name || null;
+      const name = response.data?.playlistV2?.name || null;
+      if (name) {
+        this.playlistNames.set(key, { name, at: Date.now() });
+        if (this.playlistNames.size > 200) this.playlistNames.delete(this.playlistNames.keys().next().value!);
+      }
+      return name;
     } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       console.error("SpotifyService: Failed to get playlist name:", error);
       return null;
     }
@@ -302,37 +305,33 @@ class SpotifyService {
       return null;
     }
 
-    return graphqlRateLimiter.execute(
-      `getAlbumCover:${trackUri}:${preferredSize}`,
-      async () => {
-        try {
-          const response = await this.requestTrackGraphQL(
-            trackUri,
-            "getAlbumCover",
-          );
+    try {
+        const response = await this.requestTrackGraphQL(
+          trackUri,
+          "getAlbumCover",
+        );
 
-          const sources =
-            response.data?.trackUnion?.albumOfTrack?.coverArt?.sources;
-          if (!sources || sources.length === 0) {
-            return null;
-          }
-
-          const image =
-            sources.find((img) => img.height === preferredSize) || sources[0];
-          return image.url;
-        } catch (error) {
-          console.error("SpotifyService: Failed to get album cover:", error);
-          throw error;
+        const sources =
+          response.data?.trackUnion?.albumOfTrack?.coverArt?.sources;
+        if (!sources || sources.length === 0) {
+          return null;
         }
+
+        const image =
+          sources.find((img) => img.height === preferredSize) || sources[0];
+        return image.url;
+      } catch (error) {
+    throwIfSpotifyRequestStopped(error);
+        console.error("SpotifyService: Failed to get album cover:", error);
+        throw error;
       }
-    );
   }
 
   /**
    * Get comprehensive track metadata for TrackDetails display
    * Consolidates multiple GraphQL calls into one
    */
-  async getTrackMetadata(trackUri: string): Promise<TrackMetadata | null> {
+  async getTrackMetadata(trackUri: string, signal?: AbortSignal): Promise<TrackMetadata | null> {
     if (trackUri.startsWith("spotify:local:")) {
       return {
         releaseDate: "",
@@ -343,63 +342,60 @@ class SpotifyService {
       };
     }
 
-    return graphqlRateLimiter.execute(
-      `getTrackMetadata:${trackUri}`,
-      async () => {
-        try {
-          const response = await this.requestTrackGraphQL(
-            trackUri,
-            "getTrackMetadata",
-          );
+    try {
+        const response = await this.requestTrackGraphQL(
+          trackUri,
+          "getTrackMetadata",
+          signal,
+        );
 
-          if (response.errors) {
-            console.error("SpotifyService: GraphQL errors:", response.errors);
-            return null;
-          }
-
-          const trackUnion = response.data?.trackUnion;
-          if (!trackUnion) {
-            return null;
-          }
-
-          // Extract album cover
-          let albumCoverUrl: string | null = null;
-          const sources = trackUnion.albumOfTrack?.coverArt?.sources;
-          if (sources && sources.length > 0) {
-            const image =
-              sources.find((img: any) => img.height === 300) || sources[0];
-            albumCoverUrl = image.url;
-          }
-
-          // Extract play count
-          let playCount: number | null = null;
-          if (trackUnion.playcount) {
-            playCount = parseInt(trackUnion.playcount, 10) || null;
-          }
-
-          // Format release date
-          const releaseDate = this.formatDate(
-            trackUnion.albumOfTrack?.date?.isoString || ""
-          );
-
-          // Format track length
-          const trackLength = this.formatDuration(
-            trackUnion.duration?.totalMilliseconds || 0
-          );
-
-          return {
-            releaseDate,
-            trackLength,
-            playCount,
-            albumCoverUrl,
-            genres: [], // Genres require a separate artist query
-          };
-        } catch (error) {
-          console.error("SpotifyService: Failed to get track metadata:", error);
-          throw error;
+        if (response.errors) {
+          console.error("SpotifyService: GraphQL errors:", response.errors);
+          return null;
         }
+
+        const trackUnion = response.data?.trackUnion;
+        if (!trackUnion) {
+          return null;
+        }
+
+        // Extract album cover
+        let albumCoverUrl: string | null = null;
+        const sources = trackUnion.albumOfTrack?.coverArt?.sources;
+        if (sources && sources.length > 0) {
+          const image =
+            sources.find((img: any) => img.height === 300) || sources[0];
+          albumCoverUrl = image.url;
+        }
+
+        // Extract play count
+        let playCount: number | null = null;
+        if (trackUnion.playcount) {
+          playCount = parseInt(trackUnion.playcount, 10) || null;
+        }
+
+        // Format release date
+        const releaseDate = this.formatDate(
+          trackUnion.albumOfTrack?.date?.isoString || ""
+        );
+
+        // Format track length
+        const trackLength = this.formatDuration(
+          trackUnion.duration?.totalMilliseconds || 0
+        );
+
+        return {
+          releaseDate,
+          trackLength,
+          playCount,
+          albumCoverUrl,
+          genres: [], // Genres require a separate artist query
+        };
+      } catch (error) {
+    throwIfSpotifyRequestStopped(error);
+        console.error("SpotifyService: Failed to get track metadata:", error);
+        throw error;
       }
-    );
   }
 
   /**
@@ -423,18 +419,14 @@ class SpotifyService {
 
     // Only fetch for playlists (albums/artists can use local data)
     if (contextType === "playlist") {
-      return graphqlRateLimiter.execute(
-        `getContextName:${contextUri}`,
-        async () => {
-          try {
-            const name = await this.getPlaylistName(contextUri);
-            return name || "Playlist";
-          } catch (error) {
-            console.error("SpotifyService: Failed to get context name:", error);
-            return "Playlist";
-          }
+      try {
+          const name = await this.getPlaylistName(contextUri);
+          return name || "Playlist";
+        } catch (error) {
+    throwIfSpotifyRequestStopped(error);
+          console.error("SpotifyService: Failed to get context name:", error);
+          return "Playlist";
         }
-      );
     }
 
     return null;

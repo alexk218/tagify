@@ -1,0 +1,358 @@
+/* Chart pieces for the Stats view. Colors come from variables set on the Stats workspace. */
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--stats-track);
+}
+
+.tileLabel {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.tileValue {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.tileDetail {
+  color: var(--spice-subtext);
+  font-size: 11px;
+}
+
+.empty {
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 13px;
+}
+
+.tagName {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tagDot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--spice-subtext);
+}
+
+/* Bar list */
+.barList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.barRow {
+  display: grid;
+  grid-template-columns: minmax(90px, 38%) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 30px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--spice-text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+button.barRow {
+  cursor: pointer;
+}
+
+button.barRow:hover {
+  background: var(--stats-track);
+}
+
+.barLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.barTrack {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 0 4px 4px 0;
+}
+
+.barFill {
+  display: block;
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+  background: var(--stats-hue);
+}
+
+.barValue {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Column chart */
+.columns {
+  margin: 0;
+  /* Room for the labels under each column. */
+  padding-bottom: 20px;
+}
+
+.columnPlot {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 160px;
+  margin: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--stats-line);
+  list-style: none;
+}
+
+.column {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  position: relative;
+}
+
+.columnBar {
+  width: min(100%, 24px);
+  border-radius: 4px 4px 0 0;
+  background: color-mix(in srgb, var(--stats-hue) 72%, transparent);
+}
+
+.columnBarCurrent {
+  background: var(--stats-hue);
+}
+
+.columnValue {
+  margin-bottom: 3px;
+  color: var(--spice-subtext);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  visibility: hidden;
+}
+
+.column:hover .columnValue {
+  visibility: visible;
+}
+
+.column:hover .columnBar {
+  background: var(--stats-hue);
+}
+
+.columnLabel {
+  position: absolute;
+  top: calc(100% + 5px);
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--spice-subtext);
+  font-size: 10px;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.columns > figcaption {
+  margin-top: 24px;
+}
+
+/* Heatmap */
+.heatmap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  overflow-x: auto;
+}
+
+.heatmapMonths,
+.heatmapGrid {
+  display: grid;
+  grid-template-columns: repeat(53, 12px);
+  gap: 3px;
+  width: max-content;
+}
+
+.heatmapMonths {
+  color: var(--spice-subtext);
+  font-size: 10px;
+}
+
+.heatmapMonths span {
+  white-space: nowrap;
+}
+
+.heatmapGrid {
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 12px);
+}
+
+.heatCell {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.heat0 { background: var(--stats-track); }
+.heat1 { background: color-mix(in srgb, var(--stats-hue) 28%, var(--stats-surface)); }
+.heat2 { background: color-mix(in srgb, var(--stats-hue) 50%, var(--stats-surface)); }
+.heat3 { background: color-mix(in srgb, var(--stats-hue) 75%, var(--stats-surface)); }
+.heat4 { background: var(--stats-hue); }
+
+.heatmapLegend {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--spice-subtext);
+  font-size: 11px;
+}
+
+/* Camelot wheel */
+.wheel {
+  max-width: 260px;
+  margin: 0 auto;
+}
+
+.wheel svg {
+  display: block;
+  width: 100%;
+}
+
+.wheelEmpty {
+  fill: var(--stats-track);
+  stroke: var(--stats-surface);
+  stroke-width: 2;
+}
+
+.wheelFill {
+  fill: var(--stats-hue);
+  stroke: var(--stats-surface);
+  stroke-width: 2;
+}
+
+.wheelLabel {
+  fill: var(--spice-text);
+  font-size: 9px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.barRow:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
+}
+
+.tagNameLarge .tagDot {
+  width: 12px;
+  height: 12px;
+}
+
+.columnButton {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.columnButton:hover .columnValue,
+.columnButton:focus-visible .columnValue {
+  visibility: visible;
+}
+
+.columnButton:hover .columnBar,
+.columnButton:focus-visible .columnBar {
+  background: var(--stats-hue);
+}
+
+.columnButton:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.heatCellActive {
+  cursor: pointer;
+}
+
+.heatCellActive:hover {
+  outline: 1px solid var(--spice-text);
+  outline-offset: 1px;
+}
+
+.wheelSegmentActive {
+  cursor: pointer;
+}
+
+.wheelSegmentActive:hover .wheelFill,
+.wheelSegmentActive:hover .wheelEmpty {
+  fill: var(--stats-hue);
+  opacity: 1;
+}
+
+.wheelKeys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.wheelKeys button {
+  padding: 3px 10px;
+  border: 1px solid var(--stats-line, rgb(255 255 255 / 15%));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--spice-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wheelKeys button span {
+  color: var(--spice-subtext);
+  font-weight: 400;
+}
+
+.wheelKeys button:hover {
+  border-color: var(--spice-subtext);
+}
+
+.wheelKeys button:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
+}

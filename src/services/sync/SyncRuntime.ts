@@ -23,7 +23,7 @@ import type {
   InitialMergeResultV1,
   InitialMergeSource,
 } from "@tagify/sync-contracts";
-import { assertLibrarySnapshotV1, assertLibrarySnapshotV2, assertSyncMutationV1, DURABLE_APP_STATE_DOMAINS, entityKeyV1, MAX_APP_STATE_DOCUMENT_BYTES, MAX_SYNC_BATCH_OPERATIONS, planInitialLibraryMerge, PRIVATE_SYNC_PROTOCOL_VERSION } from "@tagify/sync-contracts";
+import { assertLibrarySnapshotV1, assertLibrarySnapshotV2, assertSyncMutationV1, DURABLE_APP_STATE_DOMAINS, entityKeyV1, INITIAL_MERGE_REVIEW_VERSION, MAX_APP_STATE_DOCUMENT_BYTES, MAX_SYNC_BATCH_OPERATIONS, planInitialLibraryMerge, PRIVATE_SYNC_PROTOCOL_VERSION } from "@tagify/sync-contracts";
 import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import { storageService } from "@/services/storage/StorageService";
 import { indexedDBStorage, type SyncTransactionContext, type SyncTransactionWrites } from "@/services/storage/IndexedDBStorageService";
@@ -191,7 +191,7 @@ export function isDefinitiveSessionFailure(message: string): boolean {
 export { syncClientHeaders } from "./SyncClientHeaders";
 
 export function capabilitiesCacheKey(apiBaseUrl: string): string {
-  return `tagify:sync-capabilities:${CLIENT_VERSION}:notes-v1:${new URL(apiBaseUrl).origin}`;
+  return `tagify:sync-capabilities:${CLIENT_VERSION}:notes-v1:merge-v2:${new URL(apiBaseUrl).origin}`;
 }
 
 interface SyncLockManager {
@@ -442,6 +442,7 @@ class SyncRuntime extends EventTarget {
     let review = this.initialMergePreview;
     let deviceSnapshot = this.initialMergeDeviceSnapshot;
     if (!configuration || !review || !deviceSnapshot) throw new Error("The library review is no longer available");
+    if (!review.supported) throw new Error("Combining libraries is paused while Tagify and Community finish updating. Please try again later.");
     if (review.conflicts.some((conflict) => !resolutions[conflict.id])) throw new Error("Choose which copy to keep before combining your libraries");
     this.setStatus("syncing");
     try {
@@ -457,7 +458,7 @@ class SyncRuntime extends EventTarget {
       }
       const outboxBeforeMerge = (await readOutbox()).map((intent) => intent.id).sort().join(",");
       const response = await this.requestCompressed(configuration, "/api/v2/sync/merge", {
-        version: 1,
+        version: INITIAL_MERGE_REVIEW_VERSION,
         deviceId: configuration.deviceId,
         operationId: this.initialMergeOperationId || (this.initialMergeOperationId = crypto.randomUUID()),
         expectedCommunityHeadCursor: review.communityHeadCursor,
@@ -474,7 +475,9 @@ class SyncRuntime extends EventTarget {
         await this.prepareInitialMerge(configuration);
         throw new Error("merge_review_required: Your device library changed while Tagify was combining it. Check the refreshed choices before continuing.");
       }
-      const saved = await indexedDBStorage.replaceCloudReplica(tagDataFromSnapshot(canonical), replicaManifest(configuration, canonical), stateRecordsFromSnapshot(canonical), canonical.appState);
+      // Reconciliation date alignment: every replica adopts the reviewed saved
+      // dates, while keeping device-only details and original normalized values.
+      const saved = await indexedDBStorage.replaceCloudReplica(tagDataFromSnapshot(canonical), replicaManifest(configuration, canonical), stateRecordsFromSnapshot(canonical), canonical.appState, [], { annotationDates: "canonical" });
       if (!saved) throw new Error("Your combined library was saved to Community, but this device could not finish updating");
       await applyDurableAppStateDocuments(canonical.appState, { smartPlaylistsAlreadyPersisted: true });
       await markManifestAppStateApplied();
@@ -770,7 +773,8 @@ class SyncRuntime extends EventTarget {
       this.setStatus("recovery-available");
       return false;
     }
-    if (classification === "meaningful-unlinked") {
+    // A queued clear is meaningful even after the last saved item is removed.
+    if (classification === "meaningful-unlinked" || meaningfulOutbox) {
       return this.reconcileInitialLibraries(configuration);
     }
     return true;
@@ -788,7 +792,16 @@ class SyncRuntime extends EventTarget {
   }
 
   private async captureInitialMergeDeviceSnapshot(configuration: DesktopSyncConfiguration): Promise<LibrarySnapshotV2> {
-    const core = await buildLocalSnapshot(configuration.libraryId);
+    const core = await buildLocalSnapshot(configuration.libraryId, undefined, new Date(), { includeEmptyAnnotations: true });
+    // A fully cleared item can be absent from storage but still waiting to
+    // back up. Keep that explicit removal in the review instead of restoring it.
+    const present = new Set(core.annotations.map((annotation) => entityKeyV1(annotation.entity)));
+    const queued = await readOutbox();
+    for (const intent of queued) {
+      if (intent.type !== "entity.delete" || present.has(entityKeyV1(intent.entity))) continue;
+      core.annotations.push({ ...emptyShadow(intent.entity), deleted: true });
+      present.add(entityKeyV1(intent.entity));
+    }
     const appState = await buildDurableAppStateDocuments();
     const deviceSnapshot: LibrarySnapshotV2 = { ...core, protocolVersion: PRIVATE_SYNC_PROTOCOL_VERSION, appState };
     assertLibrarySnapshotV2(deviceSnapshot);
@@ -804,7 +817,7 @@ class SyncRuntime extends EventTarget {
     const plan = planInitialLibraryMerge(deviceSnapshot, communitySnapshot);
     this.initialMergeDeviceSnapshot = deviceSnapshot;
     this.initialMergeOperationId = crypto.randomUUID();
-    this.initialMergePreview = { ...plan, labels: mergeReviewLabels(data, deviceSnapshot, communitySnapshot, plan), supported: this.capabilities?.initialMergeReviewVersion === 1 };
+    this.initialMergePreview = { ...plan, labels: mergeReviewLabels(data, deviceSnapshot, communitySnapshot, plan), supported: this.capabilities?.initialMergeReviewVersion === INITIAL_MERGE_REVIEW_VERSION };
   }
 
   /**
@@ -859,7 +872,7 @@ class SyncRuntime extends EventTarget {
     const localDrafts = await capturePendingAppState();
     const saved = await indexedDBStorage.replaceCloudReplica(tagDataFromSnapshot(snapshot), replicaManifest(configuration, snapshot), [
       ...stateRecordsFromSnapshot(snapshot), ...localDrafts.map((draft) => ({ key: `pending-app-state:${draft.domain}`, ...draft })),
-    ], appState, localDrafts, { keepQueuedEdits: true });
+    ], appState, localDrafts, { keepQueuedEdits: true, annotationDates: "canonical" });
     if (!saved) throw new Error("The compacted cloud snapshot could not be committed atomically");
     if ((await readOutbox()).some((intent) => intent.type === "taxonomy.replace")) this.taxonomyRefreshRequested = true;
     await applyDurableAppStateDocuments([
@@ -2319,14 +2332,14 @@ function stableJson(value: unknown): string {
 async function sha256Hex(value: string) { return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))].map((byte) => byte.toString(16).padStart(2, "0")).join(""); }
 async function sha256HexBytes(value: Uint8Array) { return [...new Uint8Array(await crypto.subtle.digest("SHA-256", Uint8Array.from(value).buffer))].map((byte) => byte.toString(16).padStart(2, "0")).join(""); }
 
-export async function buildLocalSnapshot(libraryId: string, sourceData?: TagDataStructure, generatedAt = new Date()): Promise<LibrarySnapshotV1> {
+export async function buildLocalSnapshot(libraryId: string, sourceData?: TagDataStructure, generatedAt = new Date(), options: { includeEmptyAnnotations?: boolean } = {}): Promise<LibrarySnapshotV1> {
   const data = sourceData ?? await storageService.loadAll();
   const taxonomy = flattenTaxonomy(data.taxonomy);
   const annotations: AnnotationSnapshotV1[] = [];
   const add = (uri: string, value: TrackData | PlaylistData | ArtistData) => {
     const match = uri.match(/^spotify:(track|album|playlist|artist):([A-Za-z0-9]{10,64})$/); if (!match) return;
     const track = match[1] === "track" ? value as TrackData : null;
-    if (!(value.rating > 0 || value.energy > 0 || value.tagIds.length || track?.bpm || track?.camelotKey)) return;
+    if (!options.includeEmptyAnnotations && !(value.rating > 0 || value.energy > 0 || value.tagIds.length || track?.bpm || track?.camelotKey)) return;
     annotations.push({
       entity: { provider: "spotify", kind: match[1] as AnnotationSnapshotV1["entity"]["kind"], providerId: match[2] },
       fields: { rating: { value: normalizeSyncRating(value.rating), revision: 0 }, energy: { value: normalizeSyncEnergy(value.energy), revision: 0 }, bpm: { value: normalizeSyncBpm(track?.bpm), revision: 0 }, key: { value: normalizeSyncKey(track?.camelotKey), revision: 0 } },
@@ -2384,8 +2397,9 @@ function tagDataFromSnapshot(snapshot: LibrarySnapshotV1 | LibrarySnapshotV2): T
   const playlists: TagDataStructure["playlists"] = {};
   const artists: TagDataStructure["artists"] = {};
   for (const annotation of snapshot.annotations) {
+    if (annotation.deleted) continue;
     const uri = `spotify:${annotation.entity.kind}:${annotation.entity.providerId}`;
-    // Community's dates fill in what a device has not recorded itself.
+    // The snapshot carries saved dates, never the time it was downloaded.
     const dateCreated = deviceTimestamp(annotation.createdAt);
     const dateModified = deviceTimestamp(annotation.modifiedAt);
     const base = {

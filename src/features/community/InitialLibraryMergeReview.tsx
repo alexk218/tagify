@@ -69,6 +69,7 @@ export function InitialLibraryMergeReview({
           <p className={styles.mergeEyebrow}>Your choice is needed</p>
           <h3 id="merge-review-title">Combine your Tagify libraries</h3>
           <p>Tagify found saved music and settings on both this device and Community. Combining keeps items found on only one side. Your choices below apply only where both sides have different versions of the same item.</p>
+          <p>Cleared ratings and removed tags are choices too. Saved dates will match across devices; if the copies have different dates, your time-based stats and Last Updated order may change.</p>
         </div>
       </div>
 
@@ -113,7 +114,7 @@ export function InitialLibraryMergeReview({
       </> : <div className={styles.mergeNoConflicts}><ShieldCheck /><span><strong>No conflicting choices were found.</strong> Tagify can safely keep everything from both libraries.</span></div>}
 
       {error ? <div className={styles.error} role="alert">{error}</div> : null}
-      {!review.supported ? <div className={styles.warning} role="status"><span><strong>Community is finishing an update before these libraries can be combined.</strong> Your Tagify data has not changed. Try again a little later.</span></div> : null}
+      {!review.supported ? <div className={styles.warning} role="status"><span><strong>Tagify and Community need matching updates before these libraries can be combined.</strong> Check for a Tagify update, then try again a little later. Your saved data is kept.</span></div> : null}
       <div className={styles.mergeActions}>
         <button type="button" className={styles.secondary} disabled={busy || backingUp} onClick={() => void downloadBackup()}><Download size={15} /> {backingUp ? "Preparing backup…" : "Download backup first"}</button>
         <button type="button" className={styles.primary} disabled={!review.supported || busy || (review.conflicts.length > 0 && !bulkChoice)} onClick={() => void commit()}>{busy ? "Combining libraries…" : "Combine libraries"}</button>

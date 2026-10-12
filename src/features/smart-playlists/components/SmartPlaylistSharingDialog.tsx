@@ -57,14 +57,15 @@ export default function SmartPlaylistSharingDialog({ mode, taxonomy, playlists, 
   const [playlistRetry, setPlaylistRetry] = useState(0);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
   useEffect(() => {
-    if (mode !== "create") return;
+    if (mode !== "create" || destination === "new") return;
     let active = true;
+    const controller = new AbortController();
     setLoadingPlaylists(true); setPlaylistLoadError(false);
-    void spotifyApiService.getAllUserPlaylistReferencesStrict().then((items) => {
+    void spotifyApiService.getAllUserPlaylistReferencesStrict(controller.signal).then((items) => {
       if (active) setSpotifyPlaylists(items);
     }).catch(() => { if (active) setPlaylistLoadError(true); }).finally(() => { if (active) setLoadingPlaylists(false); });
-    return () => { active = false; };
-  }, [mode, playlistRetry]);
+    return () => { active = false; controller.abort(); };
+  }, [mode, destination === "new", playlistRetry]);
   const existingPlaylist = spotifyPlaylists.find((playlist) => playlist.playlistId === destination);
   const availableDestinations = spotifyPlaylists.filter((playlist) => !playlists.some((saved) => saved.id !== setup?.id && saved.playlistId === playlist.playlistId));
   const [selected, setSelected] = useState(() => new Set(playlists.map((p) => p.id ?? p.playlistId)));
@@ -191,10 +192,10 @@ export default function SmartPlaylistSharingDialog({ mode, taxonomy, playlists, 
             })}
             <p className={styles.hint}>Tag groups follow the AND/OR shown above. “AND” requires every included tag; “OR” allows any included tag. Excluded tags keep songs out of that group. Ratings, energy, BPM, and keys must also match your own saved details.</p>
           </> : setup ? <>
-            <label className={styles.search}>Spotify playlist<select value={destination} disabled={busy} onChange={(event) => setDestination(event.target.value)}><option value="new">Create a new private playlist</option><option value="" disabled>Choose an existing playlist</option>{availableDestinations.map((playlist) => <option key={playlist.playlistId} value={playlist.playlistId}>{playlist.playlistName}</option>)}</select></label>
+            <label className={styles.search}>Spotify playlist<select value={destination} disabled={busy} onChange={(event) => setDestination(event.target.value)}><option value="new">Create a new private playlist</option><option value="">Choose an existing playlist</option>{availableDestinations.map((playlist) => <option key={playlist.playlistId} value={playlist.playlistId}>{playlist.playlistName}</option>)}</select></label>
             {loadingPlaylists ? <p role="status">Reading your Spotify playlists…</p> : null}
             {playlistLoadError ? <div role="alert"><p>Your Spotify playlists couldn’t be read.</p><button disabled={busy} onClick={() => setPlaylistRetry((value) => value + 1)}>Retry playlists</button></div> : null}
-            {!loadingPlaylists && !playlistLoadError && !availableDestinations.length ? <p>No other Spotify playlists are available. Create a new playlist, or save this setup for later.</p> : null}
+            {destination !== "new" && !loadingPlaylists && !playlistLoadError && !availableDestinations.length ? <p>No other Spotify playlists are available. Create a new playlist, or save this setup for later.</p> : null}
             <h3>{setup.playlistName}</h3><p className={styles.rules}>{describeRules(setup.criteria, (id) => tagNames.get(id) ?? "Missing tag")}</p>
             {tracks ? <Matches uris={collectMatchingTrackUris(tracks, setup.criteria)} tracks={tracks} /> : null}
             <p className={styles.notice}>{destination === "new" ? "Creates a new private playlist in your Spotify account. Your existing playlists and songs keep their tags and ratings." : `Connects ${existingPlaylist ? `“${existingPlaylist.playlistName}”` : "the playlist you choose"} to these rules. Songs that don’t match can be removed from that playlist. Existing songs keep their tags and ratings.`}</p>

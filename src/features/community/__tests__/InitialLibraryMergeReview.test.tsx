@@ -135,8 +135,8 @@ describe("InitialLibraryMergeReview", () => {
   it("protects the library until Community supports reviewed merges", () => {
     render(<InitialLibraryMergeReview review={{ ...review, supported: false }} onCommit={vi.fn()} onDownloadBackup={vi.fn()} />);
 
-    expect(screen.getByText(/Community is finishing an update/i)).toBeInTheDocument();
-    expect(screen.getByText(/Your Tagify data has not changed/i)).toBeInTheDocument();
+    expect(screen.getByText(/Tagify and Community need matching updates/i)).toBeInTheDocument();
+    expect(screen.getByText(/Your saved data is kept/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Combine libraries" })).toBeDisabled();
   });
 });

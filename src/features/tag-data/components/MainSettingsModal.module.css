@@ -249,7 +249,8 @@
 }
 
 @media (width <= 640px) {
-  .backupSettingItem {
+  .backupSettingItem,
+  .displayModeItem {
     align-items: stretch;
     flex-direction: column;
   }

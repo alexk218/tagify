@@ -161,6 +161,28 @@ describe("SmartPlaylistModal", () => {
     );
   };
 
+  it("stops sequential name checks when the modal closes", async () => {
+    const metadata = (Spicetify.Platform.PlaylistAPI as any).getMetadata;
+    let finish!: (value: { name: string }) => void;
+    metadata.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const modal = renderModal();
+    await waitFor(() => expect(metadata).toHaveBeenCalledTimes(1));
+    modal.unmount();
+    await act(async () => { finish({ name: "Changed while closing" }); });
+    expect(metadata).toHaveBeenCalledTimes(1);
+    expect(mockOnUpdateSmartPlaylists).not.toHaveBeenCalled();
+  });
+
+  it("stops remaining name checks after Spotify throttles the first request", async () => {
+    const metadata = (Spicetify.Platform.PlaylistAPI as any).getMetadata;
+    metadata.mockRejectedValueOnce({ status: 429, retryAfterSeconds: 60 });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderModal();
+    await waitFor(() => expect(logged).toHaveBeenCalledWith("Could not check smart playlist names:", expect.anything()));
+    expect(metadata).toHaveBeenCalledTimes(1);
+    expect(mockOnUpdateSmartPlaylists).not.toHaveBeenCalled();
+  });
+
   describe("Rendering", () => {
     it.each([
       { actual: ["spotify:track:matched"], status: "In Sync" },

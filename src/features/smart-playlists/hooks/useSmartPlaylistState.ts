@@ -59,14 +59,21 @@ export function useSmartPlaylistState(): UseSmartPlaylistStateResult {
 
   useEffect(() => registerLocalPersistenceFlusher(() => saveQueueRef.current), []);
 
-  const persistAndSyncState = useCallback((next: SmartPlaylistCriteria[]) => {
+  const persistAndSyncState = useCallback((next: SmartPlaylistCriteria[], preserveMembership = false) => {
     smartPlaylistsRef.current = next;
     setSmartPlaylistsState(next);
 
-    const save = saveQueueRef.current.then(() => saveSmartPlaylistsToStorage(next));
+    const save = saveQueueRef.current.then(() => saveSmartPlaylistsToStorage(next, preserveMembership));
     saveQueueRef.current = save.catch(() => undefined);
     return save.then(
-      () => dispatchSmartPlaylistsUpdated(next),
+      async () => {
+        const saved = preserveMembership ? await loadSmartPlaylistsFromStorage() : next;
+        if (smartPlaylistsRef.current === next) {
+          smartPlaylistsRef.current = saved;
+          setSmartPlaylistsState(saved);
+        }
+        dispatchSmartPlaylistsUpdated(saved);
+      },
       async (error) => {
         if (smartPlaylistsRef.current === next) {
           try {
@@ -93,7 +100,7 @@ export function useSmartPlaylistState(): UseSmartPlaylistStateResult {
         return currentPlaylists;
       }
 
-      await persistAndSyncState(updated);
+      await persistAndSyncState(updated, true);
       return updated;
     },
     [persistAndSyncState],
@@ -103,6 +110,7 @@ export function useSmartPlaylistState(): UseSmartPlaylistStateResult {
     (value: SetStateAction<SmartPlaylistCriteria[]>) =>
       persistAndSyncState(
         typeof value === "function" ? value(smartPlaylistsRef.current) : value,
+        true,
       ),
     [persistAndSyncState],
   );

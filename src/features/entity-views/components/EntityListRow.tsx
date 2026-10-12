@@ -24,6 +24,7 @@ export interface EntityRowTrackTag {
 
 interface EntityListRowProps {
   kind: EntityKind;
+  entityUri?: string;
   /** "Album", "Playlist", or "Artist". */
   entityLabel: string;
   name: string;
@@ -67,6 +68,7 @@ const COVER_CLASSES: Record<EntityKind, string> = {
  */
 export function EntityListRow({
   kind,
+  entityUri,
   entityLabel,
   name,
   imageUrl,
@@ -101,7 +103,7 @@ export function EntityListRow({
   const hasProgress = Boolean(progressBar || progressText);
 
   return (
-    <li className={`${styles.row} ${isActive ? styles.rowActive : ""}`} onClick={onSelect}>
+    <li data-entity-uri={entityUri} className={`${styles.row} ${isActive ? styles.rowActive : ""}`} onClick={onSelect}>
       <button
         type="button"
         className={`${styles.cover} ${COVER_CLASSES[kind]}`}

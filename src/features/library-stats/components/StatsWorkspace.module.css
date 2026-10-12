@@ -1,0 +1,545 @@
+/* Stats view. Measures use one hue (Spotify's button color); tag colors only mark tag identity. */
+
+.workspace {
+  --stats-hue: var(--spice-button);
+  --stats-surface: color-mix(in srgb, var(--spice-card) 92%, black 8%);
+  --stats-line: color-mix(in srgb, var(--spice-button-disabled) 70%, transparent);
+  --stats-track: rgb(255 255 255 / 6%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 18px 12px 32px;
+  overflow-y: auto;
+  color: var(--spice-text);
+  container-type: inline-size;
+}
+
+/* The workspace scrolls as a whole; sections keep their natural height. */
+.workspace > *,
+.panel > * {
+  flex-shrink: 0;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 20px;
+}
+
+.title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  color: var(--spice-subtext);
+  font-size: 13px;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--stats-line);
+  border-radius: 999px;
+  background: var(--stats-surface);
+}
+
+.segmented button,
+.tabs button {
+  border: 0;
+  background: transparent;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.segmented button {
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+}
+
+.segmented button:hover,
+.tabs button:hover {
+  color: var(--spice-text);
+}
+
+.segmented .segmentActive {
+  background: var(--spice-text);
+  color: var(--spice-main);
+}
+
+.segmented .segmentActive:hover {
+  color: var(--spice-main);
+}
+
+.closeButton,
+.iconButton {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  place-items: center;
+}
+
+.closeButton:hover,
+.iconButton:hover {
+  background: var(--stats-track);
+  color: var(--spice-text);
+}
+
+.note {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--stats-track);
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--stats-line);
+  overflow-x: auto;
+}
+
+.tabs button {
+  min-height: 34px;
+  padding: 0 12px;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+}
+
+.tabs .tabActive {
+  border-bottom-color: var(--stats-hue);
+  color: var(--spice-text);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.emptyState {
+  margin: 40px auto;
+  color: var(--spice-subtext);
+  text-align: center;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@container (max-width: 760px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--stats-line);
+  border-radius: 12px;
+  background: var(--stats-surface);
+}
+
+.cardWide {
+  grid-column: 1 / -1;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.cardDescription {
+  margin: -6px 0 0;
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.hero {
+  gap: 4px;
+}
+
+.heroValue {
+  font-size: 52px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.heroLabel {
+  margin-bottom: 14px;
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+/* Tiles stretch to fill each row, so a short last row never leaves a gap. */
+.tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.tiles > * {
+  flex: 1 1 140px;
+}
+
+.chipButton:focus-visible,
+.tableTag:focus-visible,
+.actionButton:focus-visible,
+.linkButton:focus-visible,
+.backButton:focus-visible,
+.segmented button:focus-visible,
+.tabs button:focus-visible,
+.closeButton:focus-visible,
+.iconButton:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
+}
+
+/* Lists and actions */
+.linkButton,
+.backButton {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.linkButton:hover,
+.backButton:hover {
+  color: var(--spice-text);
+  text-decoration: underline;
+}
+
+.attentionList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attention {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--stats-track);
+  font-size: 13px;
+}
+
+.attentionActions,
+.detailActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.actionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--stats-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--spice-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.actionButton:hover:not(:disabled) {
+  border-color: var(--spice-subtext);
+  background: var(--stats-track);
+}
+
+.actionButton:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.pairList,
+.chipList,
+.albumList {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pairList {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pairList li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--spice-subtext);
+  font-size: 13px;
+}
+
+.pairCount {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pairCount:hover {
+  background: var(--stats-track);
+  color: var(--spice-text);
+}
+
+.pairCount:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
+}
+
+.chipList {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip,
+.chipButton {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 3px 10px;
+  border: 1px solid var(--stats-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--spice-text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.chipButton {
+  cursor: pointer;
+}
+
+.chipButton:hover {
+  border-color: var(--spice-subtext);
+}
+
+.search {
+  width: min(100%, 320px);
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--stats-line);
+  border-radius: 999px;
+  background: var(--stats-track);
+  color: var(--spice-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.tableWrap {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.table th,
+.table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--stats-line);
+  text-align: right;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--stats-surface);
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.table th:first-child {
+  text-align: left;
+}
+
+.tableTag {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 360px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--spice-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.tableTag small {
+  color: var(--spice-subtext);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.tableTag:hover {
+  text-decoration: underline;
+}
+
+.albumList {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.albumList li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A whole row that opens its tracks: artwork, text and count. */
+.listRow {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--spice-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.listRow:hover {
+  background: var(--stats-track);
+}
+
+.listRow:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
+}
+
+.albumArt {
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--stats-track);
+}
+
+.albumArt img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.albumText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.albumText strong,
+.albumText small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.albumText strong {
+  font-size: 13px;
+}
+
+.albumText small {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+/* Tag detail */
+.detailHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detailTitle {
+  margin: 4px 0 0;
+  font-size: 24px;
+}
+
+.empty {
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 13px;
+}
+
+.listValue {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

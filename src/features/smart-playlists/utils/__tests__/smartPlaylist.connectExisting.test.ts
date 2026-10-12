@@ -33,11 +33,15 @@ describe("connecting shared rules to an existing playlist", () => {
     let members = [oldSong];
     vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict").mockImplementation(async () => [...members]);
     const create = vi.spyOn(spotifyApiService, "createPrivatePlaylist");
-    const remove = vi.spyOn(spotifyApiService, "removeTrackFromPlaylist").mockImplementation(async (uri) => { members = members.filter((member) => member !== uri); return true; });
-    vi.spyOn(spotifyApiService, "addTrackToSpotifyPlaylist").mockImplementation(async (uri) => { members.push(uri); return { success: true, wasAdded: true }; });
+    const update = vi.spyOn(spotifyApiService, "updatePlaylistTracks").mockImplementation(async (_id, additions, removals) => {
+      const added = additions.filter(uri => !members.includes(uri));
+      const removed = removals.filter(uri => members.includes(uri));
+      members = [...members.filter(uri => !removed.includes(uri)), ...added];
+      return { added, removed, success: true };
+    });
     await Promise.all([connectExistingSmartPlaylist(setup.id!, selected), connectExistingSmartPlaylist(setup.id!, selected)]);
     expect(create).not.toHaveBeenCalled();
-    expect(remove).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledWith("existing", [matchingSong], [oldSong], [oldSong], expect.objectContaining({ priority: "foreground", feature: "smart-playlists" }));
     expect(members).toEqual([matchingSong]);
     const saved = await indexedDBStorage.loadAllStrict();
     expect(saved.smartPlaylists?.[0]).toMatchObject({ playlistId: "existing", playlistName: "My favourites", isActive: true, source: setup.source });

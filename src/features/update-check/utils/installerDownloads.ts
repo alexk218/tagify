@@ -1,7 +1,7 @@
 export const INSTALLER_RELEASES_URL =
-  "https://github.com/alexk218/tagify-installer/releases";
+  "https://tagify.fm/releases/manager";
 export const INSTALLER_RELEASES_API =
-  "https://api.github.com/repos/alexk218/tagify-installer/releases?per_page=100";
+  "https://tagify.fm/releases/manager/releases.json";
 
 const MAC_ASSETS = ["TagifyInstaller-mac.dmg", "TagifyInstaller-mac.zip", "Tagify.pkg"];
 
@@ -18,7 +18,7 @@ export function findMacInstallerDownload(releases: unknown): string | null {
     if (!version.every(Number.isSafeInteger)) continue;
 
     for (const name of MAC_ASSETS) {
-      const url = `https://github.com/alexk218/tagify-installer/releases/download/${release.tag_name}/${name}`;
+      const url = `https://tagify.fm/releases/manager/${release.tag_name}/${name}`;
       if (release.assets.some((asset: { name?: string; browser_download_url?: string } | null) =>
         asset?.name === name && asset.browser_download_url === url)) {
         candidates.push({ version, url });

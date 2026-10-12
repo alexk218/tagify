@@ -44,6 +44,7 @@ export function renderInlineEditorPresentation(
     rating = 0,
     energy = 0,
     tagStatus = "none",
+    recordingStatus = "idle",
     tagGroups = [],
     compact = false,
     displayMode = "combined",
@@ -96,6 +97,7 @@ export function renderInlineEditorPresentation(
     control.style.width = "auto";
     control.appendChild(
       createTagStatusIndicator({
+        recordingStatus,
         status: tagStatus,
         groups: tagGroups,
         compact,
@@ -121,6 +123,7 @@ export function renderInlineEditorPresentation(
   leadingSlot.style.justifyContent = "flex-end";
   leadingSlot.style.minWidth = "0";
   const tagIndicator = createTagStatusIndicator({
+    recordingStatus,
     status: tagStatus,
     groups: tagGroups,
     compact,

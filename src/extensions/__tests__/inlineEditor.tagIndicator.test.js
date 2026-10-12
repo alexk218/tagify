@@ -98,3 +98,12 @@ describe("inline tag status indicator", () => {
     expect(details[0].tags[0].accent.dot).toBe("#f59e0b");
   });
 });
+
+it("distinguishes a pending or unavailable duplicate check from an empty tag list", () => {
+  const pending = createTagStatusIndicator({ recordingStatus: "checking" });
+  expect(pending.getAttribute("aria-label")).toBe("Checking saved tags…");
+  expect(pending.getAttribute("aria-busy")).toBe("true");
+  const unavailable = createTagStatusIndicator({ recordingStatus: "unavailable", detailed: true });
+  expect(unavailable.textContent).toBe("Check tags");
+  expect(unavailable.getAttribute("aria-label")).toContain("Open Tagify to try again later");
+});

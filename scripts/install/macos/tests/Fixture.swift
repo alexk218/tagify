@@ -32,6 +32,7 @@ final class Fixture {
     var omitAppliedFiles = false
     var failUpdateSetting = false
     var ignoreUpdateSetting = false
+    var reportedVersion = "2.45.3"
     private var assets: [String: URL] = [:]
 
     init(fresh: Bool = false, backupMatches: Bool = false) throws {
@@ -39,8 +40,10 @@ final class Fixture {
         let home = root.appendingPathComponent("User Home")
         paths = InstallerPaths(home: home, spotify: root.appendingPathComponent("Spotify.app"), environment: [:])
         try put(paths.spotify.appendingPathComponent("Contents/Info.plist"), """
-        <?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.spotify.client</string></dict></plist>
+        <?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.spotify.client</string><key>CFBundleExecutable</key><string>Spotify</string><key>CFBundleShortVersionString</key><string>1.2.3</string></dict></plist>
         """)
+        try put(paths.spotify.appendingPathComponent("Contents/MacOS/Spotify"), "#!/bin/sh\nexit 0\n")
+        try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: paths.spotify.appendingPathComponent("Contents/MacOS/Spotify").path)
         try put(paths.resources.appendingPathComponent("Apps/xpui/original.js"), "Original Spotify")
         try put(paths.prefs, "app.last-launched-version=\"1.2.3\"\n")
         try put(home.appendingPathComponent("Library/Application Support/Spotify/PersistentCache/library.json"), "{\"dateModified\":12345,\"tags\":[\"Keep me\"]}")
@@ -56,6 +59,7 @@ final class Fixture {
         try put(paths.config.appendingPathComponent("CustomApps/other/index.js"), "Other app")
         let tagify = root.appendingPathComponent("tagify-source/tagify")
         for name in ["index.js", "extension.js", "style.css", "manifest.json"] { try put(tagify.appendingPathComponent(name), "New \(name)") }
+        try put(tagify.appendingPathComponent("manifest.json"), "{\"name\":\"Tagify\",\"icon\":\"tag\"}")
         try put(tagify.appendingPathComponent("package.json"), "{\"version\":\"3.0.0\"}")
         let tagifyZip = root.appendingPathComponent("tagify-v3.0.0.zip")
         _ = try InstallerSystem.run(URL(fileURLWithPath: "/usr/bin/ditto"), ["-c", "-k", "--keepParent", tagify.path, tagifyZip.path], [:])
@@ -68,7 +72,7 @@ final class Fixture {
         assets["tagify-v3.0.0.zip"] = tagifyZip
         assets["spicetify-2.45.3-darwin-arm64.tar.gz"] = spiceTar
         for (repository, tag, archive) in [("alexk218/tagify", "v3.0.0", tagifyZip), ("spicetify/cli", "v2.45.3", spiceTar)] {
-            let manifest: [String: Any] = ["tag_name": tag, "draft": false, "prerelease": false, "assets": [["name": archive.lastPathComponent, "browser_download_url": "https://github.com/\(repository)/releases/download/\(tag)/\(archive.lastPathComponent)", "digest": try digest(archive)]]]
+            let manifest: [String: Any] = ["tag_name": tag, "draft": false, "prerelease": false, "assets": [["name": archive.lastPathComponent, "browser_download_url": repository == "alexk218/tagify" ? "https://tagify.fm/releases/client/\(tag)/\(archive.lastPathComponent)" : "https://github.com/\(repository)/releases/download/\(tag)/\(archive.lastPathComponent)", "digest": try digest(archive)]]]
             let url = root.appendingPathComponent(repository.replacingOccurrences(of: "/", with: "-") + ".json")
             try JSONSerialization.data(withJSONObject: manifest).write(to: url)
             assets[repository] = url
@@ -76,15 +80,16 @@ final class Fixture {
         installer = try TagifyInstaller(paths: paths)
         installer.closeSpotify = { [unowned self] in self.closed = true }
         installer.download = { [unowned self] url, target in
-            let key = url.host == "api.github.com" ? url.path.replacingOccurrences(of: "/repos/", with: "").replacingOccurrences(of: "/releases/latest", with: "") : url.lastPathComponent
-            try files.copyItem(at: self.assets[key]!, to: target)
+            let key = url.host == "tagify.fm" && url.path.hasSuffix(".json") ? "alexk218/tagify" : url.host == "api.github.com" ? url.path.replacingOccurrences(of: "/repos/", with: "").replacingOccurrences(of: "/releases/latest", with: "").replacingOccurrences(of: "/releases/tags/v3.0.0", with: "").replacingOccurrences(of: "/releases/tags/v2.45.3", with: "") : url.lastPathComponent
+            guard let asset = self.assets[key] else { throw InstallerFailure(message: "Fixture release unavailable") }
+            try files.copyItem(at: asset, to: target)
             if self.corrupt && key.hasSuffix(".zip") { try put(target, "Corrupt download") }
         }
         installer.command = { [unowned self] executable, args, env in
             guard executable == self.paths.binary else { return try InstallerSystem.run(executable, args, env) }
             try expect(env["HOME"] == self.paths.home.path && env["SPICETIFY_CONFIG"] == self.paths.config.path && env["SPICETIFY_STATE"] == self.paths.state.path, "Wrong user, config or state directory")
             self.spiceCommands.append(args)
-            if args == ["-v"] { return CommandResult(status: 0, output: "2.45.3") }
+            if args == ["-v"] { return CommandResult(status: 0, output: self.reportedVersion) }
             if args.contains("config") {
                 if args.contains("custom_apps") {
                     let config = self.paths.config.appendingPathComponent("config-xpui.ini")
@@ -104,6 +109,9 @@ final class Fixture {
                 }
                 return CommandResult(status: self.failUpdateSetting ? 1 : 0, output: "Disabled Spotify updates!")
             } else if args.contains("apply") {
+                let config = self.paths.config.appendingPathComponent("config-xpui.ini")
+                let current = text(config).replacingOccurrences(of: "version=1.0.0", with: "version=1.2.3")
+                try put(config, current)
                 try put(self.paths.resources.appendingPathComponent("Apps/xpui/original.js"), "Changed Spotify")
                 try put(self.paths.state.appendingPathComponent("Backup/xpui.spa"), "Changed backup")
                 if self.failApply { return CommandResult(status: 1, output: "Simulated apply failure") }

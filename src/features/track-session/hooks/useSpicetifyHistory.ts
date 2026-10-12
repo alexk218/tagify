@@ -34,8 +34,10 @@ export function useSpicetifyHistory({
 }: UseSpicetifyHistoryProps) {
   useEffect(() => {
     let selectionRevision = 0;
+    let controller = new AbortController();
+    let previousSelection = "";
     const checkForTrackUris = async () => {
-      const revision = ++selectionRevision;
+
       const location = Spicetify.Platform.History
         .location as SpicetifyHistoryLocation;
 
@@ -47,6 +49,14 @@ export function useSpicetifyHistory({
         editSmartPlaylistId,
       } =
         parseHistoryTrackSelection(location);
+
+      const selection = JSON.stringify([trackUri, trackUris, playlistUri, artistUri, editSmartPlaylistId]);
+      if (selection === previousSelection) return;
+      previousSelection = selection;
+      controller.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      const revision = ++selectionRevision;
 
       if (editSmartPlaylistId) {
         onEditSmartPlaylist?.(editSmartPlaylistId);
@@ -82,7 +92,7 @@ export function useSpicetifyHistory({
             return;
           }
 
-          const trackData = await spotifyService.getTrack(trackUri);
+          const trackData = await spotifyService.getTrack(trackUri, signal);
 
           if (revision !== selectionRevision) return;
           if (trackData) {
@@ -95,6 +105,7 @@ export function useSpicetifyHistory({
             }
           }
         } catch (error) {
+          if (signal.aborted) return;
           console.error("Tagify: Error loading track from URI parameter:", error);
           Spicetify.showNotification("Error loading track for tagging", true);
         }
@@ -123,7 +134,7 @@ export function useSpicetifyHistory({
         setMultiTagTracks(placeholderTracks);
 
         const fetchTrackData = async () => {
-          const trackDataByUri = await spotifyService.getBatchTracks(trackUris);
+          const trackDataByUri = await spotifyService.getBatchTracks(trackUris, 2, signal);
 
           const resolvedTracks = trackUris.map((uri) => {
             if (uri.startsWith("spotify:local:")) {
@@ -140,6 +151,7 @@ export function useSpicetifyHistory({
         };
 
         fetchTrackData().catch((error) => {
+          if (signal.aborted) return;
           console.error("Tagify: Error in async track data fetching:", error);
           Spicetify.showNotification("Error loading some tracks", true);
         });
@@ -173,6 +185,7 @@ export function useSpicetifyHistory({
     }
 
     return () => {
+      controller.abort();
       selectionRevision += 1;
       if (unlisten) {
         unlisten();

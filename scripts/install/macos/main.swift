@@ -8,18 +8,22 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var spotify: URL?
     var setup = SetupStatus()
     var preferences = InstallerPreferences()
+    var analytics: InstallerAnalytics?
+    var analyticsOperation: (id: String, kind: String, started: Date)?
+    var analyticsStages: Set<String> = []
     var installer: TagifyInstaller?
+    var recoveryNeeded = false
     var busy = false
     var checkingLocal = false
     var checkingUpdates = false
     var latestTagify: String?
     var latestSpicetify: String?
     var availableUpdate: InstallerUpdate?
-    var downloadedUpdate: URL?
+    var managerUpdater: ManagerUpdating?
     var tutorial: TutorialController?
     var guide: NSPanel?
     var guideOpenButton: NSButton?
-    var updatePanel: NSPanel?
+    var guideText: InstallerLabel?
     var detailsPanel: NSPanel?
     var diagnostics = ""
     var retryOperation: (() -> Void)?
@@ -38,8 +42,11 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let choose = installerButton("Choose Spotify…", target: nil, action: nil)
     let repair = installerButton("Tagify missing? Repair", target: nil, action: nil)
     let refresh = installerButton("Check again", target: nil, action: nil)
+    let spiceHelp = installerButton("Update help", target: nil, action: nil)
     let logs = installerButton("Logs", target: nil, action: nil)
     let tutorialButton = installerButton("Tutorial", target: nil, action: nil)
+    let discordHelp = installerButton("Get help on Discord", target: nil, action: nil)
+    static let discordHelpURL = URL(string: "https://discord.gg/C4qbPUbBKV")!
     let blockUpdates = NSButton(checkboxWithTitle: "Block Spotify updates", target: nil, action: nil)
     let protectionStatus = installerLabel("", size: 13, weight: .medium)
     let pendingStatus = installerLabel("", size: 12, color: .secondaryLabelColor)
@@ -72,7 +79,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let green = InstallerTheme.green
 
     init(home: URL = FileManager.default.homeDirectoryForCurrentUser) { self.home = home; super.init() }
-    static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.2" }
+    static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development" }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -87,9 +94,11 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         else {
             do { preferences = try InstallerPreferences.load(home: home) }
             catch { appendDiagnostic("Couldn't read installer preferences: \(error)") }
+            analytics = InstallerAnalytics(home: home, configuration: InstallerAnalyticsConfiguration.bundled())
             blockUpdates.state = (preferences.blockSpotifyUpdates ?? true) ? .on : .off
             spotify = findSpotify()
             refreshSetup()
+            configureManagerUpdater()
             checkUpdates(prompt: true)
         }
         window.makeKeyAndOrderFront(nil)
@@ -118,7 +127,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: min(780, visible.height - 70)), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.minSize = NSSize(width: 560, height: 480)
         window.appearance = NSAppearance(named: .darkAqua)
-        window.title = "Tagify Installer"
+        window.title = "Tagify Manager"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.backgroundColor = InstallerTheme.background
@@ -139,11 +148,13 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let version = installerLabel("", size: 12, color: InstallerTheme.secondary)
             version.setContentHuggingPriority(.required, for: .horizontal)
             version.setContentCompressionResistancePriority(.required, for: .horizontal)
-            let row = installerStack([icon, text, NSView(), version], vertical: false, spacing: 14)
+            let trailing: NSView = name == "Spicetify" ? installerStack([version, spiceHelp], spacing: 3) : version
+            let row = installerStack([icon, text, NSView(), trailing], vertical: false, spacing: 14)
             rows.append(installerCard(row, padding: 12))
             componentLabels.append(title); componentStates.append(state); componentVersions.append(version); componentIcons.append(icon)
         }
         connect(repair, #selector(repairTagify))
+        connect(spiceHelp, #selector(showSpicetifyHelp))
         connect(refresh, #selector(refreshClicked))
         connect(logs, #selector(showDetails))
         logs.toolTip = "View setup checks and installation logs."
@@ -236,7 +247,8 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         action.heightAnchor.constraint(equalToConstant: 50).isActive = true
         action.keyEquivalent = "\r"
         connect(tutorialButton, #selector(showTutorial))
-        let footerLinks = installerStack([tutorialButton, NSView()], vertical: false, spacing: 8)
+        connect(discordHelp, #selector(openDiscordHelp))
+        let footerLinks = installerStack([tutorialButton, NSView(), discordHelp], vertical: false, spacing: 8)
         let footer = installerStack([action, repair, footerLinks], spacing: 8)
         for view in [action, repair, footerLinks] { view.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true }
         footer.translatesAutoresizingMaskIntoConstraints = false
@@ -254,33 +266,35 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func findSpotify() -> URL? {
         let configFolder = InstallerPaths(home: home, spotify: URL(fileURLWithPath: "/Applications/Spotify.app")).config
-        let config = (try? String(contentsOf: configFolder.appendingPathComponent("config-xpui.ini"), encoding: .utf8)) ?? ""
-        var candidates: [URL] = []
-        if let configured = TagifyInstaller.iniValue(config, section: "Setting", key: "spotify_path"), configured.hasSuffix("/Contents/Resources") {
-            candidates.append(URL(fileURLWithPath: configured).deletingLastPathComponent().deletingLastPathComponent())
-        }
-        candidates += [URL(fileURLWithPath: "/Applications/Spotify.app"), home.appendingPathComponent("Applications/Spotify.app")]
-        if let registered = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.spotify.client") { candidates.append(registered) }
-        return candidates.first { NSDictionary(contentsOf: $0.appendingPathComponent("Contents/Info.plist"))?["CFBundleIdentifier"] as? String == "com.spotify.client" }
+        return InstallerDiscovery.findSpotify(home: home, config: configFolder, preferred: preferences.spotifyPath,
+            running: NSRunningApplication.runningApplications(withBundleIdentifier: "com.spotify.client").compactMap(\.bundleURL),
+            registered: NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.spotify.client"))
     }
 
     @objc func refreshClicked() { refreshSetup(); checkUpdates(prompt: false) }
     func refreshSetup() {
         guard !busy, !checkingLocal else { return }
         if isPreview { render(); return }
-        spotify = spotify ?? findSpotify()
-        guard let spotify = spotify else { setup = SetupStatus(); render(); return }
-        checkingLocal = true; refresh.isEnabled = false
+        if spotify.map(InstallerDiscovery.spotifyApp) != true { spotify = findSpotify() }
+        let spotify = spotify ?? URL(fileURLWithPath: "/Applications/Spotify.app")
+        checkingLocal = true; render()
         DispatchQueue.global(qos: .userInitiated).async {
-            let state = SetupStatus.inspect(paths: InstallerPaths(home: self.home, spotify: spotify))
+            let paths = InstallerPaths(home: self.home, spotify: spotify)
+            let state = SetupStatus.inspect(paths: paths)
+            let recovery = Result { try InstallJournal.pending(in: paths.backups) }
             DispatchQueue.main.async {
                 self.checkingLocal = false
-                guard self.spotify == spotify else { self.refreshSetup(); return }
+                guard self.spotify == nil || self.spotify == spotify else { self.refreshSetup(); return }
+                switch recovery {
+                case .success(let pending): self.recoveryNeeded = !pending.isEmpty
+                case .failure(let error): self.recoveryNeeded = true; self.appendDiagnostic("Recovery check: \(error)")
+                }
                 self.setup = state
+                self.analytics?.opened(properties: self.analyticsContext())
                 self.appendDiagnostic("Setup check: Spotify \(state.spotifyVersion ?? "not found"); Spicetify \(state.spicetifyVersion ?? "not installed"); Tagify \(state.tagifyVersion ?? "not installed").")
                 self.render()
                 if let guide = self.guide {
-                    if state.spotifyFound && state.signedIn { self.dismissGuide() }
+                    if state.spotifyFound && state.spotifyPrepared { self.dismissGuide() }
                     else { guide.title = "Spotify still needs setup"; self.guideOpenButton?.isEnabled = state.spotifyFound }
                 }
             }
@@ -292,45 +306,70 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setupCards.isHidden = false; sourceGuidanceCard.isHidden = false; updateProtectionCard.isHidden = false
         let update = setup.needsTagifyUpdate(latest: latestTagify)
         let spiceUpdate = setup.needsSpicetifyUpdate(latest: latestSpicetify)
-        if !setup.spotifyFound || !setup.signedIn {
+        if recoveryNeeded {
+            heading.stringValue = "Let’s restore your previous setup."
+            intro.stringValue = "A previous setup was interrupted. Restore the saved copy before making more changes. Spotify will briefly close."
+            action.title = "Restore previous setup"
+        } else if setup.spotifyReadOnly {
+            heading.stringValue = "Move Spotify to Applications."
+            intro.stringValue = "This copy is on a read-only drive. Move Spotify to Applications, open it, then choose that copy here."
+            action.title = "Choose Spotify…"
+        } else if !setup.spotifyFound || !setup.spotifyPrepared {
             heading.stringValue = "First, set up Spotify."
             intro.stringValue = "Download Spotify for Mac from spotify.com, open it, and sign in. Then return here to install Tagify."
             action.title = "Set up Spotify"
-        } else if setup.ready && !update && !spiceUpdate {
+        } else if setup.spicetifySource != .manager && (!setup.spicetifyComplete || setup.spicetifyVersion == nil) {
+            heading.stringValue = "Repair Spicetify first."
+            intro.stringValue = setup.spicetifySource == .homebrew ? "Your Homebrew installation of Spicetify needs attention. Repair it there, then return here to set up Tagify." : "Your existing Spicetify installation needs attention. Repair it using its original installation method, then return here."
+            action.title = "Spicetify repair help"
+        } else if setup.ready && !update && (!spiceUpdate || setup.spicetifySource != .manager) {
             heading.stringValue = "Tagify is ready."
             intro.stringValue = "Open Spotify and choose Tagify to start tagging your music."
             action.title = "Open Spotify"
         } else if update {
             heading.stringValue = "A Tagify update is ready."
-            intro.stringValue = "Update to Tagify \(latestTagify ?? ""). Your saved tags and ratings stay in place."
+            intro.stringValue = "Tagify \(setup.tagifyVersion ?? "") → \(latestTagify ?? "")." + (spiceUpdate && setup.spicetifySource == .manager ? " Spicetify \(setup.spicetifyVersion ?? "") → \(latestSpicetify ?? "")." : "") + " Your saved tags and ratings stay in place."
             action.title = "Update Tagify"
-        } else if spiceUpdate && setup.ready {
+        } else if spiceUpdate && setup.tagifyVersion != nil {
             heading.stringValue = "A setup update is ready."
-            intro.stringValue = "Update your Spotify setup to keep Tagify working. Your saved tags and ratings stay in place."
+            intro.stringValue = "Spicetify \(setup.spicetifyVersion ?? "") → \(latestSpicetify ?? ""). Tagify \(setup.tagifyVersion ?? "") and your saved tags will be kept."
             action.title = "Update setup"
+            if setup.spicetifySource != .manager {
+                intro.stringValue = setup.spicetifySource == .homebrew ? "Homebrew manages your Spicetify installation. Update it there, then choose Check again. Your Tagify version and saved tags will be kept." : "Update your existing Spicetify installation, then choose Check again. Your Tagify version and saved tags will be kept."
+                action.title = "Spicetify update help"
+            }
         } else if setup.tagifyVersion != nil {
             heading.stringValue = "Let's bring Tagify back."
-            intro.stringValue = "Repair your setup to make Tagify available in Spotify again. Your saved tags stay safe."
+            intro.stringValue = "Reapply Tagify \(setup.tagifyVersion ?? "") to Spotify, keeping your installed versions and saved tags."
             action.title = "Repair Tagify"
         } else {
             heading.stringValue = "Your music, organized."
             intro.stringValue = "Install Tagify in a few minutes. Spotify will briefly close during setup."
             action.title = "Install Tagify"
         }
-        componentStates[0].stringValue = setup.spotifyFound ? (setup.signedIn ? "Ready · Desktop app" : "Sign in first") : "Desktop app needed"
-        componentStates[1].stringValue = setup.spicetifyVersion == nil ? "Needed for Tagify" : "Ready"
+        componentStates[0].stringValue = setup.spotifyReadOnly ? "Move to Applications" : setup.spotifyFound ? (setup.spotifyPrepared ? "Ready · Desktop app" : "Open Spotify first") : "Desktop app needed"
+        componentStates[1].stringValue = setup.spicetifyVersion == nil ? "Needed for Tagify" : !setup.spicetifyComplete ? "Needs repair" : "Ready"
         componentStates[2].stringValue = setup.tagifyApplied ? "Ready" : (setup.tagifyVersion == nil ? "Not installed" : "Needs repair")
         if spiceUpdate { componentStates[1].stringValue = "Update available" }
+        if setup.spicetifySource != .manager {
+            componentStates[1].stringValue = (setup.spicetifyVersion == nil || !setup.spicetifyComplete ? "Needs attention" : spiceUpdate ? "Update available" : "Ready") + (setup.spicetifySource == .homebrew ? " · Homebrew" : " · Managed separately")
+        }
         if update { componentStates[2].stringValue = "Update available" }
         for (index, version) in [setup.spotifyVersion, setup.spicetifyVersion, setup.tagifyVersion].enumerated() {
             componentVersions[index].stringValue = version ?? "—"
         }
-        for (index, ready) in [setup.spotifyFound && setup.signedIn, setup.spicetifyVersion != nil && !spiceUpdate, setup.tagifyApplied && !update].enumerated() {
+        for (index, ready) in [setup.spotifyFound && setup.spotifyPrepared && !setup.spotifyReadOnly, setup.spicetifyVersion != nil && setup.spicetifyComplete && !spiceUpdate, setup.tagifyApplied && !update].enumerated() {
             componentStates[index].textColor = ready ? green : .systemOrange
         }
         location.stringValue = spotify.map { "Spotify: \($0.path)" } ?? "Choose Spotify if it is installed in a different location."
-        repair.isHidden = !setup.ready
-        repair.isEnabled = true
+        repair.isHidden = (!setup.ready && !(spiceUpdate && setup.tagifyVersion != nil)) || recoveryNeeded
+            || !setup.spotifyFound || !setup.spotifyPrepared || setup.spotifyReadOnly
+            || (setup.spicetifySource != .manager && (!setup.spicetifyComplete || setup.spicetifyVersion == nil))
+        repair.title = spiceUpdate ? "Repair without updating" : "Tagify missing? Repair"
+        repair.isEnabled = !checkingLocal
+        spiceHelp.isHidden = setup.spicetifySource == .manager || (!spiceUpdate && setup.spicetifyComplete && setup.spicetifyVersion != nil)
+        spiceHelp.title = setup.spicetifyComplete && setup.spicetifyVersion != nil ? "Update help" : "Repair help"
+        spiceHelp.isEnabled = !checkingLocal && !recoveryNeeded
         stylePrimaryAction()
         action.isEnabled = !checkingLocal
         choose.isEnabled = true; refresh.isEnabled = !checkingLocal && !checkingUpdates
@@ -346,28 +385,56 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func renderProtection() {
         let chosen = blockUpdates.state == .on
-        let pending = setup.updatesBlocked.map { $0 != chosen } ?? false
+        let pending = (setup.updatesBlocked.map { $0 != chosen } ?? false) || (!chosen && setup.updateFolderLocked == true)
         protectionStatus.stringValue = setup.updatesBlocked.map { $0 ? "Spotify updates are blocked" : "Spotify updates are allowed" } ?? "Update protection couldn't be checked"
         protectionStatus.textColor = setup.updatesBlocked == nil ? .systemOrange : .labelColor
-        if !setup.spotifyFound || setup.spicetifyVersion == nil {
+        if setup.updateFolderLocked == true && setup.updatesBlocked == false {
+            protectionStatus.stringValue = "Update protection needs attention"
+            protectionStatus.textColor = .systemOrange
+        }
+        let canApply = !chosen || (setup.spotifyFound && setup.spotifyPrepared && !setup.spotifyReadOnly && setup.spicetifyVersion != nil)
+        if !canApply {
             pendingStatus.stringValue = "Your choice will be applied during setup."
         } else if pending {
             pendingStatus.stringValue = "Unsaved change. Choose Apply Changes to \(chosen ? "block" : "allow") Spotify updates. Spotify will briefly close."
         } else if preferenceSaveFailed { pendingStatus.stringValue = "Your setting is applied, but your Mac couldn't remember it. Choose Apply Changes to try again." }
-        else { pendingStatus.stringValue = "Your selected setting is applied." }
-        apply.isEnabled = !busy && setup.spotifyFound && setup.signedIn && setup.spicetifyVersion != nil && (pending || preferenceSaveFailed || setup.updatesBlocked == nil || (preferences.blockSpotifyUpdates != nil && preferences.blockSpotifyUpdates != chosen))
+        else { pendingStatus.stringValue = "" }
+        pendingStatus.isHidden = pendingStatus.stringValue.isEmpty
+        apply.isEnabled = !busy && !checkingLocal && !recoveryNeeded && canApply && (pending || preferenceSaveFailed || setup.updatesBlocked == nil || (preferences.blockSpotifyUpdates != nil && preferences.blockSpotifyUpdates != chosen))
     }
 
     @objc func updateBlockingChoice() { renderProtection() }
     @objc func primaryAction() {
-        guard !busy else { return }
-        if !setup.spotifyFound || !setup.signedIn { showSpotifyGuide(); return }
-        if setup.ready && !setup.needsTagifyUpdate(latest: latestTagify) && !setup.needsSpicetifyUpdate(latest: latestSpicetify) {
+        guard !busy, !checkingLocal else { return }
+        if recoveryNeeded { recoverSetup(); return }
+        if setup.spotifyReadOnly { chooseSpotify(); return }
+        if !setup.spotifyFound || !setup.spotifyPrepared { showSpotifyGuide(); return }
+        if setup.ready && !setup.needsTagifyUpdate(latest: latestTagify) && (!setup.needsSpicetifyUpdate(latest: latestSpicetify) || setup.spicetifySource != .manager) {
             if let open = openSpotifyOverride { open() }
             else if !isPreview, let spotify = spotify { NSWorkspace.shared.openApplication(at: spotify, configuration: NSWorkspace.OpenConfiguration()) }
-        } else { installTagify() }
+        } else {
+            let intent: TagifyInstaller.Intent = setup.tagifyVersion == nil || setup.needsTagifyUpdate(latest: latestTagify)
+                ? .update : setup.needsSpicetifyUpdate(latest: latestSpicetify) ? .updateSpicetify : .repair
+            if setup.spicetifySource != .manager && (intent == .updateSpicetify || setup.spicetifyVersion == nil || !setup.spicetifyComplete) { showSpicetifyHelp() }
+            else { installTagify(intent: intent) }
+        }
     }
-    @objc func repairTagify() { installTagify() }
+    @objc func repairTagify() { installTagify(intent: .repair) }
+    @objc func showSpicetifyHelp() {
+        analytics?.capture("installer_help_opened", properties: analyticsContext().merging(["help": "spicetify"], uniquingKeysWith: { _, new in new }))
+        let alert = NSAlert()
+        let needsRepair = setup.spicetifyVersion == nil || !setup.spicetifyComplete
+        let command = needsRepair ? "brew reinstall spicetify-cli" : "brew upgrade spicetify-cli"
+        alert.messageText = setup.spicetifySource == .homebrew ? "\(needsRepair ? "Repair" : "Update") Spicetify with Homebrew" : "Update your Spicetify installation"
+        alert.informativeText = setup.spicetifySource == .homebrew
+            ? "Open Terminal and run:\n\n\(command)\n\nThen return here and choose Check again. Your saved tags stay in place."
+            : "Use the same method you used to install Spicetify, then return here and choose Check again. Tagify Manager will keep that installation in place."
+        alert.addButton(withTitle: "Done")
+        if setup.spicetifySource == .homebrew { alert.addButton(withTitle: "Copy command") }
+        alert.beginSheetModal(for: window) { response in
+            if response == .alertSecondButtonReturn { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(command, forType: .string) }
+        }
+    }
     @objc func retryLastOperation() { retryOperation?() }
 
     private func beginOperation(_ title: String, stages: Bool) {
@@ -376,13 +443,13 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         intro.stringValue = "Your saved tags stay safe. You can minimize this window while we finish."
         action.title = "Working…"
         stylePrimaryAction()
-        for button in [action, choose, repair, refresh, tutorialButton, blockUpdates, apply, updateButton] { button.isEnabled = false }
+        for button in [action, choose, repair, refresh, spiceHelp, tutorialButton, blockUpdates, apply, updateButton] { button.isEnabled = false }
         progressCard.isHidden = !stages
         setupCards.isHidden = stages; sourceGuidanceCard.isHidden = stages; updateProtectionCard.isHidden = stages
         repair.isHidden = true
         scroll.documentView?.scroll(.zero)
         progress.startAnimation(nil)
-        diagnostics = "Tagify Installer \(Self.version) | macOS \(ProcessInfo.processInfo.operatingSystemVersionString)\nSpotify \(setup.spotifyVersion ?? "unknown"); Spicetify \(setup.spicetifyVersion ?? "not installed"); Tagify \(setup.tagifyVersion ?? "not installed")\n"
+        diagnostics = "Tagify Manager \(Self.version) | macOS \(ProcessInfo.processInfo.operatingSystemVersionString)\nSpotify \(setup.spotifyVersion ?? "unknown"); Spicetify \(setup.spicetifyVersion ?? "not installed"); Tagify \(setup.tagifyVersion ?? "not installed")\n"
         detailsText.string = diagnostics
         copyButton.title = "Copy diagnostics"; copyButton.isEnabled = true
     }
@@ -396,6 +463,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func updateStep(_ step: Int, _ text: String) {
+        trackStage(step == 5 && text == "Restoring your previous setup" ? "rollback" : ["preflight", "download", "backup", "spicetify", "tagify", "verify", "complete"][max(0, min(step, 6))])
         let stage = step < 3 ? 0 : min(step - 2, 4)
         status.stringValue = text + (step < 6 ? "…" : "")
         for index in stageIndicators.indices {
@@ -414,6 +482,10 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         engine = try TagifyInstaller(paths: InstallerPaths(home: home, spotify: spotify))
         #endif
         engine.progress = { step, text in DispatchQueue.main.async { self.updateStep(step, text) } }
+        engine.prepareAnalyticsHandoff = { [weak self, weak engine] app in
+            guard let analytics = self?.analytics else { return }
+            if !analytics.writeHistoricalHandoff(to: app) { engine?.writeLog("Optional setup statistics link unavailable; installation continues.") }
+        }
         engine.diagnostic = { text in DispatchQueue.main.async { self.appendDiagnostic(text) } }
         #if INSTALLER_UI_TESTS
         if installerFactoryOverride != nil { installer = engine; return engine }
@@ -423,7 +495,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             for app in running { app.terminate() }
             let deadline = Date().addingTimeInterval(12)
             while running.contains(where: { !$0.isTerminated }), Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
-            guard !running.contains(where: { !$0.isTerminated }) else { throw InstallerFailure(message: "Spotify is still open. Quit Spotify completely, then try again.") }
+            guard !running.contains(where: { !$0.isTerminated }) else { throw InstallerFailure(message: "Spotify is still open. Quit Spotify completely, then try again.", reason: "spotify_running") }
         }
         engine.authorizeSpotify = { resources in
             var outcome: Result<Void, Error> = .success(())
@@ -433,7 +505,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 alert.informativeText = "This copy of Spotify needs your Mac administrator password to allow changes. Setup will continue using your own account."
                 alert.addButton(withTitle: "Continue"); alert.addButton(withTitle: "Cancel")
                 guard alert.runModal() == .alertFirstButtonReturn else {
-                    outcome = .failure(InstallerFailure(message: "Setup paused. Allow changes to Spotify when you're ready to try again.")); return
+                    outcome = .failure(InstallerFailure(message: "Setup paused. Allow changes to Spotify when you're ready to try again.", reason: "cancelled")); return
                 }
                 let quoted = "'" + resources.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
                 let acl = "user:\(NSUserName()) allow read,write,append,execute,delete,add_file,add_subdirectory,delete_child,file_inherit,directory_inherit"
@@ -442,7 +514,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let escaped = command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
                 var error: NSDictionary?
                 NSAppleScript(source: "do shell script \"\(escaped)\" with administrator privileges")?.executeAndReturnError(&error)
-                if error != nil { outcome = .failure(InstallerFailure(message: "Permission to update Spotify wasn't granted. Try again when you're ready.")) }
+                if error != nil { outcome = .failure(InstallerFailure(message: "Permission to update Spotify wasn't granted. Try again when you're ready.", reason: "permission")) }
             }
             try outcome.get()
         }
@@ -460,36 +532,65 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    func installTagify() {
-        guard !busy, !isPreview, let spotify = spotify else { return }
+    func installTagify(intent: TagifyInstaller.Intent = .update) {
+        guard !busy, !checkingLocal, !isPreview, !recoveryNeeded, let spotify = spotify else { return }
+        beginTracking(intent == .repair ? "repair" : intent == .updateSpicetify ? "update_spicetify" : setup.tagifyVersion == nil ? "install" : "update_tagify")
         let engine: TagifyInstaller
         do { engine = try makeInstaller(spotify: spotify) }
-        catch { showFailure("The installation log couldn't be created. Check your available disk space and try again.", error: error, retry: { self.installTagify() }); return }
+        catch { finishTracking(error: error); showFailure("The installation log couldn't be created. Check your available disk space and try again.", error: error, retry: { self.installTagify(intent: intent) }); return }
         let chosen = blockUpdates.state == .on
         beginOperation("Setting up Tagify…", stages: true)
         updateStep(0, "Preparing your setup")
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try engine.install(architecture: Self.architecture, blockSpotifyUpdates: chosen) }
+            let result = Result { try engine.install(architecture: Self.architecture, blockSpotifyUpdates: chosen, intent: intent) }
             let state = SetupStatus.inspect(paths: engine.paths)
             DispatchQueue.main.async {
                 self.setup = state; self.endOperation()
                 switch result {
                 case .success:
+                    self.finishTracking(error: state.ready ? nil : InstallerFailure(message: "", reason: "verification"))
                     self.rememberProtection(chosen)
                     self.updateStep(6, "Tagify is ready")
                     self.progressCard.isHidden = true
-                    if !state.ready { self.showFailure("Setup finished, but Tagify couldn't be confirmed. Choose Repair Tagify to try again.", retry: { self.installTagify() }) }
-                case .failure(let error): self.showFailure(error.localizedDescription, error: error, retry: { self.installTagify() })
+                    if !state.ready { self.showFailure("Setup finished, but Tagify couldn't be confirmed. Choose Repair Tagify to try again.", retry: { self.installTagify(intent: intent) }) }
+                case .failure(let error):
+                    self.recoveryNeeded = (try? InstallJournal.pending(in: engine.paths.backups).isEmpty) != true
+                    self.finishTracking(error: error)
+                    self.showFailure(error.localizedDescription, error: error, retry: { if self.recoveryNeeded { self.recoverSetup() } else { self.installTagify(intent: intent) } })
+                }
+            }
+        }
+    }
+
+    func recoverSetup() {
+        guard !busy, !isPreview else { return }
+        beginTracking("recover")
+        let engine: TagifyInstaller
+        do { engine = try makeInstaller(spotify: spotify ?? URL(fileURLWithPath: "/Applications/Spotify.app")) }
+        catch { finishTracking(error: error); showFailure("Your saved setup couldn't be opened. View details for help.", error: error, retry: { self.recoverSetup() }); return }
+        beginOperation("Restoring your previous setup…", stages: false)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try engine.recoverInterruptedInstallation() }
+            let state = SetupStatus.inspect(paths: engine.paths)
+            DispatchQueue.main.async {
+                self.setup = state
+                if case .success = result { self.recoveryNeeded = false }
+                switch result { case .success: self.finishTracking(error: nil); case .failure(let error): self.finishTracking(error: error) }
+                self.endOperation()
+                if case .failure(let error) = result {
+                    self.showFailure("Your previous setup couldn't be fully restored. Keep the saved copy and choose View details for help.", error: error, retry: { self.recoverSetup() })
                 }
             }
         }
     }
 
     @objc func applyProtection() {
-        guard !busy, !isPreview, let spotify = spotify else { return }
+        guard !busy, !checkingLocal, !recoveryNeeded, !isPreview else { return }
+        beginTracking(blockUpdates.state == .on ? "block_updates" : "allow_updates")
+        let spotify = spotify ?? URL(fileURLWithPath: "/Applications/Spotify.app")
         let engine: TagifyInstaller
         do { engine = try makeInstaller(spotify: spotify) }
-        catch { showFailure("Your update setting couldn't be saved. Check your available disk space and try again.", error: error, retry: { self.applyProtection() }); return }
+        catch { finishTracking(error: error); showFailure("Your update setting couldn't be saved. Check your available disk space and try again.", error: error, retry: { self.applyProtection() }); return }
         let chosen = blockUpdates.state == .on
         beginOperation("Saving your update setting…", stages: false)
         DispatchQueue.global(qos: .userInitiated).async {
@@ -498,8 +599,11 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             DispatchQueue.main.async {
                 self.setup = state; self.endOperation()
                 switch result {
-                case .success: self.rememberProtection(chosen); self.renderProtection()
-                case .failure(let error): self.showFailure((error as? InstallerFailure)?.message ?? "Your update setting couldn't be saved. Check your available disk space and try again.", error: error, retry: { self.applyProtection() })
+                case .success: self.finishTracking(error: nil); self.rememberProtection(chosen); self.renderProtection()
+                case .failure(let error):
+                    self.recoveryNeeded = (try? InstallJournal.pending(in: engine.paths.backups).isEmpty) != true
+                    self.finishTracking(error: error)
+                    self.showFailure((error as? InstallerFailure)?.message ?? "Your update setting couldn't be saved. Check your available disk space and try again.", error: error, retry: { if self.recoveryNeeded { self.recoverSetup() } else { self.applyProtection() } })
                 }
             }
         }
@@ -511,9 +615,22 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         picker.allowedContentTypes = [.applicationBundle]; picker.directoryURL = URL(fileURLWithPath: "/Applications")
         picker.canChooseDirectories = true; picker.treatsFilePackagesAsDirectories = false
         picker.beginSheetModal(for: window) { result in
-            if result == .OK, let url = picker.url { self.spotify = url; self.refreshSetup() }
+            if result == .OK, let url = picker.url { self.selectSpotify(url) }
         }
     }
+
+    func selectSpotify(_ url: URL) {
+        guard InstallerDiscovery.spotifyApp(url) else {
+            showFailure("Choose the complete Spotify desktop app. Download it again if this copy is damaged.", retry: { self.chooseSpotify() }); return
+        }
+        spotify = url
+        preferences.spotifyPath = url.path
+        do { try preferences.save(home: home) }
+        catch { appendDiagnostic("Couldn't remember Spotify location: \(error)") }
+        refreshSetup()
+    }
+
+    @objc func openDiscordHelp() { NSWorkspace.shared.open(Self.discordHelpURL) }
 
     @objc func showTutorial() {
         guard !busy, window.attachedSheet == nil else { return }
@@ -532,6 +649,16 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         configureInstallerPanel(panel)
         panel.title = "Set up Spotify"
         let text = installerLabel("1. Download Spotify for Mac from spotify.com/download/mac and move it to Applications.\n\n2. Open Spotify, sign in, and leave it open for a minute.\n\n3. Return here and choose Check setup.\n\nTagify works inside Spotify's desktop app. The web player and mobile apps won't work for setup.", size: 14)
+        let downloadURL = URL(string: "https://www.spotify.com/download/mac/")!
+        let attributed = NSMutableAttributedString(string: text.stringValue, attributes: [
+            .font: text.font!, .foregroundColor: text.textColor!
+        ])
+        attributed.addAttributes([.link: downloadURL, .foregroundColor: NSColor.linkColor,
+                                  .underlineStyle: NSUnderlineStyle.single.rawValue],
+                                 range: (text.stringValue as NSString).range(of: "spotify.com/download/mac"))
+        text.attributedStringValue = attributed
+        text.setAccessibilityCustomActions([NSAccessibilityCustomAction(name: "Open Spotify download page", handler: { NSWorkspace.shared.open(downloadURL) })])
+        guideText = text
         let get = installerButton("Get Spotify", target: self, action: #selector(getSpotify))
         let open = installerButton("Open Spotify", target: self, action: #selector(openSpotifyForSetup)); open.isEnabled = spotify != nil
         let check = installerButton("Check setup", target: self, action: #selector(checkFromGuide))
@@ -547,7 +674,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func getSpotify() { if !isPreview { NSWorkspace.shared.open(URL(string: "https://www.spotify.com/download/mac/")!) } }
     @objc func openSpotifyForSetup() { if !isPreview, let spotify = spotify { NSWorkspace.shared.openApplication(at: spotify, configuration: NSWorkspace.OpenConfiguration()) } }
     @objc func checkFromGuide() { spotify = spotify ?? findSpotify(); refreshSetup() }
-    @objc func dismissGuide() { if let guide = guide { window.endSheet(guide); guide.orderOut(nil) }; guide = nil; guideOpenButton = nil; offerUpdateIfNeeded() }
+    @objc func dismissGuide() { if let guide = guide { window.endSheet(guide); guide.orderOut(nil) }; guide = nil; guideOpenButton = nil; guideText = nil; offerUpdateIfNeeded() }
 
     private func pinSheet(_ stack: NSStackView, to panel: NSPanel) {
         stack.translatesAutoresizingMaskIntoConstraints = false; panel.contentView!.addSubview(stack)
@@ -566,9 +693,8 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.checkingUpdates = false
                 switch result {
                 case .success(let update):
-                    if self.availableUpdate?.asset.digest != update?.asset.digest { self.downloadedUpdate = nil }
                     self.availableUpdate = update
-                    self.updateText.stringValue = update.map { "Tagify Installer \($0.version.string) is available for your Mac." } ?? ""
+                    self.updateText.stringValue = update.map { "Tagify Manager \($0.version.string) is available for your Mac." } ?? ""
                     self.updateCard.isHidden = update == nil
                     self.updateButton.title = "Update now"
                 case .failure(let error):
@@ -603,47 +729,38 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func offerUpdateIfNeeded() {
-        if availableUpdate != nil && !didPromptUpdate && !busy && window.attachedSheet == nil { showUpdate() }
+        if let update = availableUpdate, update.version.string != preferences.skippedManagerVersion && !didPromptUpdate && !busy && window.attachedSheet == nil { showUpdate() }
     }
+    func configureManagerUpdater() {
+        let updater = ManagerUpdater()
+        updater.downloadStarted = { [weak self] in self?.beginTracking("download_manager_update") }
+        updater.downloadFinished = { [weak self] error in self?.finishTracking(error: error) }
+        updater.skipped = { [weak self] version in self?.skipManagerVersion(version) }
+        updater.finished = { [weak self] in self?.managerUpdateFinished() }
+        // Let Sparkle terminate this process only after its installer is ready.
+        updater.willRelaunch = { [weak self] in self?.busy = false }
+        managerUpdater = updater
+    }
+    func skipManagerVersion(_ version: String) {
+        guard StableVersion(version) != nil else { return }
+        preferences.skippedManagerVersion = version
+        do { try preferences.save(home: home) }
+        catch { appendDiagnostic("Couldn't remember the skipped manager version: \(error)") }
+    }
+    func managerUpdateFinished() { endOperation() }
     @objc func updateInstaller() {
         guard !busy else { return }
-        if let downloaded = downloadedUpdate { if !isPreview { NSWorkspace.shared.activateFileViewerSelecting([downloaded]) }; return }
-        if availableUpdate != nil { showUpdate() } else { checkUpdates(prompt: true) }
+        showUpdate()
     }
     func showUpdate() {
-        guard let update = availableUpdate, window.attachedSheet == nil else { return }
+        guard !busy, window.attachedSheet == nil, let updater = managerUpdater else { return }
         didPromptUpdate = true
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 450), styleMask: [.titled], backing: .buffered, defer: false)
-        configureInstallerPanel(panel)
-        panel.title = "Tagify Installer update"
-        let notes = NSTextView(frame: NSRect(x: 0, y: 0, width: 500, height: 200)); notes.isEditable = false; notes.font = .systemFont(ofSize: 13); notes.string = String(update.notes.prefix(12000)); notes.textContainerInset = NSSize(width: 8, height: 8); notes.textColor = .labelColor; notes.isVerticallyResizable = true; notes.isHorizontallyResizable = false; notes.autoresizingMask = .width; notes.textContainer?.widthTracksTextView = true
-        let notesScroll = NSScrollView(); notesScroll.hasVerticalScroller = true; notesScroll.documentView = notes
-        notesScroll.heightAnchor.constraint(equalToConstant: 200).isActive = true
-        let later = installerButton("Later", target: self, action: #selector(dismissUpdate))
-        let now = installerButton("Update now", target: self, action: #selector(downloadInstaller)); now.keyEquivalent = "\r"
-        let info = installerLabel("Download the new Mac installer, then open it to replace this version. Your Tagify setup and saved tags stay in place.", size: 13, color: .secondaryLabelColor)
-        let controls = installerStack([later, NSView(), now], vertical: false)
-        let stack = installerStack([installerLabel("Installer \(update.version.string) is available.", size: 23, weight: .bold), info, installerLabel("What's new", size: 13, weight: .semibold), notesScroll, controls], spacing: 12)
-        pinSheet(stack, to: panel)
-        for view in [info, notesScroll, controls] { view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
-        updatePanel = panel; window.beginSheet(panel)
-    }
-    @objc func dismissUpdate() { if let panel = updatePanel { window.endSheet(panel); panel.orderOut(nil) }; updatePanel = nil }
-    @objc func downloadInstaller() {
-        guard !busy, !isPreview, let update = availableUpdate else { return }
-        dismissUpdate(); beginOperation("Downloading the new installer…", stages: false)
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try InstallerUpdates.download(update, downloads: self.home.appendingPathComponent("Downloads")) }
-            DispatchQueue.main.async {
-                self.endOperation()
-                switch result {
-                case .success(let url):
-                    self.downloadedUpdate = url; self.updateText.stringValue = "Your new installer is ready in Downloads. Open it to finish updating."
-                    self.updateButton.title = "Show download"
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                case .failure(let error): self.showFailure("The new installer couldn't be downloaded or verified. Check your connection and try again.", error: error, retry: { self.downloadInstaller() })
-                }
-            }
+        beginOperation("Updating Tagify Manager…", stages: false)
+        intro.stringValue = "Follow the update window to install and restart. Your Tagify setup and settings stay in place."
+        do { try updater.check() }
+        catch {
+            endOperation()
+            showFailure("Tagify Manager couldn't start its update. Try again, or download the latest manager from the releases page.", error: error, retry: { self.showUpdate() })
         }
     }
 
@@ -663,7 +780,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.title = "Installer logs"; panel.isReleasedWhenClosed = false
         detailsText.frame = NSRect(x: 0, y: 0, width: 600, height: 300)
         detailsText.isVerticallyResizable = true; detailsText.isHorizontallyResizable = false; detailsText.autoresizingMask = .width; detailsText.textContainer?.widthTracksTextView = true
-        detailsText.isEditable = false; detailsText.isSelectable = true; detailsText.font = .monospacedSystemFont(ofSize: 11, weight: .regular); detailsText.string = diagnostics.isEmpty ? "No setup activity yet. Use Check again to check your setup." : diagnostics
+        detailsText.isEditable = false; detailsText.isSelectable = false; detailsText.font = .monospacedSystemFont(ofSize: 11, weight: .regular); detailsText.string = diagnostics.isEmpty ? "No setup activity yet. Use Check again to check your setup." : diagnostics
         detailsText.textContainerInset = NSSize(width: 10, height: 10)
         let logScroll = NSScrollView(); logScroll.hasVerticalScroller = true; logScroll.documentView = detailsText
         logScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 270).isActive = true
@@ -688,13 +805,15 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func preview(_ state: String) {
         isPreview = true
         spotify = URL(fileURLWithPath: "/Applications/Spotify.app")
-        setup = SetupStatus(spotifyFound: true, signedIn: true, spotifyVersion: "1.2.85", spicetifyVersion: "2.45.3", tagifyVersion: "3.0.0", tagifyApplied: true, updatesBlocked: true)
+        setup = SetupStatus(spotifyFound: true, spotifyPrepared: true, spotifyVersion: "1.2.85", spicetifyVersion: "2.45.3", tagifyVersion: "3.0.0", tagifyApplied: true, updatesBlocked: true)
+        recoveryNeeded = false
         preferences = InstallerPreferences(); preferences.blockSpotifyUpdates = true
         blockUpdates.state = .on; busy = false; errorCard.isHidden = true; progressCard.isHidden = true; updateCard.isHidden = true; latestTagify = nil; latestSpicetify = nil
         render()
         if state == "progress" { beginOperation("Setting up Tagify…", stages: true); updateStep(4, "Installing Tagify") }
         else if state == "failure" { showFailure("Spotify is still open. Quit Spotify completely, then try again.", retry: {}) }
         else if state == "missing" { spotify = nil; setup = SetupStatus(); render() }
+        else if state == "interrupted" { recoveryNeeded = true; render() }
         else if state == "repair" { setup.tagifyApplied = false; render() }
         else if state == "tagify-update" { latestTagify = "3.0.1"; render() }
         else if state == "spicetify-update" { latestSpicetify = "2.45.4"; render() }
@@ -703,7 +822,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         else if state == "update" {
             let asset = InstallerRelease.Asset(name: "TagifyInstaller-mac.dmg", browser_download_url: URL(string: "https://github.com/alexk218/tagify-installer/releases/download/v1.0.2/TagifyInstaller-mac.dmg")!, digest: "sha256:" + String(repeating: "a", count: 64))
             availableUpdate = InstallerUpdate(version: StableVersion("1.0.2")!, notes: "• Clear setup status and a separate repair option.\n• Reopen the tutorial at any time.\n• Save your Spotify update setting without reinstalling Tagify.", asset: asset)
-            updateText.stringValue = "Tagify Installer 1.0.2 is available for your Mac."; updateCard.isHidden = false
+            updateText.stringValue = "Tagify Manager 1.0.2 is available for your Mac."; updateCard.isHidden = false
             showUpdate()
         }
     }
