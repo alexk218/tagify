@@ -66,15 +66,10 @@ Restart Spotify and choose **Tagify**.
 
 </details>
 
-## ⌛ Coming soon
-Tagify is being upgraded on a regular basis.
-Soon you'll be able to...
-- Apply ratings and tags to your playlists.
-- Import your data from RateYourMusic.
-- Downloads your tracks within Spotify. A download button next to all of your tracks.
-
 ## Community & Support
-Join the community and influence Tagify's roadmap.
+
+Discover music and share your tags on [Tagify Community](https://community.tagify.fm).
+
 - **Upcoming Features**: [Tagify Roadmap](https://github.com/alexk218/tagify/discussions/4)
 - **Feature Requests**: [Share your ideas](https://github.com/alexk218/tagify/discussions/categories/ideas-feature-requests)
 - **Get Help**: [Ask questions](https://github.com/alexk218/tagify/discussions/categories/q-a)
