@@ -44,87 +44,27 @@ Select multiple tracks and apply tags in bulk.
 
 ---
 
-## Quick Start
-
-### Prerequisites
-
-You'll need the **Spotify desktop app**, opened and signed in at least once. The full Mac installer sets up Spicetify for you; the terminal and manual options need Spicetify installed first.
-
-➡️ **[Complete Spicetify Installation Guide](SPICETIFY_INSTALLATION.md)**
-
 ## Install Tagify
 
-### **One-Click Install (recommended)**
+You'll need the **Spotify desktop app**, opened and signed in at least once.
 
-### Windows
+- **macOS:** [Download the Tagify installer](https://tagify.fm/download/mac)
+- **Windows:** [Download the Tagify installer](https://tagify.fm/download/windows)
 
-Open **Powershell** and run this command:
+Open the installer and click **Install Tagify**. It sets up Spicetify and Tagify for you. Then open Spotify and choose **Tagify**. Use the installer again whenever you want to update or repair your setup.
 
-```powershell
-iwr -useb "https://raw.githubusercontent.com/alexk218/tagify/main/install.ps1" | iex
-```
+<details>
+<summary>Linux installation</summary>
 
-### macOS — full installer
-
-1. [Download the latest Tagify Manager for Mac](https://tagify.fm/download/mac). Open it and drag **Tagify Manager** into Applications. ZIP and PKG downloads are available as alternatives.
-2. Click **Install Tagify**. The installer sets up Spicetify, installs the latest stable Tagify, and applies it to Spotify.
-3. Click **Open Spotify**, then choose Tagify.
-
-Reopen Tagify Manager whenever you want to update or repair Tagify. Repair keeps your installed versions, including betas. Your saved tags, themes, and other apps stay in place. If setup is interrupted, reopen the manager and choose **Restore previous setup** before trying again. Requires macOS 12 or later; supports Intel and Apple Silicon.
-
-The manager checks available disk space before setup and keeps the three newest completed setup backups for each Spotify copy. Unfinished recovery copies are preserved. It recognizes Spicetify installed through Homebrew and leaves its updates to Homebrew. You can uncheck **Block Spotify updates** and choose **Apply Changes** even if Spicetify is missing or broken.
-
-**Block Spotify updates** is checked by default, because Spotify updates can remove Tagify from Spotify. Your saved tags stay safe. Uncheck it before installing to allow automatic Spotify updates again; after a Spotify update, run the installer to restore Tagify.
-
-An unsigned development build may require **Open Anyway** in System Settings → Privacy & Security after the first launch attempt. Public distribution should use the signed, notarized build. See the [Mac installer build guide](scripts/install/macos/BUILD.md).
-
-### Linux — terminal option
-
-On Linux, open **Terminal** and run:
+Install [Spicetify](SPICETIFY_INSTALLATION.md) first, then run:
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/alexk218/tagify/main/install.sh" | bash
 ```
 
-Older Mac terminal instructions now direct you to Tagify Manager without changing your installation.
+Restart Spotify and choose **Tagify**.
 
-### **Manual install**
-
-#### **1. Download Tagify**
-
-- Go to the [Releases page](https://github.com/alexk218/tagify/releases)
-- Download latest .zip file
-
-#### **2. Find your Spicetify folder**
-
-- **Option 1:** Use the Spicetify CLI
-
-  1. Run `spicetify config-dir` to open the Spicetify folder
-  2. Open the `CustomApps` folder.
-
-- **Option 2:** Manually navigate to the folder
-  - **Windows**: `Windows + R` - `%APPDATA%\spicetify\CustomApps`
-  - **Mac**: `Cmd + Shift + G` - `~/.config/spicetify/CustomApps`
-
-#### **3. Extract Tagify**
-
-- Extact/unzip the downloaded .zip file.
-- Drag `tagify` folder into `CustomApps` folder
-
-#### **4. Activate Tagify**
-
-- Open PowerShell (Windows) or Terminal (Mac/Linux):
-
-  ```bash
-  spicetify config custom_apps tagify
-  spicetify apply
-  ```
-
-**5. Start using Tagify!**
-
-- Restart Spotify completely
-- Look for "Tagify" in your Spotify **top navigation bar** (next to the Spicetify Marketplace button)
-- Click it to open Tagify!
+</details>
 
 ## ⌛ Coming soon
 Tagify is being upgraded on a regular basis.
