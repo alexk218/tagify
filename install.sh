@@ -28,11 +28,11 @@ TAGIFY_STATE_DIR="$HOME/.config/tagify"
 INSTALL_RECOVERY_KEY_FILE="$TAGIFY_STATE_DIR/install-recovery-key"
 TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/tagify-install.XXXXXX")
 trap 'rm -rf "$TEMP_DIR"' EXIT
-curl -fsSL --max-time 30 https://tagify.fm/releases/client/latest.json -o "$TEMP_DIR/release.json"
+curl -fsSL --max-time 30 -H "Accept: application/vnd.github+json" https://api.github.com/repos/alexk218/tagify/releases/latest -o "$TEMP_DIR/release.json"
 LATEST_TAG=$(sed -n 's/.*"tag_name": *"\(v[0-9]*\.[0-9]*\.[0-9]*\)".*/\1/p' "$TEMP_DIR/release.json")
-EXPECTED_SHA=$(sed -n 's/.*"digest": *"sha256:\([a-f0-9]*\)".*/\1/p' "$TEMP_DIR/release.json")
+EXPECTED_SHA=$(sed -n 's/.*"digest": *"sha256:\([a-f0-9]*\)".*/\1/p' "$TEMP_DIR/release.json" | head -n 1)
 [[ "$LATEST_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ "$EXPECTED_SHA" =~ ^[a-f0-9]{64}$ ]] || { echo 'Update information could not be verified.'; exit 1; }
-ZIP_URL="https://tagify.fm/releases/client/$LATEST_TAG/tagify-$LATEST_TAG.zip"
+ZIP_URL="https://github.com/alexk218/tagify/releases/download/$LATEST_TAG/tagify-$LATEST_TAG.zip"
 ZIP_FILE="$TEMP_DIR/tagify.zip"
 
 install_recovery_bootstrap() {

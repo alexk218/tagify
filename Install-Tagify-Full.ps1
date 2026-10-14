@@ -576,7 +576,7 @@ function Get-LatestTagifyVersion {
     param()
 
     try {
-        $apiUrl = "https://tagify.fm/releases/client/latest.json"
+        $apiUrl = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
         $latestRelease = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 15
         
         $version = $latestRelease.tag_name -replace 'v', ''
@@ -1004,9 +1004,9 @@ function Download-TagifyRelease {
     $zipPath = "$tempDir\tagify.zip"
     
     try {
-        $release = Invoke-RestMethod -Uri 'https://tagify.fm/releases/client/latest.json' -TimeoutSec 15
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" -TimeoutSec 15
         $asset = $release.assets | Where-Object { $_.browser_download_url -eq $DownloadUrl -and $_.name -eq "tagify-$($release.tag_name).zip" } | Select-Object -First 1
-        if (-not $asset -or $asset.digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or $DownloadUrl -ne "https://tagify.fm/releases/client/$($release.tag_name)/$($asset.name)") { throw "The Tagify download could not be verified. Check again before installing." }
+        if (-not $asset -or $asset.digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or $DownloadUrl -ne "https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$($release.tag_name)/$($asset.name)") { throw "The Tagify download could not be verified. Check again before installing." }
         Write-Log "Download URL: $DownloadUrl"
         Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipPath -UseBasicParsing
         
