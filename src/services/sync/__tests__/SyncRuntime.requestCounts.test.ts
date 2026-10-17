@@ -36,11 +36,19 @@ type Runtime = {
  * acknowledgements, and, when `fewerRequests` is on, the migration 0114
  * behavior (pull revisions, acknowledging pulls, `known=` reads).
  */
-function fakeCommunity({ fewerRequests }: { fewerRequests: boolean }) {
+function fakeCommunity({ fewerRequests, laterBatches = false, pullRequestBody = false, othersActive, directPullDown = false }: { fewerRequests: boolean; laterBatches?: boolean; pullRequestBody?: boolean; othersActive?: boolean; directPullDown?: boolean }) {
   const community = new FakeCommunity();
   // `localFilesRead` is the revision Community recorded this device reading (migration 0118).
-  const server = { acknowledged: 0, localFilesRevision: 0, localFilesRead: -1, localFileEntries: {} as Record<string, unknown>, notesCursor: 0, requests: [] as string[] };
-  const sideDocuments = () => (fewerRequests ? { sideDocuments: { localFilesRevision: server.localFilesRevision, privateNotesCursor: server.notesCursor } } : {});
+  const server = { acknowledged: 0, localFilesRevision: 0, localFilesRead: -1, localFileEntries: {} as Record<string, unknown>, notesCursor: 0, requests: [] as string[], preflights: [] as string[] };
+  // Chromium sends a CORS preflight before a request with an authorization or
+  // custom header, and reuses the answer for the same address until
+  // Community's access-control-max-age (7200 s) runs out.
+  const preflightedUrls = new Set<string>();
+  const sideDocuments = () => ({
+    ...(fewerRequests ? { sideDocuments: { localFilesRevision: server.localFilesRevision, privateNotesCursor: server.notesCursor } } : {}),
+    // Migration 0170: whether another device or the website used the library recently.
+    ...(othersActive === undefined ? {} : { liveSync: { realtime: othersActive } }),
+  });
   const foreignBatch = (uri: string) => community.commitFrom([{
     type: "annotation.patch", operationId: crypto.randomUUID(), origin: "desktop",
     entity: { provider: "spotify", kind: "track", providerId: uri.split(":")[2] },
@@ -50,15 +58,39 @@ function fakeCommunity({ fewerRequests }: { fewerRequests: boolean }) {
     const url = new URL(String(input));
     const method = init?.method || "GET";
     const headers = (init?.headers || {}) as Record<string, string>;
-    server.requests.push(`${method} ${url.pathname}${url.searchParams.has("known") ? `?known=${url.searchParams.get("known")}` : ""}${headers["if-none-match"] ? " (if-none-match)" : ""}`);
-    if (url.pathname === "/api/v2/sync/pull" && fewerRequests) {
-      const after = Number(url.searchParams.get("after"));
+    if (Object.keys(headers).some((name) => name === "authorization" || name.startsWith("x-tagify-")) && !preflightedUrls.has(url.href)) {
+      preflightedUrls.add(url.href);
+      server.preflights.push(`OPTIONS ${url.pathname}${url.search}`);
+    }
+    const site = url.origin === "https://supabase.example" ? "DIRECT " : "";
+    const query = url.searchParams.has("known") ? `?known=${url.searchParams.get("known")}` : url.searchParams.has("later") ? `?later=${url.searchParams.get("later")}` : "";
+    server.requests.push(`${site}${method} ${url.pathname}${query}${headers["if-none-match"] ? " (if-none-match)" : ""}`);
+    // Migration 0118's pull: asking for changes after a cursor acknowledges it.
+    const pullPage = async (after: number, ifNoneMatch?: string) => {
       server.acknowledged = Math.max(server.acknowledged, Math.min(after, community.headCursor));
-      if (after >= community.headCursor && headers["if-none-match"] === `"sync-cursor-${community.headCursor}"`) {
-        return Response.json({ unchanged: true, headCursor: community.headCursor, ...sideDocuments() });
+      if (after >= community.headCursor && (ifNoneMatch === undefined || ifNoneMatch === `"sync-cursor-${community.headCursor}"`)) {
+        return { unchanged: true, headCursor: community.headCursor, batches: [], ...sideDocuments() };
       }
-      const page = await (await community.fetch(input, { ...init, headers: {} })).json();
-      return Response.json({ ...page, ...sideDocuments() });
+      const page = await (await community.fetch(`https://community.example/api/v2/sync/pull?after=${after}&limit=200`)).json();
+      return { ...page, ...sideDocuments() };
+    };
+    // Migration 0170's function, called through the database's API (docs/DESKTOP_DIRECT_PULL.md).
+    if (url.origin === "https://supabase.example" && url.pathname === "/rest/v1/rpc/pull_sync_changes_with_live_sync") {
+      if (directPullDown) throw new TypeError("Failed to fetch");
+      const body = JSON.parse(String(init?.body));
+      if (headers.apikey !== configuration.supabasePublishableKey || headers.authorization !== `Bearer ${configuration.accessToken}` || body.p_direct !== true) return Response.json({ code: "28000" }, { status: 403 });
+      return Response.json(await pullPage(Number(body.p_after_cursor)));
+    }
+    if (url.pathname === "/api/v2/sync/pull" && fewerRequests) {
+      const after = method === "POST" && pullRequestBody ? JSON.parse(String(init?.body)).after : Number(url.searchParams.get("after"));
+      if (method === "POST" && !pullRequestBody) return new Response(null, { status: 405 });
+      return Response.json(await pullPage(Number(after), headers["if-none-match"]));
+    }
+    if (url.pathname === "/api/v2/sync/push" && laterBatches && url.searchParams.get("later") === "1") {
+      // The push route's follow-up read: the same pull, from the batch's base cursor.
+      const body = JSON.parse(String(init?.body));
+      const result = await (await community.fetch(input, init)).json();
+      return Response.json({ ...result, later: await pullPage(body.baseCursor) });
     }
     if (url.pathname === "/api/v2/sync/ack") {
       server.acknowledged = Math.max(server.acknowledged, JSON.parse(String(init?.body)).cursor);
@@ -111,27 +143,33 @@ describe("Community requests per sync run", () => {
     vi.unstubAllGlobals();
   });
 
-  function useCapabilities(fewerRequests: boolean) {
+  type Support = { laterBatches?: boolean; pullRequestBody?: boolean; othersActive?: boolean; directPull?: boolean; directPullDown?: boolean };
+  function useCapabilities(fewerRequests: boolean, { laterBatches = false, pullRequestBody = false, othersActive, directPull = false }: Support = {}) {
     runtime.capabilities = {
       protocolVersion: 2,
       supportedProtocolVersions: [1, 2],
       privateNotes: { enabled: true },
       localFileBackup: { enabled: true, maxRequestBytes: 1_000_000, ...(fewerRequests ? { knownRevisionQuery: true } : {}) },
       ...(fewerRequests ? { pullSideDocuments: true, pullAcknowledgesCursor: true } : {}),
+      ...(laterBatches ? { pushReturnsLaterBatches: true } : {}),
+      ...(pullRequestBody ? { pullRequestBody: true } : {}),
+      ...(othersActive === undefined ? {} : { liveSyncHints: true }),
+      ...(directPull ? { directPull: { rpc: "pull_sync_changes_with_live_sync" } } : {}),
     };
   }
 
-  async function primedCommunity(fewerRequests: boolean) {
-    useCapabilities(fewerRequests);
-    const community = fakeCommunity({ fewerRequests });
+  /** `serverSupport` differs from what capabilities advertise only to simulate a rolled-back Community. */
+  async function primedCommunity(fewerRequests: boolean, support: Support = {}, serverSupport: Support = support) {
+    useCapabilities(fewerRequests, support);
+    const community = fakeCommunity({ fewerRequests, ...serverSupport });
     // The first sync on a device reads every document once.
     await runtime.settleLocalAndPublicSync(configuration);
     community.server.requests.length = 0;
     return community;
   }
 
-  async function edit(uri = TRACK) {
-    expect(await storageService.saveTrack(uri, { rating: 4, energy: 0, bpm: null, tagIds: [], dateModified: Date.now() })).toBe(true);
+  async function edit(uri = TRACK, rating = 4) {
+    expect(await storageService.saveTrack(uri, { rating, energy: 0, bpm: null, tagIds: [], dateModified: Date.now() })).toBe(true);
   }
 
   describe("with Community's fewer-requests support", () => {
@@ -229,6 +267,247 @@ describe("Community requests per sync run", () => {
       server.requests.length = 0;
       await runtime.settleLocalAndPublicSync(configuration);
       expect(server.requests).toEqual(["GET /api/v2/sync/pull (if-none-match)"]);
+    });
+  });
+
+  describe("with Community returning later changes from a push", () => {
+    it("backs up an edit with one push while Realtime shows this device is current", async () => {
+      const { server, community } = await primedCommunity(true, { laterBatches: true });
+      await edit();
+      await runtime.settleLocalAndPublicSync(configuration);
+      // Before: pull, push, pull (three requests).
+      expect(server.requests).toEqual(["POST /api/v2/sync/push?later=1"]);
+      expect(community.headCursor).toBe(1);
+      expect(await indexedDBStorage.getTrack(TRACK)).toMatchObject({ rating: 4 });
+      // The push's own echo confirmed the edit: nothing is left to send.
+      server.requests.length = 0;
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["GET /api/v2/sync/pull (if-none-match)"]);
+    });
+
+    it("keeps several edit runs at one request each", async () => {
+      const { server } = await primedCommunity(true, { laterBatches: true });
+      for (const [uri, rating] of [[TRACK, 4], [OTHER_TRACK, 5], [TRACK, 2]] as const) {
+        await edit(uri, rating);
+        await runtime.settleLocalAndPublicSync(configuration);
+      }
+      expect(server.requests).toEqual(Array(3).fill("POST /api/v2/sync/push?later=1"));
+      expect(await indexedDBStorage.getTrack(TRACK)).toMatchObject({ rating: 2 });
+
+      // Saving a value Community already holds sends nothing at all.
+      server.requests.length = 0;
+      await edit(TRACK, 2);
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual([]);
+    });
+
+    it("brings back another device's unannounced change with the push", async () => {
+      const { server, foreignBatch } = await primedCommunity(true, { laterBatches: true });
+      foreignBatch(OTHER_TRACK);
+      await edit();
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["POST /api/v2/sync/push?later=1"]);
+      expect(await indexedDBStorage.getTrack(OTHER_TRACK)).toMatchObject({ rating: 3 });
+      expect(await indexedDBStorage.getTrack(TRACK)).toMatchObject({ rating: 4 });
+      expect(server.acknowledged).toBe(0);
+    });
+
+    it("still keeps this device's edit when another device changed the same song first", async () => {
+      const { server, community, foreignBatch } = await primedCommunity(true, { laterBatches: true });
+      foreignBatch(TRACK);
+      await edit();
+      await runtime.settleLocalAndPublicSync(configuration);
+      // The first push meets the other device's newer revision; the change it
+      // brought back lets the second push go through.
+      expect(server.requests).toEqual(["POST /api/v2/sync/push?later=1", "POST /api/v2/sync/push?later=1"]);
+      expect(community.annotation({ provider: "spotify", kind: "track", providerId: TRACK.split(":")[2] }).fields.rating.value).toBe(4);
+      expect(await indexedDBStorage.getTrack(TRACK)).toMatchObject({ rating: 4 });
+    });
+
+    it("catches up first once Realtime announced a newer change", async () => {
+      const { server, foreignBatch, community } = await primedCommunity(true, { laterBatches: true });
+      foreignBatch(OTHER_TRACK);
+      (runtime as unknown as { announcedHead: number }).announcedHead = community.headCursor;
+      await edit();
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["GET /api/v2/sync/pull (if-none-match)", "POST /api/v2/sync/push?later=1"]);
+    });
+
+    it("catches up first without a live Realtime connection", async () => {
+      const { server } = await primedCommunity(true, { laterBatches: true });
+      runtime.channel = null;
+      runtime.realtimeSubscribedAt = 0;
+      await edit();
+      await runtime.settleLocalAndPublicSync(configuration);
+      // Before: pull, push, pull, pull (the last because nothing announces news).
+      expect(server.requests).toEqual([
+        "GET /api/v2/sync/pull (if-none-match)",
+        "POST /api/v2/sync/push?later=1",
+        "GET /api/v2/sync/pull (if-none-match)",
+      ]);
+    });
+
+    it("catches up first after Realtime reconnected", async () => {
+      const { server } = await primedCommunity(true, { laterBatches: true });
+      // Announcements while disconnected were missed.
+      runtime.realtimeSubscribedAt = Date.now() + 1;
+      await edit();
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["GET /api/v2/sync/pull (if-none-match)", "POST /api/v2/sync/push?later=1"]);
+    });
+
+    it("pulls as before when Community saved the edit without the later changes", async () => {
+      const { server, community } = await primedCommunity(true, { laterBatches: true });
+      const fetchMock = vi.mocked(globalThis.fetch);
+      const answer = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation(async (input, init) => {
+        const response = await answer(input, init);
+        if (!new URL(String(input)).pathname.endsWith("/push")) return response;
+        const { later: _later, ...saved } = await response.json();
+        return Response.json(saved);
+      });
+      await edit();
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["POST /api/v2/sync/push?later=1", "GET /api/v2/sync/pull (if-none-match)"]);
+      expect(server.acknowledged).toBe(0);
+      expect(community.headCursor).toBe(1);
+    });
+  });
+
+  describe("a library used on one computer", () => {
+    const everything = { laterBatches: true, pullRequestBody: true, othersActive: false };
+
+    beforeEach(() => {
+      // No Realtime: Community said nobody else uses this library.
+      runtime.channel = null;
+      runtime.realtimeSubscribedAt = 0;
+    });
+
+    it("backs up an edit with one request and opens no live connection", async () => {
+      const { server } = await primedCommunity(true, everything);
+      expect((runtime as unknown as { realtimeWanted: boolean | null }).realtimeWanted).toBe(false);
+      await edit();
+      await runtime.settleLocalAndPublicSync(configuration);
+      // Before: pull, push, pull, and a final pull without Realtime.
+      expect(server.requests).toEqual(["POST /api/v2/sync/push?later=1"]);
+    });
+
+    it("checks an idle library with one request", async () => {
+      const { server } = await primedCommunity(true, everything);
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["POST /api/v2/sync/pull (if-none-match)"]);
+    });
+
+    it("still brings back a change from a device that just started", async () => {
+      const { server, foreignBatch } = await primedCommunity(true, everything);
+      foreignBatch(OTHER_TRACK);
+      await edit();
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["POST /api/v2/sync/push?later=1"]);
+      expect(await indexedDBStorage.getTrack(OTHER_TRACK)).toMatchObject({ rating: 3 });
+    });
+  });
+
+  describe("reading changes directly from the database's API", () => {
+    const direct = { laterBatches: true, pullRequestBody: true, othersActive: true, directPull: true };
+
+    it("checks an idle library without a website request", async () => {
+      const { server } = await primedCommunity(true, direct);
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["DIRECT POST /rest/v1/rpc/pull_sync_changes_with_live_sync"]);
+    });
+
+    it("catches up on another device's change without a website request", async () => {
+      const { server, foreignBatch, community } = await primedCommunity(true, direct);
+      foreignBatch(OTHER_TRACK);
+      (runtime as unknown as { announcedHead: number }).announcedHead = community.headCursor;
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["DIRECT POST /rest/v1/rpc/pull_sync_changes_with_live_sync"]);
+      expect(await indexedDBStorage.getTrack(OTHER_TRACK)).toMatchObject({ rating: 3 });
+      expect(server.acknowledged).toBe(0);
+    });
+
+    it("still backs up edits through the website", async () => {
+      const { server } = await primedCommunity(true, direct);
+      await edit();
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["POST /api/v2/sync/push?later=1"]);
+    });
+
+    it("goes back to the website's address for the session when a direct read fails", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const { server } = await primedCommunity(true, direct, { ...direct, directPullDown: true });
+      await runtime.settleLocalAndPublicSync(configuration);
+      // The first sync already met the failure and switched.
+      expect(server.requests).toEqual(["POST /api/v2/sync/pull (if-none-match)"]);
+    });
+
+    it("is not used unless Community advertises it", async () => {
+      const { server } = await primedCommunity(true, { ...direct, directPull: false });
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["POST /api/v2/sync/pull (if-none-match)"]);
+    });
+  });
+
+  describe("CORS preflights during a tagging session", () => {
+    /** Three edits, each followed by an idle check, after the device's first sync. */
+    async function taggingSession(support: Support) {
+      const community = await primedCommunity(true, support);
+      // Answers Spotify already holds from the first sync stay valid.
+      community.server.preflights.length = 0;
+      for (const [uri, rating] of [[TRACK, 4], [OTHER_TRACK, 5], [TRACK, 2]] as const) {
+        await edit(uri, rating);
+        await runtime.settleLocalAndPublicSync(configuration);
+        await runtime.settleLocalAndPublicSync(configuration);
+      }
+      return community.server;
+    }
+
+    it("before: every new cursor costs a preflight and every edit three requests", async () => {
+      const server = await taggingSession({});
+      expect(server.requests).toHaveLength(12);
+      expect(server.preflights).toEqual([
+        "OPTIONS /api/v2/sync/push",
+        ...[1, 2, 3].map((cursor) => `OPTIONS /api/v2/sync/pull?deviceId=${configuration.deviceId}&after=${cursor}&limit=200`),
+      ]);
+    });
+
+    it("after: one address per route, and one request per edit", async () => {
+      const server = await taggingSession({ laterBatches: true, pullRequestBody: true });
+      expect(server.requests).toEqual(Array(3).fill(["POST /api/v2/sync/push?later=1", "POST /api/v2/sync/pull (if-none-match)"]).flat());
+      expect(server.preflights).toEqual(["OPTIONS /api/v2/sync/push?later=1"]);
+    });
+
+    it("goes back to the earlier pull for the session when Community stops accepting it", async () => {
+      const { server } = await primedCommunity(true, { pullRequestBody: true }, { pullRequestBody: false });
+      // The first sync already met the refusal and switched.
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["GET /api/v2/sync/pull (if-none-match)"]);
+    });
+
+    it("goes back to the earlier pull when a refused request surfaces as a network failure", async () => {
+      const { server } = await primedCommunity(true, { pullRequestBody: true });
+      const fetchMock = vi.mocked(globalThis.fetch);
+      const answer = fetchMock.getMockImplementation()!;
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      fetchMock.mockImplementation(async (input, init) => {
+        if (init?.method === "POST" && new URL(String(input)).pathname.endsWith("/pull")) {
+          server.requests.push("POST /api/v2/sync/pull (blocked)");
+          throw new TypeError("Failed to fetch");
+        }
+        return answer(input, init);
+      });
+      await runtime.settleLocalAndPublicSync(configuration);
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests).toEqual(["POST /api/v2/sync/pull (blocked)", "GET /api/v2/sync/pull (if-none-match)", "GET /api/v2/sync/pull (if-none-match)"]);
+    });
+
+    it("reports a real failure instead of switching when offline", async () => {
+      const { server } = await primedCommunity(true, { pullRequestBody: true });
+      vi.mocked(globalThis.fetch).mockImplementation(async () => { throw new TypeError("Failed to fetch"); });
+      await expect(runtime.settleLocalAndPublicSync(configuration)).rejects.toThrow("Failed to fetch");
+      expect((runtime as unknown as { pullRequestBodyUnavailable: boolean }).pullRequestBodyUnavailable).toBe(false);
+      expect(server.requests).toEqual([]);
     });
   });
 

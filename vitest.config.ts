@@ -8,7 +8,7 @@ export default defineConfig({
     maxWorkers: 2,
     minWorkers: 1,
     // Installer analytics and the landing page use node:test, run by their own test scripts.
-    exclude: [...configDefaults.exclude, "scripts/install/.build/**", "scripts/install/analytics/*.test.mjs", "landing-page/tests/**"],
+    exclude: [...configDefaults.exclude, "scripts/install/.build/**", "scripts/install/analytics/*.test.mjs", "landing-page/tests/**", "scripts/rym/*.test.mjs", "scripts/release/*.test.mjs", "scripts/build/*.test.mjs"],
     environment: "jsdom",
     setupFiles: ["./src/tests/setup.ts"],
     onConsoleLog: (log) => {

@@ -8,14 +8,42 @@ const MAX_AGE = 7 * 86400000;
 const MAX_EVENTS = 200;
 const HOSTS = ["https://us.i.posthog.com", "https://eu.i.posthog.com"];
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
-const EVENTS = ["tagify_opened", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened"] as const;
+const EVENTS = ["tagify_opened", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened", "update_banner_shown", "update_instructions_opened", "update_download_clicked", "update_banner_dismissed", "community_publish_prompt_shown", "community_publish_prompt_reminder_shown", "community_publish_prompt_snoozed", "community_publish_prompt_published", "community_profile_published", "community_publish_kept_private", "community_connect_prompt_shown", "community_connect_prompt_dismissed", "community_setup_opened", "community_connect_started", "community_connect_completed", "community_connect_failed"] as const;
 export type ProductEventName = typeof EVENTS[number];
+// Details are fixed, coarse values so an event never carries content, versions or links.
+const DETAILS = {
+  update_kind: ["patch", "minor", "major"],
+  method: ["direct", "release_page", "command"],
+  sync_state: ["connected", "disconnected", "not_connected"],
+  entry: ["prompt", "community", "sync"],
+  relationship: ["first_link", "reconnect", "account_switch"],
+  stage: ["start", "finish"],
+} as const;
+type DetailKey = keyof typeof DETAILS;
+export type ProductEventDetails = { [K in DetailKey]?: typeof DETAILS[K][number] };
+const EVENT_DETAILS: Partial<Record<ProductEventName, readonly DetailKey[]>> = {
+  update_banner_shown: ["update_kind"],
+  update_download_clicked: ["method"],
+  tagify_opened: ["sync_state"],
+  community_setup_opened: ["entry"],
+  community_connect_started: ["entry"],
+  community_connect_completed: ["entry", "relationship"],
+  community_connect_failed: ["entry", "stage"],
+};
+const BASE_PROPERTIES = ["app_version", "installation_id", "$process_person_profile", "$geoip_disable", "$ip"];
+function validDetails(event: ProductEventName, details: Record<string, unknown>): boolean {
+  const allowed = EVENT_DETAILS[event] ?? [];
+  return Object.entries(details).every(([key, value]) =>
+    allowed.includes(key as DetailKey) && (DETAILS[key as DetailKey] as readonly unknown[]).includes(value));
+}
+const detailsOf = (properties: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(properties).filter(([key]) => !BASE_PROPERTIES.includes(key)));
 interface Event {
   uuid: string;
   event: ProductEventName;
   timestamp: string;
   distinct_id: string;
-  properties: { app_version: string; installation_id?: string; $process_person_profile: false; $geoip_disable: true; $ip: null };
+  properties: { app_version: string; installation_id?: string; $process_person_profile: false; $geoip_disable: true; $ip: null } & ProductEventDetails;
 }
 interface State { schemaVersion: 2; enabled: boolean; events: Event[]; projectToken?: string; installationId?: string; installationExpiresAt?: string }
 interface Runtime {
@@ -50,7 +78,7 @@ function read(account: string): State {
     const events = value.events.filter((e: Event) => UUID.test(e.uuid) && e.distinct_id === `tagify-account-${account}` &&
       EVENTS.includes(e.event) && Date.parse(e.timestamp) <= Date.now() &&
       Date.parse(e.timestamp) > Date.now() - MAX_AGE && /^[0-9A-Za-z.-]{1,40}$/.test(e.properties?.app_version || "") &&
-      Object.keys(e.properties).every(key => ["app_version", "installation_id", "$process_person_profile", "$geoip_disable", "$ip"].includes(key)) &&
+      validDetails(e.event, detailsOf(e.properties)) &&
       e.properties.$process_person_profile === false && e.properties.$geoip_disable === true && e.properties.$ip === null && (!e.properties.installation_id || (linkValid && UUID.test(e.properties.installation_id) && e.properties.installation_id === value.installationId && Date.parse(e.timestamp) <= Date.parse(value.installationExpiresAt)))).slice(-MAX_EVENTS);
     return { schemaVersion: 2, enabled: true, events, projectToken: value.projectToken, installationId: linkValid ? value.installationId : undefined, installationExpiresAt: linkValid ? value.installationExpiresAt : undefined };
   } catch { return { schemaVersion: 2, enabled: false, events: [] }; }
@@ -113,14 +141,14 @@ export function releaseAggregateRequest(account: string, controller: AbortContro
   if (runtime.aggregateRequests.get(account) === controller) runtime.aggregateRequests.delete(account);
 }
 
-export function recordProductEvent(account: string, event: ProductEventName): void {
+export function recordProductEvent(account: string, event: ProductEventName, details: ProductEventDetails = {}): void {
   try {
     const state = read(account);
     const settings = configuration();
-    if (!state.enabled || !settings || !/^[a-f0-9]{64}$/.test(account) || !EVENTS.includes(event)) return;
+    if (!state.enabled || !settings || !/^[a-f0-9]{64}$/.test(account) || !EVENTS.includes(event) || !validDetails(event, details)) return;
     const day = new Date().toISOString().slice(0, 10);
     if (event === "tagify_opened" && runtime.openedDays.get(account) === day) { schedule(account); return; }
-    const properties: Event["properties"] = { app_version: packageJson.version, $process_person_profile: false, $geoip_disable: true, $ip: null };
+    const properties: Event["properties"] = { ...details, app_version: packageJson.version, $process_person_profile: false, $geoip_disable: true, $ip: null };
     if (state.installationId && Date.parse(state.installationExpiresAt || "") > Date.now()) properties.installation_id = state.installationId;
     if (state.projectToken !== settings.token) state.events = [];
     state.projectToken = settings.token;
@@ -133,9 +161,9 @@ export function recordProductEvent(account: string, event: ProductEventName): vo
 }
 
 /** Fixed interactions only; callers never supply file names, routes or content. */
-export function recordProductInteraction(event: ProductEventName): void {
+export function recordProductInteraction(event: ProductEventName, details?: ProductEventDetails): void {
   void getUsageAccountDigest().then(account => {
-    if (account) recordProductEvent(account, event);
+    if (account) recordProductEvent(account, event, details);
   }).catch(() => { /* Optional reporting never interrupts the user's action. */ });
 }
 

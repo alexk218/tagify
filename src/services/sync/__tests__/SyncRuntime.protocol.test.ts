@@ -211,6 +211,29 @@ describe("desktop sync protocol invariants", () => {
     expect(parentRevisionsFromSnapshot(nodes)).toEqual({ __root__: 4, category: 7, subcategory: 9 });
   });
 
+  it("keeps the revision of a list whose children were all deleted, from Community's list map", () => {
+    const nodes = [
+      { id: "cat_00000000-0000-4000-8000-000000000001", kind: "category", parentId: null, name: "Mood", accentId: null, position: 0, nodeRevision: 1, parentListRevision: 2, deleted: false },
+      { id: "sub_00000000-0000-4000-8000-000000000002", kind: "folder", parentId: "cat_00000000-0000-4000-8000-000000000001", name: "Chill", accentId: null, position: 0, nodeRevision: 1, parentListRevision: 3, deleted: false },
+    ] as TaxonomyNodeSnapshotV1[];
+    // Chill's last tag was deleted: no node carries its list revision any more.
+    expect(parentRevisionsFromSnapshot(nodes, { __root__: 2, "cat_00000000-0000-4000-8000-000000000001": 3, "sub_00000000-0000-4000-8000-000000000002": 5 }))
+      .toEqual({ __root__: 2, "cat_00000000-0000-4000-8000-000000000001": 3, "sub_00000000-0000-4000-8000-000000000002": 5 });
+    // Malformed entries are ignored rather than trusted.
+    expect(parentRevisionsFromSnapshot(nodes, { "not a node": 9, "sub_00000000-0000-4000-8000-000000000002": -1, __root__: "7" }))
+      .toEqual({ __root__: 2, "cat_00000000-0000-4000-8000-000000000001": 3 });
+    expect(parentRevisionsFromSnapshot(nodes, [1, 2])).toEqual({ __root__: 2, "cat_00000000-0000-4000-8000-000000000001": 3 });
+  });
+
+  it("lists items two devices placed at one position in ID order, as Community does", () => {
+    const tag = (id: string, position: number) => ({ id, kind: "tag" as const, parentId: "category", name: id, accentId: null, position, nodeRevision: 1, parentListRevision: 1, deleted: false });
+    const category = { id: "category", kind: "category" as const, parentId: null, name: "Mood", accentId: null, position: 0, nodeRevision: 1, parentListRevision: 1, deleted: false };
+    for (const order of [[tag("tag_b", 1), tag("tag_a", 1), tag("tag_c", 0)], [tag("tag_a", 1), tag("tag_c", 0), tag("tag_b", 1)]]) {
+      const taxonomy = expandSyncTaxonomy({ taxonomy: [category, ...order], colors: [], collections: [] });
+      expect(taxonomy.childrenByParentId?.category).toEqual(["tag_c", "tag_a", "tag_b"]);
+    }
+  });
+
   it("reconstructs taxonomy ordering used by remote structural batches", () => {
     const taxonomy = expandSyncTaxonomy({
       taxonomy: [

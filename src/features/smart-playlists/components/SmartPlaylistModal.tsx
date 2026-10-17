@@ -9,6 +9,7 @@ import { normalizeCamelotKey, sortCamelotKeys } from "@/utils/camelotKey";
 import { storageService } from "@/services/storage/StorageService";
 import { collectMatchingTrackUris } from "../utils/smartPlaylist.syncUtils";
 import { hasConfirmedMembershipBaseline } from "../utils/smartPlaylist.storage";
+import { describeSmartPlaylistCheckFailure, formatCheckRetryWait, mostActionableCheckFailure, type SmartPlaylistCheckFailure } from "../utils/smartPlaylist.checkFailure";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { usePromptHistory } from "@/features/onboarding/hooks/usePromptHistory";
 import { MOBILE_TAGGING_INTRO_KEY } from "@/features/onboarding/services/promptHistory";
@@ -109,6 +110,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
   );
   const [sortOrder, setSortOrder] = useState<SortOrder>(SORT_ORDERS.ASC);
   const [verifiedStatuses, setVerifiedStatuses] = useState<Record<string, "synced" | "needsSync" | "unknown">>({});
+  const [checkFailures, setCheckFailures] = useState<Record<string, SmartPlaylistCheckFailure>>({});
   const [reconnecting, setReconnecting] = useState<Set<string>>(new Set());
   useEffect(() => { if (!sharing) mainDialog.current?.focus(); }, [sharing]);
   const getSyncStatus = (
@@ -251,13 +253,17 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
 
   useEffect(() => {
     let active = true;
+    let recheck: ReturnType<typeof setTimeout> | undefined;
     const fetchCounts = async () => {
+      clearTimeout(recheck);
       setIsLoadingCounts(true);
       setVerifiedStatuses({});
+      const connected = smartPlaylists.filter((p) => p.playlistId);
+      let failures: Record<string, SmartPlaylistCheckFailure> = {};
       try {
         const data = await storageService.loadAllStrict();
         if (!active) return;
-        const results = await Promise.all(smartPlaylists.filter((p) => p.playlistId).map(async (playlist) => {
+        const results = await Promise.all(connected.map(async (playlist) => {
           try {
             const actual = await spotifyApiService.getAllTrackUrisInPlaylistStrict(playlist.playlistId);
             const actualSet = new Set(actual);
@@ -265,20 +271,37 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
             const expected = new Set(collectMatchingTrackUris(data.tracks, playlist.criteria).filter((uri) => !uri.startsWith("spotify:local:") || actualSet.has(uri)));
             const matches = actual.length === expected.size && new Set(actual).size === actual.length && actual.every((uri) => expected.has(uri));
             return { id: playlist.playlistId, count: actual.length, status: matches ? "synced" as const : "needsSync" as const };
-          } catch { return { id: playlist.playlistId, status: "unknown" as const }; }
+          } catch (error) {
+            return { id: playlist.playlistId, status: "unknown" as const, failure: describeSmartPlaylistCheckFailure(error) };
+          }
         }));
         if (active) {
+          failures = Object.fromEntries(results.flatMap((result) => result.failure ? [[result.id, result.failure]] : []));
           setPlaylistTrackCounts(Object.fromEntries(results.flatMap((result) => result.count === undefined ? [] : [[result.id, result.count]])));
           setVerifiedStatuses(Object.fromEntries(results.map((result) => [result.id, result.status])));
         }
-      } catch { if (active) setVerifiedStatuses({}); }
+      } catch (error) {
+        if (!active) return;
+        const failure = describeSmartPlaylistCheckFailure(error);
+        failures = Object.fromEntries(connected.map((playlist) => [playlist.playlistId, failure]));
+        setPlaylistTrackCounts({});
+        setVerifiedStatuses({});
+      }
       finally { if (active) setIsLoadingCounts(false); }
+      if (!active) return;
+      setCheckFailures(failures);
+      // Check again once Spotify's pause ends, or while Spotify is still catching up.
+      const reason = mostActionableCheckFailure(Object.values(failures));
+      const delay = reason?.kind === "paused" ? Math.max(1_000, reason.retryAt - Date.now() + 1_000)
+        : reason?.kind === "notResponding" ? 30_000 : undefined;
+      if (delay !== undefined) recheck = setTimeout(() => { void fetchCounts(); }, Math.min(delay, 2 ** 31 - 1));
     };
     void fetchCounts();
     const refresh = () => { void fetchCounts(); };
     window.addEventListener("tagify:dataUpdated", refresh);
-    return () => { active = false; window.removeEventListener("tagify:dataUpdated", refresh); };
+    return () => { active = false; clearTimeout(recheck); window.removeEventListener("tagify:dataUpdated", refresh); };
   }, [smartPlaylists]);
+  const checkFailure = mostActionableCheckFailure(Object.values(checkFailures));
 
   const toggleSmartPlaylistActive = async (playlistId: string) => {
     const playlist = smartPlaylists.find((p) => p.playlistId === playlistId);
@@ -576,6 +599,15 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
             </div>
 
             {importError ? <p role="alert" style={{ padding: "0 24px", color: "#ffb8b8" }}>{importError}</p> : null}
+            {checkFailure && !isLoadingCounts ? (
+              <p role="status" className={styles.checkNotice}>
+                {checkFailure.kind === "paused"
+                  ? `Spotify asked Tagify to wait. Checking your playlists again in ${formatCheckRetryWait(checkFailure.retryAt)}.`
+                  : checkFailure.kind === "notResponding"
+                    ? "Spotify is taking too long to respond. Restart Spotify if your playlists still can’t be checked."
+                    : "Some playlists couldn’t be checked. Close and reopen Smart Playlists to try again."}
+              </p>
+            ) : null}
             <div className={styles.controlsSection}>
               <div className={styles.searchSection}>
                 <FontAwesomeIcon
@@ -693,11 +725,12 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                         playlist.criteria.camelotMaxFilter ?? null,
                       );
                     const syncStatus = getSyncStatus(playlist);
+                    const notChecked = !isLoadingCounts && !!checkFailures[playlist.playlistId];
                     const currentTrackCount = !playlist.playlistId
                       ? 0
                       : isLoadingCounts
                       ? "..."
-                      : (playlistTrackCounts[playlist.playlistId] ?? 0);
+                      : (playlistTrackCounts[playlist.playlistId] ?? "—");
 
                     const matchingCount = tracks ? collectMatchingTrackUris(tracks, playlist.criteria).filter((uri) => uri.startsWith("spotify:track:")).length : null;
 
@@ -769,7 +802,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                           >
                             {syncStatus === "synced" && "In Sync"}
                             {syncStatus === "needsSync" && (playlist.pendingTagChoices?.length ? "Needs Tag Choices" : "Needs Sync")}
-                            {syncStatus === "unknown" && "Unknown"}
+                            {syncStatus === "unknown" && (notChecked ? "Not Checked" : "Unknown")}
                           </span>
                         </div> : <p className={styles.noCriteria}>{matchingCount !== null ? `${matchingCount} Spotify ${matchingCount === 1 ? "song matches" : "songs match"}. ` : ""}Saved setup — preview your songs before creating a playlist.</p>}
 

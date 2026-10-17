@@ -10,6 +10,8 @@
     "./projector": "./src/projector.ts",
     "./artifact-projector": "./src/artifact-projector.ts",
     "./taxonomy-artifact": "./src/taxonomy-artifact.ts",
-    "./comments": "./src/comments.ts"
+    "./comments": "./src/comments.ts",
+    "./tag-names": "./src/tagNames.ts",
+    "./fixtures/*": "./fixtures/*"
   }
 }

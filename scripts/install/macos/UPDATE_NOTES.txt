@@ -1,1 +1,4 @@
-Install and update Tagify directly from tagify.fm. Future Tagify Manager updates also come from tagify.fm.
+Tagify Manager 1.0.14
+
+If Spotify needs a fresh reinstall before Tagify can be added, Tagify Manager now tells you instead of asking you to close Spotify.
+With Block Spotify updates unchecked, setup always finishes.

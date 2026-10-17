@@ -26,6 +26,15 @@ it("keeps concurrent tag creations and reuses a duplicate in the same parent", a
   expect(tree.childrenByParentId?.genre).toHaveLength(2);
 });
 
+it("reuses your tag when the new name is the same tag spelled differently, but keeps near-duplicates separate", async () => {
+  const lofi = await indexedDBStorage.createQuickTag("Lo Fi", "genre");
+  expect((await indexedDBStorage.createQuickTag("lofi", "genre")).id).toBe(lofi.id);
+  expect((await indexedDBStorage.createQuickTag("lo-fi", "genre")).id).toBe(lofi.id);
+  const vocals = await indexedDBStorage.createQuickTag("male vocals", "genre");
+  expect((await indexedDBStorage.createQuickTag("male vocalist", "genre")).id).not.toBe(vocals.id);
+  expect((await indexedDBStorage.getTaxonomy()).childrenByParentId?.genre).toHaveLength(3);
+});
+
 it("does not lose the tree or saved track dates after an invalid creation", async () => {
   await indexedDBStorage.saveTrack("spotify:track:old", { rating: 4, energy: 5, bpm: null, tagIds: [], dateModified: 123 });
   await expect(indexedDBStorage.createQuickTag("New tag", "removed-parent")).rejects.toThrow();

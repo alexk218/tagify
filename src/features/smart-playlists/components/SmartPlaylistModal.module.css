@@ -397,6 +397,17 @@
   background: rgb(255 255 255 / 7%);
 }
 
+.checkNotice {
+  margin: 12px 16px 0;
+  padding: 8px 10px;
+  border: 1px solid rgb(251 191 36 / 30%);
+  border-radius: 8px;
+  background: rgb(251 191 36 / 8%);
+  color: var(--spice-text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .modalBody {
   padding: 12px 16px 16px;
   overflow-y: auto;

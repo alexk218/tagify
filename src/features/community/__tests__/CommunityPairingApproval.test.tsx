@@ -5,6 +5,15 @@ import { CommunityOnboardingModal } from "../CommunityOnboardingModal";
 import { CloudSyncModal } from "../CloudSyncModal";
 import { PENDING_PAIRING_STORAGE_KEY, syncPairingService, type ApprovedPairing, type PairingRelationship } from "@/services/sync/SyncPairingService";
 import { setDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
+import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
+
+/** Community setup always knows where it was opened from. */
+const CommunitySetup = (props: { onClose: () => void }) => <CommunityOnboardingModal entry="community" {...props} />;
+
+vi.mock("@/features/product-analytics/productAnalytics", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/product-analytics/productAnalytics")>()),
+  recordProductInteraction: vi.fn(),
+}));
 
 vi.mock("../CommunityPublicVisibilityReview", () => ({
   CommunityVisibilityReview: () => <div>Review your public visibility</div>,
@@ -18,7 +27,7 @@ const configuration = {
 };
 
 describe.each([
-  ["Community setup", CommunityOnboardingModal],
+  ["Community setup", CommunitySetup],
   ["Cloud Sync", CloudSyncModal],
 ] as const)("%s browser approval", (_name, Modal) => {
   let activateCurrentAccount: ReturnType<typeof vi.fn>;
@@ -27,6 +36,7 @@ describe.each([
     syncPairingService.cancelPending();
     localStorage.clear();
     sessionStorage.clear();
+    vi.mocked(recordProductInteraction).mockClear();
     localStorage.setItem(PENDING_PAIRING_STORAGE_KEY, JSON.stringify({
       apiBaseUrl: configuration.apiBaseUrl, deviceCode: "device-code", verifier: "verifier",
       userCode: "ABCD-EFGH", verificationUri: "https://community.tagify.fm/device?code=ABCD-EFGH",
@@ -78,6 +88,47 @@ describe.each([
     } else {
       await waitFor(() => expect(activateCurrentAccount).toHaveBeenCalledTimes(1));
     }
+  });
+
+  const entry = Modal === CloudSyncModal ? "sync" : "community";
+  const connectEvents = () => vi.mocked(recordProductInteraction).mock.calls.filter(([event]) => event.startsWith("community_"));
+
+  it("measures opening setup and the saved connection, credited to where the attempt started", async () => {
+    localStorage.setItem("tagify:community-connect-attempt:v1", JSON.stringify({ entry: "prompt" }));
+    approve("reconnect");
+    render(<Modal onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+    expect(await screen.findByText("Review your public visibility")).toBeInTheDocument();
+
+    expect(connectEvents()).toEqual([
+      ["community_setup_opened", { entry }],
+      ["community_connect_completed", { entry: "prompt", relationship: "reconnect" }],
+    ]);
+  });
+
+  it("measures a failed finish once, then the completed retry", async () => {
+    approve().mockRejectedValueOnce(new Error("Connection failed"));
+    render(<Modal onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Review your public visibility")).toBeInTheDocument();
+
+    expect(connectEvents().slice(1)).toEqual([
+      ["community_connect_failed", { entry, stage: "finish" }],
+      ["community_connect_completed", { entry, relationship: "first_link" }],
+    ]);
+  });
+
+  it("does not count an expired approval code as a failure", async () => {
+    vi.spyOn(syncPairingService, "poll").mockImplementation(async () => {
+      syncPairingService.cancelPending();
+      throw new Error("The device code expired. Start linking again.");
+    });
+    render(<Modal onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    expect(connectEvents()).toEqual([["community_setup_opened", { entry }]]);
   });
 
   it("keeps the approval available to retry when connecting fails", async () => {

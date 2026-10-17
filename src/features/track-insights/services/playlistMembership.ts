@@ -18,7 +18,12 @@ export class PlaylistMembershipStore {
   private listeners = new Set<() => void>();
   private attemptedAt = new Map<string, number>();
   private revisions = new Map<string, string>();
-  constructor(private lookup = (uri: string, fresh = false, options?: RequestOptions) => spotifyApiService.getAllTrackUrisInPlaylistStrict(uri.split(":").pop()!, fresh ? 0 : 30_000, options)) { }
+  /** Spotify's playlist version when the held contents were read, so unchanged playlists aren't downloaded again. */
+  private versions = new Map<string, string>();
+  constructor(
+    private lookup = (uri: string, fresh = false, options?: RequestOptions) => spotifyApiService.getAllTrackUrisInPlaylistStrict(uri.split(":").pop()!, fresh ? 0 : 30_000, options),
+    private probeVersion = (uri: string, options: RequestOptions) => spotifyApiService.getPlaylistVersion(uri.split(":").pop()!, options),
+  ) { }
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -40,16 +45,30 @@ export class PlaylistMembershipStore {
     }
     const current = this.snapshot[uri];
     if (!force && current && Date.now() - (this.attemptedAt.get(uri) ?? 0) < REFRESH_MS && this.revisions.get(uri) === revision) return Promise.resolve();
-    const fresh = force || this.revisions.get(uri) !== revision;
+    const unchangedRevision = this.revisions.get(uri) === revision;
     this.revisions.set(uri, revision);
     this.attemptedAt.set(uri, Date.now());
-    this.publish(uri, { ...current, status: "loading" });
     const requestOptions: RequestOptions = { ...options, priorityToken: { current: options?.priority ?? "foreground" } };
     this.pendingOptions.set(uri, requestOptions);
-    const task = this.lookup(uri, fresh, requestOptions).then((uris) => {
+    const mayBeUnchanged = !force && unchangedRevision && current?.status === "loaded" && this.versions.has(uri);
+    if (!mayBeUnchanged) this.publish(uri, { ...current, status: "loading" });
+    const task = (async () => {
+      // The version is requested before the contents, so an edit during the read leaves a newer version to catch next time.
+      let version: string | null, uris: readonly string[];
+      if (mayBeUnchanged) {
+        version = await this.probeVersion(uri, requestOptions);
+        if (version === this.versions.get(uri)) return;
+        this.publish(uri, { ...current, status: "loading" });
+        uris = await this.lookup(uri, true, requestOptions);
+      } else {
+        const probe = this.probeVersion(uri, requestOptions).catch(() => null);
+        uris = await this.lookup(uri, force || !unchangedRevision, requestOptions);
+        version = await probe;
+      }
+      if (version) this.versions.set(uri, version); else this.versions.delete(uri);
       const songs = uris.filter((uri) => uri.startsWith("spotify:track:") || uri.startsWith("spotify:local:"));
       this.publish(uri, { status: "loaded", uris: [...new Set(songs)], listedTrackCount: songs.length, checkedAt: Date.now() });
-    }).catch(() => {
+    })().catch(() => {
       this.publish(uri, { ...current, status: "failed" });
     }).finally(() => { this.pending.delete(uri); this.pendingOptions.delete(uri); });
     this.pending.set(uri, task);

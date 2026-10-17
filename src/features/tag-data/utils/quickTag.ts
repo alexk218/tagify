@@ -1,3 +1,4 @@
+import { isSameTagName } from "@tagify/community-contracts";
 import type { TagCategory, TagSubcategory, TagTaxonomy } from "@/types/tagData";
 import { createEntityId } from "@/utils/tagTaxonomy";
 
@@ -15,15 +16,20 @@ export function getQuickTagTargets(categories: TagCategory[]) {
   return targets;
 }
 
-export function getQuickTagMatches(categories: TagCategory[], query: string) {
+/** Every tag once, in the order the categories and folders show them. */
+export function getQuickTagTags(categories: TagCategory[]) {
   const tags = new Map<string, { id: string; name: string }>();
   const visit = (node: TagCategory | TagSubcategory) => {
     node.tags?.forEach((tag) => tags.set(tag.id, tag));
     node.subcategories?.forEach(visit);
   };
   categories.forEach(visit);
+  return [...tags.values()];
+}
+
+export function getQuickTagMatches(categories: TagCategory[], query: string) {
   const text = query.trim().toLocaleLowerCase();
-  return text ? [...tags.values()].filter((tag) => tag.name.toLocaleLowerCase().includes(text)) : [];
+  return text ? getQuickTagTags(categories).filter((tag) => tag.name.toLocaleLowerCase().includes(text)) : [];
 }
 
 export function getQuickTagNameError(name: string): string | null {
@@ -49,7 +55,7 @@ export function addQuickTag(current: TagTaxonomy, rawName: string, requestedPare
   const parent = taxonomy.categoriesById[parentId] || taxonomy.subcategoriesById[parentId];
   if (!parent) throw new Error("Choose a category or folder for your new tag.");
   const existing = Object.values(taxonomy.tagsById).find((tag) =>
-    (tag.parentId || tag.subcategoryId) === parentId && tag.name.toLocaleLowerCase() === name.toLocaleLowerCase(),
+    (tag.parentId || tag.subcategoryId) === parentId && isSameTagName(tag.name, name),
   );
   if (existing) return { taxonomy: current, tag: existing };
   const id = createEntityId("tag");

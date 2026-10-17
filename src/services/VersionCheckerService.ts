@@ -1,6 +1,8 @@
 export interface UpdateInfo {
   hasUpdate: boolean;
   latestVersion: string;
+  /** The running version the comparison used, cleaned like latestVersion. */
+  currentVersion?: string;
   releaseDate?: string;
   downloadUrl?: string;
   changelog?: string;
@@ -8,9 +10,13 @@ export interface UpdateInfo {
 
 export class VersionCheckerService {
   private currentVersion: string;
+  private repoOwner: string;
+  private repoName: string;
 
-  constructor(currentVersion: string, _repoOwner: string, _repoName: string) {
+  constructor(currentVersion: string, repoOwner: string, repoName: string) {
     this.currentVersion = currentVersion;
+    this.repoOwner = repoOwner;
+    this.repoName = repoName;
   }
 
   async checkForUpdates(): Promise<UpdateInfo> {
@@ -20,11 +26,11 @@ export class VersionCheckerService {
     };
 
     try {
-      const apiUrl = "https://tagify.fm/releases/client/latest.json";
+      const apiUrl = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/releases/latest`;
       const response = await fetch(apiUrl);
 
       if (!response.ok) {
-        console.warn(`Release service responded with status: ${response.status}`);
+        console.warn(`GitHub API responded with status: ${response.status}`);
         return baseInfo;
       }
 
@@ -37,6 +43,7 @@ export class VersionCheckerService {
       return {
         hasUpdate,
         latestVersion,
+        currentVersion,
         releaseDate: release.published_at,
         downloadUrl: release.html_url,
         changelog: release.body || undefined,

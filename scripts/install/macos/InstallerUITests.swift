@@ -144,6 +144,8 @@ extension InstallerApp {
         retry.performClick(nil)
         try expect(retries == 1 && !errorCard.isHidden && !busy, "Inline failure couldn't retry the failed action")
         try capture("installer-recovery")
+        showFailure(TagifyInstaller.spotifyReinstallMessage, retry: {})
+        try capture("installer-spotify-reinstall")
         appendDiagnostic("Tagify Installer 1.0.1 | Test diagnostics\nDownload couldn't be verified.")
         logs.performClick(nil)
         try expect(copyButton.isEnabled && detailsText.string.contains("Download couldn't be verified."), "Failure details omitted diagnostics")

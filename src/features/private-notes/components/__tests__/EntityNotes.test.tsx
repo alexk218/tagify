@@ -36,7 +36,8 @@ it.each(["album", "playlist", "artist"])("integrates %s notes into the detail ca
   await waitFor(() => expect(field).toBeEnabled());
   expect(field).toHaveValue("Draft from the old panel");
   expect(field.closest("section")).not.toBeNull();
-  expect(view.container.querySelector("details")).toBeNull();
+  // The note sits in the card itself, not in a collapsible panel.
+  expect(field.closest("details")).toBeNull();
   expect(screen.queryByRole("button", { name: "Save note" })).not.toBeInTheDocument();
   fireEvent.blur(field);
   await waitFor(async () => expect((await indexedDBStorage.getPrivateNote(uri))!.text).toBe("Draft from the old panel"));

@@ -5,6 +5,8 @@ import { getDisconnectedSyncProvenance } from "@/services/sync/SyncLocalState";
 import { syncPairingService } from "@/services/sync/SyncPairingService";
 import { isAnotherDialogOpen } from "@/utils/openDialogs";
 import { dismissCommunityConnectPrompt, isCommunityConnectPromptDismissed } from "./communityConnectPromptHistory";
+import { recordCommunityConnectPromptDismissed, recordCommunityConnectPromptShown } from "./communityConnectAnalytics";
+// eslint-disable-next-line css-modules/no-unused-class -- shared with the publish invitation
 import styles from "./CommunityConnectPrompt.module.css";
 
 /** Delay after other dialogs close, so the invitation never flashes between two of them. */
@@ -66,10 +68,16 @@ export function CommunityConnectPrompt({ enabled, connected, onConnect }: Commun
     };
   }, [eligible, visible]);
 
-  if (!eligible || !visible) return null;
+  const shown = eligible && visible;
+  useEffect(() => {
+    if (shown && accountDigest) recordCommunityConnectPromptShown(accountDigest);
+  }, [shown, accountDigest]);
+
+  if (!shown) return null;
 
   const notNow = () => {
     if (accountDigest) dismissCommunityConnectPrompt(accountDigest);
+    recordCommunityConnectPromptDismissed();
     setDismissed(true);
   };
 

@@ -53,14 +53,27 @@ func runTests() throws {
     let silentUpdateFailure = try Fixture()
     _ = try silentUpdateFailure.installer.install(architecture: "arm64")
     silentUpdateFailure.ignoreUpdateSetting = true
-    try fails("CLI success without actually allowing updates accepted") { _ = try silentUpdateFailure.installer.install(architecture: "arm64", blockSpotifyUpdates: false) }
-    try expect(SpotifyUpdateState.isBlocked(silentUpdateFailure.paths.spotifyUpdates), "Silent unblock failure didn't restore protection")
+    // Choosing not to block updates must never stop setup; the setup screen then offers Apply Changes.
+    _ = try silentUpdateFailure.installer.install(architecture: "arm64", blockSpotifyUpdates: false)
+    try expect(SpotifyUpdateState.isBlocked(silentUpdateFailure.paths.spotifyUpdates) && text(silentUpdateFailure.paths.tagify.appendingPathComponent("extension.js")).contains("globalThis.__tagifyInstallRecoveryKey="),
+               "Setup with updates allowed didn't finish while Spotify kept its update block")
 
     let failedUnblock = try Fixture()
     _ = try failedUnblock.installer.install(architecture: "arm64")
     failedUnblock.failUpdateSetting = true
-    try fails("Failed unblock accepted") { _ = try failedUnblock.installer.install(architecture: "arm64", blockSpotifyUpdates: false) }
-    try expect(try SpotifyUpdateState.directoryFlags(failedUnblock.paths.spotifyUpdates)! & UInt32(UF_IMMUTABLE) != 0, "Failed unblock didn't restore the prior block")
+    _ = try failedUnblock.installer.install(architecture: "arm64", blockSpotifyUpdates: false)
+    try expect(text(failedUnblock.paths.tagify.appendingPathComponent("extension.js")).contains("globalThis.__tagifyInstallRecoveryKey="), "A failed unblock stopped setup")
+
+    // Reported on Windows: Spicetify can't back up a Spotify whose app files were already changed.
+    let changedSpotify = try Fixture()
+    changedSpotify.failApply = true
+    changedSpotify.applyFailureOutput = "error You haven't backed up and Spotify cannot be backed up at this state. Please re-install Spotify then run \"spicetify backup apply\""
+    do { _ = try changedSpotify.installer.install(architecture: "arm64"); throw InstallerFailure(message: "Setup accepted a Spotify that can't be backed up") }
+    catch let failure as InstallerFailure {
+        try expect(failure.reason == "spotify_reinstall_required" && failure.message.contains("spotify.com/download") && !failure.message.contains("Spotify is closed"),
+                   "A Spotify that can't be backed up didn't ask for a reinstall: \(failure.message)")
+    }
+    try expect(text(changedSpotify.paths.resources.appendingPathComponent("Apps/xpui/original.js")) == "Original Spotify", "Reinstall guidance didn't restore Spotify first")
 
     let updatedSpotify = try Fixture()
     _ = try updatedSpotify.installer.install(architecture: "arm64")
@@ -175,13 +188,13 @@ func runTests() throws {
         try expect(StableVersion(invalid) == nil, "Invalid version accepted: \(invalid)")
     }
     func macRelease(_ tag: String, name: String = "TagifyInstaller-mac.dmg", url: String? = nil, hash: String? = nil, prerelease: Bool = false, draft: Bool = false) -> InstallerRelease {
-        InstallerRelease(tag_name: tag, draft: draft, prerelease: prerelease, body: "A useful update", assets: [InstallerRelease.Asset(name: name, browser_download_url: URL(string: url ?? "https://tagify.fm/releases/manager/\(tag)/\(name)")!, digest: hash ?? "sha256:" + String(repeating: "a", count: 64))])
+        InstallerRelease(tag_name: tag, draft: draft, prerelease: prerelease, body: "A useful update", assets: [InstallerRelease.Asset(name: name, browser_download_url: URL(string: url ?? "https://github.com/alexk218/tagify-installer/releases/download/\(tag)/\(name)")!, digest: hash ?? "sha256:" + String(repeating: "a", count: 64))])
     }
     let mac = macRelease("v1.0.2")
     let newerWindows = macRelease("v1.0.9", name: "Tagify Manager.exe")
     try expect(InstallerUpdates.select([newerWindows, mac], installed: "1.0.1")?.version.string == "1.0.2", "Windows-only release hid or replaced a Mac update")
     try expect(InstallerUpdates.select([mac], installed: "1.0.2") == nil && InstallerUpdates.select([mac], installed: "1.0.3") == nil, "Current installer or a downgrade was offered")
-    for candidate in [macRelease("v1.0.3", prerelease: true), macRelease("v1.0.3", draft: true), macRelease("v1.0.3-beta"), macRelease("v1.0.3", hash: ""), macRelease("v1.0.3", url: "https://github.com/other/repo/releases/download/v1.0.3/TagifyInstaller-mac.dmg"), macRelease("v1.0.3", url: "https://tagify.fm/releases/manager/v1.0.3/TagifyInstaller-mac.dmg?redirect=bad")] {
+    for candidate in [macRelease("v1.0.3", prerelease: true), macRelease("v1.0.3", draft: true), macRelease("v1.0.3-beta"), macRelease("v1.0.3", hash: ""), macRelease("v1.0.3", url: "https://github.com/other/repo/releases/download/v1.0.3/TagifyInstaller-mac.dmg"), macRelease("v1.0.3", url: "https://github.com/alexk218/tagify-installer/releases/download/v1.0.3/TagifyInstaller-mac.dmg?redirect=bad"), macRelease("v1.0.3", url: "https://tagify.fm/releases/manager/v1.0.3/TagifyInstaller-mac.dmg")] {
         try expect(InstallerUpdates.select([candidate], installed: "1.0.1") == nil, "Untrusted or unstable Mac update was offered")
     }
     try expect(InstallerUpdates.select([macRelease("v1.0.3", name: "TagifyInstaller-mac.zip")], installed: "1.0.1") != nil, "Mac ZIP fallback wasn't supported")

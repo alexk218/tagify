@@ -176,4 +176,40 @@ describe("automatic Tagify product analytics", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(queue().events).toHaveLength(1);
   });
+  it("sends the fixed update-banner details and nothing else", async () => {
+    recordProductEvent(account, "update_download_clicked", { method: "release_page" });
+    expect(queue().events[0].properties).toMatchObject({ method: "release_page" });
+    expect(await flushProductEvents(account)).toBe(true);
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+    expect(Object.keys(body.batch[0].properties).sort()).toEqual(["$geoip_disable", "$ip", "$process_person_profile", "app_version", "method"]);
+  });
+  it("sends the fixed connection details and nothing else", async () => {
+    recordProductEvent(account, "tagify_opened", { sync_state: "not_connected" });
+    recordProductEvent(account, "community_connect_completed", { entry: "prompt", relationship: "first_link" });
+    expect(await flushProductEvents(account)).toBe(true);
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+    const details = body.batch.map(({ event, properties: { app_version: _version, $geoip_disable: _geo, $ip: _ip, $process_person_profile: _person, ...rest } }: any) => [event, rest]);
+    expect(details).toEqual([
+      ["tagify_opened", { sync_state: "not_connected" }],
+      ["community_connect_completed", { entry: "prompt", relationship: "first_link" }],
+    ]);
+  });
+  it.each([
+    ["an unknown detail", "update_banner_shown", { update_kind: "minor", latest_version: "3.3.0" }],
+    ["a sync state outside the fixed list", "tagify_opened", { sync_state: "paused" }],
+    ["a connection detail on another event", "community_connect_started", { relationship: "reconnect" }],
+    ["a value outside the fixed list", "update_banner_shown", { update_kind: "3.3.0" }],
+    ["a detail that belongs to another event", "tagify_opened", { method: "direct" }],
+  ])("drops an event with %s", (_label, event, details) => {
+    recordProductEvent(account, event as any, details as any);
+    expect(queue().events ?? []).toEqual([]);
+  });
+  it("discards stored events whose details were altered", () => {
+    recordProductEvent(account, "update_banner_shown", { update_kind: "patch" });
+    const stored = queue();
+    stored.events[0].properties.update_kind = "https://example.com/private";
+    localStorage.setItem(key, JSON.stringify(stored));
+    recordProductEvent(account, "update_banner_dismissed");
+    expect(queue().events.map((event: any) => event.event)).toEqual(["update_banner_dismissed"]);
+  });
 });

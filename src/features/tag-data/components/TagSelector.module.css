@@ -409,19 +409,3 @@
   cursor: pointer;
 }
 .searchInput { padding-right: 30px; }
-.quickCreate {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.quickCreate select, .quickCreate button {
-  background: var(--spice-main);
-  color: var(--spice-text);
-  border: 1px solid var(--spice-button);
-  padding: 6px 8px;
-  border-radius: 4px;
-  max-width: 100%;
-}
-.quickCreate button { cursor: pointer; }

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Download, Search, ShieldCheck } from "lucide-react";
 import type { InitialMergeConflictV1, InitialMergeResultV1, InitialMergeSource } from "@tagify/sync-contracts";
 import type { InitialMergeReview } from "@/services/sync/SyncRuntime";
+// eslint-disable-next-line css-modules/no-unused-class -- shared with the Cloud Sync and setup dialogs
 import styles from "./CloudSyncModal.module.css";
 import { communityErrorMessage } from "./communitySyncCopy";
 
@@ -124,7 +125,7 @@ export function InitialLibraryMergeReview({
 }
 
 function LibraryCard({ title, counts }: { title: string; counts: InitialMergeReview["device"] }) {
-  return <article><strong>{title}</strong><span>{counts.annotations.toLocaleString()} tagged items</span><span>{counts.taxonomy.toLocaleString()} tags and groups</span><span>{counts.smartPlaylists.toLocaleString()} Smart Playlists</span><span>{counts.savedSettings.toLocaleString()} saved preferences</span></article>;
+  return <article><strong>{title}</strong><span>{counts.annotations.toLocaleString()} tagged items</span><span>{counts.taxonomy.toLocaleString()} tags and groups</span><span>{counts.smartPlaylists.toLocaleString()} Smart Playlists</span><span>{counts.savedSettings.toLocaleString()} saved filters and playlist rules</span></article>;
 }
 
 function ChoiceButton({ source, selected, onClick, label }: { source: InitialMergeSource; selected: boolean; onClick: () => void; label: string }) {

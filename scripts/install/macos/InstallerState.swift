@@ -194,10 +194,10 @@ enum InstallerUpdates {
             let names = ["TagifyInstaller-mac.dmg", "TagifyInstaller-mac.zip", "Tagify.pkg"]
             for name in names {
                 guard let asset = release.assets.first(where: { $0.name == name }),
-                      asset.browser_download_url.scheme == "https", asset.browser_download_url.host == "tagify.fm",
+                      asset.browser_download_url.scheme == "https", asset.browser_download_url.host == "github.com",
                       asset.browser_download_url.user == nil, asset.browser_download_url.password == nil,
                       asset.browser_download_url.query == nil, asset.browser_download_url.fragment == nil,
-                      asset.browser_download_url.path == "/releases/manager/\(release.tag_name)/\(name)",
+                      asset.browser_download_url.path == "/\(repository)/releases/download/\(release.tag_name)/\(name)",
                       asset.digest?.range(of: #"^sha256:[a-fA-F0-9]{64}$"#, options: .regularExpression) != nil else { continue }
                 return InstallerUpdate(version: version, notes: release.body ?? "A newer Tagify installer is available for your Mac.", asset: asset)
             }
@@ -225,12 +225,12 @@ enum InstallerUpdates {
     }
 
     static func check(installed: String) throws -> InstallerUpdate? {
-        let data = try json(URL(string: "https://tagify.fm/releases/manager/releases.json")!)
+        let data = try json(URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=100")!)
         return select(try JSONDecoder().decode([InstallerRelease].self, from: data), installed: installed)
     }
 
     static func latestTagify() throws -> String {
-        let release = try JSONDecoder().decode(Release.self, from: json(URL(string: "https://tagify.fm/releases/client/latest.json")!))
+        let release = try JSONDecoder().decode(Release.self, from: json(URL(string: "https://api.github.com/repos/alexk218/tagify/releases/latest")!))
         _ = try release.asset(repository: "alexk218/tagify", architecture: "arm64")
         return String(release.tag_name.drop(while: { $0 == "v" }))
     }

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rememberPlaylistAdditions, readPlaylistAdditionOrigins } from "../SpotifyPlaylistWriteOrigins";
 import { SmartPlaylistSyncService } from "@/services/SmartPlaylistSyncService";
+import { spotifyLocalPause } from "@/utils/spotifyRequestFailure";
 import {
   SMART_PLAYLIST_MEMBERSHIP_BASELINES_KEY,
 } from "@/features/smart-playlists/utils/smartPlaylist.storage";
@@ -1047,6 +1048,16 @@ describe("SmartPlaylistSyncService", () => {
     expect(persisted[0].smartPlaylistTrackUris).toEqual([
       "spotify:track:last-confirmed",
     ]);
+  });
+
+  it("reports when Spotify asked Tagify to wait before a manual sync", async () => {
+    const p = playlist(); savePlaylists([p]);
+    mocks.spotifyApi.getAllTrackUrisInPlaylistStrict.mockRejectedValue(spotifyLocalPause(120));
+    const summary = await new SmartPlaylistSyncService().reconcilePlaylist(p.playlistId);
+    expect(summary.failedPlaylistNames).toEqual(["House"]);
+    expect(summary.checkFailure).toMatchObject({ kind: "paused" });
+    expect((summary.checkFailure as { retryAt: number }).retryAt).toBeGreaterThan(Date.now() + 100_000);
+    expect(mocks.spotifyApi.updatePlaylistTracks).not.toHaveBeenCalled();
   });
 
   it("syncs only the selected playlist when another playlist cannot be read", async () => {

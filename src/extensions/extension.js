@@ -3,6 +3,7 @@ import { checkAutomaticRecordingReuse, getRecordingReuseStatus, getRecordingReus
 import { getTagifyDatabaseName } from "../services/sync/SyncLocalState";
 import { buildCategoryTree } from "../utils/tagTaxonomy";
 import { createQuickTagSearch } from "./inlineEditor.quickTags";
+import { getCommunityPopularTags, preloadCommunityPopularTags } from "../features/tag-data/utils/communityPopularTags";
 import { flushLocalPersistence, isLocalPersistencePaused } from "../services/sync/SyncLocalState";
 /* global Spicetify */
 import { keyboardShortcutService } from "../services/KeyboardShortcutService";
@@ -99,6 +100,8 @@ function findUriInObject(root, maxDepth = 6) {
     }
   });
   welcomeModal.initialize();
+  // The quick tag menu suggests names from this list without waiting, so it's fetched now.
+  void preloadCommunityPopularTags();
 
   const APP_NAME = "tagify";
 
@@ -1733,6 +1736,7 @@ function findUriInObject(root, maxDepth = 6) {
       menu.appendChild(createQuickTagSearch({
         categories: state.tagCategories,
         getCategories: () => state.tagCategories,
+        getPopularTags: () => getCommunityPopularTags(),
         onApply: async (tagId, tagName) => {
           // Enter adds an existing tag; it never removes a tag already applied.
           if (getTagSelectionState(tagId) !== "all") await tagAction(tagId, tagName);

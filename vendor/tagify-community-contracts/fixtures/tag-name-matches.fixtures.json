@@ -1,0 +1,50 @@
+{
+  "same": [
+    ["lofi", "lo-fi"],
+    ["lo fi", "lo-fi"],
+    ["lofi", "lo fi"],
+    ["Lo-Fi", "LO_FI"],
+    ["hiphop", "hip hop"],
+    ["Hip-Hop", "hip hop"],
+    ["R&B", "r and b"],
+    ["Drum & Bass", "drum and bass"],
+    ["drum n bass", "drumnbass"],
+    ["Sigur Rós", "sigur ros"],
+    ["post-rock", "Post Rock"],
+    ["  shoegaze ", "Shoegaze"],
+    ["🔥🔥", "🔥🔥"],
+    ["日本", "日本"],
+    ["日本 語", "日本語"]
+  ],
+  "near": [
+    ["male vocals", "male vocalist"],
+    ["female vocalists", "female vocals"],
+    ["vocal", "vocals"],
+    ["psychadelic", "psychedelic"],
+    ["ambeint", "ambient"],
+    ["good vibe", "good vibes"],
+    ["lofi beat", "lofi beats"],
+    ["synth", "synths"],
+    ["dark synthwave", "dark synthwaev"],
+    ["classic", "classics"]
+  ],
+  "distinct": [
+    ["chill", "chilled"],
+    ["jazz", "jazzy"],
+    ["funk", "funky"],
+    ["classic", "classical"],
+    ["rock", "rockabilly"],
+    ["pop", "pop punk"],
+    ["electronic", "electronica"],
+    ["1980s", "1990s"],
+    ["2000s", "2010s"],
+    ["80s", "90s"],
+    ["male vocals", "female vocals duet"],
+    ["male vocals", "female vocalist"],
+    ["pop", "pops"],
+    ["🔥🔥", "日本"],
+    ["🔥", "!!!"],
+    ["", ""],
+    ["   ", "-"]
+  ]
+}

@@ -1,0 +1,39 @@
+<?xml version="1.0" standalone="yes"?>
+<!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+-->
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Tagify Manager</title>
+        <item>
+            <title>1.0.13</title>
+            <pubDate>Wed, 14 Oct 2026 12:14:21 -0400</pubDate>
+            <link>https://github.com/alexk218/tagify-installer/releases</link>
+            <sparkle:version>13</sparkle:version>
+            <sparkle:shortVersionString>1.0.13</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="plain-text"><![CDATA[Tagify Manager 1.0.13
+
+Tagify and Tagify Manager updates download from the Tagify releases page on GitHub again.
+]]></description>
+            <enclosure url="https://github.com/alexk218/tagify-installer/releases/download/v1.0.13/TagifyInstaller-mac.zip" length="3709742" type="application/octet-stream" sparkle:edSignature="VEU2bOKc2uIcsNRK4tlPaR093aXvX/LOdrG6r9PH5vGojqUKTnyAbX39KLGBbcLS/bWv+wGJeX+G9VNHdjEfAQ=="/>
+        </item>
+        <item>
+            <title>1.0.9</title>
+            <pubDate>Sun, 11 Oct 2026 18:28:03 -0400</pubDate>
+            <link>https://github.com/alexk218/tagify-installer/releases</link>
+            <sparkle:version>10</sparkle:version>
+            <sparkle:shortVersionString>1.0.9</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="plain-text"><![CDATA[Tagify Manager 1.0.9
+
+A simpler setup screen with the same install, update and repair tools.
+]]></description>
+            <enclosure url="https://github.com/alexk218/tagify-installer/releases/download/v1.0.9/TagifyInstaller-mac.zip" length="3709586" type="application/octet-stream" sparkle:edSignature="LEbqkQV6RLYjq/yGbztSMPEVliT0WfwrV4Fi06QZOp3SGCFIikFl6+qSixPIOag1r1rPeYSrlQoy9pYrOwhKBg=="/>
+        </item>
+    </channel>
+</rss>
+<!-- sparkle-signatures:
+edSignature: Wm3Q5m9VR45PTYOoHEvKxhILiMGcXZUA93SOP0+YnwhmeGTExlBXOsM1urrjvTvODT8DaufvG1T1rYVao4UPCQ==
+length: 2195
+-->

@@ -203,4 +203,99 @@ describe("large Community changes", () => {
 
     expect(reconcile).toHaveBeenCalledWith(linked);
   });
+
+  describe("retrying a first backup Community may already have saved", () => {
+    const linked = { ...configuration, libraryId: "6f1c2a9e-3b4d-4e5f-8a7b-9c0d1e2f3a4b" };
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+    type BootstrapRuntime = Record<string, unknown> & {
+      bootstrap(configuration: DesktopSyncConfiguration, intentId: string, batchId: string, queuedAt: number): Promise<void>;
+      capabilities: unknown;
+    };
+    const runtime = syncRuntime as unknown as BootstrapRuntime;
+
+    /** The earlier attempt's library is already in Community, so the summary shows it. */
+    function community(start: () => Response) {
+      const requests: string[] = [];
+      const starts: unknown[] = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        requests.push(`${init?.method || "GET"} ${path}`);
+        if (path === "/api/v2/library") return json({ library: { counts: { annotations: 1, taxonomy: 0 } } });
+        if (path === "/api/v2/sync/bootstrap") { starts.push(JSON.parse(String(init?.body))); return start(); }
+        if (path.endsWith("/finalize")) return json({ bootstrap: { libraryId: linked.libraryId, headCursor: 7, status: "complete" } });
+        return json({ acknowledged: true });
+      });
+      return { requests, starts };
+    }
+
+    async function libraryWithOneSong() {
+      expect(await indexedDBStorage.saveTracks(new Map([[`spotify:track:${"r".repeat(22)}`, { rating: 4, energy: 0, bpm: null, tagIds: [] }]]))).toBe(true);
+      vi.spyOn(storageService, "isReady").mockReturnValue(true);
+      runtime.capabilities = { pullAcknowledgesCursor: true };
+    }
+
+    afterEach(() => { runtime.capabilities = null; });
+
+    it("confirms the saved upload instead of asking to combine the library with itself", async () => {
+      await libraryWithOneSong();
+      const reconcile = vi.spyOn(runtime as never, "reconcileInitialLibraries").mockResolvedValue(true as never);
+      vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const { requests, starts } = community(() => json({ upload: { id: "11111111-1111-4111-8111-111111111111", status: "complete", receivedChunks: 1 } }, 201));
+
+      await runtime.bootstrap(linked, "snapshot-intent", "snapshot-batch", 1);
+
+      expect(reconcile).not.toHaveBeenCalled();
+      // No chunk is sent again.
+      expect(requests).toEqual(["GET /api/v2/library", "POST /api/v2/sync/bootstrap", "POST /api/v2/sync/bootstrap/11111111-1111-4111-8111-111111111111/finalize"]);
+      expect(starts[0]).toMatchObject({ mode: "initialize", deviceId: linked.deviceId });
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(getTagifyDatabaseName());
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const cursor = await new Promise<{ value: number } | undefined>((resolve) => {
+        const request = db.transaction("sync-state").objectStore("sync-state").get("cursor");
+        request.onsuccess = () => resolve(request.result);
+      });
+      db.close();
+      expect(cursor?.value).toBe(7);
+    });
+
+    it("uses the same upload name as the attempt that was cut off", async () => {
+      await libraryWithOneSong();
+      vi.spyOn(runtime as never, "reconcileInitialLibraries").mockResolvedValue(true as never);
+      vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const first = community(() => json({ upload: { id: "11111111-1111-4111-8111-111111111111", status: "complete", receivedChunks: 1 } }, 201));
+      await runtime.bootstrap(linked, "snapshot-intent", "snapshot-batch", 1);
+      vi.restoreAllMocks();
+      vi.spyOn(storageService, "isReady").mockReturnValue(true);
+      vi.spyOn(runtime as never, "reconcileInitialLibraries").mockResolvedValue(true as never);
+      const again = community(() => json({ error: { code: "merge_required" } }, 409));
+      await runtime.bootstrap(linked, "snapshot-intent", "snapshot-batch", 1);
+      expect((again.starts[0] as { idempotencyKey: string }).idempotencyKey).toBe((first.starts[0] as { idempotencyKey: string }).idempotencyKey);
+    });
+
+    it.each([
+      ["Community holds another library", () => json({ error: { code: "merge_required", message: "Your cloud library already has items." } }, 409)],
+      ["the earlier upload never finished", () => json({ upload: { id: "22222222-2222-4222-8222-222222222222", status: "staging", receivedChunks: 0 } }, 201)],
+    ])("still offers to combine libraries when %s", async (_label, start) => {
+      await libraryWithOneSong();
+      const reconcile = vi.spyOn(runtime as never, "reconcileInitialLibraries").mockResolvedValue(true as never);
+      const { requests } = community(start);
+
+      await runtime.bootstrap(linked, "snapshot-intent", "snapshot-batch", 1);
+
+      expect(reconcile).toHaveBeenCalledWith(linked);
+      expect(requests).toEqual(["GET /api/v2/library", "POST /api/v2/sync/bootstrap"]);
+    });
+
+    it("reports other failures instead of combining", async () => {
+      await libraryWithOneSong();
+      const reconcile = vi.spyOn(runtime as never, "reconcileInitialLibraries").mockResolvedValue(true as never);
+      community(() => json({ error: { code: "sync_unavailable", message: "Try again shortly" } }, 503));
+
+      await expect(runtime.bootstrap(linked, "snapshot-intent", "snapshot-batch", 1)).rejects.toThrow("sync_unavailable");
+      expect(reconcile).not.toHaveBeenCalled();
+    });
+  });
 });

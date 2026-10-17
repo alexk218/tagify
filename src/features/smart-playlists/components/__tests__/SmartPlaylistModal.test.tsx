@@ -10,6 +10,7 @@ import { spotifyApiService } from "@/services/SpotifyApiService";
 import { storageService } from "@/services/storage/StorageService";
 import { defaultTagData } from "@/constants/defaultTagData";
 import { markConfirmedMembershipBaselines, clearConfirmedMembershipBaselines } from "../../utils/smartPlaylist.storage";
+import { spotifyLocalPause } from "@/utils/spotifyRequestFailure";
 import React, { act } from "react";
 import {
   buildTaxonomyFromCategoryTree,
@@ -195,6 +196,56 @@ describe("SmartPlaylistModal", () => {
       renderModal({ smartPlaylists: [mockSmartPlaylists[0]] });
       expect(await screen.findByText(status)).toBeInTheDocument();
     });
+    describe("when Spotify can't be checked", () => {
+      const matched = { rating: 5, energy: 7, bpm: 125, tagIds: [HOUSE_TAG_ID] };
+      const inPlaylistCount = () => screen.getByText("In Playlist").previousElementSibling?.textContent;
+      beforeEach(() => {
+        vi.spyOn(storageService, "loadAllStrict").mockResolvedValue({ ...defaultTagData, tracks: { "spotify:track:matched": matched } });
+        markConfirmedMembershipBaselines(mockSmartPlaylists, new Set(["playlist1"]));
+      });
+
+      it("says the playlist wasn't checked instead of calling it empty while Spotify asks Tagify to wait", async () => {
+        vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict").mockRejectedValue(spotifyLocalPause(180));
+        renderModal({ smartPlaylists: [mockSmartPlaylists[0]] });
+        expect(await screen.findByText("Not Checked")).toBeInTheDocument();
+        expect(screen.getByRole("status")).toHaveTextContent("Spotify asked Tagify to wait. Checking your playlists again in about 3 minutes.");
+        expect(inPlaylistCount()).toBe("—");
+        expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
+      });
+
+      it("checks again once Spotify's pause ends", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+          const read = vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict")
+            .mockRejectedValueOnce(spotifyLocalPause(5)).mockResolvedValue(["spotify:track:matched"]);
+          renderModal({ smartPlaylists: [mockSmartPlaylists[0]] });
+          expect(await screen.findByText("Not Checked")).toBeInTheDocument();
+          await act(async () => { await vi.advanceTimersByTimeAsync(6_100); });
+          expect(await screen.findByText("In Sync")).toBeInTheDocument();
+          expect(read).toHaveBeenCalledTimes(2);
+          expect(inPlaylistCount()).toBe("1");
+          expect(screen.queryByRole("status")).not.toBeInTheDocument();
+        } finally { vi.useRealTimers(); }
+      });
+
+      it("suggests restarting Spotify when it stops responding", async () => {
+        vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict").mockRejectedValue(
+          Object.assign(new Error("Spotify is taking too long to respond."), { spotifyRequestStopped: true, recoveryRequired: true }));
+        renderModal({ smartPlaylists: [mockSmartPlaylists[0]] });
+        expect(await screen.findByRole("status")).toHaveTextContent("Spotify is taking too long to respond. Restart Spotify if your playlists still can’t be checked.");
+        expect(screen.getByText("Not Checked")).toBeInTheDocument();
+      });
+
+      it("explains other failures without claiming the playlist is empty", async () => {
+        vi.spyOn(storageService, "loadAllStrict").mockRejectedValue(new Error("busy"));
+        const read = vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict");
+        renderModal({ smartPlaylists: [mockSmartPlaylists[0]] });
+        expect(await screen.findByRole("status")).toHaveTextContent("Some playlists couldn’t be checked. Close and reopen Smart Playlists to try again.");
+        expect(inPlaylistCount()).toBe("—");
+        expect(read).not.toHaveBeenCalled();
+      });
+    });
+
     it("should render modal with smart playlists", () => {
       renderModal();
 

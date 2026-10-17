@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearCommunityEntityCache,
-  COMMUNITY_ENTITY_CACHE_MS,
-  COMMUNITY_ENTITY_FAILURE_CACHE_MS,
+  COMMUNITY_ENTITY_REVALIDATE_MS,
   lookupCommunityEntity,
+  peekCommunityEntity,
 } from "../communityEntityCache";
 
 const id = "1eyzqe2QqGZUmfcPZtrIyt";
@@ -30,39 +30,59 @@ describe("Community entity lookups", () => {
     expect(second).toBe(first);
   });
 
-  it("reuses found and missing pages for ten minutes", async () => {
+  it("keeps answers for the whole session without asking again", async () => {
     let now = 1_000;
     const request = vi.fn(async (url: RequestInfo | URL) => (String(url).endsWith("/album/2234567890123456789012") ? notFound() : found()));
+    expect(peekCommunityEntity("track", id)).toBeUndefined();
 
     await lookupCommunityEntity("track", id, request, () => now);
-    expect(await lookupCommunityEntity("album", "2234567890123456789012", request, () => now)).toEqual({ found: false, entity: null });
-    now += COMMUNITY_ENTITY_CACHE_MS - 1;
-    await lookupCommunityEntity("track", id, request, () => now);
     await lookupCommunityEntity("album", "2234567890123456789012", request, () => now);
+    now += 12 * 60 * 60_000;
+
+    expect(peekCommunityEntity("track", id)).toEqual({ found: true, entity: { contributors: [{ handle: "mira" }] } });
+    expect(peekCommunityEntity("album", "2234567890123456789012")).toEqual({ found: false, entity: null });
     expect(request).toHaveBeenCalledTimes(2);
-
-    now += 1;
-    await lookupCommunityEntity("track", id, request, () => now);
-    await lookupCommunityEntity("album", "2234567890123456789012", request, () => now);
-    expect(request).toHaveBeenCalledTimes(4);
   });
 
-  it("retries failed lookups after a minute", async () => {
+  it("checks again when asked, at most once a minute", async () => {
+    let now = 1_000;
+    const request = vi.fn()
+      .mockResolvedValueOnce(notFound())
+      .mockResolvedValueOnce(found());
+
+    expect((await lookupCommunityEntity("track", id, request, () => now)).found).toBe(false);
+    now += COMMUNITY_ENTITY_REVALIDATE_MS - 1;
+    expect((await lookupCommunityEntity("track", id, request, () => now)).found).toBe(false);
+    expect(request).toHaveBeenCalledTimes(1);
+    now += 1;
+    // Another member tagged it since.
+    expect((await lookupCommunityEntity("track", id, request, () => now)).found).toBe(true);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the earlier answer when a check fails, and says when there is none", async () => {
     let now = 1_000;
     const request = vi.fn()
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValueOnce(new Response("busy", { status: 503 }))
-      .mockResolvedValueOnce(found());
+      .mockResolvedValueOnce(found())
+      .mockResolvedValueOnce(new Response("busy", { status: 503 }));
 
-    expect(await lookupCommunityEntity("track", id, request, () => now)).toEqual({ found: false, entity: null });
-    now += COMMUNITY_ENTITY_FAILURE_CACHE_MS - 1;
-    await lookupCommunityEntity("track", id, request, () => now);
-    expect(request).toHaveBeenCalledTimes(1);
-    now += 1;
-    expect(await lookupCommunityEntity("track", id, request, () => now)).toEqual({ found: false, entity: null });
-    now += COMMUNITY_ENTITY_FAILURE_CACHE_MS;
+    expect(await lookupCommunityEntity("track", id, request, () => now)).toEqual({ found: false, entity: null, unavailable: true });
+    expect(peekCommunityEntity("track", id)).toBeUndefined();
+    // A failure is not remembered: asking again tries again straight away.
     expect((await lookupCommunityEntity("track", id, request, () => now)).found).toBe(true);
+    now += COMMUNITY_ENTITY_REVALIDATE_MS;
+    expect(await lookupCommunityEntity("track", id, request, () => now)).toEqual({ found: true, entity: { contributors: [{ handle: "mira" }] } });
     expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it("forgets the least recently used items beyond 500", async () => {
+    const request = vi.fn(async () => found());
+    for (let index = 0; index < 501; index++) {
+      await lookupCommunityEntity("track", `${index}`.padStart(22, "0"), request);
+    }
+    expect(peekCommunityEntity("track", "0".repeat(22))).toBeUndefined();
+    expect(peekCommunityEntity("track", "1".padStart(22, "0"))).toBeDefined();
   });
 
   it("uses the original route for the rest of the session when the public route is not deployed", async () => {

@@ -10,7 +10,9 @@ import { isSyncSafeId, normalizeSyncName } from "./SyncLocalState";
 
 export function expandSyncTaxonomy(snapshot: Pick<LibrarySnapshotV1, "taxonomy" | "colors" | "collections">): TagTaxonomy {
   const taxonomy: TagTaxonomy = { categoryOrder: [], categoriesById: {}, foldersById: {}, childrenByParentId: {}, subcategoriesById: {}, tagsById: {}, customAccentsById: {}, colorThemesById: {}, colorThemeOrder: [], ungroupedColorIds: [] };
-  for (const node of [...snapshot.taxonomy].sort((left, right) => left.position - right.position)) {
+  // Two devices can place items at one position at the same moment; ties go by
+  // ID, as on Community, so every device lists them in the same order.
+  for (const node of [...snapshot.taxonomy].sort((left, right) => left.position - right.position || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))) {
     if (node.kind === "category") {
       taxonomy.categoryOrder.push(node.id);
       taxonomy.categoriesById[node.id] = { id: node.id, name: node.name, subcategoryIds: [], childIds: [] };

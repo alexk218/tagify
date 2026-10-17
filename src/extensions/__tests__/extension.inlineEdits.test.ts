@@ -22,6 +22,8 @@ vi.mock("@/services/SmartPlaylistSyncService", () => ({
 vi.mock("@/services/KeyboardShortcutService", () => ({ keyboardShortcutService: { initialize: vi.fn() } }));
 vi.mock("@/extensions/WelcomeModal", () => ({ welcomeModal: { initialize: vi.fn() } }));
 vi.mock("@/features/smart-playlists/utils/smartPlaylist.storage", () => ({ loadSmartPlaylistsFromStorage: vi.fn(async () => []) }));
+// The test page must never ask the real Community site for tag names.
+vi.mock("@/features/tag-data/utils/communityPopularTags", () => ({ preloadCommunityPopularTags: vi.fn(async () => undefined), getCommunityPopularTags: () => [] }));
 
 const tagId = (name: string) =>
   Object.values(defaultTagData.taxonomy.tagsById).find((tag) => tag.name === name)!.id;

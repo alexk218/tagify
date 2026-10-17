@@ -1,6 +1,7 @@
 import { spotifyBackgroundPolicy } from "./SpotifyBackgroundPolicy";
 import { getSpotifyRetryAfterMs } from "@/utils/spotifyRateLimit";
 import { sameSmartPlaylistRules } from "@/features/smart-playlists/utils/smartPlaylist.membership";
+import { describeSmartPlaylistCheckFailure, mostActionableCheckFailure, type SmartPlaylistCheckFailure } from "@/features/smart-playlists/utils/smartPlaylist.checkFailure";
 import { isTagifyPlaylistAddition, readPlaylistAdditionOrigins } from "./SpotifyPlaylistWriteOrigins";
 import type { RequestOptions } from "@/utils/RateLimiter";
 import { spotifyAccountKey, throwIfSpotifyRequestStopped } from "@/services/SpotifyRequests";
@@ -55,6 +56,8 @@ export interface SmartPlaylistReconciliationSummary {
   metadataUpdatedCount: number;
   duplicatesRemovedCount: number;
   failedPlaylistNames: string[];
+  /** Why Spotify couldn't be read, when known. */
+  checkFailure?: SmartPlaylistCheckFailure;
 }
 
 function emptySummary(): SmartPlaylistReconciliationSummary {
@@ -546,6 +549,7 @@ export class SmartPlaylistSyncService {
         summary.duplicatesRemovedCount += deduplicated.removedCount;
         successfullyFetched.add(playlist.playlistId);
       } catch (error) {
+        summary.checkFailure = mostActionableCheckFailure([summary.checkFailure, describeSmartPlaylistCheckFailure(error)]);
         if (getSpotifyRetryAfterMs(error) !== null) {
           summary.failedPlaylistNames.push(playlist.playlistName);
           break; // The next scheduled pass retries after the shared cooldown.
@@ -692,6 +696,7 @@ export class SmartPlaylistSyncService {
           `Failed to confirm smart playlist ${playlist.playlistName}:`,
           error,
         );
+        summary.checkFailure = mostActionableCheckFailure([summary.checkFailure, describeSmartPlaylistCheckFailure(error)]);
         summary.failedPlaylistNames.push(playlist.playlistName);
       }
     }

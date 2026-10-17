@@ -1,11 +1,14 @@
 import { useEffect } from "react";
 import packageJson from "@/package";
+import { getDesktopSyncConnectionState } from "@/services/sync/SyncLocalState";
 import { ANALYTICS_CHOICE_EVENT, isAnalyticsSharing, recordProductEvent, trackAggregateRequest, releaseAggregateRequest } from "@/features/product-analytics/productAnalytics";
 
 const USAGE_URL = "https://community.tagify.fm/api/v1/tagify-usage";
 /** How often a visible Tagify checks, locally, whether today's report is due. */
 const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const RETRY_DELAYS_MS = [5_000, 30_000, 120_000] as const;
+/** New activity counts wait safely on this device and go out together at most this often. */
+export const ACTIVITY_REPORT_INTERVAL_MS = 15 * 60 * 1000;
 const LAST_REPORT_PREFIX = "tagify:usage:last-report:";
 const LAST_VERSION_PREFIX = "tagify:usage:last-version:";
 const ACTIVITY_PREFIX = "tagify:usage:activity:";
@@ -104,16 +107,16 @@ function unsentActivity(accountDigest: string): DailyActivity | undefined {
 }
 
 /** Inline editors run without the main app's React hook. Stop polling once the queue is acknowledged. */
-function scheduleActivityFlush(accountDigest: string, failures = 0, delay = 60_000): void {
+function scheduleActivityFlush(accountDigest: string, failures = 0, delay = ACTIVITY_REPORT_INTERVAL_MS): void {
   if (activityTimers.has(accountDigest)) return;
   const timer = setTimeout(async () => {
     activityTimers.delete(accountDigest);
     if (!unsentActivity(accountDigest)) return;
     if (await getUsageAccountDigest() !== accountDigest) return;
     const canSend = document.visibilityState !== "hidden" && navigator.onLine;
-    const recorded = canSend && await sendUsage(accountDigest, packageJson.version);
+    const recorded = canSend && await sendUsage(accountDigest, packageJson.version, undefined, { batchActivity: true });
     if (!unsentActivity(accountDigest)) return;
-    const nextDelay = recorded ? 60_000 : (RETRY_DELAYS_MS[failures] ?? CHECK_INTERVAL_MS);
+    const nextDelay = recorded ? ACTIVITY_REPORT_INTERVAL_MS : (RETRY_DELAYS_MS[failures] ?? CHECK_INTERVAL_MS);
     scheduleActivityFlush(accountDigest, recorded ? 0 : failures + 1,
       Math.max(nextDelay, usageRequestsPausedUntil() - Date.now()));
   }, delay);
@@ -139,7 +142,12 @@ export async function recordMeaningfulAction(action: "tagging" | "rating"): Prom
   } catch { /* Analytics must never interrupt editing. */ }
 }
 
-function sendUsage(accountDigest: string, appVersion: string, answer?: DiscoveryAnswer): Promise<boolean> {
+/**
+ * `batchActivity`: when new activity is the only reason to report, wait until
+ * the last report is ACTIVITY_REPORT_INTERVAL_MS old. Resolves true while it
+ * waits, since nothing failed.
+ */
+function sendUsage(accountDigest: string, appVersion: string, answer?: DiscoveryAnswer, { batchActivity = false } = {}): Promise<boolean> {
   const existing = inFlight.get(accountDigest);
   if (existing) return existing;
   const pending = answer ?? pendingAnswer(accountDigest);
@@ -149,7 +157,9 @@ function sendUsage(accountDigest: string, appVersion: string, answer?: Discovery
   try {
     const lastReported = Number(localStorage.getItem(`${LAST_REPORT_PREFIX}${accountDigest}`));
     const lastVersion = localStorage.getItem(`${LAST_VERSION_PREFIX}${accountDigest}`);
-    if (!pending && !activity && !isUsageReportDue(lastReported, lastVersion, appVersion)) return Promise.resolve(true);
+    const due = isUsageReportDue(lastReported, lastVersion, appVersion);
+    if (!pending && !activity && !due) return Promise.resolve(true);
+    if (batchActivity && !pending && !due && Date.now() - lastReported < ACTIVITY_REPORT_INTERVAL_MS) return Promise.resolve(true);
   } catch { /* Reporting remains safe when localStorage is temporarily unavailable. */ }
   // A queued answer stays saved and goes out with the first report after the pause.
   if (usageRequestsPausedUntil()) return Promise.resolve(false);
@@ -186,10 +196,10 @@ function sendUsage(accountDigest: string, appVersion: string, answer?: Discovery
   return request;
 }
 
-export async function recordTagifyOpen(appVersion: string): Promise<boolean> {
+export async function recordTagifyOpen(appVersion: string, options: { batchActivity?: boolean } = {}): Promise<boolean> {
   const accountDigest = await getUsageAccountDigest();
-  if (accountDigest) recordProductEvent(accountDigest, "tagify_opened");
-  return accountDigest ? sendUsage(accountDigest, appVersion) : false;
+  if (accountDigest) recordProductEvent(accountDigest, "tagify_opened", { sync_state: getDesktopSyncConnectionState() });
+  return accountDigest ? sendUsage(accountDigest, appVersion, undefined, options) : false;
 }
 
 export async function recordDiscoveryAnswer(appVersion: string, answer: DiscoveryAnswer, knownAccountDigest?: string | null): Promise<boolean> {
@@ -210,7 +220,9 @@ export function useTagifyUsage(appVersion: string): void {
     let nextAttemptAt = 0;
     const report = async () => {
       if (stopped || document.visibilityState === "hidden" || !navigator.onLine || Date.now() < nextAttemptAt) return;
-      const recorded = await recordTagifyOpen(appVersion);
+      // Opening, showing Spotify and the timers below all report; new activity
+      // counts alone go out at most every ACTIVITY_REPORT_INTERVAL_MS.
+      const recorded = await recordTagifyOpen(appVersion, { batchActivity: true });
       if (stopped) return;
       if (recorded) {
         failures = 0;
@@ -227,7 +239,7 @@ export function useTagifyUsage(appVersion: string): void {
     };
     const resumeOnline = () => { failures = 0; nextAttemptAt = usageRequestsPausedUntil(); void report(); };
     const onAction = () => {
-      if (!actionTimer) actionTimer = setTimeout(() => { actionTimer = undefined; void report(); }, 60_000);
+      if (!actionTimer) actionTimer = setTimeout(() => { actionTimer = undefined; void report(); }, ACTIVITY_REPORT_INTERVAL_MS);
     };
     const activityInterval = setInterval(() => {
       void getUsageAccountDigest().then(digest => {

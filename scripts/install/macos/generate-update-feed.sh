@@ -22,7 +22,7 @@ cp "$ARCHIVE" "$OUTPUT/TagifyInstaller-mac.zip"
 cp "$SOURCE/UPDATE_NOTES.txt" "$OUTPUT/TagifyInstaller-mac.txt"
 if [ "$#" -eq 3 ]; then cp "$3" "$OUTPUT/appcast.xml"; fi
 "$SDK/bin/generate_appcast" --account fm.tagify.installer --maximum-deltas 0 --embed-release-notes \
-    --download-url-prefix "https://tagify.fm/releases/manager/v$VERSION/" \
-    --link https://tagify.fm "$OUTPUT"
+    --download-url-prefix "https://github.com/alexk218/tagify-installer/releases/download/v$VERSION/" \
+    --link https://github.com/alexk218/tagify-installer/releases "$OUTPUT"
 "$SDK/bin/sign_update" --account fm.tagify.installer --verify "$OUTPUT/appcast.xml"
 printf 'Prepared signed feed: %s/appcast.xml\nPublish the matching release assets first; publish this feed last.\n' "$OUTPUT"

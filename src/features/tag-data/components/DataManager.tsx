@@ -1,4 +1,6 @@
 import React, { useState, useRef } from "react";
+import packageJson from "@/package";
+import { initializeStatsIntroduction, dismissStatsIntroduction } from "@/features/library-stats/model/statsIntroduction";
 import styles from "./DataManager.module.css";
 import "../../../styles/globals.css";
 import { TagDataStructure } from "@/types/tagData";
@@ -46,6 +48,13 @@ const DataManager: React.FC<DataManagerProps> = ({
   onRetryMigration,
   historyControls,
 }) => {
+  const [highlightStats, setHighlightStats] = useState(() => initializeStatsIntroduction(packageJson.version));
+  const openStats = () => {
+    dismissStatsIntroduction();
+    setHighlightStats(false);
+    onOpenStats();
+  };
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [showMainSettings, setShowMainSettings] = useState(false);
@@ -141,12 +150,13 @@ const DataManager: React.FC<DataManagerProps> = ({
           className={`${styles.pillButton} ${styles.importButton}`}
           onClick={handleImportClick}
           title="Import your tag data"
+          aria-label="Import your tag data"
         >
           <FontAwesomeIcon icon={faUpload} />
         </button>
         <button
-          className={`${styles.pillButton} ${styles.statsButton}`}
-          onClick={onOpenStats}
+          className={`${styles.pillButton} ${styles.statsButton} ${highlightStats && !statsOpen ? styles.statsIntroduction : ""}`}
+          onClick={openStats}
           title={statsOpen ? "Close your stats" : "View your stats"}
           aria-label={statsOpen ? "Close your stats" : "View your stats"}
           aria-pressed={statsOpen}

@@ -1315,12 +1315,19 @@
   color: #ffd700;
   font-size: 12px;
   filter: drop-shadow(0 0 4px rgb(255 215 0 / 50%));
-  animation: sparkle 2s ease-in-out infinite;
 }
 
+/* Only sparkle on hover: an always-running filter animation keeps Spotify repainting. */
 .smartPlaylistButton:hover svg {
   color: #fff;
   filter: drop-shadow(0 0 6px rgb(255 215 0 / 80%));
+  animation: sparkle 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .smartPlaylistButton:hover svg {
+    animation: none;
+  }
 }
 
 /* ANIMATION ON LIGHTNING ICON */

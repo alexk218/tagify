@@ -3,9 +3,15 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityOnboardingModal } from "../CommunityOnboardingModal";
 import { syncPairingService } from "@/services/sync/SyncPairingService";
+import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import {
   setDesktopSyncConfiguration,
 } from "@/services/sync/SyncLocalState";
+
+vi.mock("@/features/product-analytics/productAnalytics", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/product-analytics/productAnalytics")>()),
+  recordProductInteraction: vi.fn(),
+}));
 
 describe("CommunityOnboardingModal actions", () => {
   beforeEach(() => {
@@ -13,13 +19,38 @@ describe("CommunityOnboardingModal actions", () => {
     syncPairingService.cancelPending();
     localStorage.clear();
     sessionStorage.clear();
+    vi.mocked(recordProductInteraction).mockClear();
+  });
+
+  it("measures a started connection only after Community issues the approval code", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const begin = vi.spyOn(syncPairingService, "begin")
+      .mockRejectedValueOnce(new Error("Community is unavailable"))
+      .mockResolvedValueOnce({
+        apiBaseUrl: "https://community.tagify.fm", deviceCode: "device-code", verifier: "verifier", userCode: "ABCD-EFGH",
+        verificationUri: "https://community.tagify.fm/device?code=ABCD-EFGH", expiresAt: Date.now() + 60_000, interval: 60,
+      });
+    render(<CommunityOnboardingModal entry="prompt" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("ABCD-EFGH")).toBeInTheDocument();
+
+    expect(begin).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(recordProductInteraction).mock.calls).toEqual([
+      ["community_setup_opened", { entry: "prompt" }],
+      ["community_connect_failed", { entry: "prompt", stage: "start" }],
+      ["community_connect_started", { entry: "prompt" }],
+    ]);
+    expect(JSON.parse(localStorage.getItem("tagify:community-connect-attempt:v1") || "null")).toEqual({ entry: "prompt" });
   });
 
   afterEach(() => { delete window.TagifySync; });
 
   it("lets users cancel setup without adding a reminder", () => {
     const onClose = vi.fn();
-    render(<CommunityOnboardingModal onClose={onClose} />);
+    render(<CommunityOnboardingModal entry="community" onClose={onClose} />);
 
     expect(screen.getByRole("heading", { name: "Connect Tagify to Community" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
@@ -45,7 +76,7 @@ describe("CommunityOnboardingModal actions", () => {
       profile: { handle: "alex", displayName: "Alex" },
     });
 
-    render(<CommunityOnboardingModal onClose={vi.fn()} />);
+    render(<CommunityOnboardingModal entry="community" onClose={vi.fn()} />);
 
     expect(screen.getByText("Connected as Alex")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sync now" })).toBeInTheDocument();
@@ -92,7 +123,7 @@ describe("CommunityOnboardingModal actions", () => {
       downloadInitialMergeBackup: vi.fn(),
     } as unknown as NonNullable<typeof window.TagifySync>;
 
-    render(<CommunityOnboardingModal onClose={vi.fn()} />);
+    render(<CommunityOnboardingModal entry="community" onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Combine libraries" }));
     expect(screen.getByRole("heading", { name: "Combine your Tagify libraries" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Combining libraries…" })).toBeDisabled();

@@ -286,9 +286,11 @@ describe("desktop sync storage boundary", () => {
   it("requests one immediate sync after an outbox transaction commits", () => {
     const put = vi.fn();
     const completeListeners: EventListener[] = [];
+    // Each intent first reads the latest queued one, then is written after it.
+    const reads: Array<{ result: null; onsuccess: (() => void) | null }> = [];
     const transaction = {
       objectStoreNames: { contains: (name: string) => name === SYNC_STORES.OUTBOX },
-      objectStore: () => ({ put }),
+      objectStore: () => ({ put, index: () => ({ openCursor: () => { const read = { result: null, onsuccess: null }; reads.push(read); return read; } }) }),
       addEventListener: vi.fn((type: string, listener: EventListener) => {
         if (type === "complete") completeListeners.push(listener);
       }),
@@ -302,9 +304,12 @@ describe("desktop sync storage boundary", () => {
 
     appendIntent(transaction, intent);
     appendIntent(transaction, { ...intent, id: "intent-b" });
+    reads.forEach((read) => read.onsuccess?.());
     completeListeners[0]?.(new Event("complete"));
 
     expect(put).toHaveBeenCalledTimes(2);
+    // Written in the same millisecond, the second is still queued after the first.
+    expect(put.mock.calls.map(([queued]) => queued.createdAt)).toEqual([1, 2]);
     expect(transaction.addEventListener).toHaveBeenCalledTimes(1);
     expect(onOutboxChanged).toHaveBeenCalledTimes(1);
   });

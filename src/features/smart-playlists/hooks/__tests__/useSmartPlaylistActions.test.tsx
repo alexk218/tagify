@@ -98,6 +98,24 @@ describe("useSmartPlaylistActions imports", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [{ kind: "paused" as const, retryAt: Date.now() + 4 * 60_000 }, `Spotify asked Tagify to wait, so "House Mix" wasn't synced. Your Smart Playlist is safe; try Sync again in about 4 minutes.`],
+    [{ kind: "notResponding" as const }, `Spotify is taking too long to respond, so "House Mix" wasn't synced. Your Smart Playlist is safe; restart Spotify if this keeps happening.`],
+    [undefined, `Couldn't update "House Mix" in Spotify. Your Smart Playlist is safe; try Sync again.`],
+  ])("explains why Sync didn't run (%o)", async (checkFailure, message) => {
+    vi.spyOn(smartPlaylistSyncService, "reconcilePlaylist").mockResolvedValue({
+      addedCount: 0, removedCount: 0, metadataUpdatedCount: 0, duplicatesRemovedCount: 0,
+      failedPlaylistNames: ["House Mix"], checkFailure,
+    });
+    const notify = vi.spyOn(Spicetify, "showNotification").mockImplementation(() => {});
+    const { result } = renderHook(() => useSmartPlaylistActions({
+      smartPlaylists: [importedPlaylist], updateSmartPlaylistsImmediate: vi.fn(),
+      replaceSmartPlaylists: vi.fn(), refreshSmartPlaylists: vi.fn().mockResolvedValue(undefined),
+    }));
+    await act(async () => result.current.syncSmartPlaylistFull(importedPlaylist));
+    expect(notify).toHaveBeenCalledWith(message, true, 8000);
+  });
+
   it("shows only a failure when Spotify could not read the selected playlist", async () => {
     vi.spyOn(smartPlaylistSyncService, "reconcilePlaylist").mockResolvedValue({
       addedCount: 0,

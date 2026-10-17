@@ -238,7 +238,8 @@ describe("Community sync persistence safety", () => {
     });
     const snapshot: LibrarySnapshotV2 = {
       protocolVersion: 2, sourceStorageSchemaVersion: 2, libraryId: configuration.libraryId, headCursor: 900,
-      generatedAt: new Date().toISOString(), taxonomy: [], colors: [], collections: [], appState: [],
+      generatedAt: new Date().toISOString(), taxonomy: [], colors: [], collections: [],
+      appState: [{ domain: "preferences", value: { "tagify:trackListSortBy": "artist" }, revision: 4, updatedAt: "2026-10-12T00:00:00Z" }],
       annotations: [annotation("4uLU6hMCjMI75M1A2tKUQC", 2), annotation("0VjIjW4GlUZAMYd2vXMi3b", 4)] as LibrarySnapshotV2["annotations"],
     };
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(JSON.stringify(
@@ -247,8 +248,10 @@ describe("Community sync persistence safety", () => {
           : {},
     ), { status: 200, headers: { "content-type": "application/json" } }));
 
+    localStorage.setItem("tagify:trackListSortBy", "title");
     await (syncRuntime as unknown as { pull(configuration: DesktopSyncConfiguration): Promise<boolean> }).pull(configuration);
 
+    expect(localStorage.getItem("tagify:trackListSortBy")).toBe("title");
     expect((await indexedDBStorage.getTrack(edited))?.rating).toBe(5);
     expect((await indexedDBStorage.getTrack(other))?.rating).toBe(4);
     const database = await new Promise<IDBDatabase>((resolve, reject) => {

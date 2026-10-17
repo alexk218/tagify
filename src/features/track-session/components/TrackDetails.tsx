@@ -1,6 +1,6 @@
 import { PrivateNote } from "@/features/private-notes/components/PrivateNote";
 import { getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import styles from "./TrackDetails.module.css";
 import communityLinkStyles from "../../community/CommunityEntityLink.module.css";
 import { TagTaxonomy } from "@/types/tagData";
@@ -21,8 +21,7 @@ import {
   organizeTrackTagsByCategory,
 } from "@/features/track-session/utils/trackDetails.tags";
 import { buildTagAccentCssVars } from "@/features/tag-data";
-import { CommunityEntityLens, getCommunityEntityUrl, lookupCommunityEntity } from "@/features/community";
-import { parseSpotifyEntity } from "@tagify/community-contracts";
+import { CommunityEntityLens, getCommunityEntityUrl } from "@/features/community";
 import { AlbumProgressLine } from "@/features/playlist-state";
 
 interface TrackDetailsProps {
@@ -103,23 +102,12 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   const [isEditingBpm, setIsEditingBpm] = useState(false);
   const [editBpmValue, setEditBpmValue] = useState<string>("");
   const communityUrl = getCommunityEntityUrl(displayedTrack.uri || "");
-  const [hasCommunityEntity, setHasCommunityEntity] = useState(false);
-
-  useEffect(() => {
-    setHasCommunityEntity(false);
-    const entity = communityUrl ? parseSpotifyEntity(displayedTrack.uri || "") : null;
-    if (!entity) return;
-
-    let isCurrent = true;
-    // Shares one cached request with the Community perspectives below.
-    void lookupCommunityEntity(entity.kind, entity.providerId).then(({ found }) => {
-      if (isCurrent) setHasCommunityEntity(found);
-    });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [communityUrl, displayedTrack.uri]);
+  // Known once the Community perspectives below have been opened for this track in this session.
+  const [communityPage, setCommunityPage] = useState<{ entityUri: string; found: boolean } | null>(null);
+  const handleCommunityAvailability = useCallback((entityUri: string, _hasPerspectives: boolean, found: boolean) => {
+    setCommunityPage({ entityUri, found });
+  }, []);
+  const hasCommunityEntity = communityPage?.entityUri === displayedTrack.uri && communityPage.found;
 
   const handleBpmClick = () => {
     setIsEditingBpm(true);
@@ -689,7 +677,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
           </div>
         )}
       </div>
-      <CommunityEntityLens entityUri={displayedTrack.uri || ""} />
+      <CommunityEntityLens entityUri={displayedTrack.uri || ""} onAvailabilityChange={handleCommunityAvailability} />
     </div>
   );
 };

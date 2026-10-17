@@ -259,19 +259,23 @@ function Write-Log {
 
 function Write-ErrorAndExit {
     param([string]$Message)
-    
-    $script:INSTALLATION_FAILED = $true
-    $global:TAGIFY_INSTALL_EXIT_CODE = 1
-    $global:TAGIFY_INSTALL_ERROR_MESSAGE = $Message
-    
-    Write-Log "ERROR: $Message" -ForegroundColor Red
-    Write-Log "==========================================" -ForegroundColor Red
-    Write-Log "Operation failed! See error above." -ForegroundColor Red
-    Write-Log "==========================================" -ForegroundColor Red
-    
-    Show-Notification "Tagify Installer - Error" "Error: $Message"
-    
-    Finalize-Log 1
+
+    # Report the first, most specific failure once; outer handlers that catch the stop rethrow it.
+    if (-not $script:INSTALLATION_FAILED) {
+        $script:INSTALLATION_FAILED = $true
+        $global:TAGIFY_INSTALL_EXIT_CODE = 1
+        $global:TAGIFY_INSTALL_ERROR_MESSAGE = $Message
+
+        Write-Log "ERROR: $Message" -ForegroundColor Red
+        Write-Log "==========================================" -ForegroundColor Red
+        Write-Log "Operation failed! See error above." -ForegroundColor Red
+        Write-Log "==========================================" -ForegroundColor Red
+
+        Show-Notification "Tagify Installer - Error" "Error: $Message"
+    }
+
+    # Stop here: later steps must never report success after a failure. Main finalizes the log.
+    throw $global:TAGIFY_INSTALL_ERROR_MESSAGE
 }
 
 function Show-Notification {
@@ -1300,6 +1304,16 @@ function Invoke-Spicetify {
     }
 }
 
+# Spicetify cannot back up Spotify once another tool or an earlier setup changed its app files
+# without a backup. Every repair attempt fails the same way until Spotify is reinstalled.
+function Assert-SpotifyCanBeBackedUp {
+    param([string]$SpicetifyOutput)
+
+    if ($SpicetifyOutput -match 'cannot be backed up at this state' -or $SpicetifyOutput -match 'Reinstall Spotify and try again') {
+        Write-ErrorAndExit "Spotify's app files need a fresh copy before Tagify can be added (Spotify cannot be backed up at this state). Reinstall Spotify from https://www.spotify.com/download, then run setup again. Your music and playlists stay in your Spotify account."
+    }
+}
+
 function Apply-SpicetifyConfiguration {
     param(
         [Parameter(Mandatory = $false)]
@@ -1317,6 +1331,7 @@ function Apply-SpicetifyConfiguration {
         $result = Invoke-Spicetify -Arguments "restore backup apply"
         
         if (-not $result.Success) {
+            Assert-SpotifyCanBeBackedUp "$($result.Output)`n$($result.Error)"
             # Check if it's a "no backup" error which we can work around
             if ($result.Error -match "no backup" -or $result.Output -match "no backup") {
                 Write-Log "No backup found, running backup apply instead..." -ForegroundColor Yellow
@@ -1324,6 +1339,7 @@ function Apply-SpicetifyConfiguration {
             }
             
             if (-not $result.Success) {
+                Assert-SpotifyCanBeBackedUp "$($result.Output)`n$($result.Error)"
                 Write-ErrorAndExit "Spicetify restore backup apply failed: $($result.Error)"
             }
         }
@@ -1344,6 +1360,7 @@ function Apply-SpicetifyConfiguration {
     
     # Combine output and error for pattern matching
     $combinedOutput = "$($result.Output)`n$($result.Error)"
+    Assert-SpotifyCanBeBackedUp $combinedOutput
     
     # Check for the specific error about outdated preprocessed data
     if ($combinedOutput -match 'Preprocessed\s+Spotify\s+data\s+is\s+outdated' -or 
@@ -1372,6 +1389,7 @@ function Apply-SpicetifyConfiguration {
         $result = Invoke-Spicetify -Arguments "backup apply"
         
         if (-not $result.Success) {
+            Assert-SpotifyCanBeBackedUp "$($result.Output)`n$($result.Error)"
             Write-ErrorAndExit "Spicetify backup apply failed: $($result.Error)"
         }
         
@@ -1388,6 +1406,7 @@ function Apply-SpicetifyConfiguration {
     $result = Invoke-Spicetify -Arguments "backup apply"
     
     if (-not $result.Success) {
+        Assert-SpotifyCanBeBackedUp "$($result.Output)`n$($result.Error)"
         # Last resort - try just 'apply' one more time after a small delay
         Start-Sleep -Seconds 2
         $result = Invoke-Spicetify -Arguments "apply"
@@ -1442,12 +1461,13 @@ function Main {
     param()
 
     Initialize-Logging
-    Test-Paths
 
     Write-UserProgress "Starting Tagify installer..."
     Write-Log "Starting Tagify Installer..." -ForegroundColor DarkMagenta
     
     try {
+        Test-Paths
+
         Write-UserProgress "Checking system requirements..."
         Test-Prerequisites
         
@@ -1531,6 +1551,7 @@ function Main {
     }
     catch {
         Write-Log "Operation failed: $_"
+        if (-not $script:INSTALLATION_FAILED) { $global:TAGIFY_INSTALL_ERROR_MESSAGE = "$_" }
         Write-Log "==========================================" -ForegroundColor Red
         Write-Log "TROUBLESHOOTING INFO:" -ForegroundColor Red
         Write-Log "- Log file: $script:USER_LOG" -ForegroundColor Red

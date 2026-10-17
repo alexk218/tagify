@@ -6,9 +6,13 @@ import { storageService } from "@/services/storage/StorageService";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { getTagifyDatabaseName, setDesktopSyncConfiguration, SYNC_STORES, type DesktopSyncConfiguration } from "../SyncLocalState";
 import {
+  EDIT_SESSION_GAP_MS,
   EDIT_SYNC_DEBOUNCE_MS,
   EDIT_SYNC_MAX_WAIT_MS,
   editSyncDelayMs,
+  LONG_EDIT_SESSION_AFTER_MS,
+  LONG_SESSION_EDIT_SYNC_DEBOUNCE_MS,
+  LONG_SESSION_EDIT_SYNC_MAX_WAIT_MS,
   HIDDEN_REALTIME_CLOSE_MS,
   isDefinitiveSessionFailure,
   shouldSyncWhenVisible,
@@ -51,6 +55,12 @@ type RuntimeFixture = {
   settledEditCount: number;
   pendingRealtimeHead: number;
   inactiveRefreshToken: string | null;
+  headConfirmedAt: number;
+  realtimeWanted: boolean | null;
+  capabilities: unknown;
+  scheduleSafetySync: (restart?: boolean) => void;
+  noteLiveSync: (response: unknown) => void;
+  noteLibrarySummary: (summary: unknown) => void;
   syncNow: (automatic?: boolean) => Promise<void>;
   run: (configuration: DesktopSyncConfiguration, explicit?: boolean) => Promise<void>;
   stop: () => void;
@@ -119,11 +129,13 @@ describe("request scheduling helpers", () => {
   });
 
   it("checks Community on return only when the live connection may have missed changes", () => {
-    const healthy = { hiddenForMs: 60_000, realtimeSubscribed: true, msSinceLastSync: 60_000 };
-    expect(shouldSyncWhenVisible(healthy)).toBe(false);
-    expect(shouldSyncWhenVisible({ ...healthy, hiddenForMs: VISIBLE_RESYNC_AFTER_MS })).toBe(true);
-    expect(shouldSyncWhenVisible({ ...healthy, realtimeSubscribed: false })).toBe(true);
-    expect(shouldSyncWhenVisible({ ...healthy, msSinceLastSync: VISIBLE_RESYNC_AFTER_MS })).toBe(true);
+    const quiet = { hiddenForMs: 60_000, realtime: "quiet" as const, msSinceLastSync: 60_000 };
+    expect(shouldSyncWhenVisible(quiet)).toBe(false);
+    expect(shouldSyncWhenVisible({ ...quiet, hiddenForMs: VISIBLE_RESYNC_AFTER_MS })).toBe(true);
+    expect(shouldSyncWhenVisible({ ...quiet, msSinceLastSync: VISIBLE_RESYNC_AFTER_MS })).toBe(true);
+    expect(shouldSyncWhenVisible({ ...quiet, realtime: "down" })).toBe(true);
+    // Every change since the last check was announced.
+    expect(shouldSyncWhenVisible({ hiddenForMs: VISIBLE_RESYNC_AFTER_MS, realtime: "live", msSinceLastSync: 24 * 60 * 60_000 })).toBe(false);
   });
 
   it("backs failed optional backups off from one minute to at most an hour", () => {
@@ -184,6 +196,45 @@ describe("edit-triggered sync", () => {
     }
     expect(syncNow).toHaveBeenCalledTimes(1);
     expect(Date.now() - 100_000).toBeGreaterThanOrEqual(EDIT_SYNC_MAX_WAIT_MS);
+  });
+
+  it("groups a long tagging session into fewer backups", async () => {
+    // One edit every five seconds for an hour.
+    for (let edit = 0; edit < 720; edit++) {
+      runtime.handleOutboxChanged();
+      await vi.advanceTimersByTimeAsync(5_000);
+    }
+    await vi.advanceTimersByTimeAsync(LONG_SESSION_EDIT_SYNC_DEBOUNCE_MS);
+    // Before: five seconds is a pause longer than the 3 s debounce, so every
+    // edit was its own backup: 720 in the hour, three requests each.
+    // After: the same during the first minute (12), then one a minute (59).
+    expect(syncNow).toHaveBeenCalledTimes(71);
+  });
+
+  it("goes back to quick backups after a pause", async () => {
+    for (let edit = 0; edit < 30; edit++) {
+      runtime.handleOutboxChanged();
+      await vi.advanceTimersByTimeAsync(5_000);
+    }
+    await vi.advanceTimersByTimeAsync(EDIT_SESSION_GAP_MS);
+    syncNow.mockClear();
+    runtime.handleOutboxChanged();
+    await vi.advanceTimersByTimeAsync(EDIT_SYNC_DEBOUNCE_MS);
+    expect(syncNow).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits ten seconds of quiet, not three, once the session is long", () => {
+    expect(editSyncDelayMs(100_000, 100_000, 100_000 - LONG_EDIT_SESSION_AFTER_MS)).toBe(LONG_SESSION_EDIT_SYNC_DEBOUNCE_MS);
+    expect(editSyncDelayMs(100_000, 100_000 + LONG_SESSION_EDIT_SYNC_MAX_WAIT_MS - 4_000, 0)).toBe(4_000);
+    expect(editSyncDelayMs(100_000, 100_000, 100_000 - LONG_EDIT_SESSION_AFTER_MS + 1)).toBe(EDIT_SYNC_DEBOUNCE_MS);
+  });
+
+  it("backs up waiting edits as soon as Spotify is hidden", async () => {
+    runtime.handleOutboxChanged();
+    setVisibility(runtime, "hidden");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(syncNow).toHaveBeenCalledTimes(1);
+    setVisibility(runtime, "visible");
   });
 
   it("skips the follow-up when a sync already covered every edit", async () => {
@@ -349,7 +400,7 @@ describe("visibility and the live connection", () => {
     expect(syncNow).toHaveBeenCalledTimes(1);
   });
 
-  it("closes Realtime after ten hidden minutes and reconnects once with one catch-up sync", async () => {
+  it("closes Realtime after two hidden minutes and reconnects once with one catch-up sync", async () => {
     const { client, channel } = healthyConnection();
     setVisibility(runtime, "hidden");
     await vi.advanceTimersByTimeAsync(HIDDEN_REALTIME_CLOSE_MS - 1);
@@ -371,7 +422,7 @@ describe("visibility and the live connection", () => {
     expect(syncNow).toHaveBeenNthCalledWith(1, true);
   });
 
-  it("keeps Realtime open when Spotify returns within ten minutes", async () => {
+  it("keeps Realtime open when Spotify returns within two minutes", async () => {
     const { client } = healthyConnection();
     setVisibility(runtime, "hidden");
     await vi.advanceTimersByTimeAsync(HIDDEN_REALTIME_CLOSE_MS - 60_000);
@@ -379,6 +430,169 @@ describe("visibility and the live connection", () => {
     await vi.advanceTimersByTimeAsync(HIDDEN_REALTIME_CLOSE_MS);
     expect(client.removeChannel).not.toHaveBeenCalled();
     expect(runtime.realtimeSuspended).toBe(false);
+  });
+});
+
+describe("safety checks while Spotify is open", () => {
+  let runtime: RuntimeFixture;
+  let syncNow: Mock;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000_000);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    runtime = newRuntime();
+    syncNow = vi.fn(async () => undefined);
+    runtime.syncNow = syncNow;
+    runtime.ensureRealtime = vi.fn();
+  });
+  afterEach(() => { runtime.stop(); vi.useRealTimers(); });
+
+  function liveConnection() {
+    const { client, channels } = realtimeClient();
+    runtime.realtime = client;
+    runtime.channel = client.channel();
+    runtime.realtimeSubscribedAt = Date.now();
+    runtime.headConfirmedAt = Date.now();
+    runtime.lastSuccessfulSyncAt = Date.now();
+    return { client, channel: channels[0] };
+  }
+
+  async function threeHours(during?: (minute: number) => Promise<void>) {
+    runtime.scheduleSafetySync(true);
+    for (let minute = 0; minute < 180; minute++) {
+      await during?.(minute);
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+    return syncNow.mock.calls.length;
+  }
+
+  it("before, and still while the live connection is down: every 5, 15, then 30 minutes", async () => {
+    // Checks at 5, 20, 50, 80, 110, 140 and 170 minutes.
+    expect(await threeHours()).toBe(7);
+  });
+
+  it("after: once in the first hour, then every 90 and 120 minutes while Realtime is live", async () => {
+    liveConnection();
+    // Checks at 60 and 150 minutes.
+    expect(await threeHours()).toBe(2);
+  });
+
+  it("checks just as rarely for a library nobody else uses", async () => {
+    runtime.realtimeWanted = false;
+    expect(await threeHours()).toBe(2);
+  });
+
+  it("does not add or postpone checks when switching apps", async () => {
+    liveConnection();
+    // Away from Spotify for one minute in every ten. Before, each return
+    // after five minutes since the last sync checked Community and restarted
+    // the 5-minute ladder: about 18 checks in three hours.
+    const checks = await threeHours(async (minute) => {
+      if (minute % 10 === 0) setVisibility(runtime, "hidden");
+      if (minute % 10 === 1) setVisibility(runtime, "visible");
+    });
+    expect(checks).toBe(2);
+  });
+
+  it("makes up a check that fell due while Spotify was hidden", async () => {
+    liveConnection();
+    runtime.scheduleSafetySync(true);
+    await vi.advanceTimersByTimeAsync(59 * 60_000);
+    setVisibility(runtime, "hidden");
+    // Within two minutes, so Realtime stays connected.
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(syncNow).not.toHaveBeenCalled();
+    setVisibility(runtime, "visible");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(syncNow).toHaveBeenCalledTimes(1);
+  });
+
+  it("shortens the next check when the live connection drops", async () => {
+    const { channels } = realtimeClient();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    runtime.realtimeWanted = true;
+    await runtime.connectRealtime(configuration);
+    channels[0].callback?.("SUBSCRIBED");
+    // The catch-up check after joining found the device current.
+    runtime.headConfirmedAt = Date.now();
+    runtime.scheduleSafetySync(true);
+    syncNow.mockClear();
+
+    channels[0].callback?.("CHANNEL_ERROR");
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    expect(syncNow).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(syncNow).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("whether to hold a live connection", () => {
+  let runtime: RuntimeFixture;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000_000);
+    runtime = newRuntime();
+    runtime.syncNow = vi.fn(async () => undefined);
+    runtime.capabilities = { liveSyncHints: true };
+  });
+  afterEach(() => { runtime.stop(); vi.useRealTimers(); });
+
+  it("never opens one for a library used on one computer", async () => {
+    realtimeClient();
+    runtime.noteLiveSync({ unchanged: true, headCursor: 3, liveSync: { realtime: false } });
+    runtime.ensureRealtime(configuration);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.createClient).not.toHaveBeenCalled();
+    // Nothing to release when hidden, so nothing to catch up on when shown.
+    setVisibility(runtime, "hidden");
+    await vi.advanceTimersByTimeAsync(HIDDEN_REALTIME_CLOSE_MS);
+    expect(runtime.realtimeSuspended).toBe(false);
+  });
+
+  it("opens one once another device or the website is in use, and closes it when they stop", async () => {
+    const { client, channels } = realtimeClient();
+    runtime.noteLiveSync({ liveSync: { realtime: true } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.channel).toHaveBeenCalledTimes(1);
+    runtime.noteLiveSync({ liveSync: { realtime: false } });
+    expect(client.removeChannel).toHaveBeenCalledWith(channels[0]);
+    expect(runtime.channel).toBeNull();
+    // A late error from the closed channel does not reconnect it.
+    runtime.scheduleRealtimeReconnect(configuration);
+    expect(runtime.reconnectTimer).toBeNull();
+  });
+
+  it("checks once after joining, since earlier announcements were not heard", async () => {
+    const { channels } = realtimeClient();
+    runtime.realtimeWanted = true;
+    runtime.headConfirmedAt = Date.now();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await runtime.connectRealtime(configuration);
+    channels[0].callback?.("SUBSCRIBED");
+    expect(runtime.syncNow).toHaveBeenCalledTimes(1);
+    // Once a check confirms the device is current, rejoining is needed again only after a drop.
+    runtime.headConfirmedAt = Date.now();
+    expect(runtime.headConfirmedAt).toBeGreaterThanOrEqual(runtime.realtimeSubscribedAt);
+  });
+
+  it("ignores hints Community did not advertise", () => {
+    runtime.capabilities = {};
+    runtime.noteLiveSync({ liveSync: { realtime: false } });
+    expect(runtime.realtimeWanted).toBeNull();
+  });
+
+  it("uses the device count from an older Community, and only to skip a certainly idle connection", () => {
+    runtime.capabilities = {};
+    runtime.noteLibrarySummary({ devices: 1 });
+    expect(runtime.realtimeWanted).toBe(false);
+    runtime.noteLibrarySummary({ devices: 2 });
+    expect(runtime.realtimeWanted).toBe(true);
+    runtime.noteLibrarySummary({});
+    expect(runtime.realtimeWanted).toBe(true);
+    // Community's own hint wins over the count.
+    runtime.capabilities = { liveSyncHints: true };
+    runtime.noteLibrarySummary({ devices: 1 });
+    expect(runtime.realtimeWanted).toBe(true);
   });
 });
 

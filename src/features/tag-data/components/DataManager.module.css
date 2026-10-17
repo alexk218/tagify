@@ -54,6 +54,16 @@
   background: rgb(138 43 226 / 30%);
 }
 
+.pillButton.statsIntroduction {
+  color: #e2c7ff;
+  background: rgb(138 43 226 / 22%);
+  box-shadow: 0 0 0 1px rgb(190 140 255 / 55%), 0 0 12px rgb(168 85 247 / 45%);
+}
+
+.pillButton.statsIntroduction svg {
+  filter: drop-shadow(0 0 4px rgb(190 140 255 / 70%));
+}
+
 .pillButton.infoButton:hover {
   background: rgb(255 193 7 / 30%);
 }

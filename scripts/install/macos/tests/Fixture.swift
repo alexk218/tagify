@@ -28,6 +28,7 @@ final class Fixture {
     var spiceCommands: [[String]] = []
     var closed = false
     var failApply = false
+    var applyFailureOutput = "Simulated apply failure"
     var corrupt = false
     var omitAppliedFiles = false
     var failUpdateSetting = false
@@ -72,7 +73,7 @@ final class Fixture {
         assets["tagify-v3.0.0.zip"] = tagifyZip
         assets["spicetify-2.45.3-darwin-arm64.tar.gz"] = spiceTar
         for (repository, tag, archive) in [("alexk218/tagify", "v3.0.0", tagifyZip), ("spicetify/cli", "v2.45.3", spiceTar)] {
-            let manifest: [String: Any] = ["tag_name": tag, "draft": false, "prerelease": false, "assets": [["name": archive.lastPathComponent, "browser_download_url": repository == "alexk218/tagify" ? "https://tagify.fm/releases/client/\(tag)/\(archive.lastPathComponent)" : "https://github.com/\(repository)/releases/download/\(tag)/\(archive.lastPathComponent)", "digest": try digest(archive)]]]
+            let manifest: [String: Any] = ["tag_name": tag, "draft": false, "prerelease": false, "assets": [["name": archive.lastPathComponent, "browser_download_url": "https://github.com/\(repository)/releases/download/\(tag)/\(archive.lastPathComponent)", "digest": try digest(archive)]]]
             let url = root.appendingPathComponent(repository.replacingOccurrences(of: "/", with: "-") + ".json")
             try JSONSerialization.data(withJSONObject: manifest).write(to: url)
             assets[repository] = url
@@ -80,7 +81,7 @@ final class Fixture {
         installer = try TagifyInstaller(paths: paths)
         installer.closeSpotify = { [unowned self] in self.closed = true }
         installer.download = { [unowned self] url, target in
-            let key = url.host == "tagify.fm" && url.path.hasSuffix(".json") ? "alexk218/tagify" : url.host == "api.github.com" ? url.path.replacingOccurrences(of: "/repos/", with: "").replacingOccurrences(of: "/releases/latest", with: "").replacingOccurrences(of: "/releases/tags/v3.0.0", with: "").replacingOccurrences(of: "/releases/tags/v2.45.3", with: "") : url.lastPathComponent
+            let key = url.host == "api.github.com" ? url.path.replacingOccurrences(of: "/repos/", with: "").replacingOccurrences(of: "/releases/latest", with: "").replacingOccurrences(of: "/releases/tags/v3.0.0", with: "").replacingOccurrences(of: "/releases/tags/v2.45.3", with: "") : url.lastPathComponent
             guard let asset = self.assets[key] else { throw InstallerFailure(message: "Fixture release unavailable") }
             try files.copyItem(at: asset, to: target)
             if self.corrupt && key.hasSuffix(".zip") { try put(target, "Corrupt download") }
@@ -114,7 +115,7 @@ final class Fixture {
                 try put(config, current)
                 try put(self.paths.resources.appendingPathComponent("Apps/xpui/original.js"), "Changed Spotify")
                 try put(self.paths.state.appendingPathComponent("Backup/xpui.spa"), "Changed backup")
-                if self.failApply { return CommandResult(status: 1, output: "Simulated apply failure") }
+                if self.failApply { return CommandResult(status: 1, output: self.applyFailureOutput) }
                 if !self.omitAppliedFiles {
                     try put(self.paths.resources.appendingPathComponent("Apps/xpui/spicetify-routes-tagify.js"), "Applied app")
                     try put(self.paths.resources.appendingPathComponent("Apps/xpui/extensions/tagify/extension.js"), "Applied extension")

@@ -48,4 +48,43 @@ describe("playlist membership", () => {
     await store.request("spotify:playlist:one");
     expect(store.getSnapshot()["spotify:playlist:one"]).toEqual({ status: "failed" });
   });
+  it("doesn't download an unchanged playlist again on a later check", async () => {
+    vi.useFakeTimers();
+    try {
+      const lookup = vi.fn().mockResolvedValueOnce(["spotify:track:a"]).mockResolvedValueOnce(["spotify:track:b"]);
+      const probe = vi.fn().mockResolvedValueOnce("v1").mockResolvedValueOnce("v1").mockResolvedValueOnce("v2");
+      const store = new PlaylistMembershipStore(lookup, probe);
+      const states: string[] = [];
+      store.subscribe(() => states.push(store.getSnapshot()["spotify:playlist:one"].status));
+      await store.request("spotify:playlist:one", "rev");
+      vi.advanceTimersByTime(5 * 60_000 + 1);
+      states.length = 0;
+      await store.request("spotify:playlist:one", "rev");
+      expect(lookup).toHaveBeenCalledTimes(1);
+      expect(states).toEqual([]);
+      vi.advanceTimersByTime(5 * 60_000 + 1);
+      await store.request("spotify:playlist:one", "rev");
+      expect(lookup).toHaveBeenCalledTimes(2);
+      expect(lookup).toHaveBeenLastCalledWith("spotify:playlist:one", true, expect.anything());
+      expect(store.getSnapshot()["spotify:playlist:one"].uris).toEqual(["spotify:track:b"]);
+    } finally { vi.useRealTimers(); }
+  });
+  it("downloads again when the playlist version can't be confirmed", async () => {
+    vi.useFakeTimers();
+    try {
+      const lookup = vi.fn().mockResolvedValue(["spotify:track:a"]);
+      const store = new PlaylistMembershipStore(lookup, vi.fn().mockResolvedValueOnce("v1").mockResolvedValueOnce(null));
+      await store.request("spotify:playlist:one");
+      vi.advanceTimersByTime(5 * 60_000 + 1);
+      await store.request("spotify:playlist:one");
+      expect(lookup).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
+  });
+  it("always downloads on a manual refresh", async () => {
+    const lookup = vi.fn().mockResolvedValue(["spotify:track:a"]);
+    const store = new PlaylistMembershipStore(lookup, vi.fn().mockResolvedValue("v1"));
+    await store.request("spotify:playlist:one");
+    await store.request("spotify:playlist:one", "", true);
+    expect(lookup).toHaveBeenCalledTimes(2);
+  });
 });

@@ -5,6 +5,20 @@ import userEvent from "@testing-library/user-event";
 import TagManager from "../TagManager";
 import { buildTaxonomyFromCategoryTree } from "@/utils/tagTaxonomy";
 import { TagTaxonomy } from "@/types/tagData";
+import {
+  COMMUNITY_POPULAR_TAGS_STORAGE_KEY,
+  resetCommunityPopularTags,
+} from "@/features/tag-data/utils/communityPopularTags";
+
+const sync = vi.hoisted(() => ({
+  configuration: null as null | { accountId: string; deviceId: string },
+  communityRequest: vi.fn(async () => ({ recorded: true })),
+}));
+vi.mock("@/services/sync/SyncLocalState", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/sync/SyncLocalState")>()),
+  getDesktopSyncConfiguration: () => sync.configuration,
+}));
+vi.mock("@/services/sync/SyncRuntime", () => ({ syncRuntime: { communityRequest: sync.communityRequest } }));
 
 function createTaxonomy(): TagTaxonomy {
   const taxonomy = buildTaxonomyFromCategoryTree([
@@ -87,33 +101,55 @@ function renderTagManager(overrides: Partial<React.ComponentProps<typeof TagMana
   };
 }
 
-function mockCommunityCatalog(tags: Array<Record<string, unknown>>) {
+type CatalogPage = { tags: Array<Record<string, unknown>>; nextCursor?: string | null; tagCount?: number };
+
+/** Serves the Community catalog by URL and records what Tag Manager asked for. */
+function mockCommunityCatalog(pages: Array<Record<string, unknown>> | ((url: URL) => CatalogPage)) {
+  const requests: URL[] = [];
+  const serve = typeof pages === "function" ? pages : () => ({ tags: pages });
   class MockXMLHttpRequest {
     responseType = "";
     timeout = 0;
     status = 200;
-    response: unknown = { tags };
-    responseText = JSON.stringify({ tags });
+    response: unknown = null;
+    responseText = "";
+    url = "";
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;
     ontimeout: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    aborted = false;
 
-    open = vi.fn();
+    open = vi.fn((_method: string, url: string) => { this.url = url; });
     setRequestHeader = vi.fn();
+    abort = vi.fn(() => { this.aborted = true; queueMicrotask(() => this.onabort?.()); });
     send = vi.fn(() => {
-      queueMicrotask(() => this.onload?.());
+      const url = new URL(this.url);
+      requests.push(url);
+      const page = serve(url);
+      const body = { tagCount: page.tags.length, nextCursor: null, ...page };
+      this.response = body;
+      this.responseText = JSON.stringify(body);
+      queueMicrotask(() => { if (!this.aborted) this.onload?.(); });
     });
   }
 
   vi.stubGlobal("XMLHttpRequest", MockXMLHttpRequest);
+  return requests;
 }
 
 describe("TagManager", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    sync.configuration = null;
+    sync.communityRequest.mockClear();
+    localStorage.removeItem("tagify:communityTagImportCredits:v1");
     localStorage.removeItem("tagify:showDefaultColorPalette");
     localStorage.removeItem("tagify:colorThemeSortMode");
     vi.spyOn(window, "confirm").mockReturnValue(true);
+    // Community doesn't list tag names until its next release.
+    resetCommunityPopularTags();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Not found", { status: 404 })));
   });
 
   it("shows the approved Taxonomy label", () => {
@@ -323,54 +359,138 @@ describe("TagManager", () => {
     );
   });
 
-  it("defaults community sorting to most users and supports ascending order", async () => {
+  it("defaults community sorting to most users and lets Community order and filter the whole catalog", async () => {
     const user = userEvent.setup();
     renderTagManager();
-    mockCommunityCatalog([
-      {
-        key: "solo favorite",
-        name: "Solo Favorite",
-        songCount: 120,
-        contributorCount: 1,
-        assignmentCount: 140,
-      },
-      {
-        key: "group favorite",
-        name: "Group Favorite",
-        songCount: 40,
-        contributorCount: 8,
-        assignmentCount: 44,
-      },
-      {
-        key: "small crowd",
-        name: "Small Crowd",
-        songCount: 20,
-        contributorCount: 3,
-        assignmentCount: 22,
-      },
-    ]);
+    const requests = mockCommunityCatalog((url) => ({
+      tags: url.searchParams.get("sort") === "niche"
+        ? [{ key: "small crowd", name: "Small Crowd", songCount: 20, contributorCount: 3 }]
+        : [
+            { key: "group favorite", name: "Group Favorite", songCount: 40, contributorCount: 8 },
+            { key: "solo favorite", name: "Solo Favorite", songCount: 120, contributorCount: 1 },
+          ],
+    }));
 
     await user.click(screen.getByRole("tab", { name: "Community" }));
 
     expect(screen.getByRole("combobox", { name: "Sort community tags" })).toHaveValue("contributors");
-    expect(screen.getAllByRole("option")[0]).toHaveTextContent("Most users");
-    expect(screen.queryByRole("option", { name: "Most assignments" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Niche" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Minimum community user count" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("option").slice(0, 4).map((option) => option.textContent)).toEqual([
+      "Most users", "Most tracks", "Fewest tracks", "Alphabetical",
+    ]);
+    expect(screen.queryByRole("button", { name: /Sort community tags (ascending|descending)/ })).not.toBeInTheDocument();
+    expect(await screen.findByText("120 public tracks · 1 user")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Open Community songs tagged/ }).map((row) => row.getAttribute("aria-label")))
+      .toEqual(["Open Community songs tagged Group Favorite", "Open Community songs tagged Solo Favorite"]);
+    expect(requests[0].searchParams.get("sort")).toBe("contributors");
+    expect(requests[0].searchParams.get("minTracks")).toBe("1");
+    expect(requests[0].searchParams.get("limit")).toBe("100");
 
-    const getCommunityTagNames = () =>
-      screen
-        .getAllByRole("link", { name: /Open Community songs tagged/ })
-        .map((row) => within(row).getByText(/Favorite|Crowd/).textContent);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Sort community tags" }), "niche");
+    expect(await screen.findByText("Small Crowd")).toBeInTheDocument();
+    expect(requests.at(-1)?.searchParams.get("sort")).toBe("niche");
 
-    await screen.findByText("Group Favorite");
-    expect(getCommunityTagNames()).toEqual(["Group Favorite", "Small Crowd", "Solo Favorite"]);
-    expect(screen.getByText("120 public tracks · 1 user")).toBeInTheDocument();
-    expect(screen.queryByText(/assignments?/i)).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Minimum community track count" }), "25");
+    await waitFor(() => expect(requests.at(-1)?.searchParams.get("minTracks")).toBe("25"));
+  });
 
-    await user.click(screen.getByRole("button", { name: "Sort community tags ascending" }));
+  it("searches the whole Community catalog, not just the tags already shown", async () => {
+    const user = userEvent.setup();
+    renderTagManager();
+    const requests = mockCommunityCatalog((url) => ({
+      tags: url.searchParams.get("q") === "night"
+        ? [{ key: "night drive", name: "Night Drive", songCount: 12, contributorCount: 3 }]
+        : [{ key: "organic", name: "Organic", songCount: 42, contributorCount: 5 }],
+    }));
 
-    expect(getCommunityTagNames()).toEqual(["Solo Favorite", "Small Crowd", "Group Favorite"]);
+    await user.click(screen.getByRole("tab", { name: "Community" }));
+    await screen.findByText("Organic");
+    await user.type(screen.getByRole("textbox", { name: "Search community tags" }), "night");
+
+    expect(await screen.findByText("Night Drive")).toBeInTheDocument();
+    expect(screen.queryByText("Organic")).not.toBeInTheDocument();
+    expect(requests.at(-1)?.searchParams.get("q")).toBe("night");
+    // Typing waits for a pause instead of asking Community once per letter.
+    expect(requests.filter((url) => url.searchParams.has("q"))).toHaveLength(1);
+  });
+
+  it("shows more Community tags on request and imports from later pages", async () => {
+    const user = userEvent.setup();
+    const { onReplaceTaxonomy } = renderTagManager();
+    const requests = mockCommunityCatalog((url) => url.searchParams.get("cursor") === "page-2"
+      ? { tags: [{ key: "rain", name: "Rain", songCount: 5, contributorCount: 2 }], nextCursor: null, tagCount: 3 }
+      : {
+          tags: [
+            { key: "organic", name: "Organic", songCount: 42, contributorCount: 5 },
+            { key: "night drive", name: "Night Drive", songCount: 12, contributorCount: 3 },
+          ],
+          nextCursor: "page-2",
+          tagCount: 3,
+        });
+
+    await user.click(screen.getByRole("tab", { name: "Community" }));
+    await user.click(screen.getByRole("button", { name: "Show more tags (1 remaining)" }));
+
+    const rainRow = (await screen.findByText("Rain")).closest("article");
+    expect(requests.at(-1)?.searchParams.get("cursor")).toBe("page-2");
+    expect(screen.getByText("Organic")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Show more tags/ })).not.toBeInTheDocument();
+
+    await user.click(within(rainRow!).getByRole("button", { name: "Import" }));
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+    const savedTaxonomy = onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy;
+    expect(Object.values(savedTaxonomy.tagsById).some((tag) => tag.name === "Rain" && tag.source?.type === "community")).toBe(true);
+  });
+
+  it("explains a failed load and tries again", async () => {
+    const user = userEvent.setup();
+    renderTagManager();
+    let fail = true;
+    mockCommunityCatalog(() => {
+      if (fail) throw new Error("offline");
+      return { tags: [{ key: "organic", name: "Organic", songCount: 42, contributorCount: 5 }] };
+    });
+
+    await user.click(screen.getByRole("tab", { name: "Community" })).catch(() => undefined);
+    expect(await screen.findByText("Couldn't load Community tags. Check your connection and try again.")).toBeInTheDocument();
+    fail = false;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Organic")).toBeInTheDocument();
+  });
+
+  it("thanks the people who share an imported tag once the import is saved, when signed in", async () => {
+    const user = userEvent.setup();
+    sync.configuration = { accountId: "account-1", deviceId: "device-1" };
+    const { onClose } = renderTagManager();
+    mockCommunityCatalog([{ key: "organic", name: "Organic", songCount: 42, contributorCount: 5 }]);
+
+    await user.click(screen.getByRole("tab", { name: "Community" }));
+    expect(screen.getByText(/When you import a tag, the people who share it get a thank-you\./)).toBeInTheDocument();
+    const organicRow = (await screen.findByText("Organic")).closest("article");
+    await user.click(within(organicRow!).getByRole("button", { name: "Import" }));
+    expect(sync.communityRequest).not.toHaveBeenCalled();
+
+    sync.communityRequest.mockRejectedValueOnce(Object.assign(new Error("offline"), { status: undefined }));
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+    expect(onClose).toHaveBeenCalled();
+    await waitFor(() => expect(sync.communityRequest).toHaveBeenCalledWith("/api/v2/tag-imports", {
+      method: "POST",
+      body: { deviceId: "device-1", tags: [{ name: "Organic" }] },
+    }));
+    // Still waiting to be sent after a failure, so the next visit tries again.
+    expect(localStorage.getItem("tagify:communityTagImportCredits:v1")).toContain("Organic");
+  });
+
+  it("doesn't mention thank-yous or report imports without Community", async () => {
+    const user = userEvent.setup();
+    renderTagManager();
+    mockCommunityCatalog([{ key: "organic", name: "Organic", songCount: 42, contributorCount: 5 }]);
+
+    await user.click(screen.getByRole("tab", { name: "Community" }));
+    const organicRow = (await screen.findByText("Organic")).closest("article");
+    expect(screen.queryByText(/thank-you/)).not.toBeInTheDocument();
+    await user.click(within(organicRow!).getByRole("button", { name: "Import" }));
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+    expect(sync.communityRequest).not.toHaveBeenCalled();
   });
 
   it("does not open Community search when importing a community tag", async () => {
@@ -1194,3 +1314,83 @@ describe("TagManager", () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+describe("TagManager names other members use", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    resetCommunityPopularTags();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Not found", { status: 404 })));
+    localStorage.setItem(COMMUNITY_POPULAR_TAGS_STORAGE_KEY, JSON.stringify({
+      checkedAt: Date.now(),
+      tags: [
+        { name: "male vocalist", slug: "male-vocalist", people: 12 },
+        { name: "acid house", slug: "acid-house", people: 5 },
+      ],
+    }));
+  });
+
+  function savedNamesIn(taxonomy: TagTaxonomy, folderName: string) {
+    const folder = Object.values(taxonomy.subcategoriesById).find((subcategory) => subcategory.name === folderName)!;
+    return folder.tagIds.map((tagId) => taxonomy.tagsById[tagId]?.name);
+  }
+
+  it("points out the name members usually use while you type, and adds it in one click", async () => {
+    const user = userEvent.setup();
+    const { onReplaceTaxonomy } = renderTagManager();
+    const input = screen.getByRole("textbox", { name: "Add tag to Electronic" });
+
+    await user.type(input, "male vocals");
+    const hint = await screen.findByText("Members usually call this “male vocalist” (12)");
+    expect(input).toHaveAccessibleDescription(expect.stringContaining(hint.textContent!));
+    await user.click(screen.getByRole("button", { name: "Use this name" }));
+    expect(input).toHaveValue("");
+    expect(screen.queryByText(/Members usually call this/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+    expect(savedNamesIn(onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy, "Electronic")).toContain("male vocalist");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("still adds your own spelling", async () => {
+    const user = userEvent.setup();
+    const { onReplaceTaxonomy } = renderTagManager();
+
+    await user.type(screen.getByRole("textbox", { name: "Add tag to Electronic" }), "male vocals{Enter}");
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+    const names = savedNamesIn(onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy, "Electronic");
+    expect(names).toContain("male vocals");
+    expect(names).not.toContain("male vocalist");
+  });
+
+  it("mentions your own tag when you start typing the same one", async () => {
+    const user = userEvent.setup();
+    renderTagManager();
+
+    await user.type(screen.getByRole("textbox", { name: "Add tag to Electronic" }), "TRIBAL");
+    expect(screen.getByText("You already have “Tribal” in Percussion")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use this name" })).not.toBeInTheDocument();
+  });
+
+  it("stays quiet when the typed name is already the usual one", async () => {
+    const user = userEvent.setup();
+    renderTagManager();
+
+    await user.type(screen.getByRole("textbox", { name: "Add tag to Electronic" }), "Acid House");
+    expect(screen.queryByText(/Members usually call this/)).not.toBeInTheDocument();
+  });
+
+  it("shows no suggestions, and still adds tags, while Community doesn't list names", async () => {
+    localStorage.removeItem(COMMUNITY_POPULAR_TAGS_STORAGE_KEY);
+    const user = userEvent.setup();
+    const { onReplaceTaxonomy } = renderTagManager();
+
+    await user.type(screen.getByRole("textbox", { name: "Add tag to Electronic" }), "male vocals");
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("https://community.tagify.fm/api/v1/tag-names", expect.objectContaining({ credentials: "omit" })));
+    expect(screen.queryByText(/Members usually call this/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Add Tag/i }));
+    await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+    expect(savedNamesIn(onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy, "Electronic")).toContain("male vocals");
+  });
+});
+

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 8,
+  "version": "2.5.0",
+  "taxonomy": {
+    "categoryOrder": ["feeling"],
+    "categoriesById": { "feeling": { "id": "feeling", "name": "Feeling", "subcategoryIds": ["atmosphere"] } },
+    "subcategoriesById": { "atmosphere": { "id": "atmosphere", "name": "Atmosphere", "categoryId": "feeling", "tagIds": ["dreamy", "private-memory"] } },
+    "tagsById": {
+      "dreamy": { "id": "dreamy", "name": "Dreamy", "subcategoryId": "atmosphere", "accentId": "blue" },
+      "private-memory": { "id": "private-memory", "name": "Private memory", "subcategoryId": "atmosphere" }
+    },
+    "customAccentsById": {}
+  },
+  "tracks": { "spotify:track:4uLU6hMCjMI75M1A2tKUQC": { "rating": 4.5, "energy": 8, "bpm": 105, "camelotKey": "4A", "tagIds": ["dreamy", "private-memory"] } },
+  "playlists": {
+    "spotify:album:4aawyAB9vmqN3uQ7FjRGTy": { "rating": 5, "tagIds": ["dreamy"] },
+    "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M": { "rating": 5, "tagIds": ["dreamy"] }
+  },
+  "artists": { "spotify:artist:0TnOYISbd1XYRBk9myaseg": { "rating": 4, "tagIds": ["dreamy"] } }
+}

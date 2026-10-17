@@ -98,6 +98,15 @@
 .visibilityDisclosure > svg { flex: 0 0 auto; color: var(--spice-subtext); }
 .visibilityContent { display: grid; gap: 12px; padding: 0 12px 12px; border-top: 1px solid rgb(255 255 255 / 7%); }
 .visibilitySummary { margin: 0; padding-top: 12px; color: var(--spice-subtext); font-size: 12px; line-height: 1.5; }
+.visibilityActions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.quietAction { min-height: 38px; padding: 8px 10px; border: 0; border-radius: 9px; color: var(--spice-subtext); background: transparent; cursor: pointer; font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.quietAction:hover:not(:disabled) { color: var(--spice-text); }
+.quietAction:disabled, .secondary:disabled { opacity: .5; cursor: not-allowed; }
+.quietAction:focus-visible { outline: 2px solid #c3b9ff; outline-offset: 2px; }
+.visibilityConfirm { display: grid; gap: 10px; padding: 11px; border: 1px solid rgb(239 124 131 / 26%); border-radius: 9px; background: rgb(239 124 131 / 7%); }
+.visibilityConfirm > div:first-child { display: grid; gap: 3px; }
+.visibilityConfirm strong { font-size: 13px; }
+.visibilityConfirm span { color: var(--spice-subtext); font-size: 12px; }
 .checkRow { display: flex; gap: 9px; align-items: flex-start; color: var(--spice-text); line-height: 1.35; }
 .checkRow input { margin-top: 2px; accent-color: #9b8cff; }
 .visibilityCheckbox { margin-top: 2px; accent-color: #e74c3c; }

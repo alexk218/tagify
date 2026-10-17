@@ -54,6 +54,24 @@ import {
 } from "@/features/tag-data/utils/tagManager.taxonomy";
 import { mergeTaxonomy } from "@/features/tag-data/utils/tagData.taxonomyMerge";
 import {
+  buildCommunityTagSearchUrl,
+  COMMUNITY_TAG_SEARCH_MAX_LENGTH,
+  formatCommunityTagStats,
+  type CommunityCatalogSort,
+  type CommunityCatalogTag,
+} from "@/features/tag-data/utils/communityTagCatalog";
+import {
+  flushCommunityTagImportCredits,
+  newlyImportedCommunityTagNames,
+  queueCommunityTagImportCredits,
+} from "@/features/tag-data/utils/communityTagImportCredits";
+import { useCommunityTagCatalog } from "@/features/tag-data/hooks/useCommunityTagCatalog";
+import { useCommunityPopularTags } from "@/features/tag-data/hooks/useCommunityPopularTags";
+import { findTagSuggestions, findUsualTagName } from "@tagify/community-contracts";
+import { COMMUNITY_ORIGIN } from "@/features/community/communityLinks";
+import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
+import { syncRuntime } from "@/services/sync/SyncRuntime";
+import {
   buildCustomTagAccentId,
   buildTagAccentCssVars,
   getTagAccentOptions,
@@ -275,30 +293,6 @@ const COLOR_LIBRARY_SORT_DESCRIPTIONS: Record<ColorLibrarySortMode, string> = {
 
 type TagManagerView = "tags" | "community" | "colors";
 
-interface CommunityCatalogTag {
-  key: string;
-  name: string;
-  songCount: number;
-  contributorCount?: number;
-  assignmentCount?: number;
-  firstSeenAt?: string;
-  lastSeenAt?: string;
-}
-
-interface CommunityCatalogResponse {
-  tags?: CommunityCatalogTag[];
-}
-
-type CommunityCatalogSortMode =
-  | "popular"
-  | "contributors"
-  | "alphabetical"
-  | "recent";
-type CommunityCatalogSortDirection = "descending" | "ascending";
-
-const COMMUNITY_TAGS_FETCH_TIMEOUT_MS = 10000;
-const COMMUNITY_TAGS_API_BASE = "https://community.tagify.fm";
-const COMMUNITY_TAGS_CATALOG_ENDPOINT = `${COMMUNITY_TAGS_API_BASE}/api/v1/tags`;
 
 const buildCategoryDndId = (categoryId: string) => `category:${categoryId}`;
 const buildSubcategoryDndId = (subcategoryId: string) => `subcategory:${subcategoryId}`;
@@ -318,44 +312,6 @@ function downloadColors(taxonomy: TagTaxonomy, themeId?: string): void {
 
 function normalizeName(value: string): string {
   return value.trim().toLowerCase();
-}
-
-function loadCommunityCatalogTags(): Promise<CommunityCatalogTag[]> {
-  return new Promise((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    request.open("GET", COMMUNITY_TAGS_CATALOG_ENDPOINT, true);
-    request.responseType = "json";
-    request.timeout = COMMUNITY_TAGS_FETCH_TIMEOUT_MS;
-    request.setRequestHeader("Accept", "application/json");
-
-    request.onload = () => {
-      if (request.status < 200 || request.status >= 300) {
-        reject(new Error(`Community tags request failed with ${request.status}.`));
-        return;
-      }
-
-      const response =
-        typeof request.response === "object" && request.response !== null
-          ? (request.response as CommunityCatalogResponse)
-          : (JSON.parse(String(request.responseText || "{}")) as CommunityCatalogResponse);
-      resolve(Array.isArray(response.tags) ? response.tags : []);
-    };
-    request.onerror = () => reject(new Error("Community tags request failed."));
-    request.ontimeout = () => reject(new Error("Community tags request timed out."));
-    request.send();
-  });
-}
-
-function formatCommunityTagStats(tag: CommunityCatalogTag): string {
-  const contributorCount = tag.contributorCount ?? 0;
-  const userLabel = contributorCount === 1 ? "user" : "users";
-  const trackLabel = tag.songCount === 1 ? "track" : "tracks";
-
-  return `${tag.songCount} public ${trackLabel} · ${contributorCount} ${userLabel}`;
-}
-
-function buildCommunityTagSearchUrl(tag: CommunityCatalogTag): string {
-  return `${COMMUNITY_TAGS_API_BASE}/search?tag=${encodeURIComponent(`label:${encodeURIComponent(tag.name)}`)}`;
 }
 
 function openCommunityTagSearch(tag: CommunityCatalogTag): void {
@@ -1164,14 +1120,8 @@ const TagManager: React.FC<TagManagerProps> = ({
   >(null);
   const [renameValue, setRenameValue] = useState("");
   const [communitySearchQuery, setCommunitySearchQuery] = useState<string>("");
-  const [communitySortMode, setCommunitySortMode] =
-    useState<CommunityCatalogSortMode>("contributors");
-  const [communitySortDirection, setCommunitySortDirection] =
-    useState<CommunityCatalogSortDirection>("descending");
+  const [communitySortMode, setCommunitySortMode] = useState<CommunityCatalogSort>("contributors");
   const [communityMinTrackCount, setCommunityMinTrackCount] = useState(1);
-  const [communityTags, setCommunityTags] = useState<CommunityCatalogTag[]>([]);
-  const [isLoadingCommunityTags, setIsLoadingCommunityTags] = useState(false);
-  const [communityTagsError, setCommunityTagsError] = useState<string | null>(null);
   const [importingCommunityTagKey, setImportingCommunityTagKey] = useState<string | null>(null);
   const [newCustomAccentName, setNewCustomAccentName] = useState<string>("");
   const [newCustomAccentColor, setNewCustomAccentColor] =
@@ -1205,7 +1155,6 @@ const TagManager: React.FC<TagManagerProps> = ({
 
   const hoverExpandTimerRef = useRef<number | null>(null);
   const hoverExpandCategoryIdRef = useRef<string | null>(null);
-  const communityTagsRequestRef = useRef<Promise<CommunityCatalogTag[]> | null>(null);
   const treePaneRef = useRef<HTMLDivElement | null>(null);
   const dragPlacementRef = useRef<RelativeDropPlacement>("before");
 
@@ -1356,43 +1305,14 @@ const TagManager: React.FC<TagManagerProps> = ({
     return allCustomAccents;
   }, [allCustomAccents, colorLibrarySortMode, localTaxonomy, selectedColorTheme, selectedColorThemeId]);
 
-  const visibleCommunityTags = useMemo(() => {
-    const normalizedQuery = normalizeName(communitySearchQuery);
-    const tags = communityTags.filter((tag) => {
-      return (
-        normalizeName(tag.name).includes(normalizedQuery) &&
-        tag.songCount >= communityMinTrackCount
-      );
-    });
-
-    return [...tags].sort((left, right) => {
-      const nameComparison = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
-      let comparison: number;
-      if (communitySortMode === "alphabetical") {
-        comparison = nameComparison;
-      } else if (communitySortMode === "contributors") {
-        comparison =
-          (right.contributorCount ?? 0) - (left.contributorCount ?? 0) ||
-          right.songCount - left.songCount ||
-          nameComparison;
-      } else if (communitySortMode === "recent") {
-        comparison =
-          Date.parse(right.lastSeenAt ?? "") - Date.parse(left.lastSeenAt ?? "") ||
-          nameComparison;
-      } else {
-        comparison =
-          right.songCount - left.songCount ||
-          nameComparison;
-      }
-      return communitySortDirection === "ascending" ? comparison * -1 : comparison;
-    });
-  }, [
-    communityMinTrackCount,
-    communitySearchQuery,
-    communitySortDirection,
-    communitySortMode,
-    communityTags,
-  ]);
+  const communityCatalog = useCommunityTagCatalog({
+    enabled: activeView === "community",
+    query: communitySearchQuery,
+    sort: communitySortMode,
+    minTrackCount: communityMinTrackCount,
+  });
+  // Only a desktop signed in to Community thanks the people who share a tag.
+  const canThankCurators = getDesktopSyncConfiguration() !== null;
 
   const communityDestinationPath = selectedCategoryForInspector
     ? `${selectedCategoryForInspector.name}${selectedSubcategory ? ` / ${selectedSubcategory.name}` : ""}`
@@ -1601,30 +1521,11 @@ const TagManager: React.FC<TagManagerProps> = ({
     selectedSubcategoryId,
   ]);
 
+  // Imports saved while offline or before Community could accept them are sent on the next visit.
   useEffect(() => {
-    if (activeView !== "community" || communityTags.length > 0) {
-      return;
-    }
-
-    setIsLoadingCommunityTags(true);
-    setCommunityTagsError(null);
-
-    const tagsRequest = communityTagsRequestRef.current ?? loadCommunityCatalogTags();
-    communityTagsRequestRef.current = tagsRequest;
-
-    tagsRequest
-      .then((tags) => {
-        setCommunityTags(tags);
-      })
-      .catch((error) => {
-        console.error("Failed to load community tags", error);
-        setCommunityTagsError("Community tags could not be loaded. Check your Spotify console for the request error.");
-        communityTagsRequestRef.current = null;
-      })
-      .finally(() => {
-        setIsLoadingCommunityTags(false);
-      });
-  }, [activeView, communityTags.length]);
+    void flushCommunityTagImportCredits(getDesktopSyncConfiguration(), (path, options) =>
+      syncRuntime.communityRequest(path, options));
+  }, []);
 
   const isCategoryNameUnique = useCallback(
     (name: string, excludeCategoryId?: string) => {
@@ -1813,13 +1714,29 @@ const TagManager: React.FC<TagManagerProps> = ({
     selectSubcategory(categoryId, subcategoryId);
   };
 
-  const handleAddTag = () => {
+  const popularTagNames = useCommunityPopularTags();
+  // While you type a new tag: your own tag that is the same, or else the name members usually use.
+  const newTagNameHint = useMemo(() => {
+    const typed = newTagName.trim();
+    if (!typed) return null;
+    const suggestions = findTagSuggestions(typed, popularTagNames, { mine: Object.values(localTaxonomy.tagsById) });
+    const yours = suggestions.find((suggestion) => suggestion.match === "mine");
+    if (yours?.match === "mine") {
+      const parentId = yours.tag.parentId || yours.tag.subcategoryId;
+      const place = localTaxonomy.subcategoriesById[parentId]?.name ?? localTaxonomy.categoriesById[parentId]?.name;
+      return { kind: "yours" as const, name: yours.name, place };
+    }
+    const usual = findUsualTagName(typed, suggestions);
+    return usual ? { kind: "usual" as const, name: usual.name, people: usual.people } : null;
+  }, [localTaxonomy, newTagName, popularTagNames]);
+
+  const handleAddTag = (requestedName = newTagName) => {
     if (!selectedTagParentId || !selectedCategoryForInspector) {
       showModalNotification("Select a category or folder before adding a tag.", true);
       return;
     }
 
-    const name = newTagName.trim();
+    const name = requestedName.trim();
     if (!name) {
       return;
     }
@@ -1896,10 +1813,8 @@ const TagManager: React.FC<TagManagerProps> = ({
           songCount: tag.songCount,
           contributorCount: tag.contributorCount,
           assignmentCount: tag.assignmentCount,
-          firstSeenAt: tag.firstSeenAt,
-          lastSeenAt: tag.lastSeenAt,
         },
-        publicUrl: `${COMMUNITY_TAGS_API_BASE}/tags`,
+        publicUrl: `${COMMUNITY_ORIGIN}/tags`,
       };
       const result = importCommunityTagPackage(localTaxonomy, importPackage, {
         targetCategoryId,
@@ -2508,6 +2423,12 @@ const TagManager: React.FC<TagManagerProps> = ({
       (tagId) => !(tagId in localTaxonomy.tagsById),
     );
     onReplaceTaxonomy(localTaxonomy, removedTagIds, draftBase);
+    // Thank the people who share the community tags this save adds; never delays closing.
+    const connection = getDesktopSyncConfiguration();
+    if (connection) {
+      queueCommunityTagImportCredits(connection.accountId, newlyImportedCommunityTagNames(draftBase, localTaxonomy));
+      void flushCommunityTagImportCredits(connection, (path, options) => syncRuntime.communityRequest(path, options));
+    }
     setHasChanges(false);
     onClose();
   };
@@ -3470,6 +3391,8 @@ const TagManager: React.FC<TagManagerProps> = ({
                         value={newTagName}
                         onChange={(event) => setNewTagName(event.target.value)}
                         placeholder={`Add tag to ${selectedTagParentName}…`}
+                        aria-label={`Add tag to ${selectedTagParentName}`}
+                        aria-describedby="tag-manager-new-tag-hint"
                         className={styles.textInput}
                         onKeyDown={(event) => {
                           if (event.key === "Enter") {
@@ -3477,9 +3400,34 @@ const TagManager: React.FC<TagManagerProps> = ({
                           }
                         }}
                       />
-                      <button type="button" className={styles.primaryButton} onClick={handleAddTag}>
+                      <button type="button" className={styles.primaryButton} onClick={() => handleAddTag()}>
                         Add Tag
                       </button>
+                    </div>
+                    <div aria-live="polite" id="tag-manager-new-tag-hint" className={styles.nameHintRegion}>
+                      {newTagNameHint ? (
+                        <div className={styles.nameHint}>
+                          {newTagNameHint.kind === "yours" ? (
+                            <span className={styles.nameHintText}>
+                              You already have “{newTagNameHint.name}”{newTagNameHint.place ? ` in ${newTagNameHint.place}` : ""}
+                            </span>
+                          ) : (
+                            <>
+                              <span className={styles.nameHintText}>
+                                Members usually call this “{newTagNameHint.name}” ({newTagNameHint.people})
+                              </span>
+                              <button
+                                type="button"
+                                className={styles.nameHintButton}
+                                title={`Add “${newTagNameHint.name}” to ${selectedTagParentName} instead`}
+                                onClick={() => handleAddTag(newTagNameHint.name)}
+                              >
+                                Use this name
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className={styles.tagListPane}>
@@ -3601,6 +3549,7 @@ const TagManager: React.FC<TagManagerProps> = ({
                     <h3 className={styles.paneTitle}>Community Tag Catalog</h3>
                     <p className={styles.paneSubtitle}>
                       Public tags from community-tagged tracks, normalized by tag name.
+                      {canThankCurators && " When you import a tag, the people who share it get a thank-you."}
                     </p>
                   </div>
                 </div>
@@ -3612,33 +3561,22 @@ const TagManager: React.FC<TagManagerProps> = ({
                     onChange={(event) => setCommunitySearchQuery(event.target.value)}
                     placeholder="Search community tags..."
                     className={styles.searchInput}
+                    maxLength={COMMUNITY_TAG_SEARCH_MAX_LENGTH}
+                    aria-label="Search community tags"
                   />
                   <select
                     className={styles.compactSelect}
                     value={communitySortMode}
                     onChange={(event) =>
-                      setCommunitySortMode(event.target.value as CommunityCatalogSortMode)
+                      setCommunitySortMode(event.target.value as CommunityCatalogSort)
                     }
                     aria-label="Sort community tags"
                   >
                     <option value="contributors">Most users</option>
                     <option value="popular">Most tracks</option>
+                    <option value="niche">Fewest tracks</option>
                     <option value="alphabetical">Alphabetical</option>
-                    <option value="recent">Recent</option>
                   </select>
-                  <button
-                    type="button"
-                    className={styles.communitySortDirectionButton}
-                    onClick={() =>
-                      setCommunitySortDirection((currentDirection) =>
-                        currentDirection === "ascending" ? "descending" : "ascending",
-                      )
-                    }
-                    title={`Sort ${communitySortDirection === "ascending" ? "descending" : "ascending"}`}
-                    aria-label={`Sort community tags ${communitySortDirection === "ascending" ? "descending" : "ascending"}`}
-                  >
-                    {communitySortDirection === "ascending" ? "↑" : "↓"}
-                  </button>
                   <select
                     className={styles.compactSelect}
                     value={communityMinTrackCount}
@@ -3653,43 +3591,20 @@ const TagManager: React.FC<TagManagerProps> = ({
                   </select>
                 </div>
 
-                {isLoadingCommunityTags ? (
+                {communityCatalog.status === "loading" ? (
                   <div className={styles.emptyState}>Loading community tags...</div>
-                ) : communityTagsError ? (
+                ) : communityCatalog.status === "error" ? (
                   <div className={styles.emptyState}>
-                    <p>{communityTagsError}</p>
-                    <button
-                      type="button"
-                      className={styles.secondaryButton}
-                      onClick={() => {
-                        communityTagsRequestRef.current = null;
-                        setCommunityTagsError(null);
-                        setCommunityTags([]);
-                        setIsLoadingCommunityTags(true);
-                        const tagsRequest = loadCommunityCatalogTags();
-                        communityTagsRequestRef.current = tagsRequest;
-                        tagsRequest
-                          .then((tags) => {
-                            setCommunityTags(tags);
-                          })
-                          .catch((error) => {
-                            console.error("Failed to load community tags", error);
-                            setCommunityTagsError("Community tags could not be loaded. Check your Spotify console for the request error.");
-                            communityTagsRequestRef.current = null;
-                          })
-                          .finally(() => {
-                            setIsLoadingCommunityTags(false);
-                          });
-                      }}
-                    >
-                      Retry
+                    <p>Couldn't load Community tags. Check your connection and try again.</p>
+                    <button type="button" className={styles.secondaryButton} onClick={communityCatalog.retry}>
+                      Try again
                     </button>
                   </div>
-                ) : visibleCommunityTags.length === 0 ? (
+                ) : communityCatalog.tags.length === 0 ? (
                   <div className={styles.emptyState}>No community tags match this search.</div>
                 ) : (
                   <div className={styles.communityTagList}>
-                    {visibleCommunityTags.map((tag) => (
+                    {communityCatalog.tags.map((tag) => (
                       <article
                         key={tag.key}
                         className={styles.communityTagRow}
@@ -3720,6 +3635,27 @@ const TagManager: React.FC<TagManagerProps> = ({
                         </button>
                       </article>
                     ))}
+                    {communityCatalog.hasMore && (
+                      <div className={styles.communityLoadMore}>
+                        <button
+                          type="button"
+                          className={styles.communityLoadMoreButton}
+                          disabled={communityCatalog.loadingMore}
+                          onClick={communityCatalog.loadMore}
+                        >
+                          {communityCatalog.loadingMore
+                            ? "Loading more tags..."
+                            : communityCatalog.remaining > 0
+                              ? `Show more tags (${communityCatalog.remaining.toLocaleString()} remaining)`
+                              : "Show more tags"}
+                        </button>
+                        {communityCatalog.loadMoreFailed && (
+                          <p className={styles.communityLoadMoreError} role="alert">
+                            Couldn't load more tags. Try again.
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </main>

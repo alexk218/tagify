@@ -1,9 +1,11 @@
 import packageJson from "@/package";
+import { initializeStatsIntroduction } from "@/features/library-stats/model/statsIntroduction";
 
 const LAST_SEEN_VERSION_KEY = "tagify:lastSeenVersion";
 
 export const welcomeModal = {
   initialize() {
+    initializeStatsIntroduction(packageJson.version);
     const waitForSpicetify = async () => {
       while (!Spicetify?.PopupModal || !Spicetify?.Platform) {
         await new Promise((resolve) => setTimeout(resolve, 100));

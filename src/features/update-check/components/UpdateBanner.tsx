@@ -18,6 +18,8 @@ import {
   INSTALLER_RELEASES_API,
   INSTALLER_RELEASES_URL,
 } from "../utils/installerDownloads";
+import { recordUpdateBannerDismissed, recordUpdateBannerShown, recordUpdateDownload, recordUpdateInstructionsOpened } from "../utils/updateAnalytics";
+import packageJson from "@/package";
 
 interface UpdateBannerProps {
   updateInfo: UpdateInfo;
@@ -37,9 +39,9 @@ const detectOS = (): "windows" | "mac" | "linux" => {
 
 const getInstallCommand = (os: "windows" | "mac" | "linux"): string => {
   if (os === "windows") {
-    return 'iwr -useb "https://tagify.fm/releases/install/Install-Tagify-Full.ps1" | iex';
+    return 'iwr -useb "https://raw.githubusercontent.com/alexk218/tagify/main/Install-Tagify-Full.ps1" | iex';
   }
-  return 'curl -fsSL "https://tagify.fm/releases/install/install.sh" | bash';
+  return 'curl -fsSL "https://raw.githubusercontent.com/alexk218/tagify/main/install.sh" | bash';
 };
 
 const getOSLabel = (os: "windows" | "mac" | "linux"): string => {
@@ -67,6 +69,10 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   const [findingMacInstaller, setFindingMacInstaller] = useState(false);
   const [macInstallerFailed, setMacInstallerFailed] = useState(false);
   const showMacDownload = isMac && expandedSection === "update" && activeTab === "need-installer";
+
+  useEffect(() => {
+    recordUpdateBannerShown(updateInfo.currentVersion ?? packageJson.version, updateInfo.latestVersion);
+  }, [updateInfo.currentVersion, updateInfo.latestVersion]);
 
   useEffect(() => {
     if (!showMacDownload || macInstallerUrl) return;
@@ -102,6 +108,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   }, [showMacDownload, macInstallerUrl]);
 
   const handleDownloadInstaller = () => {
+    recordUpdateDownload("release_page");
     window.open(
       isMac ? INSTALLER_RELEASES_URL : `${INSTALLER_RELEASES_URL}/latest`,
       "_blank",
@@ -110,6 +117,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   };
 
   const handleDirectDownload = () => {
+    recordUpdateDownload("direct");
     window.open(
       isMac
         ? macInstallerUrl ?? INSTALLER_RELEASES_URL
@@ -120,6 +128,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   };
 
   const handleDismiss = () => {
+    recordUpdateBannerDismissed();
     setIsAnimating(true);
     setTimeout(() => {
       onDismiss();
@@ -133,6 +142,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
       setExpandedSection(section);
       // Reset to first tab when opening update section
       if (section === "update") {
+        recordUpdateInstructionsOpened();
         setActiveTab(defaultUpdateTab);
       }
     }
@@ -143,6 +153,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
 
     try {
       await navigator.clipboard.writeText(command);
+      recordUpdateDownload("command");
       setCopiedCommand(true);
       setTimeout(() => setCopiedCommand(false), 2000);
     } catch (err) {

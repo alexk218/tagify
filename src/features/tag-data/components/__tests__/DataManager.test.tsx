@@ -28,6 +28,7 @@ const taxonomyBackup: TagDataStructure = {
 describe("DataManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     delete window.TagifySync;
   });
 
@@ -153,5 +154,27 @@ describe("DataManager", () => {
     rerender(<DataManager onExportTagData={vi.fn()} onImportTagData={vi.fn()} onOpenStats={onOpenStats} statsOpen onResetTagifyData={vi.fn()} onRetryMigration={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Close your stats" })).toHaveAttribute("aria-pressed", "true");
   });
-});
+  it("keeps the upgrade glow until Stats is clicked, including after remount", () => {
+    localStorage.setItem("tagify:lastSeenVersion", "3.1.0");
+    const props = { onExportTagData: vi.fn(), onImportTagData: vi.fn(), onOpenStats: vi.fn(), onResetTagifyData: vi.fn(), onRetryMigration: vi.fn() };
+    const first = render(<DataManager {...props} />);
+    expect(screen.getByRole("button", { name: "View your stats" }).className).toContain("statsIntroduction");
+    localStorage.setItem("tagify:lastSeenVersion", "3.2.0");
+    first.unmount();
+    const second = render(<DataManager {...props} />);
+    const button = screen.getByRole("button", { name: "View your stats" });
+    expect(button.className).toContain("statsIntroduction");
+    fireEvent.click(button);
+    expect(props.onOpenStats).toHaveBeenCalledOnce();
+    expect(button.className).not.toContain("statsIntroduction");
+    second.unmount();
+    render(<DataManager {...props} />);
+    expect(screen.getByRole("button", { name: "View your stats" }).className).not.toContain("statsIntroduction");
+  });
 
+  it("does not highlight Stats for a fresh installation", () => {
+    render(<DataManager onExportTagData={vi.fn()} onImportTagData={vi.fn()} onOpenStats={vi.fn()} onResetTagifyData={vi.fn()} onRetryMigration={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "View your stats" }).className).not.toContain("statsIntroduction");
+  });
+
+});

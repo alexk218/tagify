@@ -4,7 +4,7 @@ import { findMacInstallerDownload, INSTALLER_RELEASES_URL } from "../installerDo
 function release(version: string, name = "TagifyInstaller-mac.dmg") {
   return {
     tag_name: version, draft: false, prerelease: false,
-    assets: [{ name, browser_download_url: `${INSTALLER_RELEASES_URL}/${version}/${name}` }],
+    assets: [{ name, browser_download_url: `${INSTALLER_RELEASES_URL}/download/${version}/${name}` }],
   };
 }
 
@@ -31,6 +31,7 @@ describe("Mac installer selection", () => {
     expect(findMacInstallerDownload([null, {}, { ...valid, assets: null },
       { ...valid, assets: [{ name: valid.assets[0].name, browser_download_url: "https://example.com/TagifyInstaller-mac.dmg" }] },
       { ...valid, assets: release("v1.0.1").assets },
+      { ...valid, assets: [{ name: valid.assets[0].name, browser_download_url: "https://tagify.fm/releases/manager/v1.0.2/TagifyInstaller-mac.dmg" }] },
     ])).toBeNull();
     expect(findMacInstallerDownload({})).toBeNull();
   });

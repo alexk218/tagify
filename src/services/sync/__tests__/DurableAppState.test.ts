@@ -131,3 +131,11 @@ it("includes automatic rules in private backups and restores them without public
   await restoreLocalDurableAppState(state);
   expect(JSON.parse(localStorage.getItem("tagify:automaticTagRules")!)).toEqual(rules);
 });
+
+ it("never uploads or restores device preferences through cloud documents", async () => {
+  localStorage.setItem("tagify:trackListSortBy", "title");
+  const documents = await buildDurableAppStateDocuments();
+  expect(documents.some((document) => document.domain === "preferences")).toBe(false);
+  await applyDurableAppStateDocuments([{ domain: "preferences", value: { "tagify:trackListSortBy": "artist" }, revision: 10, updatedAt: "2026-10-12T00:00:00Z" }]);
+  expect(localStorage.getItem("tagify:trackListSortBy")).toBe("title");
+});

@@ -34,10 +34,10 @@ struct Release: Decodable {
             : ["spicetify-\(version)-darwin-\(architecture).tar.gz"]
         guard let asset = assets.first(where: { names.contains($0.name) }),
               asset.browser_download_url.scheme == "https",
-              asset.browser_download_url.host == (repository == "alexk218/tagify" ? "tagify.fm" : "github.com"),
+              asset.browser_download_url.host == "github.com",
               asset.browser_download_url.user == nil, asset.browser_download_url.password == nil,
               asset.browser_download_url.query == nil, asset.browser_download_url.fragment == nil,
-              asset.browser_download_url.path == (repository == "alexk218/tagify" ? "/releases/client/\(tag_name)/\(asset.name)" : "/\(repository)/releases/download/\(tag_name)/\(asset.name)"),
+              asset.browser_download_url.path == "/\(repository)/releases/download/\(tag_name)/\(asset.name)",
               let digest = asset.digest,
               digest.range(of: #"^sha256:[a-fA-F0-9]{64}$"#, options: .regularExpression) != nil else {
             throw InstallerFailure(message: "A verified download couldn't be found. Try again later.")
@@ -374,9 +374,7 @@ final class TagifyInstaller {
     func release(_ repository: String, version: String? = nil) throws -> Release {
         let destination = work.appendingPathComponent("release-\(UUID().uuidString).json")
         let endpoint = URL(string: "https://api.github.com/repos/\(repository)/releases")!
-        let url = repository == "alexk218/tagify"
-            ? URL(string: "https://tagify.fm/releases/client/" + (version.map { "v" + $0 + "/release.json" } ?? "latest.json"))!
-            : version.map { endpoint.appendingPathComponent("tags").appendingPathComponent("v" + $0) } ?? endpoint.appendingPathComponent("latest")
+        let url = version.map { endpoint.appendingPathComponent("tags").appendingPathComponent("v" + $0) } ?? endpoint.appendingPathComponent("latest")
         try download(url, destination)
         return try JSONDecoder().decode(Release.self, from: Data(contentsOf: destination))
     }
@@ -422,8 +420,24 @@ final class TagifyInstaller {
     }
 
     private func spice(_ arguments: [String]) throws {
-        try run(paths.binary.path, ["--no-restart"] + arguments,
-                failure: "Spotify couldn't be updated. Check that Spotify is closed and try again. If this continues, Spotify may need a newer Spicetify update.")
+        let arguments = ["--no-restart"] + arguments
+        writeLog("Running \(paths.binary.path) \(arguments.joined(separator: " "))")
+        let result = try command(paths.binary, arguments, environment)
+        writeLog(result.output)
+        guard result.status != 0 else { return }
+        if Self.needsSpotifyReinstall(result.output) {
+            throw InstallerFailure(message: Self.spotifyReinstallMessage, reason: "spotify_reinstall_required")
+        }
+        throw InstallerFailure(message: "Spotify couldn't be updated. Check that Spotify is closed and try again. If this continues, Spotify may need a newer Spicetify update.")
+    }
+
+    // Spicetify can't back up Spotify once another tool or an earlier setup changed its app files
+    // without a backup. Every retry fails the same way until Spotify is reinstalled.
+    static let spotifyReinstallMessage = "Spotify's app files need a fresh copy before Tagify can be added. Download Spotify from spotify.com/download, replace the copy in Applications, then choose Try again. Your music and playlists stay in your Spotify account."
+
+    static func needsSpotifyReinstall(_ output: String) -> Bool {
+        output.range(of: "cannot be backed up at this state", options: .caseInsensitive) != nil ||
+            output.range(of: "Reinstall Spotify and try again", options: .caseInsensitive) != nil
     }
 
     private func setSpotifyUpdates(blocked: Bool) throws {
@@ -724,11 +738,17 @@ final class TagifyInstaller {
                 try spice(["restore", "backup", "apply"])
             } else { try spice(["backup", "apply"]) }
             progress(5, blockSpotifyUpdates ? "Blocking Spotify updates" : "Allowing Spotify updates")
-            try setSpotifyUpdates(blocked: blockSpotifyUpdates)
+            if blockSpotifyUpdates { try setSpotifyUpdates(blocked: true) }
+            else {
+                // Choosing not to block updates must never stop setup. A block that stays only delays
+                // Spotify updates, and the setup screen offers Apply Changes to try again.
+                do { try setSpotifyUpdates(blocked: false) }
+                catch { writeLog("Spotify updates are still blocked; continuing setup. \(error)") }
+            }
             let verified = SetupStatus.inspect(paths: paths, command: { executable, args, _ in try self.command(executable, args, self.environment) })
             guard verified.ready, verified.tagifyVersion == version,
                   InstalledVersion(verified.spicetifyVersion ?? "") == InstalledVersion(spiceVersion),
-                  verified.updatesBlocked == blockSpotifyUpdates else {
+                  !blockSpotifyUpdates || verified.updatesBlocked == true else {
                 throw InstallerFailure(message: "Tagify couldn't be confirmed in Spotify. Your previous setup will be restored. Try again.", reason: "verification")
             }
             journal!.status = .committed

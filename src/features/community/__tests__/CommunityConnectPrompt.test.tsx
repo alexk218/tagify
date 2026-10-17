@@ -6,6 +6,12 @@ import { COMMUNITY_CONNECT_PROMPT_PREFIX } from "../communityConnectPromptHistor
 import { getUsageAccountDigest } from "@/features/discovery-survey/services/tagifyUsage";
 import { PENDING_PAIRING_STORAGE_KEY } from "@/services/sync/SyncPairingService";
 import { setDisconnectedSyncProvenance } from "@/services/sync/SyncLocalState";
+import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
+
+vi.mock("@/features/product-analytics/productAnalytics", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/product-analytics/productAnalytics")>()),
+  recordProductInteraction: vi.fn(),
+}));
 
 vi.mock("@/features/discovery-survey/services/tagifyUsage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/discovery-survey/services/tagifyUsage")>()),
@@ -23,10 +29,27 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
   vi.mocked(getUsageAccountDigest).mockResolvedValue(ACCOUNT_A);
+  vi.mocked(recordProductInteraction).mockClear();
 });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("Community connection invitation", () => {
+  it("measures the invitation being seen and declined, without counting it while hidden", async () => {
+    const { rerender } = render(<CommunityConnectPrompt enabled={false} connected={false} onConnect={vi.fn()} />);
+    await settle();
+    expect(recordProductInteraction).not.toHaveBeenCalled();
+
+    rerender(<CommunityConnectPrompt enabled connected={false} onConnect={vi.fn()} />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+
+    expect(prompt()).toBeNull();
+    expect(vi.mocked(recordProductInteraction).mock.calls).toEqual([
+      ["community_connect_prompt_shown"],
+      ["community_connect_prompt_dismissed"],
+    ]);
+  });
+
   it("invites an unlinked listener without taking keyboard focus, and Connect starts setup", async () => {
     const onConnect = vi.fn();
     render(<><button>Tag a song</button><CommunityConnectPrompt enabled connected={false} onConnect={onConnect} /></>);

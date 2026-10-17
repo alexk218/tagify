@@ -12,10 +12,20 @@ import { Portal } from "@/components/ui";
 import styles from "./CloudSyncModal.module.css";
 import { InitialLibraryMergeReview } from "./InitialLibraryMergeReview";
 import { communityErrorMessage, communitySyncStatusLabel } from "./communitySyncCopy";
+import {
+  recordCommunityConnectCompleted,
+  recordCommunityConnectFinishFailed,
+  recordCommunityConnectStarted,
+  recordCommunityConnectStartFailed,
+  recordCommunitySetupOpened,
+  type CommunityConnectEntry,
+} from "./communityConnectAnalytics";
 
 export function CommunityOnboardingModal({
+  entry,
   onClose,
 }: {
+  entry: CommunityConnectEntry;
   onClose: () => void;
 }) {
   const [configuration, setConfiguration] = useState(() => getDesktopSyncConfiguration());
@@ -27,6 +37,7 @@ export function CommunityOnboardingModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [finished, setFinished] = useState(false);
+  const [finishedPrivately, setFinishedPrivately] = useState(false);
   const [requiresReload, setRequiresReload] = useState(false);
   const [visibilityReviewed, setVisibilityReviewed] = useState<boolean | null>(null);
   const polling = useRef(false);
@@ -62,8 +73,11 @@ export function CommunityOnboardingModal({
 
   useEffect(() => {
     // Opening the connection screen re-enables automatic reconnection checks on the next start.
-    if (!getDesktopSyncConfiguration()) clearRecoveryUnavailable();
-  }, []);
+    if (!getDesktopSyncConfiguration()) {
+      clearRecoveryUnavailable();
+      recordCommunitySetupOpened(entry);
+    }
+  }, [entry]);
 
   useEffect(() => {
     if (!configuration?.accessToken || configuration.profile?.handle) return;
@@ -79,8 +93,10 @@ export function CommunityOnboardingModal({
       const next = await syncPairingService.begin(COMMUNITY_ORIGIN, deviceName(), navigator.platform || "Spotify desktop");
       setApprovedPairing(null);
       setPending(next);
+      recordCommunityConnectStarted(entry);
       openCommunityUrl(next.verificationUri);
     } catch (nextError) {
+      recordCommunityConnectStartFailed(entry);
       setError(communityErrorMessage(nextError, "Couldn't start connecting to Community. Please try again."));
     } finally {
       setBusy(false);
@@ -109,6 +125,7 @@ export function CommunityOnboardingModal({
         const connection = await syncPairingService.complete(approval, {
           confirmedAccountSwitch: approval.relationship === "account-switch",
         });
+        recordCommunityConnectCompleted(entry, approval.relationship);
         setConfiguration(connection.configuration);
         setApprovedPairing(null);
         setRequiresReload(connection.requiresReload);
@@ -117,13 +134,15 @@ export function CommunityOnboardingModal({
         setPending(syncPairingService.getPending());
       }
     } catch (nextError) {
+      // An expired code is an unfinished approval, not a failure.
+      if (completingApproval || syncPairingService.getPending()) recordCommunityConnectFinishFailed(entry);
       setError(communityErrorMessage(nextError, "Couldn't finish connecting to Community. Please try again."));
       if (!completingApproval) setPending(syncPairingService.getPending());
     } finally {
       polling.current = false;
       setBusy(false);
     }
-  }, []);
+  }, [entry]);
 
   const cancelPairing = () => {
     syncPairingService.cancelPending();
@@ -190,11 +209,12 @@ export function CommunityOnboardingModal({
           {showingMergeReview && mergePreview ? <InitialLibraryMergeReview review={mergePreview} onCommit={(resolutions) => activeSyncRuntime().commitInitialMerge(resolutions)} onDownloadBackup={() => activeSyncRuntime().downloadInitialMergeBackup()} /> : null}
           {!showingMergeReview ? <CommunityVisibilityReview connected={Boolean(configuration)} onReviewStateChange={setVisibilityReviewed} onSaved={(policy) => {
             if (policy.reviewedAt) {
+              setFinishedPrivately(!policy.enabled);
               setFinished(true);
             }
           }} /> : null}
           {!showingMergeReview ? <div className={styles.actions}>
-            <button type="button" onClick={() => void activeSyncRuntime().syncNow()} disabled={busy || requiresReload || status === "idle" || status === "syncing" || status === "publishing" || visibilityReviewed === false}><RefreshCw size={15} /> {status === "syncing" ? "Syncing…" : visibilityReviewed === false ? "Save visibility first" : "Sync now"}</button>
+            <button type="button" onClick={() => void activeSyncRuntime().syncNow()} disabled={busy || requiresReload || status === "idle" || status === "syncing" || status === "publishing" || visibilityReviewed === false}><RefreshCw size={15} /> {status === "syncing" ? "Syncing…" : visibilityReviewed === false ? "Choose what to share first" : "Sync now"}</button>
           </div> : null}
         </> : null}
 
@@ -203,11 +223,13 @@ export function CommunityOnboardingModal({
             <CheckCircle2 size={34} />
             <div>
               <h3>Your Community setup is ready.</h3>
-              <p>Future syncs run automatically with your saved public visibility rules. You can reopen Sync any time to review or change what appears publicly.</p>
+              <p>{finishedPrivately
+                ? "Tagify backs up your library automatically, and your tags stay private. You can publish them any time from Sync."
+                : "Future syncs run automatically with your saved public visibility rules. You can reopen Sync any time to review or change what appears publicly."}</p>
             </div>
           </div>
           <div className={styles.actions}>
-            <button type="button" onClick={() => openCommunityUrl(profileHref)}><ExternalLink size={15} /> Open my profile</button>
+            {!finishedPrivately ? <button type="button" onClick={() => openCommunityUrl(profileHref)}><ExternalLink size={15} /> Open my profile</button> : null}
             <button type="button" className={styles.primary} onClick={close}>Done</button>
           </div>
         </> : null}

@@ -13,9 +13,12 @@ const songEntity = { provider: "spotify" as const, kind: "track" as const, provi
 const track = (values: Partial<TrackData> = {}): TrackData => ({ rating: 0, energy: 0, bpm: null, camelotKey: null, tagIds: [], dateModified: 1_000, ...values });
 
 let community: FakeCommunity;
+let liveRealtime = false;
 
 async function sync(device: FakeDevice): Promise<void> {
   await useDevice(device);
+  // While it was switched away, Realtime would have announced the other devices' changes.
+  if (liveRealtime) runtime.announcedHead = Math.max(runtime.announcedHead, community.headCursor);
   await runtime.settleLocalAndPublicSync(device.configuration);
 }
 
@@ -25,15 +28,27 @@ async function edit(uri: string, change: (current: TrackData) => TrackData): Pro
 }
 
 function healthBase(): BackupHealth {
-  return { lastBackupAt: null, annotations: 0, taxonomyNodes: 0, appStateDocuments: 0, protectedDomains: ["preferences", "smart-playlists"], notBackedUp: [], needsChoice: [], retrying: [], deviceOnlyChanges: 0 };
+  return { lastBackupAt: null, annotations: 0, taxonomyNodes: 0, appStateDocuments: 0, protectedDomains: ["playlist-rules", "smart-playlists"], notBackedUp: [], needsChoice: [], retrying: [], deviceOnlyChanges: 0 };
 }
 
-describe("private cloud backup keeps every change", () => {
+describe.each([
+  { protocol: "pull, push, pull", capabilities: null },
+  // The push brings back later changes, and Realtime lets a current device skip its catch-up pull.
+  { protocol: "push returning later changes", capabilities: { pushReturnsLaterBatches: true } },
+])("private cloud backup keeps every change ($protocol)", ({ capabilities }) => {
   beforeEach(() => {
     community = new FakeCommunity();
     vi.spyOn(globalThis, "fetch").mockImplementation(community.fetch);
     runtime.supportsV2 = false;
-    runtime.capabilities = null;
+    runtime.capabilities = capabilities;
+    // The shared runtime throttles repairs; each case starts like a fresh install.
+    (runtime as unknown as { lastShadowRepairAt: number }).lastShadowRepairAt = -Infinity;
+    liveRealtime = capabilities !== null;
+    if (liveRealtime) {
+      runtime.channel = {};
+      runtime.realtimeSubscribedAt = 1;
+      community.onForeignCommit = (headCursor) => { runtime.announcedHead = Math.max(runtime.announcedHead, headCursor); };
+    }
   });
 
   afterEach(() => {
@@ -120,16 +135,16 @@ describe("private cloud backup keeps every change", () => {
     const device = new FakeDevice("settings");
     await useDevice(device);
     runtime.supportsV2 = true;
-    localStorage.setItem("tagify:trackListSortBy", "title");
+    localStorage.setItem("tagify:playlistSettings", JSON.stringify({ sort: "title" }));
     await sync(device);
-    expect(community.appState.get("preferences")?.value).toMatchObject({ "tagify:trackListSortBy": "title" });
+    expect(community.appState.get("playlist-rules")?.value).toEqual({ sort: "title" });
 
     // Changed again before this device has seen its own backup come back.
-    localStorage.setItem("tagify:trackListSortBy", "artist");
+    localStorage.setItem("tagify:playlistSettings", JSON.stringify({ sort: "artist" }));
     await sync(device);
 
-    expect(localStorage.getItem("tagify:trackListSortBy")).toBe("artist");
-    expect(community.appState.get("preferences")?.value).toMatchObject({ "tagify:trackListSortBy": "artist" });
+    expect(JSON.parse(localStorage.getItem("tagify:playlistSettings") || "null")).toEqual({ sort: "artist" });
+    expect(community.appState.get("playlist-rules")?.value).toEqual({ sort: "artist" });
     expect(community.conflictCount).toBe(0);
   });
 
@@ -139,43 +154,43 @@ describe("private cloud backup keeps every change", () => {
     const desktop = new FakeDevice("desktop-settings");
     await useDevice(laptop);
     runtime.supportsV2 = true;
-    localStorage.setItem("tagify:trackListSortBy", "title");
+    localStorage.setItem("tagify:playlistSettings", JSON.stringify({ sort: "title" }));
     await sync(laptop);
     await sync(desktop);
-    expect(localStorage.getItem("tagify:trackListSortBy")).toBe("title");
+    expect(JSON.parse(localStorage.getItem("tagify:playlistSettings") || "null")).toEqual({ sort: "title" });
 
-    localStorage.setItem("tagify:trackListSortBy", "artist");
+    localStorage.setItem("tagify:playlistSettings", JSON.stringify({ sort: "artist" }));
     await sync(desktop);
     await useDevice(laptop);
-    localStorage.setItem("tagify:trackListSortBy", "album");
+    localStorage.setItem("tagify:playlistSettings", JSON.stringify({ sort: "album" }));
     runtime.backupHealth = healthBase();
     await sync(laptop);
 
-    expect(localStorage.getItem("tagify:trackListSortBy")).toBe("album");
-    expect(community.appState.get("preferences")?.value).toMatchObject({ "tagify:trackListSortBy": "artist" });
-    expect(syncRuntime.getBackupHealth()?.needsChoice).toEqual(["preferences"]);
+    expect(JSON.parse(localStorage.getItem("tagify:playlistSettings") || "null")).toEqual({ sort: "album" });
+    expect(community.appState.get("playlist-rules")?.value).toEqual({ sort: "artist" });
+    expect(syncRuntime.getBackupHealth()?.needsChoice).toEqual(["playlist-rules"]);
 
     // Waiting for a choice never re-sends or overwrites either copy.
     const pushes = community.pushes.length;
     await sync(laptop);
     expect(community.pushes.length).toBe(pushes);
-    expect(localStorage.getItem("tagify:trackListSortBy")).toBe("album");
+    expect(JSON.parse(localStorage.getItem("tagify:playlistSettings") || "null")).toEqual({ sort: "album" });
 
-    await syncRuntime.resolveSettingsChoice("preferences", "device");
+    await syncRuntime.resolveSettingsChoice("playlist-rules", "device");
     await sync(laptop);
-    expect(community.appState.get("preferences")?.value).toMatchObject({ "tagify:trackListSortBy": "album" });
+    expect(community.appState.get("playlist-rules")?.value).toEqual({ sort: "album" });
     expect(syncRuntime.getBackupHealth()?.needsChoice).toEqual([]);
 
     // Choosing the other device's copy shows it here instead.
     await sync(desktop);
-    localStorage.setItem("tagify:trackListSortBy", "date");
+    localStorage.setItem("tagify:playlistSettings", JSON.stringify({ sort: "date" }));
     await sync(desktop);
     await useDevice(laptop);
-    localStorage.setItem("tagify:trackListSortBy", "energy");
+    localStorage.setItem("tagify:playlistSettings", JSON.stringify({ sort: "energy" }));
     await sync(laptop);
-    expect(syncRuntime.getBackupHealth()?.needsChoice).toEqual(["preferences"]);
-    await syncRuntime.resolveSettingsChoice("preferences", "cloud");
-    expect(localStorage.getItem("tagify:trackListSortBy")).toBe("date");
+    expect(syncRuntime.getBackupHealth()?.needsChoice).toEqual(["playlist-rules"]);
+    await syncRuntime.resolveSettingsChoice("playlist-rules", "cloud");
+    expect(JSON.parse(localStorage.getItem("tagify:playlistSettings") || "null")).toEqual({ sort: "date" });
     expect(syncRuntime.getBackupHealth()?.needsChoice).toEqual([]);
   });
 
@@ -185,12 +200,30 @@ describe("private cloud backup keeps every change", () => {
     runtime.supportsV2 = true;
     runtime.backupHealth = healthBase();
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    localStorage.setItem("tagify:tagCombinations", JSON.stringify(Array.from({ length: 30_000 }, (_, index) => `combination-${index}`)));
+    localStorage.setItem("tagify:playlistSettings", JSON.stringify(Array.from({ length: 30_000 }, (_, index) => `combination-${index}`)));
 
     await sync(device);
 
-    expect(community.appState.has("preferences")).toBe(false);
-    expect(syncRuntime.getBackupHealth()).toMatchObject({ notBackedUp: ["preferences"], protectedDomains: ["smart-playlists"] });
+    expect(community.appState.has("playlist-rules")).toBe(false);
+    expect(syncRuntime.getBackupHealth()).toMatchObject({ notBackedUp: ["playlist-rules"], protectedDomains: ["smart-playlists"] });
+  });
+
+  it("keeps device preferences through sync and discards old preference choices", async () => {
+    const device = new FakeDevice("local-preferences");
+    await useDevice(device);
+    runtime.supportsV2 = true;
+    runtime.backupHealth = { ...healthBase(), protectedDomains: ["preferences", "smart-playlists"], appStateDocuments: 2 };
+    localStorage.setItem("tagify:trackListSortBy", "title");
+    await putStateRecord({ key: "app-state-choice:preferences", domain: "preferences", createdAt: "old" });
+    await putStateRecord({ key: "pending-app-state:preferences", domain: "preferences", value: { "tagify:trackListSortBy": "album" }, revision: 1 });
+    community.commitFrom([{ type: "app-state.replace", operationId: crypto.randomUUID(), origin: "desktop", domain: "preferences", value: { "tagify:trackListSortBy": "artist" }, expectedRevision: 0 }]);
+
+    await sync(device);
+
+    expect(localStorage.getItem("tagify:trackListSortBy")).toBe("title");
+    expect(community.pushes.flatMap((push) => push.operations).filter((operation) => operation.type === "app-state.replace" && operation.domain === "preferences")).toHaveLength(1);
+    expect((await readStore<{ key: string }>("sync-state")).some((record) => record.key.includes("app-state") && record.key.endsWith(":preferences"))).toBe(false);
+    expect(syncRuntime.getBackupHealth()).toMatchObject({ protectedDomains: ["smart-playlists"], appStateDocuments: 1, needsChoice: [], notBackedUp: [] });
   });
 
   it("removes a song from the backup after a two-field change", async () => {

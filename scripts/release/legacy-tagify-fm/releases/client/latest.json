@@ -1,0 +1,18 @@
+{
+  "tag_name": "v3.2.0",
+  "name": "v3.2.0",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-12T17:30:39.349Z",
+  "html_url": "https://tagify.fm/releases/client/v3.2.0/",
+  "body": "### What's new in Tagify 3.2.0\n\nNew Stats, quicker tagging and more reliable Smart Playlists.\n\n**See the music behind your stats**  \nExplore your tagging calendar, streaks, favorite tags, ratings, artists, tempo, energy and musical keys. Open a chart\u2019s songs to search, play or turn them into a playlist.\n\nYou can also choose to share your tagging calendar, longest streak, average rating and favorite tag pairs on your [Tagify Community profile](https://community.tagify.fm)!\n\n**Your tags follow matching releases**  \nSpotify often has multiple releases of the same recording, like a single and an album release. Tagify detects matching copies and keeps your tags, ratings and energy consistent across them.\n\n+ other minor bug fixes!\n\nThanks to everyone who tested and reported problems!\n\n**Install or update**\n\n- **macOS:** [Download Tagify Manager](https://tagify.fm/download/mac), move it to Applications and open it to install or update Tagify.\n- **Windows:** [Download the Windows installer](https://tagify.fm/download/windows) and run it to install or update Tagify.\n",
+  "assets": [
+    {
+      "name": "tagify-v3.2.0.zip",
+      "state": "uploaded",
+      "size": 1436949,
+      "digest": "sha256:346f0e746abf3e29aca754240da2e9d2c87e75d7e35fd27109575fed66629c31",
+      "browser_download_url": "https://tagify.fm/releases/client/v3.2.0/tagify-v3.2.0.zip"
+    }
+  ]
+}

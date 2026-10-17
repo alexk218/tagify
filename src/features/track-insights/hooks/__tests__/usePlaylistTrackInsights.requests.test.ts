@@ -7,6 +7,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 it("bounds a large playlist refresh and ignores repeated focus events", async () => {
   vi.useFakeTimers();
   const lookup = vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict").mockResolvedValue([]);
+  vi.spyOn(spotifyApiService, "getPlaylistVersion").mockResolvedValue(null);
   const playlists = Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`spotify:playlist:insights-${i}`, { rating: 0, energy: 0, tagIds: [] }]));
   const hook = renderHook(() => usePlaylistTrackInsights(playlists, {}, createEmptyTaxonomy(), true, null));
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -18,5 +19,18 @@ it("bounds a large playlist refresh and ignores repeated focus events", async ()
   expect(lookup).toHaveBeenCalledTimes(20);
   await act(async () => { await vi.advanceTimersByTimeAsync(240_000); });
   expect(lookup).toHaveBeenCalledTimes(40);
+  hook.unmount();
+});
+it("checks unchanged playlists without downloading them again", async () => {
+  vi.useFakeTimers();
+  const lookup = vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict").mockResolvedValue(["spotify:track:a"]);
+  const version = vi.spyOn(spotifyApiService, "getPlaylistVersion").mockResolvedValue("same");
+  const playlists = Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`spotify:playlist:unchanged-${i}`, { rating: 0, energy: 0, tagIds: [] }]));
+  const hook = renderHook(() => usePlaylistTrackInsights(playlists, {}, createEmptyTaxonomy(), true, null));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(lookup).toHaveBeenCalledTimes(5);
+  await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
+  expect(version).toHaveBeenCalledTimes(10);
+  expect(lookup).toHaveBeenCalledTimes(5);
   hook.unmount();
 });

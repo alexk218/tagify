@@ -8,7 +8,8 @@ For every installer change, review both platforms before release:
 - Footer: **Tutorial** and **Get help on Discord** (`https://discord.gg/C4qbPUbBKV`).
 - Setup: Spotify, Spicetify and Tagify status; **Logs**, **Check again**, and repair.
 - Tutorial: Spicetify homepage link and purpose; desktop Spotify requirement; keep the manager for future repairs.
-- Update protection: enabled by default; explain that Spotify updates remove Spicetify and Tagify; preserve pending/error feedback without a redundant saved-choice message.
+- Update protection: enabled by default; explain that Spotify updates remove Spicetify and Tagify; preserve pending/error feedback without a redundant saved-choice message. With **Block Spotify updates** unchecked, a protection error never stops setup; the protection status shows what still needs attention.
+- When Spicetify reports that Spotify "cannot be backed up at this state", setup stops and asks for a Spotify reinstall instead of retrying or suggesting closing Spotify.
 - Ordinary text is non-selectable; links remain clickable; explicit diagnostic Copy actions remain available.
 - Installer updates explain changes and offer the correct platform download.
 

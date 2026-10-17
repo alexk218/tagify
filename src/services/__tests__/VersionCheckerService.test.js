@@ -7,13 +7,9 @@ import { describe, test, expect, beforeEach, vi } from "vitest";
 import { VersionCheckerService } from "../VersionCheckerService";
 
 describe("VersionCheckerService", () => {
-  let versionChecker;
-
   beforeEach(() => {
     // Clear all mocks before each test
     vi.clearAllMocks();
-    // Initialize with a base version for testing
-    versionChecker = new VersionCheckerService("1.0.2", "alexk218", "tagify");
   });
 
   describe("Version Comparison - Standard Semver", () => {
@@ -103,6 +99,7 @@ describe("VersionCheckerService", () => {
 
         expect(result.hasUpdate).toBe(shouldUpdate);
         expect(result.latestVersion).toBe(latest);
+        expect(global.fetch).toHaveBeenCalledWith("https://api.github.com/repos/alexk218/tagify/releases/latest");
       });
     });
   });
@@ -345,7 +342,6 @@ if (typeof window !== "undefined") {
     ];
 
     testCases.forEach(({ current, latest, expected }) => {
-      const checker = new VersionCheckerService(current, "alexk218", "tagify");
       console.log(`${current} vs ${latest}: expected ${expected}`);
     });
   };

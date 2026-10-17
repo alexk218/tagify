@@ -6,12 +6,12 @@
     <key>CFBundleIdentifier</key><string>fm.tagify.installer</string>
     <key>CFBundleExecutable</key><string>TagifyInstaller</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0.11</string>
-    <key>CFBundleVersion</key><string>12</string>
+    <key>CFBundleShortVersionString</key><string>1.0.14</string>
+    <key>CFBundleVersion</key><string>14</string>
     <key>LSMinimumSystemVersion</key><string>12.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
-    <key>SUFeedURL</key><string>https://tagify.fm/releases/manager/appcast.xml</string>
+    <key>SUFeedURL</key><string>https://raw.githubusercontent.com/alexk218/tagify-installer/main/appcast.xml</string>
     <key>SUPublicEDKey</key><string>ZJMVeDgExjYEnr6nS4w108LDUcMZwfaXen0KJVYjTa8=</string>
     <key>SUEnableAutomaticChecks</key><false/>
     <key>SUAllowsAutomaticUpdates</key><false/>

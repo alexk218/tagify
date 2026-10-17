@@ -1,4 +1,5 @@
 import { TagTaxonomy } from "@/types/tagData";
+import { formatCheckRetryWait, type SmartPlaylistCheckFailure } from "./smartPlaylist.checkFailure";
 
 export interface SmartPlaylistAppliedCriteriaNotification {
   trackName?: string;
@@ -116,9 +117,14 @@ export function showSmartPlaylistSyncSuccessNotification(
 
 export function showSmartPlaylistSyncErrorNotification(
   playlistName: string,
+  failure?: SmartPlaylistCheckFailure,
 ): void {
   Spicetify.showNotification(
-    `Couldn't update "${playlistName}" in Spotify. Your Smart Playlist is safe; try Sync again.`,
+    failure?.kind === "paused"
+      ? `Spotify asked Tagify to wait, so "${playlistName}" wasn't synced. Your Smart Playlist is safe; try Sync again in ${formatCheckRetryWait(failure.retryAt)}.`
+      : failure?.kind === "notResponding"
+        ? `Spotify is taking too long to respond, so "${playlistName}" wasn't synced. Your Smart Playlist is safe; restart Spotify if this keeps happening.`
+        : `Couldn't update "${playlistName}" in Spotify. Your Smart Playlist is safe; try Sync again.`,
     true,
     8000,
   );

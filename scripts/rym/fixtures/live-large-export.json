@@ -1,0 +1,1772 @@
+{
+  "format": "tagify-rym-personal-tags",
+  "version": 1,
+  "account": "test",
+  "status": "complete",
+  "selectedTags": [
+    {
+      "name": "tagify-export-test-20261013",
+      "url": "https://rateyourmusic.com/collection/test/stag/tagify%2dexport%2dtest%2d20261013/",
+      "expected": 1,
+      "collected": 1
+    },
+    {
+      "name": "tagify-large-test-20261013",
+      "url": "https://rateyourmusic.com/collection/test/stag/tagify%2dlarge%2dtest%2d20261013/",
+      "expected": 101,
+      "collected": 101
+    },
+    {
+      "name": "tagify-overlap-test-20261013",
+      "url": "https://rateyourmusic.com/collection/test/stag/tagify%2doverlap%2dtest%2d20261013/",
+      "expected": 2,
+      "collected": 2
+    },
+    {
+      "name": "tagify-pagination-test-20261013",
+      "url": "https://rateyourmusic.com/collection/test/stag/tagify%2dpagination%2dtest%2d20261013/",
+      "expected": 26,
+      "collected": 26
+    },
+    {
+      "name": "tagify second test",
+      "url": "https://rateyourmusic.com/collection/test/stag/tagify+second+test/",
+      "expected": 1,
+      "collected": 1
+    }
+  ],
+  "pages": [
+    {
+      "tag": "tagify-export-test-20261013",
+      "path": "/collection/test/stag/tagify-export-test-20261013",
+      "signature": "[{\"id\":\"16765\",\"url\":\"https://rateyourmusic.com/release/album/voivod/nothingface/\",\"title\":\"Nothingface\",\"artists\":[\"Voivod\"],\"year\":1989,\"releaseType\":\"album\",\"tags\":[\"tagify-export-test-20261013\",\"tagify second test\"]}]"
+    },
+    {
+      "tag": "tagify-large-test-20261013",
+      "path": "/collection/test/stag/tagify-large-test-20261013",
+      "signature": "[{\"id\":\"235964\",\"url\":\"https://rateyourmusic.com/release/single/the-fluid-nirvana/candy-mollys-lips/\",\"title\":\"Candy / Molly's Lips\",\"artists\":[\"The Fluid\",\"Nirvana\"],\"year\":1991,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"3128708\",\"url\":\"https://rateyourmusic.com/release/album/killing-joke/absolute-dissent-10/\",\"title\":\"Absolute Dissent\",\"artists\":[\"Killing Joke\"],\"year\":2010,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1073\",\"url\":\"https://rateyourmusic.com/release/album/metallica/kill-em-all/\",\"title\":\"Kill 'Em All\",\"artists\":[\"Metallica\"],\"year\":1983,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\",\"tagify-overlap-test-20261013\"]},{\"id\":\"1225777\",\"url\":\"https://rateyourmusic.com/release/album/metallica/ride-the-lightning/\",\"title\":\"Ride the Lightning\",\"artists\":[\"Metallica\"],\"year\":1984,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1593\",\"url\":\"https://rateyourmusic.com/release/album/metallica/master-of-puppets/\",\"title\":\"Master of Puppets\",\"artists\":[\"Metallica\"],\"year\":1986,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"5183\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/the-5_98-e_p-garage-days-re-revisited/\",\"title\":\"The $5.98 E.P.: Garage Days Re-Revisited\",\"artists\":[\"Metallica\"],\"year\":1987,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1393905\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/metallica/\",\"title\":\"Metallica\",\"artists\":[\"Metallica\"],\"year\":1988,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"3770\",\"url\":\"https://rateyourmusic.com/release/album/metallica/_and-justice-for-all/\",\"title\":\"...And Justice for All\",\"artists\":[\"Metallica\"],\"year\":1988,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1657090\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/the-6-1_2-year-anniversary-live-e_p/\",\"title\":\"The 6 1/2 Year Anniversary Live E.P.\",\"artists\":[\"Metallica\"],\"year\":1990,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1337\",\"url\":\"https://rateyourmusic.com/release/album/metallica/metallica/\",\"title\":\"Metallica\",\"artists\":[\"Metallica\"],\"year\":1991,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"4501\",\"url\":\"https://rateyourmusic.com/release/album/metallica/live-shit-binge-and-purge/\",\"title\":\"Live Shit: Binge & Purge\",\"artists\":[\"Metallica\"],\"year\":1993,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"2443\",\"url\":\"https://rateyourmusic.com/release/album/metallica/load/\",\"title\":\"Load\",\"artists\":[\"Metallica\"],\"year\":1996,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"2444\",\"url\":\"https://rateyourmusic.com/release/album/metallica/reload/\",\"title\":\"Reload\",\"artists\":[\"Metallica\"],\"year\":1997,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"53152\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/live-in-london-antipodean-tour-edition/\",\"title\":\"Live in London: Antipodean Tour Edition\",\"artists\":[\"Metallica\"],\"year\":1998,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1336\",\"url\":\"https://rateyourmusic.com/release/album/metallica/sandm/\",\"title\":\"S&M\",\"artists\":[\"Metallica\"],\"year\":1999,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"4426911\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/the-garage-remains-the-same/\",\"title\":\"The Garage Remains the Same\",\"artists\":[\"Metallica\"],\"year\":2000,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"46090\",\"url\":\"https://rateyourmusic.com/release/album/metallica/st-anger/\",\"title\":\"St. Anger\",\"artists\":[\"Metallica\"],\"year\":2003,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"2999377\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/%E3%82%BB%E3%82%A4%E3%83%B3%E3%83%88%E3%83%BB%E3%82%A2%E3%83%B3%E3%82%AC%E3%83%BC/\",\"title\":\"セイント・アンガー [St. Anger]\",\"artists\":[\"Metallica\"],\"year\":2003,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"124311\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/the-unnamed-feeling-e_p/\",\"title\":\"The Unnamed Feeling E.P.\",\"artists\":[\"Metallica\"],\"year\":2004,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"170808\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/some-kind-of-monster/\",\"title\":\"Some Kind of Monster\",\"artists\":[\"Metallica\"],\"year\":2004,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1547579\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/live-from-live-earth-ep/\",\"title\":\"Live From Live Earth - EP\",\"artists\":[\"Metallica\"],\"year\":2007,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1573481\",\"url\":\"https://rateyourmusic.com/release/album/metallica/death-magnetic/\",\"title\":\"Death Magnetic\",\"artists\":[\"Metallica\"],\"year\":2008,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"3097141\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/six-feet-down-under-ep/\",\"title\":\"Six Feet Down Under EP\",\"artists\":[\"Metallica\"],\"year\":2010,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"3171782\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/six-feet-down-under-part-ii/\",\"title\":\"Six Feet Down Under Part II\",\"artists\":[\"Metallica\"],\"year\":2010,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"3141202\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/live-at-grimeys/\",\"title\":\"Live at Grimey's\",\"artists\":[\"Metallica\"],\"year\":2010,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]}]"
+    },
+    {
+      "tag": "tagify-large-test-20261013",
+      "path": "/collection/test/stag/tagify-large-test-20261013/2",
+      "signature": "[{\"id\":\"3777931\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/beyond-magnetic/\",\"title\":\"Beyond Magnetic\",\"artists\":[\"Metallica\"],\"year\":2011,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"4685424\",\"url\":\"https://rateyourmusic.com/release/album/metallica/metallica-through-the-never/\",\"title\":\"Metallica Through the Never\",\"artists\":[\"Metallica\"],\"year\":2013,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"5565902\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/musicares-map-fund-benefit-concert/\",\"title\":\"MusiCares MAP Fund Benefit Concert\",\"artists\":[\"Metallica\"],\"year\":2014,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"7624463\",\"url\":\"https://rateyourmusic.com/release/album/metallica/hardwired_to-self-destruct/\",\"title\":\"Hardwired...to Self-Destruct\",\"artists\":[\"Metallica\"],\"year\":2016,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"10074605\",\"url\":\"https://rateyourmusic.com/release/album/metallica/helping-hands-live-and-acoustic-at-the-masonic/\",\"title\":\"Helping Hands... Live & Acoustic at the Masonic\",\"artists\":[\"Metallica\"],\"year\":2019,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"13569881\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/tribute-to-chris-cornell/\",\"title\":\"Tribute to Chris Cornell\",\"artists\":[\"Metallica\"],\"year\":2021,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"15021344\",\"url\":\"https://rateyourmusic.com/release/album/metallica/72-seasons/\",\"title\":\"72 Seasons\",\"artists\":[\"Metallica\"],\"year\":2023,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"16373115\",\"url\":\"https://rateyourmusic.com/release/ep/metallica/m72-world-tour-mexico-city/\",\"title\":\"M72 World Tour: Mexico City\",\"artists\":[\"Metallica\"],\"year\":2025,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"16797992\",\"url\":\"https://rateyourmusic.com/release/album/metallica/live-at-mid-hudson-civic-center-poughkeepsie-new-york-november-28-1986/\",\"title\":\"Live at Mid-Hudson Civic Center: Poughkeepsie, New York - November 28, 1986\",\"artists\":[\"Metallica\"],\"year\":2025,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"16895781\",\"url\":\"https://rateyourmusic.com/release/album/metallica/brisbane-australia-january-19-2004/\",\"title\":\"Brisbane Australia: January 19 2004\",\"artists\":[\"Metallica\"],\"year\":2026,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"17307534\",\"url\":\"https://rateyourmusic.com/release/album/metallica/london-england-july-3-2026/\",\"title\":\"London, England: July 3, 2026\",\"artists\":[\"Metallica\"],\"year\":2026,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"11769795\",\"url\":\"https://rateyourmusic.com/release/album/metallica-san-francisco-symphony/sandm2/\",\"title\":\"S&M2\",\"artists\":[\"Metallica\",\"San Francisco Symphony\"],\"year\":2020,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"46338\",\"url\":\"https://rateyourmusic.com/release/single/nirvana/love-buzz-big-cheese/\",\"title\":\"Love Buzz / Big Cheese\",\"artists\":[\"Nirvana\"],\"year\":1988,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"125\",\"url\":\"https://rateyourmusic.com/release/album/nirvana/bleach/\",\"title\":\"Bleach\",\"artists\":[\"Nirvana\"],\"year\":1989,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"46335\",\"url\":\"https://rateyourmusic.com/release/ep/nirvana/blew/\",\"title\":\"Blew\",\"artists\":[\"Nirvana\"],\"year\":1989,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"46336\",\"url\":\"https://rateyourmusic.com/release/single/nirvana/sliver-dive/\",\"title\":\"Sliver / Dive\",\"artists\":[\"Nirvana\"],\"year\":1990,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"126\",\"url\":\"https://rateyourmusic.com/release/album/nirvana/nevermind/\",\"title\":\"Nevermind\",\"artists\":[\"Nirvana\"],\"year\":1991,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"815041\",\"url\":\"https://rateyourmusic.com/release/single/nirvana/on-a-plain/\",\"title\":\"On a Plain\",\"artists\":[\"Nirvana\"],\"year\":1991,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"46339\",\"url\":\"https://rateyourmusic.com/release/single/nirvana/smells-like-teen-spirit/\",\"title\":\"Smells Like Teen Spirit\",\"artists\":[\"Nirvana\"],\"year\":1991,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"583298\",\"url\":\"https://rateyourmusic.com/release/ep/nirvana/hormoaning/\",\"title\":\"Hormoaning\",\"artists\":[\"Nirvana\"],\"year\":1991,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1226035\",\"url\":\"https://rateyourmusic.com/release/single/nirvana/mollys-lips/\",\"title\":\"Molly's Lips\",\"artists\":[\"Nirvana\"],\"year\":1992,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"46340\",\"url\":\"https://rateyourmusic.com/release/single/nirvana/come-as-you-are/\",\"title\":\"Come as You Are\",\"artists\":[\"Nirvana\"],\"year\":1992,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"46341\",\"url\":\"https://rateyourmusic.com/release/single/nirvana/lithium/\",\"title\":\"Lithium\",\"artists\":[\"Nirvana\"],\"year\":1992,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"128\",\"url\":\"https://rateyourmusic.com/release/album/nirvana/in-utero/\",\"title\":\"In Utero\",\"artists\":[\"Nirvana\"],\"year\":1993,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"15485545\",\"url\":\"https://rateyourmusic.com/release/ep/nirvana/in-utero-30th-live/\",\"title\":\"In Utero 30th Live\",\"artists\":[\"Nirvana\"],\"year\":2023,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]}]"
+    },
+    {
+      "tag": "tagify-large-test-20261013",
+      "path": "/collection/test/stag/tagify-large-test-20261013/3",
+      "signature": "[{\"id\":\"625511\",\"url\":\"https://rateyourmusic.com/release/ep/nirvana-helios-creed-yeast-coffin-break/teriyaki-asthma/\",\"title\":\"Teriyaki Asthma\",\"artists\":[\"Nirvana\",\"Helios Creed\",\"Yeast\",\"Coffin Break\"],\"year\":1989,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"399809\",\"url\":\"https://rateyourmusic.com/release/single/nirvana-melvins/here-she-comes-now-venus-in-furs/\",\"title\":\"Here She Comes Now / Venus in Furs\",\"artists\":[\"Nirvana\",\"Melvins\"],\"year\":1991,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"16297821\",\"url\":\"https://rateyourmusic.com/release/ep/nirvana-steven-jesse-bernstein/bleach-b-side-jesse-12-b-side/\",\"title\":\"Bleach B Side / Jesse 12\\\" B Side\",\"artists\":[\"Nirvana\",\"Steven Jesse Bernstein\"],\"year\":1992,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"12905\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/drill/\",\"title\":\"Drill\",\"artists\":[\"Radiohead\"],\"year\":1992,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"183909\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/creep/\",\"title\":\"Creep\",\"artists\":[\"Radiohead\"],\"year\":1992,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"2827165\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/creep/\",\"title\":\"Creep\",\"artists\":[\"Radiohead\"],\"year\":1993,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"47\",\"url\":\"https://rateyourmusic.com/release/album/radiohead/pablo-honey/\",\"title\":\"Pablo Honey\",\"artists\":[\"Radiohead\"],\"year\":1993,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"560784\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/anyone-can-play-guitar/\",\"title\":\"Anyone Can Play Guitar\",\"artists\":[\"Radiohead\"],\"year\":1994,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"14336\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/itch/\",\"title\":\"Itch\",\"artists\":[\"Radiohead\"],\"year\":1994,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"3661\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/my-iron-lung/\",\"title\":\"My Iron Lung\",\"artists\":[\"Radiohead\"],\"year\":1994,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"522813\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/just-for-college/\",\"title\":\"Just (For College)\",\"artists\":[\"Radiohead\"],\"year\":1995,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1363054\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/live-at-the-astoria/\",\"title\":\"Live at the Astoria\",\"artists\":[\"Radiohead\"],\"year\":1995,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"364955\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/live-au-forum/\",\"title\":\"Live au Forum\",\"artists\":[\"Radiohead\"],\"year\":1995,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"20952\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/high-and-dry-planet-telex/\",\"title\":\"High and Dry / Planet Telex\",\"artists\":[\"Radiohead\"],\"year\":1995,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"44\",\"url\":\"https://rateyourmusic.com/release/album/radiohead/the-bends/\",\"title\":\"The Bends\",\"artists\":[\"Radiohead\"],\"year\":1995,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"40083\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/fake-plastic-trees/\",\"title\":\"Fake Plastic Trees\",\"artists\":[\"Radiohead\"],\"year\":1995,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"368422\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/live-ep/\",\"title\":\"Live EP\",\"artists\":[\"Radiohead\"],\"year\":1996,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"67131\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/street-spirit-fade-out/\",\"title\":\"Street Spirit (Fade Out)\",\"artists\":[\"Radiohead\"],\"year\":1996,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"2303798\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/let-down-karma-police/\",\"title\":\"Let Down / Karma Police\",\"artists\":[\"Radiohead\"],\"year\":1997,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"20953\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/paranoid-android/\",\"title\":\"Paranoid Android\",\"artists\":[\"Radiohead\"],\"year\":1997,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"45\",\"url\":\"https://rateyourmusic.com/release/album/radiohead/ok-computer/\",\"title\":\"OK Computer\",\"artists\":[\"Radiohead\"],\"year\":1997,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"80031\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/karma-police/\",\"title\":\"Karma Police\",\"artists\":[\"Radiohead\"],\"year\":1997,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"34796\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/no-surprises-running-from-demons/\",\"title\":\"No Surprises / Running From Demons\",\"artists\":[\"Radiohead\"],\"year\":1997,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"18721\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/college-karma-ep/\",\"title\":\"College Karma EP\",\"artists\":[\"Radiohead\"],\"year\":1998,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"70631\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/no-surprises/\",\"title\":\"No Surprises\",\"artists\":[\"Radiohead\"],\"year\":1998,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]}]"
+    },
+    {
+      "tag": "tagify-large-test-20261013",
+      "path": "/collection/test/stag/tagify-large-test-20261013/4",
+      "signature": "[{\"id\":\"1580\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/airbag-how-am-i-driving/\",\"title\":\"Airbag / How Am I Driving?\",\"artists\":[\"Radiohead\"],\"year\":1998,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"3598959\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/how-to-disappear-completely/\",\"title\":\"How to Disappear Completely\",\"artists\":[\"Radiohead\"],\"year\":2000,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"46\",\"url\":\"https://rateyourmusic.com/release/album/radiohead/kid-a/\",\"title\":\"Kid A\",\"artists\":[\"Radiohead\"],\"year\":2000,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"712881\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/idioteque/\",\"title\":\"Idioteque\",\"artists\":[\"Radiohead\"],\"year\":2000,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"827079\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/college-ep/\",\"title\":\"College EP\",\"artists\":[\"Radiohead\"],\"year\":2001,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"14576\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/pyramid-song/\",\"title\":\"Pyramid Song\",\"artists\":[\"Radiohead\"],\"year\":2001,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1705\",\"url\":\"https://rateyourmusic.com/release/album/radiohead/amnesiac/\",\"title\":\"Amnesiac\",\"artists\":[\"Radiohead\"],\"year\":2001,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"20954\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/knives-out/\",\"title\":\"Knives Out\",\"artists\":[\"Radiohead\"],\"year\":2001,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"28116\",\"url\":\"https://rateyourmusic.com/release/ep/radiohead/i-might-be-wrong-live-recordings/\",\"title\":\"I Might Be Wrong: Live Recordings\",\"artists\":[\"Radiohead\"],\"year\":2001,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"56332\",\"url\":\"https://rateyourmusic.com/release/album/radiohead/hail-to-the-thief/\",\"title\":\"Hail to the Thief\",\"artists\":[\"Radiohead\"],\"year\":2003,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1052924\",\"url\":\"https://rateyourmusic.com/release/album/radiohead/in-rainbows/\",\"title\":\"In Rainbows\",\"artists\":[\"Radiohead\"],\"year\":2007,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1133859\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/jigsaw-falling-into-place/\",\"title\":\"Jigsaw Falling Into Place\",\"artists\":[\"Radiohead\"],\"year\":2008,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"3343084\",\"url\":\"https://rateyourmusic.com/release/album/radiohead/the-king-of-limbs/\",\"title\":\"The King of Limbs\",\"artists\":[\"Radiohead\"],\"year\":2011,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"3604169\",\"url\":\"https://rateyourmusic.com/release/album/radiohead/tkol-rmx-1234567/\",\"title\":\"TKOL RMX 1234567\",\"artists\":[\"Radiohead\"],\"year\":2011,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"7369907\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/burn-the-witch/\",\"title\":\"Burn the Witch\",\"artists\":[\"Radiohead\"],\"year\":2016,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"7377202\",\"url\":\"https://rateyourmusic.com/release/single/radiohead/daydreaming/\",\"title\":\"Daydreaming\",\"artists\":[\"Radiohead\"],\"year\":2016,\"releaseType\":\"single\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"7381986\",\"url\":\"https://rateyourmusic.com/release/album/radiohead/a-moon-shaped-pool/\",\"title\":\"A Moon Shaped Pool\",\"artists\":[\"Radiohead\"],\"year\":2016,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"3619954\",\"url\":\"https://rateyourmusic.com/release/album/lou-reed-metallica/lulu/\",\"title\":\"Lulu\",\"artists\":[\"Lou Reed\",\"Metallica\"],\"year\":2011,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"4887\",\"url\":\"https://rateyourmusic.com/release/album/various-artists/woodstock-94/\",\"title\":\"Woodstock 94\",\"artists\":[\"Various Artists\"],\"year\":1994,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"16025\",\"url\":\"https://rateyourmusic.com/release/album/various-artists/spawn-the-album/\",\"title\":\"Spawn: The Album\",\"artists\":[\"Various Artists\"],\"year\":1997,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"4771\",\"url\":\"https://rateyourmusic.com/release/album/various-artists/music-from-and-inspired-by-m_i-2/\",\"title\":\"Music From and Inspired by M:I-2\",\"artists\":[\"Various Artists\"],\"year\":2000,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"41122\",\"url\":\"https://rateyourmusic.com/release/album/various-artists/were-a-happy-family-a-tribute-to-ramones/\",\"title\":\"We're a Happy Family: A Tribute to Ramones\",\"artists\":[\"Various Artists\"],\"year\":2003,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"1630804\",\"url\":\"https://rateyourmusic.com/release/album/various-artists/maiden-heaven-a-tribute-to-iron-maiden/\",\"title\":\"Maiden Heaven: A Tribute to Iron Maiden\",\"artists\":[\"Various Artists\"],\"year\":2008,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"5232142\",\"url\":\"https://rateyourmusic.com/release/album/various-artists/ronnie-james-dio-this-is-your-life/\",\"title\":\"Ronnie James Dio: This Is Your Life\",\"artists\":[\"Various Artists\"],\"year\":2014,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]},{\"id\":\"13277469\",\"url\":\"https://rateyourmusic.com/release/album/various-artists/the-metallica-blacklist/\",\"title\":\"The Metallica Blacklist\",\"artists\":[\"Various Artists\"],\"year\":2021,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\"]}]"
+    },
+    {
+      "tag": "tagify-large-test-20261013",
+      "path": "/collection/test/stag/tagify-large-test-20261013/5",
+      "signature": "[{\"id\":\"142309\",\"url\":\"https://rateyourmusic.com/release/ep/%E3%83%AC%E3%83%87%E3%82%A3%E3%82%AA%E3%83%98%E3%83%83%E3%83%89-radiohead/%E3%82%B3%E3%83%A0%E3%83%BB%E3%83%A9%E3%82%B0-2_2_5/\",\"title\":\"コム・ラグ: 2+2=5 [Com Lag: 2plus2isfive]\",\"artists\":[\"レディオヘッド [Radiohead]\"],\"year\":2004,\"releaseType\":\"ep\",\"tags\":[\"tagify-large-test-20261013\"]}]"
+    },
+    {
+      "tag": "tagify-overlap-test-20261013",
+      "path": "/collection/test/stag/tagify-overlap-test-20261013",
+      "signature": "[{\"id\":\"1073\",\"url\":\"https://rateyourmusic.com/release/album/metallica/kill-em-all/\",\"title\":\"Kill 'Em All\",\"artists\":[\"Metallica\"],\"year\":1983,\"releaseType\":\"album\",\"tags\":[\"tagify-large-test-20261013\",\"tagify-overlap-test-20261013\"]},{\"id\":\"19573\",\"url\":\"https://rateyourmusic.com/release/album/voivod/war-and-pain/\",\"title\":\"War and Pain\",\"artists\":[\"Voïvod\"],\"year\":1984,\"releaseType\":\"album\",\"tags\":[\"tagify-overlap-test-20261013\",\"tagify-pagination-test-20261013\"]}]"
+    },
+    {
+      "tag": "tagify-pagination-test-20261013",
+      "path": "/collection/test/stag/tagify-pagination-test-20261013",
+      "signature": "[{\"id\":\"446893\",\"url\":\"https://rateyourmusic.com/release/ep/living-colour-the-screaming-blue-messiahs-queensryche-voivod/ep-2/\",\"title\":\"EP 2\",\"artists\":[\"Living Colour\",\"The Screaming Blue Messiahs\",\"Queensrÿche\",\"Voivod\"],\"year\":1988,\"releaseType\":\"ep\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"16764\",\"url\":\"https://rateyourmusic.com/release/album/voivod/dimension-hatross/\",\"title\":\"Dimension Hatröss\",\"artists\":[\"Voivod\"],\"year\":1988,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"16766\",\"url\":\"https://rateyourmusic.com/release/album/voivod/angel-rat/\",\"title\":\"Angel Rat\",\"artists\":[\"Voivod\"],\"year\":1991,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"16767\",\"url\":\"https://rateyourmusic.com/release/album/voivod/the-outer-limits/\",\"title\":\"The Outer Limits\",\"artists\":[\"Voivod\"],\"year\":1993,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"27204\",\"url\":\"https://rateyourmusic.com/release/album/voivod/negatron/\",\"title\":\"Negatron\",\"artists\":[\"Voivod\"],\"year\":1995,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"27206\",\"url\":\"https://rateyourmusic.com/release/album/voivod/voivod-lives/\",\"title\":\"Voivod Lives\",\"artists\":[\"Voivod\"],\"year\":2000,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"3693491\",\"url\":\"https://rateyourmusic.com/release/ep/voivod/voivod/\",\"title\":\"Voivod\",\"artists\":[\"Voivod\"],\"year\":2002,\"releaseType\":\"ep\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"43028\",\"url\":\"https://rateyourmusic.com/release/album/voivod/voivod/\",\"title\":\"Voivod\",\"artists\":[\"Voivod\"],\"year\":2003,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"519839\",\"url\":\"https://rateyourmusic.com/release/album/voivod/katorz/\",\"title\":\"Katorz\",\"artists\":[\"Voivod\"],\"year\":2006,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"2234740\",\"url\":\"https://rateyourmusic.com/release/album/voivod/infini/\",\"title\":\"Infini\",\"artists\":[\"Voivod\"],\"year\":2009,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"3366528\",\"url\":\"https://rateyourmusic.com/release/album/voivod/warriors-of-ice/\",\"title\":\"Warriors of Ice\",\"artists\":[\"Voivod\"],\"year\":2011,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"3914060\",\"url\":\"https://rateyourmusic.com/release/album/voivod/live-at-roadburn-2011/\",\"title\":\"Live at Roadburn 2011\",\"artists\":[\"Voivod\"],\"year\":2012,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"4073832\",\"url\":\"https://rateyourmusic.com/release/album/voivod/target-earth/\",\"title\":\"Target Earth\",\"artists\":[\"Voivod\"],\"year\":2013,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"11538407\",\"url\":\"https://rateyourmusic.com/release/ep/voivod/the-end-of-dormancy/\",\"title\":\"The End of Dormancy\",\"artists\":[\"Voivod\"],\"year\":2020,\"releaseType\":\"ep\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"12090083\",\"url\":\"https://rateyourmusic.com/release/album/voivod/lost-machine/\",\"title\":\"Lost Machine\",\"artists\":[\"Voivod\"],\"year\":2020,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"14042248\",\"url\":\"https://rateyourmusic.com/release/album/voivod/synchro-anarchy/\",\"title\":\"Synchro Anarchy\",\"artists\":[\"Voivod\"],\"year\":2022,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"14898654\",\"url\":\"https://rateyourmusic.com/release/ep/voivod/ultraman/\",\"title\":\"Ultraman\",\"artists\":[\"Voivod\"],\"year\":2022,\"releaseType\":\"ep\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"15230992\",\"url\":\"https://rateyourmusic.com/release/album/voivod/morgoth-tales/\",\"title\":\"Morgöth Tales\",\"artists\":[\"Voivod\"],\"year\":2023,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"19573\",\"url\":\"https://rateyourmusic.com/release/album/voivod/war-and-pain/\",\"title\":\"War and Pain\",\"artists\":[\"Voïvod\"],\"year\":1984,\"releaseType\":\"album\",\"tags\":[\"tagify-overlap-test-20261013\",\"tagify-pagination-test-20261013\"]},{\"id\":\"313879\",\"url\":\"https://rateyourmusic.com/release/ep/voivod/thrashing-rage/\",\"title\":\"Thrashing Rage\",\"artists\":[\"Voïvod\"],\"year\":1986,\"releaseType\":\"ep\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"19574\",\"url\":\"https://rateyourmusic.com/release/album/voivod/rrroooaaarrr/\",\"title\":\"Rrröööaaarrr\",\"artists\":[\"Voïvod\"],\"year\":1986,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"16774\",\"url\":\"https://rateyourmusic.com/release/album/voivod/killing-technology/\",\"title\":\"Killing Technology\",\"artists\":[\"Voïvod\"],\"year\":1987,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"27205\",\"url\":\"https://rateyourmusic.com/release/album/voivod/phobos/\",\"title\":\"Phobos\",\"artists\":[\"Voïvod\"],\"year\":1997,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"7017940\",\"url\":\"https://rateyourmusic.com/release/ep/voivod/post-society/\",\"title\":\"Post Society\",\"artists\":[\"Voïvod\"],\"year\":2016,\"releaseType\":\"ep\",\"tags\":[\"tagify-pagination-test-20261013\"]},{\"id\":\"9323570\",\"url\":\"https://rateyourmusic.com/release/album/voivod/the-wake/\",\"title\":\"The Wake\",\"artists\":[\"Voïvod\"],\"year\":2018,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]}]"
+    },
+    {
+      "tag": "tagify-pagination-test-20261013",
+      "path": "/collection/test/stag/tagify-pagination-test-20261013/2",
+      "signature": "[{\"id\":\"17027426\",\"url\":\"https://rateyourmusic.com/release/album/voivod-orchestre-symphonique-de-quebec/symphonique/\",\"title\":\"Symphonique\",\"artists\":[\"Voivod\",\"Orchestre symphonique de Québec\"],\"year\":2026,\"releaseType\":\"album\",\"tags\":[\"tagify-pagination-test-20261013\"]}]"
+    },
+    {
+      "tag": "tagify second test",
+      "path": "/collection/test/stag/tagify+second+test",
+      "signature": "[{\"id\":\"16765\",\"url\":\"https://rateyourmusic.com/release/album/voivod/nothingface/\",\"title\":\"Nothingface\",\"artists\":[\"Voivod\"],\"year\":1989,\"releaseType\":\"album\",\"tags\":[\"tagify-export-test-20261013\",\"tagify second test\"]}]"
+    }
+  ],
+  "releases": [
+    {
+      "id": "16765",
+      "url": "https://rateyourmusic.com/release/album/voivod/nothingface/",
+      "title": "Nothingface",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 1989,
+      "releaseType": "album",
+      "tags": [
+        "tagify-export-test-20261013",
+        "tagify second test"
+      ]
+    },
+    {
+      "id": "235964",
+      "url": "https://rateyourmusic.com/release/single/the-fluid-nirvana/candy-mollys-lips/",
+      "title": "Candy / Molly's Lips",
+      "artists": [
+        "The Fluid",
+        "Nirvana"
+      ],
+      "year": 1991,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "3128708",
+      "url": "https://rateyourmusic.com/release/album/killing-joke/absolute-dissent-10/",
+      "title": "Absolute Dissent",
+      "artists": [
+        "Killing Joke"
+      ],
+      "year": 2010,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1073",
+      "url": "https://rateyourmusic.com/release/album/metallica/kill-em-all/",
+      "title": "Kill 'Em All",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1983,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013",
+        "tagify-overlap-test-20261013"
+      ]
+    },
+    {
+      "id": "1225777",
+      "url": "https://rateyourmusic.com/release/album/metallica/ride-the-lightning/",
+      "title": "Ride the Lightning",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1984,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1593",
+      "url": "https://rateyourmusic.com/release/album/metallica/master-of-puppets/",
+      "title": "Master of Puppets",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1986,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "5183",
+      "url": "https://rateyourmusic.com/release/ep/metallica/the-5_98-e_p-garage-days-re-revisited/",
+      "title": "The $5.98 E.P.: Garage Days Re-Revisited",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1987,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1393905",
+      "url": "https://rateyourmusic.com/release/ep/metallica/metallica/",
+      "title": "Metallica",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1988,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "3770",
+      "url": "https://rateyourmusic.com/release/album/metallica/_and-justice-for-all/",
+      "title": "...And Justice for All",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1988,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1657090",
+      "url": "https://rateyourmusic.com/release/ep/metallica/the-6-1_2-year-anniversary-live-e_p/",
+      "title": "The 6 1/2 Year Anniversary Live E.P.",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1990,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1337",
+      "url": "https://rateyourmusic.com/release/album/metallica/metallica/",
+      "title": "Metallica",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1991,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "4501",
+      "url": "https://rateyourmusic.com/release/album/metallica/live-shit-binge-and-purge/",
+      "title": "Live Shit: Binge & Purge",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1993,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "2443",
+      "url": "https://rateyourmusic.com/release/album/metallica/load/",
+      "title": "Load",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1996,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "2444",
+      "url": "https://rateyourmusic.com/release/album/metallica/reload/",
+      "title": "Reload",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1997,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "53152",
+      "url": "https://rateyourmusic.com/release/ep/metallica/live-in-london-antipodean-tour-edition/",
+      "title": "Live in London: Antipodean Tour Edition",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1998,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1336",
+      "url": "https://rateyourmusic.com/release/album/metallica/sandm/",
+      "title": "S&M",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 1999,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "4426911",
+      "url": "https://rateyourmusic.com/release/ep/metallica/the-garage-remains-the-same/",
+      "title": "The Garage Remains the Same",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2000,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "46090",
+      "url": "https://rateyourmusic.com/release/album/metallica/st-anger/",
+      "title": "St. Anger",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2003,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "2999377",
+      "url": "https://rateyourmusic.com/release/ep/metallica/%E3%82%BB%E3%82%A4%E3%83%B3%E3%83%88%E3%83%BB%E3%82%A2%E3%83%B3%E3%82%AC%E3%83%BC/",
+      "title": "セイント・アンガー [St. Anger]",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2003,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "124311",
+      "url": "https://rateyourmusic.com/release/ep/metallica/the-unnamed-feeling-e_p/",
+      "title": "The Unnamed Feeling E.P.",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2004,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "170808",
+      "url": "https://rateyourmusic.com/release/ep/metallica/some-kind-of-monster/",
+      "title": "Some Kind of Monster",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2004,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1547579",
+      "url": "https://rateyourmusic.com/release/ep/metallica/live-from-live-earth-ep/",
+      "title": "Live From Live Earth - EP",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2007,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1573481",
+      "url": "https://rateyourmusic.com/release/album/metallica/death-magnetic/",
+      "title": "Death Magnetic",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2008,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "3097141",
+      "url": "https://rateyourmusic.com/release/ep/metallica/six-feet-down-under-ep/",
+      "title": "Six Feet Down Under EP",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2010,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "3171782",
+      "url": "https://rateyourmusic.com/release/ep/metallica/six-feet-down-under-part-ii/",
+      "title": "Six Feet Down Under Part II",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2010,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "3141202",
+      "url": "https://rateyourmusic.com/release/ep/metallica/live-at-grimeys/",
+      "title": "Live at Grimey's",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2010,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "3777931",
+      "url": "https://rateyourmusic.com/release/ep/metallica/beyond-magnetic/",
+      "title": "Beyond Magnetic",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2011,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "4685424",
+      "url": "https://rateyourmusic.com/release/album/metallica/metallica-through-the-never/",
+      "title": "Metallica Through the Never",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2013,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "5565902",
+      "url": "https://rateyourmusic.com/release/ep/metallica/musicares-map-fund-benefit-concert/",
+      "title": "MusiCares MAP Fund Benefit Concert",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2014,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "7624463",
+      "url": "https://rateyourmusic.com/release/album/metallica/hardwired_to-self-destruct/",
+      "title": "Hardwired...to Self-Destruct",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2016,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "10074605",
+      "url": "https://rateyourmusic.com/release/album/metallica/helping-hands-live-and-acoustic-at-the-masonic/",
+      "title": "Helping Hands... Live & Acoustic at the Masonic",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2019,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "13569881",
+      "url": "https://rateyourmusic.com/release/ep/metallica/tribute-to-chris-cornell/",
+      "title": "Tribute to Chris Cornell",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2021,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "15021344",
+      "url": "https://rateyourmusic.com/release/album/metallica/72-seasons/",
+      "title": "72 Seasons",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2023,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "16373115",
+      "url": "https://rateyourmusic.com/release/ep/metallica/m72-world-tour-mexico-city/",
+      "title": "M72 World Tour: Mexico City",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2025,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "16797992",
+      "url": "https://rateyourmusic.com/release/album/metallica/live-at-mid-hudson-civic-center-poughkeepsie-new-york-november-28-1986/",
+      "title": "Live at Mid-Hudson Civic Center: Poughkeepsie, New York - November 28, 1986",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2025,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "16895781",
+      "url": "https://rateyourmusic.com/release/album/metallica/brisbane-australia-january-19-2004/",
+      "title": "Brisbane Australia: January 19 2004",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2026,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "17307534",
+      "url": "https://rateyourmusic.com/release/album/metallica/london-england-july-3-2026/",
+      "title": "London, England: July 3, 2026",
+      "artists": [
+        "Metallica"
+      ],
+      "year": 2026,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "11769795",
+      "url": "https://rateyourmusic.com/release/album/metallica-san-francisco-symphony/sandm2/",
+      "title": "S&M2",
+      "artists": [
+        "Metallica",
+        "San Francisco Symphony"
+      ],
+      "year": 2020,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "46338",
+      "url": "https://rateyourmusic.com/release/single/nirvana/love-buzz-big-cheese/",
+      "title": "Love Buzz / Big Cheese",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1988,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "125",
+      "url": "https://rateyourmusic.com/release/album/nirvana/bleach/",
+      "title": "Bleach",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1989,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "46335",
+      "url": "https://rateyourmusic.com/release/ep/nirvana/blew/",
+      "title": "Blew",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1989,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "46336",
+      "url": "https://rateyourmusic.com/release/single/nirvana/sliver-dive/",
+      "title": "Sliver / Dive",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1990,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "126",
+      "url": "https://rateyourmusic.com/release/album/nirvana/nevermind/",
+      "title": "Nevermind",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1991,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "815041",
+      "url": "https://rateyourmusic.com/release/single/nirvana/on-a-plain/",
+      "title": "On a Plain",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1991,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "46339",
+      "url": "https://rateyourmusic.com/release/single/nirvana/smells-like-teen-spirit/",
+      "title": "Smells Like Teen Spirit",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1991,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "583298",
+      "url": "https://rateyourmusic.com/release/ep/nirvana/hormoaning/",
+      "title": "Hormoaning",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1991,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1226035",
+      "url": "https://rateyourmusic.com/release/single/nirvana/mollys-lips/",
+      "title": "Molly's Lips",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1992,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "46340",
+      "url": "https://rateyourmusic.com/release/single/nirvana/come-as-you-are/",
+      "title": "Come as You Are",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1992,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "46341",
+      "url": "https://rateyourmusic.com/release/single/nirvana/lithium/",
+      "title": "Lithium",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1992,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "128",
+      "url": "https://rateyourmusic.com/release/album/nirvana/in-utero/",
+      "title": "In Utero",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 1993,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "15485545",
+      "url": "https://rateyourmusic.com/release/ep/nirvana/in-utero-30th-live/",
+      "title": "In Utero 30th Live",
+      "artists": [
+        "Nirvana"
+      ],
+      "year": 2023,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "625511",
+      "url": "https://rateyourmusic.com/release/ep/nirvana-helios-creed-yeast-coffin-break/teriyaki-asthma/",
+      "title": "Teriyaki Asthma",
+      "artists": [
+        "Nirvana",
+        "Helios Creed",
+        "Yeast",
+        "Coffin Break"
+      ],
+      "year": 1989,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "399809",
+      "url": "https://rateyourmusic.com/release/single/nirvana-melvins/here-she-comes-now-venus-in-furs/",
+      "title": "Here She Comes Now / Venus in Furs",
+      "artists": [
+        "Nirvana",
+        "Melvins"
+      ],
+      "year": 1991,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "16297821",
+      "url": "https://rateyourmusic.com/release/ep/nirvana-steven-jesse-bernstein/bleach-b-side-jesse-12-b-side/",
+      "title": "Bleach B Side / Jesse 12\" B Side",
+      "artists": [
+        "Nirvana",
+        "Steven Jesse Bernstein"
+      ],
+      "year": 1992,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "12905",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/drill/",
+      "title": "Drill",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1992,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "183909",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/creep/",
+      "title": "Creep",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1992,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "2827165",
+      "url": "https://rateyourmusic.com/release/single/radiohead/creep/",
+      "title": "Creep",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1993,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "47",
+      "url": "https://rateyourmusic.com/release/album/radiohead/pablo-honey/",
+      "title": "Pablo Honey",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1993,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "560784",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/anyone-can-play-guitar/",
+      "title": "Anyone Can Play Guitar",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1994,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "14336",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/itch/",
+      "title": "Itch",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1994,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "3661",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/my-iron-lung/",
+      "title": "My Iron Lung",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1994,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "522813",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/just-for-college/",
+      "title": "Just (For College)",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1995,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1363054",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/live-at-the-astoria/",
+      "title": "Live at the Astoria",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1995,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "364955",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/live-au-forum/",
+      "title": "Live au Forum",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1995,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "20952",
+      "url": "https://rateyourmusic.com/release/single/radiohead/high-and-dry-planet-telex/",
+      "title": "High and Dry / Planet Telex",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1995,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "44",
+      "url": "https://rateyourmusic.com/release/album/radiohead/the-bends/",
+      "title": "The Bends",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1995,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "40083",
+      "url": "https://rateyourmusic.com/release/single/radiohead/fake-plastic-trees/",
+      "title": "Fake Plastic Trees",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1995,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "368422",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/live-ep/",
+      "title": "Live EP",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1996,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "67131",
+      "url": "https://rateyourmusic.com/release/single/radiohead/street-spirit-fade-out/",
+      "title": "Street Spirit (Fade Out)",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1996,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "2303798",
+      "url": "https://rateyourmusic.com/release/single/radiohead/let-down-karma-police/",
+      "title": "Let Down / Karma Police",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1997,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "20953",
+      "url": "https://rateyourmusic.com/release/single/radiohead/paranoid-android/",
+      "title": "Paranoid Android",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1997,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "45",
+      "url": "https://rateyourmusic.com/release/album/radiohead/ok-computer/",
+      "title": "OK Computer",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1997,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "80031",
+      "url": "https://rateyourmusic.com/release/single/radiohead/karma-police/",
+      "title": "Karma Police",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1997,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "34796",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/no-surprises-running-from-demons/",
+      "title": "No Surprises / Running From Demons",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1997,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "18721",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/college-karma-ep/",
+      "title": "College Karma EP",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1998,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "70631",
+      "url": "https://rateyourmusic.com/release/single/radiohead/no-surprises/",
+      "title": "No Surprises",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1998,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1580",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/airbag-how-am-i-driving/",
+      "title": "Airbag / How Am I Driving?",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 1998,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "3598959",
+      "url": "https://rateyourmusic.com/release/single/radiohead/how-to-disappear-completely/",
+      "title": "How to Disappear Completely",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2000,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "46",
+      "url": "https://rateyourmusic.com/release/album/radiohead/kid-a/",
+      "title": "Kid A",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2000,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "712881",
+      "url": "https://rateyourmusic.com/release/single/radiohead/idioteque/",
+      "title": "Idioteque",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2000,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "827079",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/college-ep/",
+      "title": "College EP",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2001,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "14576",
+      "url": "https://rateyourmusic.com/release/single/radiohead/pyramid-song/",
+      "title": "Pyramid Song",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2001,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1705",
+      "url": "https://rateyourmusic.com/release/album/radiohead/amnesiac/",
+      "title": "Amnesiac",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2001,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "20954",
+      "url": "https://rateyourmusic.com/release/single/radiohead/knives-out/",
+      "title": "Knives Out",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2001,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "28116",
+      "url": "https://rateyourmusic.com/release/ep/radiohead/i-might-be-wrong-live-recordings/",
+      "title": "I Might Be Wrong: Live Recordings",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2001,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "56332",
+      "url": "https://rateyourmusic.com/release/album/radiohead/hail-to-the-thief/",
+      "title": "Hail to the Thief",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2003,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1052924",
+      "url": "https://rateyourmusic.com/release/album/radiohead/in-rainbows/",
+      "title": "In Rainbows",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2007,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1133859",
+      "url": "https://rateyourmusic.com/release/single/radiohead/jigsaw-falling-into-place/",
+      "title": "Jigsaw Falling Into Place",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2008,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "3343084",
+      "url": "https://rateyourmusic.com/release/album/radiohead/the-king-of-limbs/",
+      "title": "The King of Limbs",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2011,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "3604169",
+      "url": "https://rateyourmusic.com/release/album/radiohead/tkol-rmx-1234567/",
+      "title": "TKOL RMX 1234567",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2011,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "7369907",
+      "url": "https://rateyourmusic.com/release/single/radiohead/burn-the-witch/",
+      "title": "Burn the Witch",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2016,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "7377202",
+      "url": "https://rateyourmusic.com/release/single/radiohead/daydreaming/",
+      "title": "Daydreaming",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2016,
+      "releaseType": "single",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "7381986",
+      "url": "https://rateyourmusic.com/release/album/radiohead/a-moon-shaped-pool/",
+      "title": "A Moon Shaped Pool",
+      "artists": [
+        "Radiohead"
+      ],
+      "year": 2016,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "3619954",
+      "url": "https://rateyourmusic.com/release/album/lou-reed-metallica/lulu/",
+      "title": "Lulu",
+      "artists": [
+        "Lou Reed",
+        "Metallica"
+      ],
+      "year": 2011,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "4887",
+      "url": "https://rateyourmusic.com/release/album/various-artists/woodstock-94/",
+      "title": "Woodstock 94",
+      "artists": [
+        "Various Artists"
+      ],
+      "year": 1994,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "16025",
+      "url": "https://rateyourmusic.com/release/album/various-artists/spawn-the-album/",
+      "title": "Spawn: The Album",
+      "artists": [
+        "Various Artists"
+      ],
+      "year": 1997,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "4771",
+      "url": "https://rateyourmusic.com/release/album/various-artists/music-from-and-inspired-by-m_i-2/",
+      "title": "Music From and Inspired by M:I-2",
+      "artists": [
+        "Various Artists"
+      ],
+      "year": 2000,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "41122",
+      "url": "https://rateyourmusic.com/release/album/various-artists/were-a-happy-family-a-tribute-to-ramones/",
+      "title": "We're a Happy Family: A Tribute to Ramones",
+      "artists": [
+        "Various Artists"
+      ],
+      "year": 2003,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "1630804",
+      "url": "https://rateyourmusic.com/release/album/various-artists/maiden-heaven-a-tribute-to-iron-maiden/",
+      "title": "Maiden Heaven: A Tribute to Iron Maiden",
+      "artists": [
+        "Various Artists"
+      ],
+      "year": 2008,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "5232142",
+      "url": "https://rateyourmusic.com/release/album/various-artists/ronnie-james-dio-this-is-your-life/",
+      "title": "Ronnie James Dio: This Is Your Life",
+      "artists": [
+        "Various Artists"
+      ],
+      "year": 2014,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "13277469",
+      "url": "https://rateyourmusic.com/release/album/various-artists/the-metallica-blacklist/",
+      "title": "The Metallica Blacklist",
+      "artists": [
+        "Various Artists"
+      ],
+      "year": 2021,
+      "releaseType": "album",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "142309",
+      "url": "https://rateyourmusic.com/release/ep/%E3%83%AC%E3%83%87%E3%82%A3%E3%82%AA%E3%83%98%E3%83%83%E3%83%89-radiohead/%E3%82%B3%E3%83%A0%E3%83%BB%E3%83%A9%E3%82%B0-2_2_5/",
+      "title": "コム・ラグ: 2+2=5 [Com Lag: 2plus2isfive]",
+      "artists": [
+        "レディオヘッド [Radiohead]"
+      ],
+      "year": 2004,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-large-test-20261013"
+      ]
+    },
+    {
+      "id": "19573",
+      "url": "https://rateyourmusic.com/release/album/voivod/war-and-pain/",
+      "title": "War and Pain",
+      "artists": [
+        "Voïvod"
+      ],
+      "year": 1984,
+      "releaseType": "album",
+      "tags": [
+        "tagify-overlap-test-20261013",
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "446893",
+      "url": "https://rateyourmusic.com/release/ep/living-colour-the-screaming-blue-messiahs-queensryche-voivod/ep-2/",
+      "title": "EP 2",
+      "artists": [
+        "Living Colour",
+        "The Screaming Blue Messiahs",
+        "Queensrÿche",
+        "Voivod"
+      ],
+      "year": 1988,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "16764",
+      "url": "https://rateyourmusic.com/release/album/voivod/dimension-hatross/",
+      "title": "Dimension Hatröss",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 1988,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "16766",
+      "url": "https://rateyourmusic.com/release/album/voivod/angel-rat/",
+      "title": "Angel Rat",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 1991,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "16767",
+      "url": "https://rateyourmusic.com/release/album/voivod/the-outer-limits/",
+      "title": "The Outer Limits",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 1993,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "27204",
+      "url": "https://rateyourmusic.com/release/album/voivod/negatron/",
+      "title": "Negatron",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 1995,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "27206",
+      "url": "https://rateyourmusic.com/release/album/voivod/voivod-lives/",
+      "title": "Voivod Lives",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2000,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "3693491",
+      "url": "https://rateyourmusic.com/release/ep/voivod/voivod/",
+      "title": "Voivod",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2002,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "43028",
+      "url": "https://rateyourmusic.com/release/album/voivod/voivod/",
+      "title": "Voivod",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2003,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "519839",
+      "url": "https://rateyourmusic.com/release/album/voivod/katorz/",
+      "title": "Katorz",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2006,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "2234740",
+      "url": "https://rateyourmusic.com/release/album/voivod/infini/",
+      "title": "Infini",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2009,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "3366528",
+      "url": "https://rateyourmusic.com/release/album/voivod/warriors-of-ice/",
+      "title": "Warriors of Ice",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2011,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "3914060",
+      "url": "https://rateyourmusic.com/release/album/voivod/live-at-roadburn-2011/",
+      "title": "Live at Roadburn 2011",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2012,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "4073832",
+      "url": "https://rateyourmusic.com/release/album/voivod/target-earth/",
+      "title": "Target Earth",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2013,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "11538407",
+      "url": "https://rateyourmusic.com/release/ep/voivod/the-end-of-dormancy/",
+      "title": "The End of Dormancy",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2020,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "12090083",
+      "url": "https://rateyourmusic.com/release/album/voivod/lost-machine/",
+      "title": "Lost Machine",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2020,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "14042248",
+      "url": "https://rateyourmusic.com/release/album/voivod/synchro-anarchy/",
+      "title": "Synchro Anarchy",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2022,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "14898654",
+      "url": "https://rateyourmusic.com/release/ep/voivod/ultraman/",
+      "title": "Ultraman",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2022,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "15230992",
+      "url": "https://rateyourmusic.com/release/album/voivod/morgoth-tales/",
+      "title": "Morgöth Tales",
+      "artists": [
+        "Voivod"
+      ],
+      "year": 2023,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "313879",
+      "url": "https://rateyourmusic.com/release/ep/voivod/thrashing-rage/",
+      "title": "Thrashing Rage",
+      "artists": [
+        "Voïvod"
+      ],
+      "year": 1986,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "19574",
+      "url": "https://rateyourmusic.com/release/album/voivod/rrroooaaarrr/",
+      "title": "Rrröööaaarrr",
+      "artists": [
+        "Voïvod"
+      ],
+      "year": 1986,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "16774",
+      "url": "https://rateyourmusic.com/release/album/voivod/killing-technology/",
+      "title": "Killing Technology",
+      "artists": [
+        "Voïvod"
+      ],
+      "year": 1987,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "27205",
+      "url": "https://rateyourmusic.com/release/album/voivod/phobos/",
+      "title": "Phobos",
+      "artists": [
+        "Voïvod"
+      ],
+      "year": 1997,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "7017940",
+      "url": "https://rateyourmusic.com/release/ep/voivod/post-society/",
+      "title": "Post Society",
+      "artists": [
+        "Voïvod"
+      ],
+      "year": 2016,
+      "releaseType": "ep",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "9323570",
+      "url": "https://rateyourmusic.com/release/album/voivod/the-wake/",
+      "title": "The Wake",
+      "artists": [
+        "Voïvod"
+      ],
+      "year": 2018,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    },
+    {
+      "id": "17027426",
+      "url": "https://rateyourmusic.com/release/album/voivod-orchestre-symphonique-de-quebec/symphonique/",
+      "title": "Symphonique",
+      "artists": [
+        "Voivod",
+        "Orchestre symphonique de Québec"
+      ],
+      "year": 2026,
+      "releaseType": "album",
+      "tags": [
+        "tagify-pagination-test-20261013"
+      ]
+    }
+  ],
+  "error": null
+}

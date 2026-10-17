@@ -316,6 +316,46 @@
   flex-shrink: 0;
 }
 
+.nameHintRegion {
+  flex-shrink: 0;
+}
+
+.nameHint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 8px 16px 0;
+  padding: 7px 10px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 4%);
+  color: var(--spice-text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.nameHintText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.nameHintButton {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--spice-text);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.nameHintButton:hover {
+  opacity: 0.8;
+}
+
 .hiddenFileInput {
   display: none;
 }
@@ -791,33 +831,48 @@
   padding: 0 10px;
 }
 
-.communitySortDirectionButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
+.communityLoadMore {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 8px 0 4px;
+}
+
+.communityLoadMoreButton {
+  min-height: 32px;
+  padding: 0 16px;
   border: 1px solid rgb(255 255 255 / 10%);
   border-radius: 7px;
   background: rgb(0 0 0 / 20%);
   color: var(--spice-text);
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   transition:
     background-color 0.2s ease,
     border-color 0.2s ease;
 }
 
-.communitySortDirectionButton:hover {
+.communityLoadMoreButton:hover:not(:disabled) {
   background: rgb(255 255 255 / 10%);
   border-color: color-mix(in srgb, var(--spice-accent) 36%, white 8%);
 }
 
-.communitySortDirectionButton:focus-visible {
+.communityLoadMoreButton:focus-visible {
   outline: none;
   border-color: color-mix(in srgb, var(--spice-accent) 50%, white 8%);
   box-shadow: 0 0 0 2px rgb(30 144 255 / 12%);
+}
+
+.communityLoadMoreButton:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.communityLoadMoreError {
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 12px;
 }
 
 .searchInput::placeholder,

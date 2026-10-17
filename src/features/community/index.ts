@@ -5,5 +5,7 @@ export { CloudSyncModal } from "./CloudSyncModal";
 export { CloudRecoveryModal, isCloudRecoveryStatus } from "./CloudRecoveryModal";
 export { CommunityOnboardingModal } from "./CommunityOnboardingModal";
 export { CommunityConnectPrompt } from "./CommunityConnectPrompt";
+export { CommunityPublishPrompt } from "./CommunityPublishPrompt";
 export { CommunityEntityLens } from "./CommunityEntityLens";
-export { lookupCommunityEntity } from "./communityEntityCache";
+export { lookupCommunityEntity, peekCommunityEntity } from "./communityEntityCache";
+export type { CommunityConnectEntry } from "./communityConnectAnalytics";

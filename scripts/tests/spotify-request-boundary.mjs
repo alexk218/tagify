@@ -11,7 +11,7 @@ const otherFetchFiles = new Set([
   'src/features/onboarding/services/promptHistory.ts', 'src/features/community/communityDevice.ts',
   'src/features/community/communityEntityCache.ts', 'src/features/community-updates/communityUpdateService.ts',
   'src/features/update-check/components/UpdateBanner.tsx',
-  'src/features/product-analytics/productAnalytics.ts',
+  'src/features/product-analytics/productAnalytics.ts', 'src/features/tag-data/utils/communityPopularTags.ts',
 ]);
 const sdk = /\b(?:PlaylistAPI|RootlistAPI|LibraryAPI|CosmosAsync|GraphQL)\b/;
 const wrappers = new Set(['spotifyRead', 'spotifyWrite']);
@@ -35,7 +35,8 @@ export function findViolations(source, filename) {
   const ancestors = node => { const result = []; for (let parent = node.parent; parent; parent = parent.parent) result.push(parent); return result; };
   const failures = [];
   let fetchCount = 0;
-  const fetchLimit = filename.endsWith("/SyncRuntime.ts") ? 10 : filename.endsWith("/communityDevice.ts") ? 3 : /\/(?:PrivateNotes|SyncPairingService)\.ts$/.test(filename) ? 2 : 1;
+  // SyncRuntime's 11th: the direct Community pull through Supabase's API (docs in tagify-community DESKTOP_DIRECT_PULL.md).
+  const fetchLimit = filename.endsWith("/SyncRuntime.ts") ? 11 : filename.endsWith("/communityDevice.ts") ? 3 : /\/(?:PrivateNotes|SyncPairingService)\.ts$/.test(filename) ? 2 : 1;
   walk(file, node => {
     if (!ts.isCallExpression(node)) return;
     const callee = node.expression.getText(file);

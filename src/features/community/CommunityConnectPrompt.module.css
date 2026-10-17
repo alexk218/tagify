@@ -10,6 +10,21 @@
   padding: 10px 14px;
 }
 
+/* Longer invitations keep their text readable: the buttons move under it when space runs out. */
+.promptLong {
+  flex-wrap: wrap;
+}
+
+.promptLong .text {
+  flex: 1 1 320px;
+}
+
+.promptLong .actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
 .icon {
   align-items: center;
   background: rgb(155 140 255 / 18%);
@@ -80,6 +95,37 @@
   background: rgb(255 255 255 / 10%);
 }
 
+.quiet {
+  background: transparent;
+  border: 0;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 32px;
+  padding: 0 6px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.quiet:hover {
+  color: var(--spice-text);
+}
+
+.primary:disabled,
+.secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.error {
+  color: #ffb0b5;
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 2px 0 0;
+}
+
+.quiet:focus-visible,
 .primary:focus-visible,
 .secondary:focus-visible {
   outline: 2px solid #c3b9ff;

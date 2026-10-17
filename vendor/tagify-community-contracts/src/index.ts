@@ -7,6 +7,7 @@ export { isRecord };
 export * from "./taxonomy-artifact";
 export * from "./comments";
 export * from "./artifact-projector";
+export * from "./tagNames";
 
 export type MusicEntityKind = "track" | "album" | "artist";
 export type CatalogEntityType = "artist" | "recording" | "releaseGroup" | "release" | "work";

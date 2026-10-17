@@ -3,7 +3,7 @@ vi.mock("@/features/product-analytics/config.json", () => ({ default: { token: "
 import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { activityDay, recordMeaningfulAction, getUsageAccountDigest, isUsageReportDue, recordDiscoveryAnswer, recordTagifyOpen, retryAfterMs, USAGE_PAUSED_UNTIL_KEY, useTagifyUsage } from "../tagifyUsage";
+import { ACTIVITY_REPORT_INTERVAL_MS, activityDay, recordMeaningfulAction, getUsageAccountDigest, isUsageReportDue, recordDiscoveryAnswer, recordTagifyOpen, retryAfterMs, USAGE_PAUSED_UNTIL_KEY, useTagifyUsage } from "../tagifyUsage";
 
 describe("private Tagify usage recording", () => {
   let getUser: ReturnType<typeof vi.fn>;
@@ -93,7 +93,7 @@ describe("private Tagify usage recording", () => {
       await inline.recordMeaningfulAction("tagging");
       await inline.recordMeaningfulAction("rating");
       expect(fetch).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(ACTIVITY_REPORT_INTERVAL_MS);
       await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
       expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)).activity).toMatchObject({ tagging: 1, rating: 1 });
       await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
@@ -108,7 +108,7 @@ describe("private Tagify usage recording", () => {
     try {
       const inline = await import("../tagifyUsage");
       await inline.recordMeaningfulAction("tagging");
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(ACTIVITY_REPORT_INTERVAL_MS);
       expect(fetch).not.toHaveBeenCalled();
       online.mockReturnValue(true);
       vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 429, headers: { get: () => "3600" } } as unknown as Response);
@@ -131,13 +131,37 @@ describe("private Tagify usage recording", () => {
       await inline.recordMeaningfulAction("tagging");
       getUser.mockResolvedValue({ username: "another-account" });
     setAnalyticsSharing((await getUsageAccountDigest())!, true);
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(ACTIVITY_REPORT_INTERVAL_MS);
       expect(fetch).not.toHaveBeenCalled();
       await inline.recordTagifyOpen("3.1.0");
       expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))).not.toHaveProperty("activity");
       getUser.mockResolvedValue({ username: "stable-account" });
       await inline.recordTagifyOpen("3.1.0");
       expect(JSON.parse(String(vi.mocked(fetch).mock.calls[1][1]?.body)).activity.tagging).toBe(1);
+    } finally { vi.clearAllTimers(); visibility.mockRestore(); vi.useRealTimers(); }
+  });
+
+  it("sends an hour of steady tagging as four reports instead of sixty", async () => {
+    // Keep hashing on the fake clock's microtasks.
+    vi.stubGlobal("crypto", { subtle: { digest: async () => new Uint8Array(32).buffer }, randomUUID: () => "123e4567-e89b-42d3-a456-426614174000" });
+    setAnalyticsSharing("0".repeat(64), true);
+    vi.useFakeTimers(); vi.resetModules();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    try {
+      const inline = await import("../tagifyUsage");
+      // The same version the inline flush reports, so no update report is due.
+      const { default: { version } } = await import("@/package");
+      await inline.recordTagifyOpen(version);
+      vi.mocked(fetch).mockClear();
+      for (let minute = 0; minute < 60; minute++) {
+        await inline.recordMeaningfulAction("tagging");
+        // Showing Spotify again checks too, but only sends when a report is due.
+        await inline.recordTagifyOpen(version, { batchActivity: true });
+        await vi.advanceTimersByTimeAsync(60_000);
+      }
+      expect(fetch).toHaveBeenCalledTimes(4);
+      const sent = vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(String(init?.body)).activity.tagging);
+      expect(sent.at(-1)).toBeGreaterThanOrEqual(45);
     } finally { vi.clearAllTimers(); visibility.mockRestore(); vi.useRealTimers(); }
   });
 

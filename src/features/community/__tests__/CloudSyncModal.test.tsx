@@ -8,6 +8,9 @@ import { storageService } from "@/services/storage/StorageService";
 import { CommunityOnboardingModal } from "../CommunityOnboardingModal";
 import { CloudSyncModal } from "../CloudSyncModal";
 
+/** Community setup always knows where it was opened from. */
+const CommunitySetup = (props: { onClose: () => void }) => <CommunityOnboardingModal entry="community" {...props} />;
+
 const configuration = {
   accountId: "account-a",
   libraryId: "library-a",
@@ -34,7 +37,7 @@ describe("CloudSyncModal revoked device recovery", () => {
     vi.restoreAllMocks();
   });
 
-  it.each([["Cloud Sync", CloudSyncModal], ["Community setup", CommunityOnboardingModal]] as const)("avoids redundant syncs and saves changed visibility before retrying in %s", async (_name, Modal) => {
+  it.each([["Cloud Sync", CloudSyncModal], ["Community setup", CommunitySetup]] as const)("avoids redundant syncs and saves changed visibility before retrying in %s", async (_name, Modal) => {
     let status = "error";
     const emit = (next: string) => {
       status = next;
@@ -74,10 +77,10 @@ describe("CloudSyncModal revoked device recovery", () => {
     act(() => emit("error"));
     expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
     act(() => emit("idle"));
-    fireEvent.click(screen.getByRole("button", { name: /Public visibility Sharing all tags/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Public visibility Sharing all tags/ }));
     expect(await screen.findByRole("button", { name: "Save visibility" })).toBeDisabled();
     fireEvent.click(screen.getByRole("checkbox", { name: /Exclude Mood/ }));
-    expect(screen.getByRole("button", { name: "Save visibility first" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Choose what to share first" })).toBeDisabled();
     fireEvent.click(screen.getByRole("checkbox", { name: /Exclude Mood/ }));
     expect(screen.getByRole("button", { name: "Save visibility" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
@@ -85,11 +88,11 @@ describe("CloudSyncModal revoked device recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save visibility" }));
     await screen.findByText("Couldn't save your sharing choices. Please try again.");
     expect(syncNow).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Save visibility first" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Choose what to share first" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save visibility" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Save visibility" }));
     await waitFor(() => expect(syncNow).toHaveBeenCalledTimes(2));
-    if (Modal === CommunityOnboardingModal) {
+    if (Modal === CommunitySetup) {
       expect(screen.getByText("Your Community setup is ready.")).toBeInTheDocument();
       return;
     }
@@ -104,7 +107,7 @@ describe("CloudSyncModal revoked device recovery", () => {
     expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
   });
 
-  it.each([["Cloud Sync", CloudSyncModal], ["Community setup", CommunityOnboardingModal]] as const)("keeps backup retry available if visibility cannot load in %s", async (_name, Modal) => {
+  it.each([["Cloud Sync", CloudSyncModal], ["Community setup", CommunitySetup]] as const)("keeps backup retry available if visibility cannot load in %s", async (_name, Modal) => {
     vi.spyOn(syncRuntime, "communityRequest").mockRejectedValue(new Error("Temporarily offline"));
     vi.spyOn(storageService, "getTaxonomy").mockRejectedValue(new Error("Temporarily unavailable"));
     window.TagifySync = {

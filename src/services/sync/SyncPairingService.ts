@@ -36,6 +36,7 @@ import { defaultTagData } from "@/constants/defaultTagData";
 import { createEmptyTaxonomy, normalizeTaxonomyTree } from "@/utils/tagTaxonomy";
 import { addMissingTaxonomy } from "./PreserveLocalTaxonomyMetadata";
 import { clearRecoveryUnavailable, enrollDesktopRecovery } from "./SyncInstallRecovery";
+import { getDeviceLinkSecret } from "./SyncDeviceLinkIdentity";
 import { wereSmartPlaylistsExplicitlyCleared } from "@/features/smart-playlists/utils/smartPlaylist.storage";
 
 export const PENDING_PAIRING_STORAGE_KEY = "tagify:sync:pending-pairing";
@@ -72,10 +73,11 @@ export class SyncPairingService {
     // Choosing to link again means automatic reconnection is worth checking on the next start.
     clearRecoveryUnavailable();
     const verifier = randomBase64Url(48);
+    const installationSecret = getDeviceLinkSecret(apiBaseUrl);
     const response = await fetch(`${trimSlash(apiBaseUrl)}/api/v2/device-authorizations`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, platform, verifierChallenge: await sha256Hex(verifier) }),
+      body: JSON.stringify({ name, platform, verifierChallenge: await sha256Hex(verifier), ...(installationSecret ? { installationSecret } : {}) }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error?.message || "Tagify could not start device linking");

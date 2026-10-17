@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { smartPlaylistSyncService } from "@/services/SmartPlaylistSyncService";
 import { clearConfirmedMembershipBaseline, updateSmartPlaylistsInStorage } from "@/features/smart-playlists/utils/smartPlaylist.storage";
+import { describeSmartPlaylistCheckFailure } from "@/features/smart-playlists/utils/smartPlaylist.checkFailure";
 import {
   showSmartPlaylistSyncErrorNotification,
   showSmartPlaylistSyncSuccessNotification,
@@ -71,7 +72,7 @@ export function useSmartPlaylistActions({
         await refreshSmartPlaylists();
 
         if (summary.failedPlaylistNames.length > 0) {
-          showSmartPlaylistSyncErrorNotification(playlist.playlistName);
+          showSmartPlaylistSyncErrorNotification(playlist.playlistName, summary.checkFailure);
           return;
         }
         showSmartPlaylistSyncSuccessNotification(
@@ -86,7 +87,7 @@ export function useSmartPlaylistActions({
           `Critical error syncing smart playlist ${playlist.playlistName}:`,
           error,
         );
-        showSmartPlaylistSyncErrorNotification(playlist.playlistName);
+        showSmartPlaylistSyncErrorNotification(playlist.playlistName, describeSmartPlaylistCheckFailure(error));
       }
     },
     [refreshSmartPlaylists],

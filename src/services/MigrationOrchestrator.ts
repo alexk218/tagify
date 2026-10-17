@@ -270,7 +270,11 @@ class MigrationOrchestrator {
           getDesktopSyncConfiguration() &&
           !indexedDBHasData,
       );
-      isFreshInstall = !localStorageHasData && !indexedDBHasData;
+      // Fresh means nothing the user made exists yet. Starting tags alone don't
+      // count: Spotify's background start saves them before the page opens.
+      isFreshInstall =
+        !saved.hasUserContent &&
+        !(localStorageData && hasUserLibraryContent(localStorageData));
 
       console.log(`[Orchestrator] IndexedDB has data: ${indexedDBHasData}`);
       console.log(

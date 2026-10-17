@@ -45,22 +45,28 @@ export function readLocalDurableAppState(): LocalDurableAppState {
 }
 
 export async function restoreLocalDurableAppState(state: Partial<LocalDurableAppState>): Promise<void> {
+  if (state.preferences) {
+    const preferences = asRecord(state.preferences);
+    PREFERENCE_KEYS.forEach((key) => preferences[key] === undefined ? localStorage.removeItem(key) : writeStoredValue(key, preferences[key]));
+  }
   const updatedAt = new Date().toISOString();
-  await applyDurableAppStateDocuments((["filter-formulas", "playlist-rules", "preferences"] as const)
+  await applyDurableAppStateDocuments((["filter-formulas", "playlist-rules"] as const)
     .filter((domain) => domain in state)
     .map((domain) => ({ domain, value: state[domain], revision: 0, updatedAt })));
 }
 
-export async function readDurableAppState(): Promise<Record<DurableAppStateDomain, unknown>> {
+export async function readDurableAppState(): Promise<Omit<Record<DurableAppStateDomain, unknown>, "preferences">> {
   const [publicationPolicy, ownerIdentityMapping, installations, smartPlaylists] = await Promise.all([
     indexedDBStorage.getCommunityPublicationPolicy(),
     indexedDBStorage.getCommunityOwnerIdentityMapping(),
     indexedDBStorage.getCommunityInstallations(),
     indexedDBStorage.getAllSmartPlaylists(),
   ]);
+  const libraryState = readLocalDurableAppState();
   return {
     "smart-playlists": sanitizeSmartPlaylists(smartPlaylists),
-    ...readLocalDurableAppState(),
+    "filter-formulas": libraryState["filter-formulas"],
+    "playlist-rules": libraryState["playlist-rules"],
     "community-provenance": { ownerIdentityMapping, installations, publicationPolicyVersion: publicationPolicy?.policyVersion ?? null },
   };
 }
@@ -102,10 +108,6 @@ export async function applyDurableAppStateDocuments(
     });
   }
   if (byDomain.has("playlist-rules")) writeStoredValue(PLAYLIST_RULES_KEY, byDomain.get("playlist-rules"));
-  if (byDomain.has("preferences")) {
-    const preferences = asRecord(byDomain.get("preferences"));
-    PREFERENCE_KEYS.forEach((key) => preferences[key] === undefined ? localStorage.removeItem(key) : writeStoredValue(key, preferences[key]));
-  }
 
   if (byDomain.has("community-provenance")) {
     const provenance = asRecord(byDomain.get("community-provenance"));

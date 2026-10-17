@@ -27,6 +27,8 @@ export class FakeCommunity {
   conflictCount = 0;
   /** Runs once before the next push is applied, like another device committing first. */
   beforeNextPush: (() => void) | null = null;
+  /** Called with the new head after another device or the website commits (a Realtime announcement). */
+  onForeignCommit: ((headCursor: number) => void) | null = null;
 
   annotation(entity: AnnotationSnapshotV1["entity"]): AnnotationSnapshotV1 {
     const key = entityKeyV1(entity);
@@ -44,7 +46,14 @@ export class FakeCommunity {
 
   /** Commits a batch as another device would, through the same rules. */
   commitFrom(operations: SyncMutationV2[], batchId: string = crypto.randomUUID()) {
-    return this.push({ protocolVersion: operations.some((operation) => operation.type === "app-state.replace") ? 2 : 1, batchId, operations });
+    const result = this.push({ protocolVersion: operations.some((operation) => operation.type === "app-state.replace") ? 2 : 1, batchId, operations });
+    this.onForeignCommit?.(this.headCursor);
+    return result;
+  }
+
+  /** pull_sync_changes: the batches after `after`, one page at a time. */
+  pullPage(after: number, limit = 100) {
+    return { protocolVersion: 1, libraryId: this.libraryId, headCursor: this.headCursor, batches: this.batches.filter((batch) => batch.cursor > after).slice(0, limit), conflicts: [], snapshotRequired: false };
   }
 
   push(batch: { protocolVersion: number; batchId: string; operations: SyncMutationV2[] }) {
@@ -140,8 +149,10 @@ export class FakeCommunity {
       const limit = Number(url.searchParams.get("limit") || 100);
       const tag = (init?.headers as Record<string, string> | undefined)?.["if-none-match"];
       if (tag === `"sync-cursor-${this.headCursor}"` && after === this.headCursor) return new Response(null, { status: 304 });
-      return json({ protocolVersion: 1, libraryId: this.libraryId, headCursor: this.headCursor, batches: this.batches.filter((batch) => batch.cursor > after).slice(0, limit), conflicts: [], snapshotRequired: false });
+      return json(this.pullPage(after, limit));
     }
+    // `?later=1`: the push route reads the changes after the batch's base cursor once it is saved.
+    if (url.pathname === "/api/v2/sync/push" && url.searchParams.get("later") === "1") return json({ ...this.push(body), later: this.pullPage(Number(body.baseCursor), 200) });
     if (url.pathname === "/api/v2/sync/push") return json(this.push(body));
     if (url.pathname === "/api/v2/sync/ack") return json({ acknowledged: true });
     if (url.pathname === "/api/v2/sync/snapshot") return json({ snapshot: this.snapshot() });
@@ -165,6 +176,10 @@ export type RuntimeInternals = {
   backupHealth: unknown;
   taxonomyRefreshRequested: boolean;
   ownBatchIds?: Set<string>;
+  channel: unknown;
+  realtimeSubscribedAt: number;
+  headConfirmedAt: number;
+  announcedHead: number;
 };
 export const runtime = syncRuntime as unknown as RuntimeInternals;
 
@@ -178,6 +193,9 @@ export class FakeDevice {
   readonly ownBatchIds = new Set<string>();
   readonly configuration: DesktopSyncConfiguration;
   readonly localStorage = new Map<string, string>();
+  /** This installation's own record of when it last knew it was current. */
+  headConfirmedAt = 0;
+  announcedHead = 0;
 
   constructor(readonly name: string) {
     this.configuration = syncConfiguration(`${name}-device`);
@@ -196,6 +214,8 @@ export async function useDevice(device: FakeDevice): Promise<void> {
     }
     const ids = runtime.ownBatchIds;
     if (ids) { activeDevice.ownBatchIds.clear(); ids.forEach((id) => activeDevice!.ownBatchIds.add(id)); }
+    activeDevice.headConfirmedAt = runtime.headConfirmedAt;
+    activeDevice.announcedHead = runtime.announcedHead;
   }
   indexedDBStorage.resetConnection();
   vi.stubGlobal("indexedDB", device.factory);
@@ -205,6 +225,8 @@ export async function useDevice(device: FakeDevice): Promise<void> {
   const ids = runtime.ownBatchIds;
   if (ids) { ids.clear(); device.ownBatchIds.forEach((id) => ids.add(id)); }
   runtime.taxonomyRefreshRequested = false;
+  runtime.headConfirmedAt = device.headConfirmedAt;
+  runtime.announcedHead = device.announcedHead;
   activeDevice = device;
   if (!(await storageService.switchAccountDatabase())) throw new Error("The test device database could not be opened");
 }
@@ -213,6 +235,10 @@ export function resetDevices(): void {
   activeDevice = null;
   runtime.ownBatchIds?.clear();
   runtime.taxonomyRefreshRequested = false;
+  runtime.headConfirmedAt = 0;
+  runtime.announcedHead = 0;
+  runtime.channel = null;
+  runtime.realtimeSubscribedAt = 0;
 }
 
 export async function readStore<T>(storeName: string): Promise<T[]> {

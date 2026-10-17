@@ -1,0 +1,11 @@
+{
+  "/releases/manager/v1.0.13/TagifyInstaller-mac.dmg": "https://github.com/alexk218/tagify-installer/releases/download/v1.0.13/TagifyInstaller-mac.dmg",
+  "/releases/manager/v1.0.13/TagifyInstaller-mac.zip": "https://github.com/alexk218/tagify-installer/releases/download/v1.0.13/TagifyInstaller-mac.zip",
+  "/releases/manager/v1.0.13/Tagify.pkg": "https://github.com/alexk218/tagify-installer/releases/download/v1.0.13/Tagify.pkg",
+  "/releases/manager/v1.0.13/TagifyInstaller.exe": "https://github.com/alexk218/tagify-installer/releases/download/v1.0.13/TagifyInstaller.exe",
+  "/releases/manager/v1.0.12/TagifyInstaller.exe": "https://github.com/alexk218/tagify-installer/releases/download/v1.0.12/TagifyInstaller.exe",
+  "/releases/client/v3.2.0/tagify-v3.2.0.zip": "https://github.com/alexk218/tagify/releases/download/v3.2.0/tagify-v3.2.0.zip",
+  "/releases/install/install.sh": "https://raw.githubusercontent.com/alexk218/tagify/main/install.sh",
+  "/releases/install/Install-Tagify-Full.ps1": "https://raw.githubusercontent.com/alexk218/tagify/main/Install-Tagify-Full.ps1",
+  "/releases/install/spotify-compatibility.json": "https://raw.githubusercontent.com/alexk218/tagify/main/config/spotify-compatibility.json"
+}

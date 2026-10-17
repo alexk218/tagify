@@ -6,7 +6,6 @@ import { recordingAnnotations } from "@/features/recording-reuse/utils/recording
 import { TrackEditHistoryControls } from "@/features/track-session/history/TrackEditHistoryControls";
 import { useTrackEditHistory } from "@/features/track-session/history/useTrackEditHistory";
 import { trackEditHistory } from "@/services/TrackEditHistory";
-import { storageService } from "@/services/storage/StorageService";
 import { usePlaylistTrackInsights, useArtistTrackInsights, playlistMembershipStore } from "@/features/track-insights";
 import { useAlbumMembership, useAlbumTrackListLookups } from "@/features/playlist-state";
 import { useRatingControlTheme } from "@/hooks/shared/useRatingControlTheme";
@@ -73,11 +72,13 @@ import { pruneTagFilterFormula } from "@/utils/tagFilterGroups";
 import { buildCategoryTree, buildValidTagIdSet } from "@/utils/tagTaxonomy";
 import {
   CommunityConnectPrompt,
+  CommunityPublishPrompt,
   CommunityOnboardingModal,
   CloudSyncModal,
   CloudRecoveryModal,
   CommunityWorkspace,
   isCloudRecoveryStatus,
+  type CommunityConnectEntry,
 } from "@/features/community";
 import { Users } from "lucide-react";
 import { syncRuntime, type SyncStatus } from "@/services/sync/SyncRuntime";
@@ -132,7 +133,9 @@ function App() {
   const [statsTrackSet, setStatsTrackSet] = useState<(StatsTrackSet & { id: number; reveal: "list" | "track" }) | null>(null);
   const [showMigrationModal, setShowMigrationModal] = useState(false);
   const [showCommunityWorkspace, setShowCommunityWorkspace] = useState(false);
-  const [showCommunityOnboarding, setShowCommunityOnboarding] = useState(false);
+  // Where Community setup was opened from; null while it is closed.
+  const [communitySetupEntry, setCommunitySetupEntry] = useState<CommunityConnectEntry | null>(null);
+  const showCommunityOnboarding = communitySetupEntry !== null;
   const [showCloudRecovery, setShowCloudRecovery] = useState(false);
   const [showCloudSync, setShowCloudSync] = useState(false);
   const [syncConnected, setSyncConnected] = useState(
@@ -354,9 +357,10 @@ function App() {
   );
 
   useTagifyUsage(packageJson.version);
-  useProductAnalyticsView(isLoading ? null : showTagManager ? "tag_manager_opened" :
-    showCommunityWorkspace ? "community_opened" : showStats ? "stats_opened" :
-    showLocalTracksModal ? "local_files_opened" : showCloudSync ? "cloud_sync_opened" : `${activeView}_viewed`);
+  // The Sync dialog opens over other screens, usually Community, so it is checked first.
+  useProductAnalyticsView(isLoading ? null : showCloudSync && !cloudRecoveryPending ? "cloud_sync_opened" :
+    showTagManager ? "tag_manager_opened" : showCommunityWorkspace ? "community_opened" : showStats ? "stats_opened" :
+    showLocalTracksModal ? "local_files_opened" : `${activeView}_viewed`);
   const { shouldShowSurvey, completeSurvey, skipSurvey } = useDiscoverySurvey(packageJson.version, {
     lastUserTrackAddedEvent,
     canShowSurvey: !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode &&
@@ -399,13 +403,13 @@ function App() {
     if (reveal === "track") requestAnimationFrame(() => revealElement(appRootRef.current));
   }, [selectAppView]);
 
-  const connectCommunity = useCallback(() => {
+  const connectCommunity = useCallback((entry: CommunityConnectEntry) => {
     if (cloudRecoveryPending) {
       setShowCloudRecovery(true);
       return;
     }
     setShowCloudSync(false);
-    setShowCommunityOnboarding(true);
+    setCommunitySetupEntry(entry);
   }, [cloudRecoveryPending]);
 
   const openCloudSync = useCallback(() => {
@@ -431,7 +435,7 @@ function App() {
         setShowCloudRecovery(true);
         setShowCloudSync(false);
         setShowCommunityWorkspace(false);
-        setShowCommunityOnboarding(false);
+        setCommunitySetupEntry(null);
       }
     };
     window.addEventListener("tagify:syncStatus", handleSyncStatus);
@@ -1102,14 +1106,6 @@ function App() {
   const recordingConflicts = useRecordingLibrary(tagData.tracks, !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode, onRecordingsChanged);
   const recordingReuseStatus = useAutomaticRecordingReuse(activeView === "tracks" && !isMultiTagging && isDisplayedTrackMusic ? activeTrack : null, tagData.tracks, onRecordingsChanged);
 
-  const handleCreateQuickTag = async (name: string, parentId: string) => {
-    await flushLocalPersistence();
-    const tag = await storageService.createQuickTag(name, parentId);
-    await refreshPersistedTagData();
-    dispatchTagDataUpdatedEvent("save");
-    return tag.id;
-  };
-
   const trackDataMap = useMemo(() => {
     return Object.fromEntries(
       multiTagTracks.map((track) => [
@@ -1302,7 +1298,17 @@ function App() {
       <CommunityConnectPrompt
         enabled={canShowOptionalPrompts && !showCommunityWorkspace}
         connected={syncConnected}
-        onConnect={connectCommunity}
+        onConnect={() => connectCommunity("prompt")}
+      />
+      <CommunityPublishPrompt
+        enabled={canShowOptionalPrompts && !showCommunityWorkspace}
+        connected={syncConnected}
+        status={syncStatus}
+        taggedTrackCount={taggedTrackCount}
+        lastUserTrackAddedEvent={lastUserTrackAddedEvent}
+        tracks={tagData.tracks}
+        taxonomy={tagData.taxonomy}
+        onReview={openCloudSync}
       />
 
       <SmartPlaylistTagChoices enabled={canShowOptionalPrompts} />
@@ -1321,9 +1327,10 @@ function App() {
         />
       )}
 
-      {showCommunityOnboarding && (
+      {communitySetupEntry && (
         <CommunityOnboardingModal
-          onClose={() => setShowCommunityOnboarding(false)}
+          entry={communitySetupEntry}
+          onClose={() => setCommunitySetupEntry(null)}
         />
       )}
 
@@ -1347,7 +1354,7 @@ function App() {
 
       {showCommunityWorkspace ? (
         <CommunityWorkspace
-          onConnectCommunity={connectCommunity}
+          onConnectCommunity={() => connectCommunity("community")}
           onOpenCloudSync={openCloudSync}
           connected={syncConnected}
           status={syncStatus}
@@ -1425,7 +1432,6 @@ function App() {
                     customAccentsById={tagData.taxonomy.customAccentsById}
                     selectedTagIds={trackTags}
                     onToggleTag={handleToggleTag}
-                    onCreateTag={handleCreateQuickTag}
                     onOpenTagManager={() => setShowTagManager(true)}
                     targetType={isMultiTagging ? "tracks" : "track"}
                     isMultiTagging={isMultiTagging}
@@ -1528,7 +1534,6 @@ function App() {
                     customAccentsById={tagData.taxonomy.customAccentsById}
                     selectedTagIds={playlistTags}
                     onToggleTag={handleToggleTag}
-                    onCreateTag={handleCreateQuickTag}
                     onOpenTagManager={() => setShowTagManager(true)}
                     targetType={
                       activePlaylistUri.startsWith("spotify:album:")
@@ -1595,7 +1600,6 @@ function App() {
                     customAccentsById={tagData.taxonomy.customAccentsById}
                     selectedTagIds={artistTags}
                     onToggleTag={handleToggleTag}
-                    onCreateTag={handleCreateQuickTag}
                     onOpenTagManager={() => setShowTagManager(true)}
                     targetType="artist"
                     isMultiTagging={false}

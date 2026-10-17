@@ -88,17 +88,12 @@ describe("TagSelector", () => {
     seedExpandedState();
   });
 
-  it("creates and applies a tag in the selected folder without opening the manager", async () => {
+  it("searches existing tags without offering to create one", async () => {
     const user = userEvent.setup();
-    const onCreateTag = vi.fn().mockResolvedValue("new-tag");
-    const { onToggleTag, onOpenTagManager } = renderTagSelector({ onCreateTag });
+    renderTagSelector();
     await user.type(screen.getByRole("textbox", { name: "Search tags" }), "Ambient");
-    await user.selectOptions(screen.getByRole("combobox", { name: "New tag category or folder" }), "electronic");
-    await user.click(screen.getByRole("button", { name: "Create and apply “Ambient”" }));
-    expect(onCreateTag).toHaveBeenCalledWith("Ambient", "electronic");
-    expect(onToggleTag).toHaveBeenCalledWith("new-tag");
-    expect(onOpenTagManager).not.toHaveBeenCalled();
-    expect(screen.getByRole("textbox", { name: "Search tags" })).toHaveValue("");
+    expect(screen.queryByRole("combobox", { name: "New tag category or folder" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Create and apply/ })).toBeNull();
   });
 
   it("Enter adds a single match without removing an applied tag, and search can be cleared", async () => {

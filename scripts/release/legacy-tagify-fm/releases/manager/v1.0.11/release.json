@@ -1,0 +1,39 @@
+{
+  "tag_name": "v1.0.11",
+  "name": "v1.0.11",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-12T17:30:39.349Z",
+  "html_url": "https://tagify.fm/releases/manager/v1.0.11/",
+  "body": "Install and update Tagify directly from tagify.fm. Future Tagify Manager updates also come from tagify.fm.",
+  "assets": [
+    {
+      "name": "TagifyInstaller-mac.dmg",
+      "state": "uploaded",
+      "size": 3941572,
+      "digest": "sha256:8279c314dbdaebb43dbdd8d1a5e52c18ac044dbef17b57e7c7aaac15ffd258fa",
+      "browser_download_url": "https://tagify.fm/releases/manager/v1.0.11/TagifyInstaller-mac.dmg"
+    },
+    {
+      "name": "TagifyInstaller-mac.zip",
+      "state": "uploaded",
+      "size": 3710271,
+      "digest": "sha256:cd56964a55cedf839c4275a24ad03e98e59060ff8ecce5c7fe278fec78face4e",
+      "browser_download_url": "https://tagify.fm/releases/manager/v1.0.11/TagifyInstaller-mac.zip"
+    },
+    {
+      "name": "Tagify.pkg",
+      "state": "uploaded",
+      "size": 3583644,
+      "digest": "sha256:24cc7c42f67cbddc9d4906918b17686848957c7667f49091748d8953ebe17b07",
+      "browser_download_url": "https://tagify.fm/releases/manager/v1.0.11/Tagify.pkg"
+    },
+    {
+      "name": "TagifyInstaller.exe",
+      "state": "uploaded",
+      "size": 142803030,
+      "digest": "sha256:f2104bec2c4e55369116deb41ee523f90870c637f44bffd1ee100568e5b0b877",
+      "browser_download_url": "https://tagify.fm/releases/manager/v1.0.11/TagifyInstaller.exe"
+    }
+  ]
+}

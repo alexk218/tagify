@@ -878,7 +878,7 @@ class SpotifyApiService {
     const shared = globalThis as typeof globalThis & { __tagifyPlaylistVersionsV1?: Map<string, { version: string; generation: string; at: number; uris: string[] }> };
     return shared.__tagifyPlaylistVersionsV1 ??= new Map();
   })();
-  private getPlaylistVersion = async (playlistId: string, options: RequestOptions): Promise<string | null> => {
+  getPlaylistVersion = async (playlistId: string, options: RequestOptions): Promise<string | null> => {
     const uri = `spotify:playlist:${playlistId}`;
     try {
       const metadata = await spotifyRead<any>(`desktop:playlist:getMetadata:${JSON.stringify([uri])}`, () => (Spicetify.Platform.PlaylistAPI as any).getMetadata(uri), options);

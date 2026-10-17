@@ -119,10 +119,33 @@ export function sameInitialMergeDeviceContent(left: LibrarySnapshotV2, right: Li
 interface ShadowRecord { key: string; annotation: AnnotationSnapshotV1 }
 interface CursorRecord { key: "cursor"; value: number }
 interface PullBatch { cursor: number; batchId: string; operations: SyncMutationV2[]; committedAt: string }
+/** One page of changes, from a pull or returned with a push. */
+interface PullPage {
+  unchanged?: boolean;
+  snapshotRequired?: boolean;
+  headCursor?: number;
+  batches?: PullBatch[];
+  conflicts?: SyncConflictV1[];
+  liveSync?: { realtime?: unknown };
+}
+interface PushOutcome {
+  sent: number; accepted: number; confirmed: number; snapshot: boolean;
+  /** The push carried every later change back, so no pull is needed to confirm it. */
+  laterApplied: boolean;
+}
 type AnnotationMutation = Extract<SyncMutationV1, { type: "annotation.patch" | "annotation.tag-membership" | "annotation.delete" }>;
 
+/** Safety checks while the live connection is down: it may be missing announcements. */
 const RECOVERY_POLL_INTERVALS_MS = [5 * 60_000, 15 * 60_000, 30 * 60_000] as const;
+/**
+ * Safety checks while nothing can arrive unannounced: Realtime is live, or no
+ * other device or website sign-in uses this library.
+ */
+export const QUIET_RECOVERY_POLL_INTERVALS_MS = [60 * 60_000, 90 * 60_000, 120 * 60_000] as const;
 const MAX_PULL_PAGES = 5_000;
+const PULL_PAGE_SIZE = 200;
+/** The database function Tagify may call directly when Community advertises `directPull`. */
+const DIRECT_PULL_FUNCTION = "pull_sync_changes_with_live_sync";
 const APP_STATE_CHOICE_PREFIX = "app-state-choice:";
 const DEVICE_ONLY_CHANGES_KEY = "device-only-changes";
 /** Saved settings that changed here and on another device. `keep` records the user's choice until it is backed up. */
@@ -134,28 +157,57 @@ const CLIENT_VERSION = packageJson.version;
 /** Edits are backed up once typing pauses, and at least this often during continuous editing. */
 export const EDIT_SYNC_DEBOUNCE_MS = 3_000;
 export const EDIT_SYNC_MAX_WAIT_MS = 15_000;
+/**
+ * After a minute of steady tagging, edits are grouped into fewer, larger
+ * backups. They are already saved on this device, and hiding Spotify backs
+ * them up straight away.
+ */
+export const LONG_SESSION_EDIT_SYNC_DEBOUNCE_MS = 10_000;
+export const LONG_SESSION_EDIT_SYNC_MAX_WAIT_MS = 60_000;
+export const LONG_EDIT_SESSION_AFTER_MS = 60_000;
+/** A pause this long between edits ends a tagging session. */
+export const EDIT_SESSION_GAP_MS = 2 * 60_000;
 /** Returning to Spotify only checks Community when the live connection may have missed something. */
 export const VISIBLE_RESYNC_AFTER_MS = 5 * 60_000;
 /** Spotify hidden this long releases its live Community connection until it is shown again. */
-export const HIDDEN_REALTIME_CLOSE_MS = 10 * 60_000;
+export const HIDDEN_REALTIME_CLOSE_MS = 2 * 60_000;
 const SIDE_SYNC_BACKOFF_MAX_MS = 60 * 60_000;
 
-export function safetySyncDelayMs(stage = 2, random = Math.random): number {
-  const interval = RECOVERY_POLL_INTERVALS_MS[Math.min(Math.max(stage, 0), RECOVERY_POLL_INTERVALS_MS.length - 1)];
+export function safetySyncDelayMs(stage = 2, random = Math.random, quiet = false): number {
+  const intervals = quiet ? QUIET_RECOVERY_POLL_INTERVALS_MS : RECOVERY_POLL_INTERVALS_MS;
+  const interval = intervals[Math.min(Math.max(stage, 0), intervals.length - 1)];
   return Math.round(interval * (1 + random() * 0.2));
 }
 
-/** Trailing debounce for edit-triggered sync, bounded by a maximum wait from the first unsent edit. */
-export function editSyncDelayMs(firstEditAt: number, now: number): number {
-  return Math.max(0, Math.min(EDIT_SYNC_DEBOUNCE_MS, firstEditAt + EDIT_SYNC_MAX_WAIT_MS - now));
+/**
+ * Trailing debounce for edit-triggered sync, bounded by a maximum wait from
+ * the first unsent edit. Both grow once a tagging session has lasted a minute.
+ */
+export function editSyncDelayMs(firstEditAt: number, now: number, sessionStartedAt = now): number {
+  const long = now - sessionStartedAt >= LONG_EDIT_SESSION_AFTER_MS;
+  const debounce = long ? LONG_SESSION_EDIT_SYNC_DEBOUNCE_MS : EDIT_SYNC_DEBOUNCE_MS;
+  const maxWait = long ? LONG_SESSION_EDIT_SYNC_MAX_WAIT_MS : EDIT_SYNC_MAX_WAIT_MS;
+  return Math.max(0, Math.min(debounce, firstEditAt + maxWait - now));
 }
 
-export function shouldSyncWhenVisible({ hiddenForMs, realtimeSubscribed, msSinceLastSync }: {
+/**
+ * How much the live connection covers:
+ * - `live`: Realtime has stayed connected since this device last confirmed it
+ *   was current, so every change since was announced;
+ * - `quiet`: no live connection is needed (nobody else uses the library), or
+ *   Realtime reconnected and a check is already on its way;
+ * - `down`: a live connection is wanted but missing.
+ */
+export type RealtimeCoverage = "live" | "quiet" | "down";
+
+export function shouldSyncWhenVisible({ hiddenForMs, realtime, msSinceLastSync }: {
   hiddenForMs: number;
-  realtimeSubscribed: boolean;
+  realtime: RealtimeCoverage;
   msSinceLastSync: number;
 }): boolean {
-  return hiddenForMs >= VISIBLE_RESYNC_AFTER_MS || !realtimeSubscribed || msSinceLastSync >= VISIBLE_RESYNC_AFTER_MS;
+  if (realtime === "live") return false;
+  if (realtime === "down") return true;
+  return hiddenForMs >= VISIBLE_RESYNC_AFTER_MS || msSinceLastSync >= VISIBLE_RESYNC_AFTER_MS;
 }
 
 /** Retry delay after consecutive local-file or note backup failures: 1, 2, 4 … minutes, at most an hour. */
@@ -218,10 +270,38 @@ export function runWithAccountSyncLock<T>(
 }
 
 export async function gzipJsonBody(value: unknown): Promise<ArrayBuffer> {
+  return gzipText(JSON.stringify(value));
+}
+
+async function gzipText(json: string): Promise<ArrayBuffer> {
   if (typeof CompressionStream === "undefined") throw new Error("This Spotify version cannot prepare a large Community library review");
-  const source = new Response(JSON.stringify(value)).body;
+  const source = new Response(json).body;
   if (!source) throw new Error("This Spotify version cannot prepare a large Community library review");
   return new Response(source.pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
+}
+
+/** Gzipped request bodies stay under the website's 4.5 MB request limit with room for headers. */
+export const MAX_COMPRESSED_REQUEST_BYTES = 4_000_000;
+/** Requests for one reset while Community is still saving it (it waits up to 4 minutes per request). */
+const RESET_INSTALL_ATTEMPTS = 4;
+/** The Community capability that accepts a gzipped library reset. */
+export const COMPRESSED_REPLACE_CAPABILITY = "compressedReplace";
+/** Community's default limit for the expanded JSON of a compressed request. */
+export const MAX_EXPANDED_REQUEST_BYTES = 64_000_000;
+
+/**
+ * Limits for a gzipped reset when Community advertises
+ * `compressedReplace: { encoding: "gzip", maxCompressedBytes, maxExpandedBytes }`;
+ * null means send it as plain JSON (older Community rejects gzip bytes).
+ */
+export function compressedReplaceLimits(capabilities: unknown): { maxCompressedBytes: number; maxExpandedBytes: number } | null {
+  const value = (capabilities as Record<string, unknown> | null)?.[COMPRESSED_REPLACE_CAPABILITY] as { encoding?: unknown; maxCompressedBytes?: unknown; maxExpandedBytes?: unknown } | undefined;
+  if (!value || typeof value !== "object" || value.encoding !== "gzip") return null;
+  const limit = (advertised: unknown, ceiling: number) => {
+    const bytes = Number(advertised);
+    return Number.isSafeInteger(bytes) && bytes > 0 ? Math.min(bytes, ceiling) : ceiling;
+  };
+  return { maxCompressedBytes: limit(value.maxCompressedBytes, MAX_COMPRESSED_REQUEST_BYTES), maxExpandedBytes: limit(value.maxExpandedBytes, MAX_EXPANDED_REQUEST_BYTES) };
 }
 
 export interface OutboxGroup {
@@ -356,6 +436,9 @@ class SyncRuntime extends EventTarget {
   private backupHealthRefreshRequested = false;
   private editSyncTimer: ReturnType<typeof setTimeout> | null = null;
   private firstPendingEditAt = 0;
+  /** The current tagging session: its first edit and its latest one. */
+  private editSessionStartedAt = 0;
+  private lastEditAt = 0;
   /** Committed local edits seen, and how many of them the last completed sync covered. */
   private localEditCount = 0;
   private settledEditCount = 0;
@@ -363,6 +446,18 @@ class SyncRuntime extends EventTarget {
   private pendingRealtimeHead = 0;
   /** Whether the latest pull left this device at Community's newest cursor. */
   private lastPullReachedHead = false;
+  /** When the latest reply that reached Community's newest cursor was asked for. */
+  private headConfirmedAt = 0;
+  /** Newest cursor another device or the website announced over Realtime. */
+  private announcedHead = 0;
+  /**
+   * Whether another device or the website used this library recently, as
+   * Community last reported; null until it has said. Only then is a live
+   * connection worth holding open.
+   */
+  private realtimeWanted: boolean | null = null;
+  /** When the next safety check is due; kept while Spotify is hidden. */
+  private nextSafetySyncAt = 0;
   /** Local-file and note revisions from the latest pull, when Community reports them. */
   private lastSideDocuments: PullSideDocuments | null = null;
   private lastSuccessfulSyncAt = 0;
@@ -375,6 +470,10 @@ class SyncRuntime extends EventTarget {
   private refreshing: { refreshToken: string; result: Promise<DesktopSyncConfiguration> } | null = null;
   private readonly localFileBackoff = new SideSyncBackoff();
   private readonly privateNotesBackoff = new SideSyncBackoff();
+  /** Set when Community stopped accepting the cursor in a pull's body during this session. */
+  private pullRequestBodyUnavailable = false;
+  /** Set when a direct read failed but Community's address worked, for the rest of the session. */
+  private directPullUnavailable = false;
   /** Cleared when Spotify cannot read Community's "not modified" reply to a local-file check. */
   private conditionalLocalFileReads = true;
 
@@ -388,8 +487,9 @@ class SyncRuntime extends EventTarget {
     window.addEventListener(SYNC_OUTBOX_CHANGED_EVENT, this.handleOutboxChanged);
     window.addEventListener(LOCAL_FILES_CHANGED_EVENT, this.handleOutboxChanged);
     // Realtime triggers sync immediately; local edits sync once typing pauses.
-    // Recovery pulls back off from 5 to 15 to 30 minutes and pause while
-    // Spotify is hidden.
+    // Safety checks back off from 5 to 15 to 30 minutes while the live
+    // connection is down, and from 60 to 90 to 120 minutes while it is live
+    // or not needed. They pause while Spotify is hidden.
     this.hiddenAt = document.visibilityState === "visible" ? 0 : Date.now();
     this.scheduleSafetySync();
     this.installPublicApi();
@@ -403,9 +503,12 @@ class SyncRuntime extends EventTarget {
     if (this.editSyncTimer) clearTimeout(this.editSyncTimer);
     if (this.realtimeSuspendTimer) clearTimeout(this.realtimeSuspendTimer);
     this.timer = null;
+    this.nextSafetySyncAt = 0;
     this.reconnectTimer = null;
     this.editSyncTimer = null;
     this.firstPendingEditAt = 0;
+    this.editSessionStartedAt = 0;
+    this.lastEditAt = 0;
     this.realtimeSuspendTimer = null;
     this.realtimeSuspended = false;
     this.pendingRealtimeHead = 0;
@@ -426,7 +529,8 @@ class SyncRuntime extends EventTarget {
     const notBackedUp = [...this.oversizedAppStateDomains];
     return {
       ...this.backupHealth,
-      protectedDomains: this.backupHealth.protectedDomains.filter((domain) => !notBackedUp.includes(domain as DurableAppStateDomain)),
+      appStateDocuments: Math.max(0, this.backupHealth.appStateDocuments - (this.backupHealth.protectedDomains.includes("preferences") ? 1 : 0)),
+      protectedDomains: this.backupHealth.protectedDomains.filter((domain) => domain !== "preferences" && !notBackedUp.includes(domain as DurableAppStateDomain)),
       notBackedUp,
       needsChoice: [...this.settingsChoices],
       retrying: [...(this.localFilesRetrying ? ["local-files" as const] : []), ...(privateNoteBackupStatus() === "error" ? ["notes" as const] : [])],
@@ -566,10 +670,15 @@ class SyncRuntime extends EventTarget {
     this.deviceOnlyChangeCount = 0;
     this.oversizedAppStateDomains.clear();
     this.ownBatchIds.clear();
+    this.headConfirmedAt = 0;
+    this.announcedHead = 0;
+    this.realtimeWanted = null;
     // Another account's failed backups say nothing about this one.
     this.localFileBackoff.succeeded();
     this.privateNotesBackoff.succeeded();
     this.conditionalLocalFileReads = true;
+    this.pullRequestBodyUnavailable = false;
+    this.directPullUnavailable = false;
   }
 
   async replaceCloudWithCurrentLocalState(): Promise<void> {
@@ -583,9 +692,31 @@ class SyncRuntime extends EventTarget {
       const operationId = crypto.randomUUID();
       const snapshot: LibrarySnapshotV2 = { ...core, protocolVersion: PRIVATE_SYNC_PROTOCOL_VERSION, appState };
       assertLibrarySnapshotV2(snapshot);
-      const result = await this.request(configuration, "/api/v2/sync/replace", {
-        deviceId: configuration.deviceId, operationId, confirmation: "RESET TAGIFY", snapshot,
-      });
+      const replacement = { deviceId: configuration.deviceId, operationId, confirmation: "RESET TAGIFY", snapshot };
+      // The whole library goes in one request. Uncompressed, the website's
+      // 4.5 MB request limit stops it at about 7,000 songs; newer Community
+      // servers accept it gzipped, as the reviewed merge already is.
+      // A Spotify version without CompressionStream keeps sending plain JSON.
+      const compression = typeof CompressionStream === "undefined" ? null : compressedReplaceLimits(this.capabilities ?? await this.loadCapabilities(configuration));
+      const send = () => compression
+        ? this.requestCompressed(configuration, "/api/v2/sync/replace", replacement, {
+          ...compression,
+          tooLargeMessage: "This library is too large to reset from Tagify in one step. Download a backup and contact Tagify support.",
+        })
+        : this.request(configuration, "/api/v2/sync/replace", replacement);
+      let result;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          result = await send();
+          break;
+        } catch (error) {
+          // Community saves a very large library in the background and stops
+          // waiting after a few minutes. Asking again with the same operation
+          // waits for that same save instead of starting another one.
+          if (attempt < RESET_INSTALL_ATTEMPTS && error instanceof SyncHttpError && error.status === 503 && /^library_install_pending\b/.test(error.message)) continue;
+          throw error;
+        }
+      }
       this.updateProjectionStatus(result.projection);
       const canonical = await this.downloadSnapshot(configuration, PRIVATE_SYNC_PROTOCOL_VERSION) as LibrarySnapshotV2;
       assertLibrarySnapshotV2(canonical);
@@ -611,7 +742,7 @@ class SyncRuntime extends EventTarget {
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error?.message || response.statusText);
+    if (!response.ok) throw Object.assign(new Error(payload.error?.message || response.statusText), { status: response.status });
     return payload;
   }
 
@@ -632,13 +763,17 @@ class SyncRuntime extends EventTarget {
     // A rejected session cannot recover by retrying; only Sync Now or reconnecting tries again.
     if (automatic && this.inactiveRefreshToken === configuration.refreshToken) { this.setStatus("reauthorize"); return; }
     if (!navigator.onLine) { this.setStatus("offline"); return; }
-    this.ensureRealtime(configuration);
+    // Until Community says whether anyone else uses this library, connect
+    // after the run instead, so a library used alone never opens a channel.
+    if (this.realtimeWanted) this.ensureRealtime(configuration);
     this.running = runWithAccountSyncLock(configuration.accountId, async () => {
       const activeConfiguration = getDesktopSyncConfiguration();
       if (!activeConfiguration || activeConfiguration.accountId !== configuration.accountId) return;
       await this.run(activeConfiguration, !automatic);
     }).finally(() => {
       this.running = null;
+      const current = getDesktopSyncConfiguration();
+      if (current && this.realtimeWanted !== false) this.ensureRealtime(current);
       const realtimeHead = this.pendingRealtimeHead;
       this.pendingRealtimeHead = 0;
       if (this.rerunRequested) {
@@ -675,6 +810,7 @@ class SyncRuntime extends EventTarget {
       if (shouldRefreshSummary) {
         this.backupHealth = backupHealthFromSummary(summary);
         this.lastLibrarySummaryAt = Date.now();
+        this.noteLibrarySummary(summary);
       }
       if (!(await this.ensureReplicaReady(active, summary))) return;
       this.deviceOnlyChangeCount = Object.keys((await getState<DeviceOnlyChangesRecord>(DEVICE_ONLY_CHANGES_KEY))?.items ?? {}).length;
@@ -690,6 +826,8 @@ class SyncRuntime extends EventTarget {
       this.consecutiveFailures = 0;
       this.automaticRetryNotBefore = 0;
       this.lastSuccessfulSyncAt = Date.now();
+      // This run was a check too; the next safety check counts from now.
+      this.scheduleSafetySync(true);
       this.setSettledStatus();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Sync failed";
@@ -829,35 +967,131 @@ class SyncRuntime extends EventTarget {
     let applied = false;
     for (let page = 0; page < MAX_PULL_PAGES; page++) {
       const cursor = await readCursor();
-      const response = await this.request(configuration, `/api/v2/sync/pull?deviceId=${encodeURIComponent(configuration.deviceId)}&after=${cursor}&limit=200`, undefined, `"sync-cursor-${cursor}"`);
-      this.lastSideDocuments = this.hasCapability("pullSideDocuments") && !response.snapshotRequired ? pullSideDocuments(response) : null;
-      if (response.unchanged) {
-        this.lastPullReachedHead = true;
-        return applied;
-      }
-      // A remote update can arrive during the UI's short save debounce. Commit
-      // those edits first so rehydrating from IndexedDB cannot discard them.
-      await flushLocalPersistence();
-      if (response.snapshotRequired) {
-        await this.replaceWithRequiredSnapshot(configuration);
-        return true;
-      }
-      const batches = (response.batches || []) as PullBatch[];
-      for (const batch of batches) {
-        if (await this.applyPulledBatch(batch, response.conflicts || [])) applied = true;
-      }
-      const appliedCursor = Math.max(cursor, batches.at(-1)?.cursor ?? cursor);
-      if (batches.length || cursor < Number(response.headCursor || 0)) {
-        await this.acknowledgeCursor(configuration, appliedCursor);
-      }
-      if (batches.length) this.resetRecoverySchedule();
-      if (!batches.length || appliedCursor >= Number(response.headCursor || 0)) {
-        // A reply that names no cursor never counts as caught up.
-        this.lastPullReachedHead = Number.isSafeInteger(response.headCursor) && appliedCursor >= response.headCursor;
-        return applied;
-      }
+      const requestedAt = Date.now();
+      const response = await this.requestPullPage(configuration, cursor);
+      const outcome = await this.applyPullPage(configuration, cursor, response, requestedAt);
+      if (outcome.applied) applied = true;
+      if (outcome.done) return applied;
     }
     throw new Error("sync_pull_incomplete: Tagify is still catching up with your other devices and will continue shortly.");
+  }
+
+  private async requestPullPage(configuration: DesktopSyncConfiguration, cursor: number): Promise<PullPage> {
+    if (!this.canPullDirectly(configuration)) return this.requestPullPageFromCommunity(configuration, cursor);
+    try {
+      return await this.pullDirectly(configuration, cursor);
+    } catch (error) {
+      // Community's own address answers with the same page, or reports the
+      // failure the usual way (an inactive session, a pause, an outage).
+      const page = await this.requestPullPageFromCommunity(configuration, cursor);
+      this.directPullUnavailable = true;
+      console.warn("Tagify sync: reading changes directly failed; using Community's address this session", error instanceof Error ? error.message : error);
+      return page;
+    }
+  }
+
+  /** Community advertises `directPull` once it has checked the database's API from Spotify (docs/DESKTOP_DIRECT_PULL.md). */
+  private canPullDirectly(configuration: DesktopSyncConfiguration): boolean {
+    const directPull = (this.capabilities as { directPull?: { rpc?: unknown } } | null)?.directPull;
+    return !this.directPullUnavailable && directPull?.rpc === DIRECT_PULL_FUNCTION && Boolean(configuration.supabaseUrl && configuration.supabasePublishableKey);
+  }
+
+  /**
+   * Reads the same page from the database's API (PostgREST), without a
+   * website request. The function checks this device's session itself.
+   */
+  private async pullDirectly(configuration: DesktopSyncConfiguration, cursor: number): Promise<PullPage> {
+    const response = await fetch(`${configuration.supabaseUrl}/rest/v1/rpc/${DIRECT_PULL_FUNCTION}`, {
+      method: "POST",
+      headers: { apikey: configuration.supabasePublishableKey, authorization: `Bearer ${configuration.accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ p_device_id: configuration.deviceId, p_after_cursor: cursor, p_limit: PULL_PAGE_SIZE, p_direct: true }),
+    });
+    if (!response.ok) throw new Error(`direct pull answered ${response.status}`);
+    const page: unknown = await response.json();
+    if (!isPullPage(page)) throw new Error("direct pull returned an unexpected page");
+    return page as PullPage;
+  }
+
+  /**
+   * Spotify checks with Community before every signed-in request (a CORS
+   * preflight) and remembers the answer per address for up to two hours. A
+   * cursor in the address made every pull a new address and a second request;
+   * newer Community servers read it from the body, so one address serves all.
+   */
+  private async requestPullPageFromCommunity(configuration: DesktopSyncConfiguration, cursor: number): Promise<PullPage> {
+    const ifNoneMatch = `"sync-cursor-${cursor}"`;
+    const query = `/api/v2/sync/pull?deviceId=${encodeURIComponent(configuration.deviceId)}&after=${cursor}&limit=${PULL_PAGE_SIZE}`;
+    if (!this.hasCapability("pullRequestBody") || this.pullRequestBodyUnavailable) return this.request(configuration, query, undefined, ifNoneMatch);
+    try {
+      return await this.request(configuration, "/api/v2/sync/pull", { deviceId: configuration.deviceId, after: cursor, limit: PULL_PAGE_SIZE }, ifNoneMatch);
+    } catch (error) {
+      // Community answered, and not because the route is missing or refuses POST.
+      if (error instanceof SyncHttpError && error.status !== 404 && error.status !== 405) throw error;
+      // A Community rolled back after advertising it (a refused POST may also
+      // surface as a failed request): read changes the older way this session.
+      const response = await this.request(configuration, query, undefined, ifNoneMatch);
+      this.pullRequestBodyUnavailable = true;
+      console.warn("Tagify sync: Community did not accept the newer change request; using the earlier one");
+      return response;
+    }
+  }
+
+  /**
+   * Applies one page of Community changes after `cursor`, from a pull or from
+   * the later changes a push returned. `done` once nothing more is waiting.
+   */
+  private async applyPullPage(configuration: DesktopSyncConfiguration, cursor: number, response: PullPage, requestedAt: number): Promise<{ applied: boolean; done: boolean }> {
+    this.lastPullReachedHead = false;
+    this.lastSideDocuments = this.hasCapability("pullSideDocuments") && !response.snapshotRequired ? pullSideDocuments(response) : null;
+    this.noteLiveSync(response);
+    if (response.unchanged) {
+      this.noteHeadReached(requestedAt);
+      return { applied: false, done: true };
+    }
+    // A remote update can arrive during the UI's short save debounce. Commit
+    // those edits first so rehydrating from IndexedDB cannot discard them.
+    await flushLocalPersistence();
+    if (response.snapshotRequired) {
+      await this.replaceWithRequiredSnapshot(configuration);
+      return { applied: true, done: true };
+    }
+    let applied = false;
+    const batches = response.batches || [];
+    for (const batch of batches) {
+      if (await this.applyPulledBatch(batch, response.conflicts || [])) applied = true;
+    }
+    const appliedCursor = Math.max(cursor, batches.at(-1)?.cursor ?? cursor);
+    if (batches.length || cursor < Number(response.headCursor || 0)) {
+      await this.acknowledgeCursor(configuration, appliedCursor);
+    }
+    if (batches.length) this.resetRecoverySchedule();
+    if (!batches.length || appliedCursor >= Number(response.headCursor || 0)) {
+      // A reply that names no cursor never counts as caught up.
+      const headCursor = response.headCursor;
+      if (typeof headCursor === "number" && Number.isSafeInteger(headCursor) && appliedCursor >= headCursor) this.noteHeadReached(requestedAt);
+      return { applied, done: true };
+    }
+    return { applied, done: false };
+  }
+
+  /** `requestedAt` is when the answer was asked for: anything committed after it is still to come. */
+  private noteHeadReached(requestedAt: number): void {
+    this.lastPullReachedHead = true;
+    this.headConfirmedAt = Math.max(this.headConfirmedAt, requestedAt);
+  }
+
+  /**
+   * True when this device already holds Community's newest changes: a reply
+   * reached the head while Realtime was connected, the connection has stayed
+   * up since, and it has announced nothing newer. Only then can an edit run
+   * skip its catch-up pull, because the push brings back anything later.
+   */
+  private async knownToBeAtHead(): Promise<boolean> {
+    return this.hasCapability("pushReturnsLaterBatches")
+      && this.headConfirmedAt > 0
+      && this.realtimeCoverage() !== "down"
+      && (this.isRealtimeLive() || this.realtimeWanted === false)
+      && this.announcedHead <= await readCursor();
   }
 
   private async replaceWithRequiredSnapshot(configuration: DesktopSyncConfiguration): Promise<void> {
@@ -919,6 +1153,7 @@ class SyncRuntime extends EventTarget {
     const shadow = await readAppStateShadow();
     const local = new Map((await buildDurableAppStateDocuments()).map((document) => [document.domain, document]));
     for (const operation of operations) {
+      if (operation.domain === "preferences") continue;
       const saved = shadow[operation.domain];
       const pending = await getState<DurableAppStateDocumentV2>(`pending-app-state:${operation.domain}`);
       const document = local.get(operation.domain);
@@ -936,7 +1171,7 @@ class SyncRuntime extends EventTarget {
     return decisions;
   }
 
-  private hasCapability(name: "pullSideDocuments" | "pullAcknowledgesCursor"): boolean {
+  private hasCapability(name: "pullSideDocuments" | "pullAcknowledgesCursor" | "pushReturnsLaterBatches" | "pullRequestBody" | "liveSyncHints"): boolean {
     return (this.capabilities as Record<string, unknown> | null)?.[name] === true;
   }
 
@@ -955,7 +1190,9 @@ class SyncRuntime extends EventTarget {
     let repaired = false;
     let waiting = false;
     let caughtUp = false;
-    this.lastSideDocuments = null;
+    // A run that sends nothing while this device is current makes no request,
+    // so it relies on the revisions from the latest reply.
+    if (!(await this.knownToBeAtHead())) this.lastSideDocuments = null;
     for (;;) {
       // Whether the latest pull of this round reached Community's newest cursor.
       let pulledToHead = false;
@@ -970,16 +1207,23 @@ class SyncRuntime extends EventTarget {
         const firstIntent = (await readOutbox())[0];
         if (!firstIntent) break;
         // Catch up first so only this device's own changes are sent and a
-        // confirmed copy is compared with Community's latest state.
+        // confirmed copy is compared with Community's latest state. Realtime
+        // already says when this device is current; then the push alone
+        // brings back anything that arrived in the meantime.
         if (firstIntent.type !== "library.snapshot" && !caughtUp) {
-          await this.pull(configuration);
-          pulledToHead = this.lastPullReachedHead;
+          if (await this.knownToBeAtHead()) pulledToHead = true;
+          else {
+            await this.pull(configuration);
+            pulledToHead = this.lastPullReachedHead;
+          }
         }
         const outcome = await this.push(configuration);
         // Confirming queued edits sends nothing, so there is nothing new to pull.
         caughtUp = outcome.sent === 0 && !outcome.snapshot;
         if (!caughtUp) {
-          await this.pull(configuration);
+          // Newer Community servers return the changes after this device's
+          // cursor, its own included, with the push.
+          if (!outcome.laterApplied) await this.pull(configuration);
           pulledToHead = this.lastPullReachedHead;
         }
         caughtUp = true;
@@ -1001,9 +1245,9 @@ class SyncRuntime extends EventTarget {
       // A pull after a backup reached Community's newest cursor moments ago.
       // While Realtime is live, anything committed since then is announced and
       // handled once this sync finishes, so another pull here would come back
-      // unchanged. Without a live connection, or after a newer announcement,
-      // pull as usual.
-      const skipPull = pulledToHead && this.isRealtimeSubscribed() && this.pendingRealtimeHead <= await readCursor();
+      // unchanged; the same holds when nobody else uses the library. Without
+      // a live connection, or after a newer announcement, pull as usual.
+      const skipPull = pulledToHead && (this.isRealtimeSubscribed() || this.realtimeWanted === false) && this.pendingRealtimeHead <= await readCursor();
       if (!skipPull) await this.pull(configuration);
       await this.pushDurableAppState(configuration);
       // Community's pull reports whether local files or notes changed elsewhere;
@@ -1034,16 +1278,16 @@ class SyncRuntime extends EventTarget {
    * change it describes; anything rejected, skipped, or unconfirmed is sent
    * again with Community's latest revisions instead of being dropped.
    */
-  private async push(configuration: DesktopSyncConfiguration): Promise<{ sent: number; accepted: number; confirmed: number; snapshot: boolean }> {
+  private async push(configuration: DesktopSyncConfiguration): Promise<PushOutcome> {
     const intents = await readOutbox();
-    if (!intents.length) return { sent: 0, accepted: 0, confirmed: 0, snapshot: false };
+    if (!intents.length) return { sent: 0, accepted: 0, confirmed: 0, snapshot: false, laterApplied: false };
     const plan = coalesceOutboxIntents(intents);
     const snapshotIntent = plan.intents[0]?.type === "library.snapshot" ? plan.intents[0] : null;
     if (snapshotIntent) {
       if (snapshotIntent.reason === "reset") throw new Error("intentional_cloud_reset_requires_confirmation");
       await this.bootstrap(configuration, snapshotIntent.id, snapshotIntent.batchId, snapshotIntent.createdAt);
       await deleteOutbox([snapshotIntent.id]);
-      return { sent: 0, accepted: 0, confirmed: 1, snapshot: true };
+      return { sent: 0, accepted: 0, confirmed: 1, snapshot: true, laterApplied: false };
     }
     const operations: SyncMutationV1[] = [];
     const confirmedIds: string[] = [];
@@ -1074,26 +1318,29 @@ class SyncRuntime extends EventTarget {
     }
     await this.noteDeviceOnlyChanges(deviceOnly);
     if (confirmedIds.length) await deleteOutbox(confirmedIds);
-    if (!operations.length) return { sent: 0, accepted: 0, confirmed: confirmedIds.length, snapshot: false };
+    if (!operations.length) return { sent: 0, accepted: 0, confirmed: confirmedIds.length, snapshot: false, laterApplied: false };
     const sent = await withContentOperationIds(operations);
     const batchId = await stableUuid(`push:${this.batchSalt}`, await sha256Hex(stableJson(sent)));
     this.rememberOwnBatch(batchId);
+    const baseCursor = await readCursor();
     const batch: SyncBatchV1 = {
       protocolVersion: 1,
       batchId,
       deviceId: configuration.deviceId,
-      baseCursor: await readCursor(),
+      baseCursor,
       operations: sent,
     };
+    const askForLater = this.hasCapability("pushReturnsLaterBatches");
+    const requestedAt = Date.now();
     let result;
     try {
-      result = await this.request(configuration, "/api/v2/sync/push", batch);
+      result = await this.request(configuration, `/api/v2/sync/push${askForLater ? "?later=1" : ""}`, batch);
     } catch (error) {
       // Community already holds a different batch under this name: nothing
       // was applied, so send the same changes again under a new name.
       if (/batch_id_reused/i.test(error instanceof Error ? error.message : "")) {
         this.batchSalt = crypto.randomUUID();
-        return { sent: sent.length, accepted: 0, confirmed: confirmedIds.length, snapshot: false };
+        return { sent: sent.length, accepted: 0, confirmed: confirmedIds.length, snapshot: false, laterApplied: false };
       }
       throw error;
     }
@@ -1108,10 +1355,17 @@ class SyncRuntime extends EventTarget {
       // as sent; the next attempt uses a new name.
       console.error("Tagify sync: Community confirmed a different batch; sending again", { batchId });
       this.batchSalt = crypto.randomUUID();
-      return { sent: sent.length, accepted: 0, confirmed: confirmedIds.length, snapshot: false };
+      return { sent: sent.length, accepted: 0, confirmed: confirmedIds.length, snapshot: false, laterApplied: false };
     }
     dispatchSyncEvent("local", batchId, accepted.filter((operation) => sentIds.has(operation.operationId)));
-    return { sent: sent.length, accepted: accepted.length, confirmed: confirmedIds.length, snapshot: false };
+    // The changes after this device's cursor, its own echo included, answer
+    // the same question a pull would. Without them (an older Community, or a
+    // read that failed after the save) the caller pulls instead.
+    let laterApplied = false;
+    if (askForLater && isPullPage(result.later) && await readCursor() === baseCursor) {
+      laterApplied = (await this.applyPullPage(configuration, baseCursor, result.later as PullPage, requestedAt)).done;
+    }
+    return { sent: sent.length, accepted: accepted.length, confirmed: confirmedIds.length, snapshot: false, laterApplied };
   }
 
   private rememberOwnBatch(batchId: string): void {
@@ -1310,6 +1564,7 @@ class SyncRuntime extends EventTarget {
    */
   private async pushDurableAppState(configuration: DesktopSyncConfiguration): Promise<void> {
     if (!this.supportsV2) return;
+    await indexedDBStorage.runSyncTransaction({}, () => ({ deleteState: ["pending-app-state:preferences", `${APP_STATE_CHOICE_PREFIX}preferences`], result: undefined }));
     const shadow = await readAppStateShadow();
     const savedSmartPlaylists = shadow["smart-playlists"];
     if (Array.isArray(savedSmartPlaylists?.value) &&
@@ -1401,7 +1656,7 @@ class SyncRuntime extends EventTarget {
 
   private async refreshSettingsChoices(): Promise<void> {
     const choices: DurableAppStateDomain[] = [];
-    for (const domain of DURABLE_APP_STATE_DOMAINS) {
+    for (const domain of DURABLE_APP_STATE_DOMAINS.filter((domain) => domain !== "preferences")) {
       const choice = await getState<AppStateChoiceRecord>(`${APP_STATE_CHOICE_PREFIX}${domain}`);
       if (choice && choice.keep !== "device") choices.push(domain);
     }
@@ -1436,6 +1691,12 @@ class SyncRuntime extends EventTarget {
     // its upload; a changed library gets its own upload instead of being
     // rejected as a different payload under the same key.
     const snapshot = await buildLocalSnapshot(configuration.libraryId, undefined, new Date(queuedAt));
+    const chunks = snapshotChunks(snapshot);
+    const checksum = await sha256Hex(JSON.stringify(snapshot));
+    const startRequest = {
+      deviceId: configuration.deviceId, idempotencyKey: await stableUuid(batchId, checksum), mode: "initialize",
+      sourceStorageSchemaVersion: snapshot.sourceStorageSchemaVersion, checksum, expectedChunks: chunks.length,
+    };
     const summary = (await this.request(configuration, "/api/v2/library")).library;
     const cloudHasData = Number(summary?.counts?.annotations || 0) > 0 || Number(summary?.counts?.taxonomy || 0) > 0;
     const localHasData = snapshot.annotations.length > 0 || snapshot.taxonomy.length > 0;
@@ -1443,17 +1704,21 @@ class SyncRuntime extends EventTarget {
       throw new Error("snapshot_required: confirm Restore from cloud before replacing this replica");
     }
     if (cloudHasData && localHasData) {
+      // An earlier attempt may have saved this very library after its reply was
+      // lost (a dropped connection while Community finished a large first
+      // sync). Community recognizes the same upload and confirms it, instead of
+      // this device asking the user to combine the library with itself.
+      const resumedCursor = await this.resumeFinishedBootstrap(configuration, startRequest, checksum);
+      if (resumedCursor !== null) {
+        await this.completeBootstrap(configuration, snapshot, resumedCursor, intentId);
+        return;
+      }
       if (await this.reconcileInitialLibraries(configuration)) return;
       throw new Error("merge_review_required");
     }
-    const chunks = snapshotChunks(snapshot);
-    const checksum = await sha256Hex(JSON.stringify(snapshot));
     let start;
     try {
-      start = await this.request(configuration, "/api/v2/sync/bootstrap", {
-        deviceId: configuration.deviceId, idempotencyKey: await stableUuid(batchId, checksum), mode: "initialize",
-        sourceStorageSchemaVersion: snapshot.sourceStorageSchemaVersion, checksum, expectedChunks: chunks.length,
-      });
+      start = await this.request(configuration, "/api/v2/sync/bootstrap", startRequest);
     } catch (error) {
       // Community holds something this device's check above doesn't count
       // (such as colors). Combine the libraries instead of replacing them.
@@ -1473,7 +1738,31 @@ class SyncRuntime extends EventTarget {
       if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error?.message || "Snapshot upload failed"); }
     }
     const result = await this.request(configuration, `/api/v2/sync/bootstrap/${uploadId}/finalize`, { deviceId: configuration.deviceId, checksum });
-    const appliedCursor = result.bootstrap.headCursor || 0;
+    await this.completeBootstrap(configuration, snapshot, result.bootstrap.headCursor || 0, intentId);
+  }
+
+  /**
+   * Starts the same upload again. Returns its cursor when Community already
+   * finished it (finalizing a finished upload only reports it), or null when
+   * the cloud library holds something else and needs the reviewed merge.
+   */
+  private async resumeFinishedBootstrap(configuration: DesktopSyncConfiguration, startRequest: Record<string, unknown>, checksum: string): Promise<number | null> {
+    let start;
+    try {
+      start = await this.request(configuration, "/api/v2/sync/bootstrap", startRequest);
+    } catch (error) {
+      if (/merge_required/i.test(error instanceof Error ? error.message : "")) return null;
+      throw error;
+    }
+    if (start?.upload?.status !== "complete" || typeof start.upload.id !== "string") return null;
+    const result = await this.request(configuration, `/api/v2/sync/bootstrap/${start.upload.id}/finalize`, { deviceId: configuration.deviceId, checksum });
+    const headCursor = result?.bootstrap?.headCursor;
+    if (!Number.isSafeInteger(headCursor)) return null;
+    console.info("Tagify sync: confirmed a first backup Community had already saved", { headCursor });
+    return headCursor;
+  }
+
+  private async completeBootstrap(configuration: DesktopSyncConfiguration, snapshot: LibrarySnapshotV1, appliedCursor: number, intentId: string): Promise<void> {
     const canonical: LibrarySnapshotV1 | LibrarySnapshotV2 = { ...snapshot, headCursor: appliedCursor };
     await seedShadowFromSnapshot(canonical, appliedCursor);
     await writeManifest(replicaManifest(configuration, canonical));
@@ -1501,9 +1790,16 @@ class SyncRuntime extends EventTarget {
     return payload;
   }
 
-  private async requestCompressed(configuration: DesktopSyncConfiguration, path: string, body: unknown): Promise<any> {
-    const compressed = await gzipJsonBody(body);
-    if (compressed.byteLength > 4_000_000) throw new Error("This library is too large to combine in one review. Download a backup and contact Tagify support.");
+  private async requestCompressed(configuration: DesktopSyncConfiguration, path: string, body: unknown, {
+    maxCompressedBytes = MAX_COMPRESSED_REQUEST_BYTES,
+    maxExpandedBytes = MAX_EXPANDED_REQUEST_BYTES,
+    tooLargeMessage = "This library is too large to combine in one review. Download a backup and contact Tagify support.",
+  }: { maxCompressedBytes?: number; maxExpandedBytes?: number; tooLargeMessage?: string } = {}): Promise<any> {
+    const json = JSON.stringify(body);
+    // Community refuses what it would have to expand beyond this; stop before compressing.
+    if (new TextEncoder().encode(json).byteLength > maxExpandedBytes) throw new Error(tooLargeMessage);
+    const compressed = await gzipText(json);
+    if (compressed.byteLength > maxCompressedBytes) throw new Error(tooLargeMessage);
     const response = await fetch(`${configuration.apiBaseUrl}${path}`, {
       method: "POST",
       headers: {
@@ -1543,7 +1839,7 @@ class SyncRuntime extends EventTarget {
   private async downloadSnapshot(configuration: DesktopSyncConfiguration, protocolVersion: number): Promise<LibrarySnapshotV1 | LibrarySnapshotV2> {
     const path = `/api/v2/sync/snapshot?deviceId=${encodeURIComponent(configuration.deviceId)}&protocolVersion=${protocolVersion}&delivery=direct-gzip-v1`;
     const descriptor = await this.request(configuration, path);
-    if (descriptor.snapshot) return descriptor.snapshot as LibrarySnapshotV1 | LibrarySnapshotV2;
+    if (descriptor.snapshot) return librarySnapshotWithoutPreferences(descriptor.snapshot as LibrarySnapshotV1 | LibrarySnapshotV2);
     const download = descriptor.download as { url?: unknown; encoding?: unknown; checksum?: unknown } | undefined;
     if (!download || typeof download.url !== "string" || download.encoding !== "gzip" || typeof download.checksum !== "string") {
       throw new Error("invalid_snapshot_response: Community returned an invalid snapshot download");
@@ -1556,7 +1852,7 @@ class SyncRuntime extends EventTarget {
     const checksum = await sha256HexBytes(bytes);
     if (checksum !== download.checksum) throw new Error("snapshot_checksum_mismatch: The cloud snapshot failed its integrity check");
     try {
-      return JSON.parse(new TextDecoder().decode(bytes)) as LibrarySnapshotV1 | LibrarySnapshotV2;
+      return librarySnapshotWithoutPreferences(JSON.parse(new TextDecoder().decode(bytes)) as LibrarySnapshotV1 | LibrarySnapshotV2);
     } catch {
       throw new Error("invalid_snapshot_response: The cloud snapshot was not valid JSON");
     }
@@ -1600,7 +1896,7 @@ class SyncRuntime extends EventTarget {
 
   /** Connects Realtime with a current session unless it is connected, reconnecting, or paused. */
   private ensureRealtime(configuration: DesktopSyncConfiguration): void {
-    if (!this.started || this.channel || this.realtimeConnecting || this.reconnectTimer || this.realtimeSuspended) return;
+    if (!this.started || this.channel || this.realtimeConnecting || this.reconnectTimer || this.realtimeSuspended || this.realtimeWanted === false) return;
     if (this.inactiveRefreshToken === configuration.refreshToken) return;
     this.realtimeConnecting = true;
     void this.refreshIfNeeded(configuration)
@@ -1615,7 +1911,7 @@ class SyncRuntime extends EventTarget {
   }
 
   private async connectRealtime(configuration: DesktopSyncConfiguration) {
-    if (!configuration.supabaseUrl || !configuration.supabasePublishableKey || this.channel || this.realtimeConnecting || this.realtimeSuspended) return;
+    if (!configuration.supabaseUrl || !configuration.supabasePublishableKey || this.channel || this.realtimeConnecting || this.realtimeSuspended || this.realtimeWanted === false) return;
     this.realtimeConnecting = true;
     try {
       // Realtime asks for a token after joining and on every heartbeat. Without
@@ -1629,7 +1925,8 @@ class SyncRuntime extends EventTarget {
       const realtime = this.realtime;
       this.realtimeToken = configuration.accessToken;
       await realtime.realtime.setAuth(configuration.accessToken);
-      if (!this.started || this.realtime !== realtime || this.realtimeSuspended) return;
+      // Read through a cast: TypeScript keeps the check above narrowed across the await.
+      if (!this.started || this.realtime !== realtime || this.realtimeSuspended || (this.realtimeWanted as boolean | null) === false) return;
       const channel = realtime.channel(`tagify-library:${configuration.libraryId}`, { config: { private: true } });
       this.channel = channel;
       channel
@@ -1638,6 +1935,7 @@ class SyncRuntime extends EventTarget {
           // Community names the device that wrote the change; this device's own
           // backup was already confirmed by the sync that sent it.
           if (typeof payload.deviceId === "string" && payload.deviceId === configuration.deviceId) return;
+          this.announcedHead = Math.max(this.announcedHead, Number(payload.headCursor));
           void this.handleRemoteHead(Number(payload.headCursor));
         })
         .on("broadcast", { event: "projection_cursor" }, ({ payload }) => {
@@ -1651,11 +1949,18 @@ class SyncRuntime extends EventTarget {
         .subscribe((status) => {
           // Removing an old channel also emits CLOSED. It must not schedule a new retry.
           if (this.channel !== channel) return;
-          if (status === "SUBSCRIBED") this.realtimeSubscribedAt = Date.now();
+          if (status === "SUBSCRIBED") {
+            this.realtimeSubscribedAt = Date.now();
+            // Announcements made before joining were not heard: check once,
+            // after which Realtime covers every change.
+            if (this.headConfirmedAt < this.realtimeSubscribedAt) void this.syncNow(true);
+            this.scheduleSafetySync(true);
+          }
           if (this.started && (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED")) {
             if (this.realtimeSubscribedAt && Date.now() - this.realtimeSubscribedAt >= 30_000) this.reconnectAttempts = 0;
             this.realtimeSubscribedAt = 0;
             console.warn("Tagify sync: Realtime hint channel unavailable; recovery pulls remain active");
+            this.scheduleSafetySync(true);
             this.scheduleRealtimeReconnect(configuration);
           }
         });
@@ -1672,20 +1977,30 @@ class SyncRuntime extends EventTarget {
     window.dispatchEvent(new CustomEvent("tagify:syncStatus", { detail: { status } }));
   }
 
-  private scheduleSafetySync() {
-    if (!this.started || document.visibilityState !== "visible") return;
+  /**
+   * Arms the next safety check. Its due time survives Spotify being hidden
+   * and shown again, so switching apps neither postpones it nor brings it
+   * forward; `restart` counts a new interval from now.
+   */
+  private scheduleSafetySync(restart = false) {
+    if (!this.started) return;
+    if (restart || !this.nextSafetySyncAt) {
+      this.nextSafetySyncAt = Date.now() + safetySyncDelayMs(this.recoveryPollStage, Math.random, this.realtimeCoverage() !== "down");
+    }
+    if (document.visibilityState !== "visible") return;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
+      this.nextSafetySyncAt = 0;
       if (document.visibilityState === "visible" && navigator.onLine) {
         this.recoveryPollStage = Math.min(this.recoveryPollStage + 1, RECOVERY_POLL_INTERVALS_MS.length - 1);
         void this.syncNow(true);
       }
       this.scheduleSafetySync();
-    }, safetySyncDelayMs(this.recoveryPollStage));
+    }, Math.max(0, this.nextSafetySyncAt - Date.now()));
   }
 
-  private resetRecoverySchedule() { this.recoveryPollStage = 0; this.scheduleSafetySync(); }
+  private resetRecoverySchedule() { this.recoveryPollStage = 0; this.scheduleSafetySync(true); }
   private handleOnline = () => { this.resetRecoverySchedule(); void this.syncNow(true); };
   private handleVisibilityChange = () => {
     if (document.visibilityState !== "visible") {
@@ -1693,6 +2008,11 @@ class SyncRuntime extends EventTarget {
       this.timer = null;
       this.hiddenAt ||= Date.now();
       this.scheduleRealtimeSuspend();
+      // Leaving Spotify (perhaps for another device) backs up waiting edits now.
+      if (this.editSyncTimer) {
+        clearTimeout(this.editSyncTimer);
+        void this.flushEditSync();
+      }
       return;
     }
     const hiddenForMs = this.hiddenAt ? Date.now() - this.hiddenAt : 0;
@@ -1704,17 +2024,15 @@ class SyncRuntime extends EventTarget {
       this.realtimeSuspended = false;
       const configuration = getDesktopSyncConfiguration();
       if (configuration) this.ensureRealtime(configuration);
-      this.resetRecoverySchedule();
+      this.scheduleSafetySync();
       void this.syncNow(true);
       return;
     }
     // Realtime already delivers changes while connected; only check Community
     // when that connection may have missed something.
-    if (shouldSyncWhenVisible({ hiddenForMs, realtimeSubscribed: this.isRealtimeSubscribed(), msSinceLastSync: Date.now() - this.lastSuccessfulSyncAt })) {
-      this.resetRecoverySchedule();
+    this.scheduleSafetySync();
+    if (shouldSyncWhenVisible({ hiddenForMs, realtime: this.realtimeCoverage(), msSinceLastSync: Date.now() - this.lastSuccessfulSyncAt })) {
       void this.syncNow(true);
-    } else {
-      this.scheduleSafetySync();
     }
   };
   private handleOutboxChanged = () => {
@@ -1737,10 +2055,12 @@ class SyncRuntime extends EventTarget {
     if (!this.started) return;
     const now = Date.now();
     this.firstPendingEditAt ||= now;
+    if (!this.lastEditAt || now - this.lastEditAt >= EDIT_SESSION_GAP_MS) this.editSessionStartedAt = now;
+    this.lastEditAt = now;
     if (this.editSyncTimer) clearTimeout(this.editSyncTimer);
     // The edit shows as being saved right away, as before.
     if ((this.status === "idle" || this.status === "publishing") && this.canSyncAutomatically()) this.setStatus("syncing");
-    this.editSyncTimer = setTimeout(() => void this.flushEditSync(), editSyncDelayMs(this.firstPendingEditAt, now));
+    this.editSyncTimer = setTimeout(() => void this.flushEditSync(), editSyncDelayMs(this.firstPendingEditAt, now, this.editSessionStartedAt));
   }
 
   private async flushEditSync(): Promise<void> {
@@ -1778,12 +2098,57 @@ class SyncRuntime extends EventTarget {
     return Boolean(this.channel) && this.realtimeSubscribedAt > 0;
   }
 
+  /** Realtime has stayed connected since this device last confirmed it was current. */
+  private isRealtimeLive(): boolean {
+    return this.isRealtimeSubscribed() && this.headConfirmedAt > 0 && this.headConfirmedAt >= this.realtimeSubscribedAt;
+  }
+
+  private realtimeCoverage(): RealtimeCoverage {
+    if (this.isRealtimeLive()) return "live";
+    return this.realtimeWanted === false || this.isRealtimeSubscribed() ? "quiet" : "down";
+  }
+
+  /** Pull pages from Community with `liveSyncHints` say whether anyone else uses this library. */
+  private noteLiveSync(response: PullPage): void {
+    const realtime = response?.liveSync?.realtime;
+    if (this.hasCapability("liveSyncHints") && typeof realtime === "boolean") this.setRealtimeWanted(realtime);
+  }
+
+  /**
+   * Older Community servers: a library with only this device connected has
+   * nobody else to hear from. Its other devices may be unused, so this only
+   * ever saves a connection that is certainly idle.
+   */
+  private noteLibrarySummary(summary: { devices?: unknown } | null | undefined): void {
+    const devices = summary?.devices;
+    if (this.hasCapability("liveSyncHints") || typeof devices !== "number" || !Number.isSafeInteger(devices)) return;
+    this.setRealtimeWanted(devices > 1);
+  }
+
+  private setRealtimeWanted(wanted: boolean): void {
+    if (this.realtimeWanted === wanted) return;
+    this.realtimeWanted = wanted;
+    if (wanted) {
+      const configuration = getDesktopSyncConfiguration();
+      if (configuration) this.ensureRealtime(configuration);
+    } else {
+      if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      if (this.realtimeSuspendTimer) clearTimeout(this.realtimeSuspendTimer);
+      this.realtimeSuspendTimer = null;
+      this.closeRealtimeChannel();
+    }
+    this.scheduleSafetySync(true);
+  }
+
   private realtimeAccessToken(): string {
     return getDesktopSyncConfiguration()?.accessToken || this.realtimeToken;
   }
 
   private scheduleRealtimeSuspend(): void {
     if (!this.started || this.realtimeSuspended || this.realtimeSuspendTimer) return;
+    // Nothing to release, and nothing to catch up on when shown again.
+    if (this.realtimeWanted === false) return;
     this.realtimeSuspendTimer = setTimeout(() => {
       this.realtimeSuspendTimer = null;
       if (!this.started || document.visibilityState === "visible") return;
@@ -1813,7 +2178,7 @@ class SyncRuntime extends EventTarget {
   }
 
   private scheduleRealtimeReconnect(configuration: DesktopSyncConfiguration) {
-    if (!this.started || this.reconnectTimer || this.realtimeSuspended) return;
+    if (!this.started || this.reconnectTimer || this.realtimeSuspended || this.realtimeWanted === false) return;
     if (this.inactiveRefreshToken === (getDesktopSyncConfiguration() || configuration).refreshToken) return;
     const delay = Math.round(Math.min(5 * 60_000, 1_000 * 2 ** Math.min(this.reconnectAttempts++, 8)) * (1 + Math.random() * 0.25));
     this.reconnectTimer = setTimeout(async () => {
@@ -1821,7 +2186,7 @@ class SyncRuntime extends EventTarget {
       const previous = this.channel;
       this.channel = null;
       if (previous && this.realtime) await this.realtime.removeChannel(previous);
-      if (!this.started || !navigator.onLine || this.realtimeSuspended) return;
+      if (!this.started || !navigator.onLine || this.realtimeSuspended || this.realtimeWanted === false) return;
       try {
         const current = getDesktopSyncConfiguration() || configuration;
         const active = await this.refreshIfNeeded(current);
@@ -2139,6 +2504,7 @@ export function planPulledBatch(
   const deleteState: string[] = [];
   for (const operation of batch.operations) {
     if (operation.type === "app-state.replace") {
+      if (operation.domain === "preferences") continue;
       const current = appState.get(operation.domain) ?? context.appState[operation.domain];
       appState.set(operation.domain, {
         domain: operation.domain, value: operation.value,
@@ -2367,7 +2733,7 @@ async function seedShadowFromSnapshot(snapshot: LibrarySnapshotV1, cursor: numbe
     transaction.objectStore(SYNC_STORES.CONFLICTS).clear();
     transaction.objectStore(SYNC_STORES.TOMBSTONES).clear();
     store.put({ key: "cursor", value: cursor });
-    const parentRevisions = parentRevisionsFromSnapshot(snapshot.taxonomy);
+    const parentRevisions = parentRevisionsFromSnapshot(snapshot.taxonomy, snapshotListRevisions(snapshot));
     store.put({ key: "taxonomy-shadow", nodes: Object.fromEntries(snapshot.taxonomy.map((node) => [node.id,node])), colors: Object.fromEntries(snapshot.colors.map((color) => [color.id,color])), collections: Object.fromEntries(snapshot.collections.map((collection) => [collection.id,collection])), parentRevisions } as TaxonomyShadowRecord);
     snapshot.annotations.forEach((annotation) => store.put({ key: `entity:${entityKeyV1(annotation.entity)}`, annotation } as ShadowRecord));
   });
@@ -2381,7 +2747,7 @@ function stateRecordsFromSnapshot(snapshot: LibrarySnapshotV1 | LibrarySnapshotV
       nodes: Object.fromEntries(snapshot.taxonomy.map((node) => [node.id, node])),
       colors: Object.fromEntries(snapshot.colors.map((color) => [color.id, color])),
       collections: Object.fromEntries(snapshot.collections.map((collection) => [collection.id, collection])),
-      parentRevisions: parentRevisionsFromSnapshot(snapshot.taxonomy),
+      parentRevisions: parentRevisionsFromSnapshot(snapshot.taxonomy, snapshotListRevisions(snapshot)),
     } as TaxonomyShadowRecord,
     ...snapshot.annotations.map((annotation) => ({ key: `entity:${entityKeyV1(annotation.entity)}`, annotation } as ShadowRecord)),
   ];
@@ -2490,14 +2856,30 @@ function smartPlaylistsFromAppState(appState: DurableAppStateDocumentV2[]): unkn
   );
 }
 
-export function parentRevisionsFromSnapshot(nodes: TaxonomyNodeSnapshotV1[]): Record<string, number> {
+/**
+ * Community's revision of each parent list. Nodes carry their own list's
+ * revision, but a list whose children were all deleted has no node left to
+ * carry it, so Community also sends every list's revision; without it the next
+ * tag added to such a list would be refused on every retry.
+ */
+export function parentRevisionsFromSnapshot(nodes: TaxonomyNodeSnapshotV1[], listRevisions?: unknown): Record<string, number> {
   const revisions: Record<string, number> = {};
   nodes.forEach((node) => {
     const key = node.parentId || "__root__";
     revisions[key] = Math.max(revisions[key] || 0, node.parentListRevision);
   });
+  if (listRevisions && typeof listRevisions === "object" && !Array.isArray(listRevisions)) {
+    for (const [key, revision] of Object.entries(listRevisions as Record<string, unknown>)) {
+      if ((key === "__root__" || isSyncSafeId(key)) && Number.isSafeInteger(revision) && (revision as number) >= 0) {
+        revisions[key] = Math.max(revisions[key] || 0, revision as number);
+      }
+    }
+  }
   return revisions;
 }
+
+const snapshotListRevisions = (snapshot: LibrarySnapshotV1 | LibrarySnapshotV2): unknown =>
+  (snapshot as { parentListRevisions?: unknown }).parentListRevisions;
 
 function stableTaxonomyJson(taxonomy: TagTaxonomy): string {
   return JSON.stringify(flattenTaxonomy(normalizeTaxonomyTree(taxonomy)));
@@ -2544,6 +2926,14 @@ function positiveNumber(value: string | null): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+/** A pull reply as Community returns it, also when it comes back with a push. */
+export function isPullPage(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const page = value as Record<string, unknown>;
+  if (page.snapshotRequired === true || page.unchanged === true) return Number.isSafeInteger(page.headCursor);
+  return Number.isSafeInteger(page.headCursor) && Array.isArray(page.batches);
+}
+
 function isSyncCapabilities(value: unknown): value is SyncCapabilitiesV1 | SyncCapabilitiesV2 {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
@@ -2563,3 +2953,10 @@ function compareVersions(left: string, right: string): number {
 }
 
 export const syncRuntime = new SyncRuntime();
+
+/** Older cloud snapshots may still include preferences; they stay on this device. */
+function librarySnapshotWithoutPreferences(snapshot: LibrarySnapshotV1 | LibrarySnapshotV2): LibrarySnapshotV1 | LibrarySnapshotV2 {
+  if (snapshot.protocolVersion !== PRIVATE_SYNC_PROTOCOL_VERSION) return snapshot;
+  assertLibrarySnapshotV2(snapshot);
+  return { ...snapshot, appState: snapshot.appState.filter((document) => document.domain !== "preferences") };
+}

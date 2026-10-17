@@ -273,6 +273,12 @@ export function setDisconnectedSyncProvenance(
   }
 }
 
+/** Whether this device syncs now, chose to disconnect earlier, or has never connected. */
+export function getDesktopSyncConnectionState(): "connected" | "disconnected" | "not_connected" {
+  if (getDesktopSyncConfiguration()) return "connected";
+  return getDisconnectedSyncProvenance() ? "disconnected" : "not_connected";
+}
+
 export function isSyncCaptureEnabled(): boolean {
   return !isLocalPersistencePaused() && Boolean(getDesktopSyncConfiguration());
 }
@@ -423,9 +429,39 @@ export function noteLocalFileChange(transaction: IDBTransaction, uri: string, ca
   }, { once: true });
 }
 
+/** Per outbox transaction: intents waiting for the latest queued time, or the last time given. */
+const queueTimes = new WeakMap<IDBTransaction, LocalSyncIntent[] | number>();
+
+/**
+ * Queues an intent. The outbox is read in `createdAt` order and the latest
+ * intent for an item decides what is sent, so two intents must never share a
+ * time: one made in the same millisecond as an earlier one (deleting a folder
+ * clears a song, then the song is tagged again) would otherwise be read back in
+ * either order. Each intent is therefore queued after everything already in
+ * the outbox, whichever bundle wrote it. A read-write transaction holds the
+ * outbox to itself, so it reads the latest time once.
+ */
 export function appendIntent(transaction: IDBTransaction, intent: LocalSyncIntent | null): void {
   if (!intent || !transaction.objectStoreNames.contains(SYNC_STORES.OUTBOX)) return;
-  transaction.objectStore(SYNC_STORES.OUTBOX).put(intent);
+  const outbox = transaction.objectStore(SYNC_STORES.OUTBOX);
+  const queueAfter = (items: LocalSyncIntent[], after: number) => {
+    let last = after;
+    for (const item of items) {
+      if (!(item.createdAt > last)) item.createdAt = last + 1;
+      last = item.createdAt;
+      outbox.put(item);
+    }
+    queueTimes.set(transaction, last);
+  };
+  const state = queueTimes.get(transaction);
+  if (Array.isArray(state)) state.push(intent);
+  else if (typeof state === "number") queueAfter([intent], state);
+  else {
+    const waiting = [intent];
+    queueTimes.set(transaction, waiting);
+    const latest = outbox.index("by-created-at").openCursor(null, "prev");
+    latest.onsuccess = () => queueAfter(waiting, (latest.result?.value as LocalSyncIntent | undefined)?.createdAt ?? 0);
+  }
   if (notifyingTransactions.has(transaction)) return;
   notifyingTransactions.add(transaction);
   transaction.addEventListener("complete", () => {
