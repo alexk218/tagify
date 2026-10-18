@@ -61,8 +61,9 @@ describe("Update reminder", () => {
 
 const releasesUrl = "https://github.com/alexk218/tagify-installer/releases";
 const macUrl = `${releasesUrl}/download/v1.0.2/TagifyInstaller-mac.dmg`;
+const windowsUrl = `${releasesUrl}/download/v1.0.3/TagifyInstaller.exe`;
 const macReleases = [
-  { tag_name: "v1.0.3", draft: false, prerelease: false, assets: [{ name: "TagifyInstaller.exe" }] },
+  { tag_name: "v1.0.3", draft: false, prerelease: false, assets: [{ name: "TagifyInstaller.exe", browser_download_url: windowsUrl }] },
   { tag_name: "v1.0.2", draft: false, prerelease: false, assets: [{ name: "TagifyInstaller-mac.dmg", browser_download_url: macUrl }] },
 ];
 
@@ -117,13 +118,24 @@ describe("Platform installer guidance", () => {
     expect(window.open).toHaveBeenCalledWith(releasesUrl, "_blank", "noopener,noreferrer");
   });
 
-  it("keeps Windows installer guidance and its exe download", () => {
+  it("keeps Windows installer guidance and downloads the exe from the newest GitHub release", async () => {
     renderBanner("Windows NT 10.0");
     expect(screen.getByText(/click the/)).toHaveTextContent('"Update Tagify"');
     expect(fetch).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "I Need Installer" }));
-    fireEvent.click(screen.getByRole("button", { name: "Download Installer" }));
-    expect(window.open).toHaveBeenCalledWith("https://tagify.fm/download/windows", "_blank", "noopener,noreferrer");
+    fireEvent.click(await screen.findByRole("button", { name: "Download Installer" }));
+    expect(fetch).toHaveBeenCalledWith("https://api.github.com/repos/alexk218/tagify-installer/releases?per_page=100", expect.anything());
+    expect(window.open).toHaveBeenCalledWith(windowsUrl, "_blank", "noopener,noreferrer");
+  });
+
+  it("offers the GitHub releases page when the Windows lookup fails", async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("Offline"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    renderBanner("Windows NT 10.0");
+    fireEvent.click(screen.getByRole("button", { name: "I Need Installer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View Windows downloads" }));
+    expect(screen.getByRole("status")).toHaveTextContent(/couldn't find the Windows download/);
+    expect(window.open).toHaveBeenCalledWith(releasesUrl, "_blank", "noopener,noreferrer");
   });
 
   it("shows manual instructions on Linux without Windows installer tabs", () => {
@@ -153,12 +165,12 @@ describe("Update reminder measurements", () => {
     expect(calls()).toEqual([["update_banner_shown", { update_kind: "minor" }]]);
   });
 
-  it("reports opening the instructions and downloading the installer", () => {
+  it("reports opening the instructions and downloading the installer", async () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
     render(<UpdateBanner updateInfo={info} onDismiss={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "How to Update" }));
     fireEvent.click(screen.getByRole("button", { name: "I Need Installer" }));
-    fireEvent.click(screen.getByRole("button", { name: "Download Installer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Download Installer" }));
     expect(calls()).toContainEqual(["update_instructions_opened"]);
     expect(calls()).toContainEqual(["update_download_clicked", { method: "direct" }]);
   });

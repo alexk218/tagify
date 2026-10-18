@@ -19,6 +19,9 @@ beforeEach(async () => {
   vi.stubGlobal("indexedDB", new IDBFactory()); await indexedDBStorage.init();
   now = Date.now(); vi.spyOn(Date, "now").mockImplementation(() => now);
 });
+// These tests write tens of thousands of songs to the fake database. Alone they take seconds, but the
+// full suite on a busy Mac has pushed one past a minute, so leave generous room.
+const LARGE_LIBRARY_TIMEOUT_MS = 180_000;
 afterEach(() => { trackEditHistory.clear(); indexedDBStorage.resetConnection(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it("uses two lookups and candidate-only reads for overlapping and repeated checks in a 50,000-song tagged library", async () => {
@@ -42,7 +45,7 @@ it("uses two lookups and candidate-only reads for overlapping and repeated check
   expect(await indexedDBStorage.getTrack(target.uri)).toMatchObject({ rating: 3, energy: 4, tagIds: [tag] });
   expect(await indexedDBStorage.getTrack(uri(1))).toMatchObject({ dateModified: 20, recordingIdentity: identity });
   console.log(`50,000 tagged songs: ${lookup.mock.calls.length} Spotify lookups, ${reads.mock.calls.length} reads of two tracks, ${links.mock.calls.length} link write, ${(performance.now() - start).toFixed(0)}ms matching`);
-}, 60_000);
+}, LARGE_LIBRARY_TIMEOUT_MS);
 
 it("keeps successful lookups through cache eviction, expiry and reopening even when no recording was linked", async () => {
   const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity").mockResolvedValue(identity);
@@ -168,7 +171,7 @@ it("bounds lookup work for 10,000 same-title candidates and does not rewrite a g
   expect(lookup).toHaveBeenCalledTimes(60);
   expect(links).toHaveBeenCalledTimes(1);
   expect((await indexedDBStorage.getTrack(target.uri))!.recordingGroupId).toBe(group);
-}, 60_000);
+}, LARGE_LIBRARY_TIMEOUT_MS);
 
 it("automatically shares a different-code copy in a 50,000-song library with no extra requests after reopening or restart", async () => {
   const tracks: Record<string, TrackData> = Object.fromEntries(Array.from({ length: 50_000 }, (_, index) => [uri(index), { ...song, name: `Song ${index}` }]));
@@ -189,4 +192,4 @@ it("automatically shares a different-code copy in a 50,000-song library with no 
   expect(fullRead).not.toHaveBeenCalled();
   expect(reads.mock.calls.every(([uris]) => uris.length === 2)).toBe(true);
   console.log("50,000 tagged songs: automatic sharing + repeated opening + restart = 2 total Spotify requests; reads limited to 2 candidates");
-}, 60_000);
+}, LARGE_LIBRARY_TIMEOUT_MS);

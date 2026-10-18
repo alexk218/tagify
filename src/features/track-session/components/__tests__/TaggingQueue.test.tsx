@@ -8,7 +8,7 @@ const { getTaggingQueuePage } = vi.hoisted(() => ({ getTaggingQueuePage: vi.fn()
 vi.mock("@/services/SpotifyApiService", () => ({ spotifyApiService: { getTaggingQueuePage } }));
 const one = { uri: "spotify:track:one", name: "One", artists: [{ name: "Artist" }], album: { name: "Album" }, duration_ms: 100 };
 const two = { ...one, uri: "spotify:track:two", name: "Two" };
-const initial = { tracks: [one, two], checked: 2, unavailable: 0, nextOffset: 2, total: 3, backend: "desktop" };
+const initial = { tracks: [one, two], checked: 2, unavailable: 0, nextOffset: 2, total: 3 };
 const props = { tracks: {}, taxonomy: createEmptyTaxonomy(), onTagTrack: vi.fn(), onTagTracks: vi.fn() };
 beforeEach(() => { vi.clearAllMocks(); });
 it("checks only on request, opens an untagged track, and removes completed tracks as saved data changes", async () => {
@@ -48,18 +48,19 @@ it("discards a stopped page when the user chooses a new source", async () => {
   expect(screen.queryByRole("button", { name: "Tag One" })).toBeNull();
   expect(screen.getByRole("textbox", { name: "Spotify playlist link" })).toBeVisible();
 });
-it("keeps progress if precise paging fails after the desktop repeats a page", async () => {
-  getTaggingQueuePage.mockResolvedValueOnce(initial).mockResolvedValueOnce({ ...initial, tracks: [one], checked: 1, nextOffset: null }).mockRejectedValueOnce(new Error("Couldn't check the next page"));
+it("stops with progress kept when Spotify repeats the previous page", async () => {
+  getTaggingQueuePage.mockResolvedValueOnce(initial).mockResolvedValueOnce({ ...initial, nextOffset: 4 });
   render(<TaggingQueue {...props} />);
   await userEvent.click(screen.getByText("Tagging queue"));
   await userEvent.click(screen.getByRole("button", { name: "Check all tracks" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't check the next page");
-  expect(getTaggingQueuePage).toHaveBeenLastCalledWith(null, 2, expect.any(AbortSignal), true);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Spotify stopped advancing through your library");
+  expect(getTaggingQueuePage).toHaveBeenCalledTimes(2);
+  expect(getTaggingQueuePage).toHaveBeenLastCalledWith(null, 2, expect.any(AbortSignal));
   expect(screen.getByRole("status")).toHaveTextContent("More tracks to check");
 });
 
-it("accepts legitimate duplicate playlist entries from precise paging", async () => {
-  getTaggingQueuePage.mockResolvedValueOnce({ ...initial, backend: "web" }).mockResolvedValueOnce({ ...initial, backend: "web", tracks: [one], checked: 1, nextOffset: null });
+it("accepts songs that appear again later in a playlist", async () => {
+  getTaggingQueuePage.mockResolvedValueOnce(initial).mockResolvedValueOnce({ ...initial, tracks: [one], checked: 1, nextOffset: null });
   render(<TaggingQueue {...props} />);
   await userEvent.click(screen.getByText("Tagging queue"));
   await userEvent.click(screen.getByRole("button", { name: "Check all tracks" }));

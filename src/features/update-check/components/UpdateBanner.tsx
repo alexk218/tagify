@@ -14,7 +14,7 @@ import {
 import { faGithub } from "@fortawesome/free-brands-svg-icons";
 
 import {
-  findMacInstallerDownload,
+  findInstallerDownload,
   INSTALLER_RELEASES_API,
   INSTALLER_RELEASES_URL,
 } from "../utils/installerDownloads";
@@ -65,38 +65,40 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   const [isAnimating, setIsAnimating] = useState(false);
   const [copiedCommand, setCopiedCommand] = useState(false);
 
-  const [macInstallerUrl, setMacInstallerUrl] = useState<string | null>(null);
-  const [findingMacInstaller, setFindingMacInstaller] = useState(false);
-  const [macInstallerFailed, setMacInstallerFailed] = useState(false);
-  const showMacDownload = isMac && expandedSection === "update" && activeTab === "need-installer";
+  const installerPlatform = isMac ? "mac" : "windows";
+  const installerPlatformLabel = isMac ? "Mac" : "Windows";
+  const [installerUrl, setInstallerUrl] = useState<string | null>(null);
+  const [findingInstaller, setFindingInstaller] = useState(false);
+  const [installerFailed, setInstallerFailed] = useState(false);
+  const showInstallerDownload = hasInstaller && expandedSection === "update" && activeTab === "need-installer";
 
   useEffect(() => {
     recordUpdateBannerShown(updateInfo.currentVersion ?? packageJson.version, updateInfo.latestVersion);
   }, [updateInfo.currentVersion, updateInfo.latestVersion]);
 
   useEffect(() => {
-    if (!showMacDownload || macInstallerUrl) return;
+    if (!showInstallerDownload || installerUrl) return;
     let cancelled = false;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
-    setFindingMacInstaller(true);
-    setMacInstallerFailed(false);
+    setFindingInstaller(true);
+    setInstallerFailed(false);
 
     const findDownload = async () => {
       try {
         const response = await fetch(INSTALLER_RELEASES_API, { signal: controller.signal });
         if (!response.ok) throw new Error("Installer releases unavailable");
-        const url = findMacInstallerDownload(await response.json());
-        if (!url) throw new Error("No stable Mac installer found");
-        if (!cancelled) setMacInstallerUrl(url);
+        const url = findInstallerDownload(await response.json(), installerPlatform);
+        if (!url) throw new Error(`No stable ${installerPlatformLabel} installer found`);
+        if (!cancelled) setInstallerUrl(url);
       } catch (error) {
         if (!cancelled) {
-          console.error("Could not find the Mac installer:", error);
-          setMacInstallerFailed(true);
+          console.error(`Could not find the ${installerPlatformLabel} installer:`, error);
+          setInstallerFailed(true);
         }
       } finally {
         clearTimeout(timeout);
-        if (!cancelled) setFindingMacInstaller(false);
+        if (!cancelled) setFindingInstaller(false);
       }
     };
     void findDownload();
@@ -105,7 +107,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [showMacDownload, macInstallerUrl]);
+  }, [showInstallerDownload, installerUrl, installerPlatform, installerPlatformLabel]);
 
   const handleDownloadInstaller = () => {
     recordUpdateDownload("release_page");
@@ -118,13 +120,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
 
   const handleDirectDownload = () => {
     recordUpdateDownload("direct");
-    window.open(
-      isMac
-        ? macInstallerUrl ?? INSTALLER_RELEASES_URL
-        : "https://tagify.fm/download/windows",
-      "_blank",
-      "noopener,noreferrer"
-    );
+    window.open(installerUrl ?? INSTALLER_RELEASES_URL, "_blank", "noopener,noreferrer");
   };
 
   const handleDismiss = () => {
@@ -333,13 +329,15 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                     <button
                       className={styles.primaryButton}
                       onClick={handleDirectDownload}
-                      disabled={isMac && findingMacInstaller}
-                      title={isMac ? "Download the Mac installer" : "Direct download of TagifyInstaller.exe"}
+                      disabled={findingInstaller}
+                      title={isMac ? "Download the Mac installer" : "Download TagifyInstaller.exe"}
                     >
                       <FontAwesomeIcon icon={faDownload} />
-                      {isMac
-                        ? findingMacInstaller ? "Finding Mac installer…" : macInstallerFailed ? "View Mac downloads" : "Download Mac Installer"
-                        : "Download Installer"}
+                      {findingInstaller
+                        ? `Finding ${installerPlatformLabel} installer…`
+                        : installerFailed
+                          ? `View ${installerPlatformLabel} downloads`
+                          : isMac ? "Download Mac Installer" : "Download Installer"}
                     </button>
                     <button
                       className={styles.secondaryButton}
@@ -350,9 +348,9 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                       View on GitHub
                     </button>
                   </div>
-                  {isMac && macInstallerFailed && (
+                  {installerFailed && (
                     <p className={styles.helpText} role="status">
-                      We couldn&apos;t find the Mac download right now. View the
+                      We couldn&apos;t find the {installerPlatformLabel} download right now. View the
                       downloads on GitHub or try again later.
                     </p>
                   )}
@@ -405,7 +403,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
               <div className={styles.changelogHeader}>
                 <h4 className={styles.changelogTitle}>Release Notes</h4>
                 <a
-                  href={updateInfo.downloadUrl || "https://tagify.fm"}
+                  href={updateInfo.downloadUrl || "https://github.com/alexk218/tagify/releases/latest"}
                   target="_blank"
                   rel="noopener noreferrer"
                   className={styles.releaseLink}

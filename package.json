@@ -1,6 +1,6 @@
 {
   "name": "tagify-secret",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "private": true,
   "exports": {
     "./components/ui": "./src/components/ui/index.ts",

@@ -10,6 +10,6 @@ chmod +x "$TEMP/bin/uname" "$TEMP/bin/curl"
 printf 'Keep installed Tagify' > "$TEMP/home/.config/spicetify/CustomApps/tagify/index.js"
 HOME="$TEMP/home" PATH="$TEMP/bin:/usr/bin:/bin" /bin/bash "$SOURCE_DIR/../../../../install.sh" > "$TEMP/output"
 test "$(cat "$TEMP/home/.config/spicetify/CustomApps/tagify/index.js")" = 'Keep installed Tagify'
-grep -q 'https://tagify.fm/download/mac' "$TEMP/output"
+grep -q 'https://github.com/alexk218/tagify-installer/releases' "$TEMP/output"
 grep -q 'has not been changed' "$TEMP/output"
 printf '%s\n' 'PASS: historical Mac terminal entry leaves setup untouched and provides manager instructions.'

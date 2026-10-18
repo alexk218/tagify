@@ -65,7 +65,7 @@ describe("SpotifyUpdateHelpModal", () => {
     render(<SpotifyUpdateHelpModal onClose={vi.fn()} />);
 
     expect(screen.getByRole("link", { name: "Get the Windows installer" }))
-      .toHaveAttribute("href", "https://tagify.fm/download/windows");
+      .toHaveAttribute("href", "https://github.com/alexk218/tagify-installer/releases");
     expect(screen.getByText(/lets you block automatic Spotify updates/)).toHaveTextContent(/checks for Tagify and Spicetify updates/);
     expect(screen.queryByRole("button", { name: "Copy Spotify update blocking command" })).not.toBeInTheDocument();
     expect(document.querySelector("code")).toBeNull();
@@ -74,8 +74,8 @@ describe("SpotifyUpdateHelpModal", () => {
   it("offers Mac installer guidance alongside the Terminal command", () => {
     render(<SpotifyUpdateHelpModal onClose={vi.fn()} />);
 
-    expect(screen.getByRole("link", { name: "Visit tagify.fm" }))
-      .toHaveAttribute("href", "https://tagify.fm");
+    expect(screen.getByRole("link", { name: "Get the Mac installer" }))
+      .toHaveAttribute("href", "https://github.com/alexk218/tagify-installer/releases");
     expect(screen.getByText("Or run once in Terminal")).toBeInTheDocument();
     expect(screen.getByText(BLOCK_SPOTIFY_UPDATES_COMMAND)).toBeInTheDocument();
   });

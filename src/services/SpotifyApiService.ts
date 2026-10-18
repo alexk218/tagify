@@ -62,7 +62,6 @@ export interface SpotifyArtistMetadata {
 
 class SpotifyApiService {
   private playlistReadsBlockedUntil = 0;
-  private recordingReadsBlockedUntil = 0;
   private getAccessToken(): string | null {
     return (
       Spicetify.Platform.AuthorizationAPI?.getState?.()?.token?.accessToken ||
@@ -71,67 +70,43 @@ class SpotifyApiService {
     );
   }
 
+  /**
+   * Recording identity (ISRC, artists, length) from Spotify's desktop metadata.
+   * The Web API answers desktop sign-ins with 429 on every route (see
+   * SPOTIFY_ENDPOINT_POLICY.md), so there is no Web API fallback. A song the
+   * desktop metadata can't describe has no identity for now and is retried later.
+   */
   getRecordingIdentity = async (uri: string, signal?: AbortSignal, options?: RequestOptions) => {
     const id = uri.match(/^spotify:track:([A-Za-z0-9]{22})$/)?.[1];
     if (!id) throw new Error("Recording matching is available for Spotify songs.");
     const token = this.getAccessToken();
     if (!token) throw new Error("Sign in to Spotify again to check this recording.");
-    // Desktop metadata carries the same ISRC without relying on Web API availability.
-    if (Spicetify.URI?.idToHex && Spicetify.URI?.hexToId && Date.now() >= this.recordingReadsBlockedUntil) {
-      try {
-        const hex = Spicetify.URI.idToHex(id);
-        if (!/^[a-f0-9]{32}$/i.test(hex)) throw new Error("Invalid Spotify song identity");
-        const response = await spotifyFetch(`https://spclient.wg.spotify.com/metadata/4/track/${hex}`, {
-          headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal,
-        }, undefined, options);
-        if (response.status === 429) {
-          const retry = Number(response.headers.get("Retry-After"));
-          this.recordingReadsBlockedUntil = Date.now() + (Number.isFinite(retry) && retry > 0 ? retry : 60) * 1000;
-        }
-        if (response.ok) {
-          const value = await response.json();
-          if (typeof value.gid === "string" && value.gid.toLowerCase() === hex.toLowerCase()) {
-            const identity = normalizeRecordingIdentity({
-              isrc: value.external_id?.find((entry: { type?: string }) => entry.type?.toLowerCase() === "isrc")?.id?.toUpperCase(),
-              artistIds: value.artist?.map((artist: { gid?: string }) =>
-                typeof artist.gid === "string" && /^[a-f0-9]{32}$/i.test(artist.gid) ? Spicetify.URI.hexToId(artist.gid) : undefined),
-              durationMs: value.duration, name: value.name,
-            });
-            if (identity) return identity;
-          }
-        }
-      } catch (error) {
-      throwIfSpotifyRequestStopped(error);
-        if (signal?.aborted) throw error;
-        // Unsupported desktop metadata can still be confirmed by the Web API.
-      }
-    }
-    if (signal?.aborted) throw new DOMException("Recording check cancelled", "AbortError");
-    if (Date.now() < this.playlistReadsBlockedUntil) throw new Error("Spotify needs a short break. Wait a moment, then try again.");
-    const response = await spotifyFetch(`https://api.spotify.com/v1/tracks/${id}`, { headers: { Authorization: `Bearer ${token}` }, signal }, undefined, options);
-    if (!response.ok) {
-      if (response.status === 429) {
-        const retry = Number(response.headers.get("Retry-After"));
-        this.playlistReadsBlockedUntil = Date.now() + (Number.isFinite(retry) && retry > 0 ? retry : 60) * 1000;
-      }
-      throw new Error("Spotify couldn't check this recording. Wait a moment, then try again.");
-    }
+    if (!Spicetify.URI?.idToHex || !Spicetify.URI?.hexToId) throw new Error("Spotify couldn't check this recording. Wait a moment, then try again.");
+    const hex = Spicetify.URI.idToHex(id);
+    if (!/^[a-f0-9]{32}$/i.test(hex)) throw new Error("Spotify couldn't check this recording. Wait a moment, then try again.");
+    const response = await spotifyFetch(`https://spclient.wg.spotify.com/metadata/4/track/${hex}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal,
+    }, undefined, options);
+    // A 429 throws inside spotifyFetch and pauses requests; other failures mean no identity yet.
+    if (!response.ok) return undefined;
     const value = await response.json();
-    return normalizeRecordingIdentity({ isrc: value.external_ids?.isrc?.toUpperCase(), artistIds: value.artists?.map((artist: { id?: string }) => artist.id), durationMs: value.duration_ms, name: value.name });
+    if (typeof value.gid !== "string" || value.gid.toLowerCase() !== hex.toLowerCase()) return undefined;
+    return normalizeRecordingIdentity({
+      isrc: value.external_id?.find((entry: { type?: string }) => entry.type?.toLowerCase() === "isrc")?.id?.toUpperCase(),
+      artistIds: value.artist?.map((artist: { gid?: string }) =>
+        typeof artist.gid === "string" && /^[a-f0-9]{32}$/i.test(artist.gid) ? Spicetify.URI.hexToId(artist.gid) : undefined),
+      durationMs: value.duration, name: value.name,
+    });
   };
 
-  getTaggingQueuePage = async (playlistId: string | null, offset = 0, signal?: AbortSignal, useWebApi = false) => {
+  getTaggingQueuePage = async (playlistId: string | null, offset = 0, signal?: AbortSignal) => {
     const limit = 50;
     if (Date.now() < this.playlistReadsBlockedUntil) throw new Error("Spotify needs a short break. Wait a moment, then check more tracks.");
+    let native: any;
     try {
-      if (useWebApi) throw new Error("Use precise library paging");
-      const native = playlistId
+      native = playlistId
         ? await spotifyRead<any>(`desktop:playlist:getContents:${JSON.stringify([`spotify:playlist:${playlistId}`,{ offset, limit }])}`, () => (Spicetify.Platform.PlaylistAPI as any).getContents(`spotify:playlist:${playlistId}`, { offset, limit }), { signal })
         : await spotifyRead<any>(`desktop:library:getTracks:${JSON.stringify([{ offset, limit }])}`, () => (Spicetify.Platform.LibraryAPI as any).getTracks({ offset, limit }), { signal });
-      if (!Array.isArray(native?.items) || native.items.length > limit || (typeof native.offset === "number" && native.offset !== offset)) {
-        throw new Error("Desktop library paging is unavailable");
-      }
-      return { ...normalizeQueuePage(native, offset), backend: "desktop" as const };
     } catch (error) {
       throwIfSpotifyRequestStopped(error);
       if (signal?.aborted) throw error;
@@ -139,45 +114,65 @@ class SpotifyApiService {
         this.playlistReadsBlockedUntil = Date.now() + 60_000;
         throw new Error("Spotify needs a short break. Wait a moment, then check more tracks.");
       }
-    }
-    const token = this.getAccessToken();
-    if (!token) throw new Error("Spotify needs you to sign in again before checking your library.");
-    const endpoint = playlistId ? `playlists/${encodeURIComponent(playlistId)}/items` : "me/tracks";
-    const response = await spotifyFetch(`https://api.spotify.com/v1/${endpoint}?limit=${limit}&offset=${offset}`, { headers: { Authorization: `Bearer ${token}` }, signal });
-    if (!response.ok) {
-      if (response.status === 429) {
-        const retry = Number(response.headers.get("Retry-After"));
-        this.playlistReadsBlockedUntil = Date.now() + (Number.isFinite(retry) && retry > 0 ? retry : 60) * 1000;
-        throw new Error("Spotify needs a short break. Wait a moment, then check more tracks.");
-      }
       throw new Error("Spotify couldn't check those tracks. Make sure you're online and can open this library, then try again.");
     }
-    const page = await response.json();
-    if (typeof page.offset === "number" && page.offset !== offset) throw new Error("Spotify repeated a page of your library. Your progress is kept; try again later.");
-    return { ...normalizeQueuePage(page, offset), backend: "web" as const };
+    // PlaylistAPI pages by offset but always reports offset 0 (Spotify 1.2.92), so
+    // only a different non-zero offset is evidence of a wrong page. The queue
+    // also stops when a page repeats the previous one.
+    const reportedOffset = typeof native?.offset === "number" && !(playlistId && native.offset === 0) ? native.offset : offset;
+    if (!Array.isArray(native?.items) || native.items.length > limit || reportedOffset !== offset) {
+      throw new Error("Spotify couldn't check those tracks. Make sure you're online and can open this library, then try again.");
+    }
+    return normalizeQueuePage(native, offset);
   };
 
-  createPrivatePlaylist = async (name: string, description = ""): Promise<string> => {
-    const token = this.getAccessToken();
-    if (!token) throw new Error("Spotify needs you to sign in again before creating a playlist.");
-    let response: Response;
+  /**
+   * A new playlist through Spotify's desktop API (the Web API rejects desktop
+   * sign-ins), with the description and privacy the user chose. Spotify makes new
+   * playlists public, so one that could not be made private is removed again
+   * rather than left public.
+   */
+  createPlaylist = async (name: string, { description = "", isPublic = false }: { description?: string; isPublic?: boolean } = {}): Promise<string> => {
+    const rootlist = Spicetify.Platform.RootlistAPI as any, playlists = Spicetify.Platform.PlaylistAPI as any;
+    const permissions = (Spicetify.Platform as any).PlaylistPermissionsAPI;
+    if (typeof rootlist?.createPlaylist !== "function" || (!isPublic && (typeof permissions?.setBasePermission !== "function" || typeof permissions?.getBasePermission !== "function"))) {
+      throw new Error("Spotify needs an update before Tagify can create playlists. Update Spotify, then try again.");
+    }
+    let uri: unknown;
     try {
-      response = await spotifyFetch("https://api.spotify.com/v1/me/playlists", {
-        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description, public: false, collaborative: false }),
-      });
-    } catch {
+      uri = await spotifyWrite(() => rootlist.createPlaylist(name, { before: "start" }), { feature: "playlist-details" });
+    } catch (error) {
+      throwIfSpotifyRequestStopped(error);
       throw new Error("Spotify didn’t confirm whether your playlist was created. Check your Spotify library before trying again.");
     }
-    if (!response.ok) {
-      if (response.status === 429) throw new Error("Spotify needs a short break. Wait a moment, then try creating your playlist again.");
-      throw new Error("Spotify couldn’t create a private playlist. Check that Spotify is online and signed in, then try again.");
+    const id = typeof uri === "string" ? uri.match(/^spotify:playlist:([^:/?#\s]+)$/)?.[1] : undefined;
+    if (!id) throw new Error("Spotify couldn’t create your playlist. Check that Spotify is online and signed in, then try again.");
+    const playlistUri = `spotify:playlist:${id}`;
+    if (!isPublic) {
+      try {
+        // A brand-new playlist ignores the first privacy change, so confirm it and retry briefly.
+        let privacy: unknown;
+        for (let attempt = 0; attempt < 6 && privacy !== "BLOCKED"; attempt++) {
+          if (attempt) await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+          await spotifyWrite(() => permissions.setBasePermission(playlistUri, "BLOCKED"), { resource: playlistUri, feature: "playlist-details" });
+          privacy = await spotifyRead(`desktop:permissions:getBasePermission:${JSON.stringify([playlistUri, attempt])}`, () => permissions.getBasePermission(playlistUri), { resource: playlistUri, feature: "playlist-details" });
+        }
+        if (privacy !== "BLOCKED") throw new Error("Playlist stayed public");
+      } catch (error) {
+        const removed = await spotifyWrite(() => rootlist.remove([{ uri: playlistUri }]), { feature: "playlist-details" }).then(() => true, () => false);
+        if (!removed) throw new Error(`Spotify created “${name}” but couldn’t make it private. Make it private or delete it in Spotify, then try again.`);
+        throwIfSpotifyRequestStopped(error);
+        throw new Error("Spotify couldn’t make the new playlist private, so Tagify removed it. Try again in a moment.");
+      }
     }
-    let result: { id?: unknown };
-    try { result = await response.json(); } catch { throw new Error("Spotify didn’t return your new playlist. Check your Spotify library before trying again."); }
-    if (typeof result.id !== "string" || !/^[A-Za-z0-9]+$/.test(result.id)) throw new Error("Spotify didn’t return your new playlist. Check your Spotify library before trying again.");
-    return result.id;
+    if (description) {
+      // The description is optional detail; the playlist is already usable.
+      await spotifyWrite(() => playlists.updateDetails(playlistUri, { description }), { resource: playlistUri, feature: "playlist-details" }).catch(() => {});
+    }
+    return id;
   };
+
+  createPrivatePlaylist = (name: string, description = ""): Promise<string> => this.createPlaylist(name, { description, isPublic: false });
 
   private hasUsableName(value: unknown, placeholder: string): value is string {
     return (
@@ -265,71 +260,23 @@ class SpotifyApiService {
       }
     } catch (error) {
       throwIfSpotifyRequestStopped(error);
-      console.warn("PlaylistAPI metadata lookup failed; trying Web API:", error);
+      console.warn("PlaylistAPI metadata lookup failed:", error);
     }
 
-    return this.getPlaylistMetadataFromWebApi(playlistUri, options);
+    return null;
   };
 
-  private getPlaylistMetadataFromWebApi = async (
-    playlistUri: string,
-    options?: RequestOptions,
-  ): Promise<SpotifyPlaylistMetadata | null> => {
-    try {
-      const playlistId = this.extractPlaylistId(playlistUri);
-      const token = this.getAccessToken();
-
-      if (!playlistId || !token) {
-        return null;
-      }
-
-      const response = await spotifyFetch(
-        `https://api.spotify.com/v1/playlists/${playlistId}`,
-        { headers: { Authorization: `Bearer ${token}` } }, undefined, options,
-      );
-      if (!response.ok) {
-        return null;
-      }
-
-      const playlist = await response.json();
-      if (!this.hasUsableName(playlist?.name, "Unknown Playlist")) {
-        return null;
-      }
-
-      return {
-        uri: playlistUri,
-        name: playlist.name,
-        ownerName:
-          playlist?.owner?.display_name ||
-          playlist?.owner?.displayName ||
-          playlist?.owner?.id ||
-          null,
-        imageUrl: playlist?.images?.[0]?.url || null,
-        description: playlist?.description || null,
-        trackCount:
-          typeof playlist?.tracks?.total === "number" ? playlist.tracks.total : null,
-        snapshotId: playlist?.snapshot_id || null,
-      };
-    } catch (error) {
-      throwIfSpotifyRequestStopped(error);
-      console.warn("Error fetching playlist metadata from Spotify Web API:", error);
-      return null;
-    }
-  };
-
+  /**
+   * Album details from Spotify's own album lookup. The Web API answers desktop
+   * sign-ins with 429 on every route, and each 429 pauses every Tagify request,
+   * so there is no Web API fallback (see SPOTIFY_ENDPOINT_POLICY.md).
+   */
   private getAlbumMetadata = async (
     albumUri: string,
     options?: RequestOptions,
-  ): Promise<SpotifyPlaylistMetadata | null> => {
-    const webApiMetadata = await this.getAlbumMetadataFromWebApi(albumUri, options);
-    if (webApiMetadata) {
-      return webApiMetadata;
-    }
+  ): Promise<SpotifyPlaylistMetadata | null> => this.getAlbumMetadataFromGraphQL(albumUri, undefined, options);
 
-    return this.getAlbumMetadataFromGraphQL(albumUri, undefined, options);
-  };
-
-  /** Album details from Spotify's own client API, which keeps working when the Web API is throttled. */
+  /** Album details from Spotify's own client API, the same lookup Spotify's album page uses. */
   private getAlbumMetadataFromGraphQL = async (
     albumUri: string,
     pageSize: number = ALBUM_GRAPHQL_PAGE_SIZE,
@@ -380,17 +327,13 @@ class SpotifyApiService {
     })();
 
   /**
-   * An album's tracks in album order, from Spotify's own client API first (it
-   * shares the same cooldown as the Web API). Null when Spotify cannot say.
+   * An album's tracks in album order from Spotify's own client API. Null when
+   * Spotify cannot say; there is no Web API fallback (see getAlbumMetadata).
    */
   getAlbumTracks = async (albumUri: string, options?: RequestOptions): Promise<SpotifyAlbumTrack[] | null> => {
-    const graphQLTracks = await (() => this.getAlbumTracksFromGraphQL(albumUri, options))()
+    const tracks = await this.getAlbumTracksFromGraphQL(albumUri, options)
       .catch((error) => { throwIfSpotifyRequestStopped(error); return null; });
-    if (graphQLTracks && graphQLTracks.length > 0) {
-      return graphQLTracks;
-    }
-
-    return this.getAlbumTracksFromWebApi(albumUri, options);
+    return tracks?.length ? tracks : null;
   };
 
   private getAlbumTracksFromGraphQL = async (
@@ -454,118 +397,8 @@ class SpotifyApiService {
     return null;
   };
 
-  private getAlbumTracksFromWebApi = async (
-    albumUri: string,
-    options?: RequestOptions,
-  ): Promise<SpotifyAlbumTrack[] | null> => {
-    const albumId = this.extractAlbumId(albumUri);
-    const token = this.getAccessToken();
-    if (!albumId || !token) {
-      return null;
-    }
-
-    try {
-      const tracks: SpotifyAlbumTrack[] = [];
-      for (let page = 0; page < ALBUM_TRACK_PAGE_LIMIT; page += 1) {
-        const response = await spotifyFetch(
-          `https://api.spotify.com/v1/albums/${albumId}/tracks?limit=50&offset=${page * 50}`,
-          { headers: { Authorization: `Bearer ${token}` } }, undefined, options,
-        );
-        if (!response.ok) {
-          return null;
-        }
-
-        const body: {
-          items?: Array<{
-            uri?: string;
-            name?: string;
-            artists?: Array<{ name?: string; uri?: string }>;
-            disc_number?: number;
-            track_number?: number;
-            duration_ms?: number;
-          }>;
-          next?: string | null;
-        } = await response.json();
-        if (!Array.isArray(body.items) || body.items.some((track) => !track?.uri?.startsWith("spotify:track:"))) return null;
-        (body.items || []).forEach((track) => {
-          if (typeof track.uri === "string" && track.uri.startsWith("spotify:track:")) {
-            rememberRuleFacts(track.uri, { durationMs: track.duration_ms, albumUri: `spotify:album:${albumId}`, name: track.name, artists: track.artists?.map(artist => artist.name).filter(Boolean).join(", ") });
-            tracks.push({
-              uri: track.uri,
-              name: track.name || "Unknown Track",
-              artists: (track.artists || [])
-                .map((artist) => artist.name)
-                .filter(Boolean)
-                .join(", "),
-              artistsData: (track.artists ?? []).flatMap((artist) =>
-                artist.uri?.startsWith("spotify:artist:") && artist.name
-                  ? [{ uri: artist.uri, name: artist.name }] : []),
-              discNumber: track.disc_number ?? 1,
-              trackNumber: track.track_number ?? tracks.length + 1,
-            });
-          }
-        });
-        if (!body.next) return tracks;
-      }
-      return null;
-    } catch (error) {
-      throwIfSpotifyRequestStopped(error);
-      console.warn("Error fetching album tracks from Spotify Web API:", error);
-      return null;
-    }
-  };
-
   /** Batch Web API reads are unavailable; the caller retains bounded cached single lookups. */
   getAlbumTrackTotals = async (_albumUris: string[], _options?: RequestOptions): Promise<Map<string, number> | null> => null;
-
-  private getAlbumMetadataFromWebApi = async (
-    albumUri: string,
-    options?: RequestOptions,
-  ): Promise<SpotifyPlaylistMetadata | null> => {
-    try {
-      const albumId = this.extractAlbumId(albumUri);
-      const token = this.getAccessToken();
-
-      if (!albumId || !token) {
-        return null;
-      }
-
-      const response = await spotifyFetch(`https://api.spotify.com/v1/albums/${albumId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }, undefined, options);
-
-      if (!response.ok) {
-        return null;
-      }
-
-      const album = await response.json();
-      if (!this.hasUsableName(album?.name, "Unknown Album")) {
-        return null;
-      }
-
-      return {
-        uri: albumUri,
-        name: album.name,
-        ownerName: Array.isArray(album?.artists)
-          ? album.artists
-              .map((artist: any) => artist?.name)
-              .filter(Boolean)
-              .join(", ") || null
-          : null,
-        imageUrl: album?.images?.[0]?.url || null,
-        description: album?.release_date ? `Released ${album.release_date}` : null,
-        trackCount:
-          typeof album?.total_tracks === "number" ? album.total_tracks : null,
-        snapshotId: null,
-      };
-    } catch (error) {
-      throwIfSpotifyRequestStopped(error);
-      console.warn("Error fetching album metadata from Spotify Web API:", error);
-      return null;
-    }
-  };
 
   private findAlbumMetadataNode(value: any, albumUri: string): any {
     if (!value || typeof value !== "object") {
@@ -942,78 +775,9 @@ class SpotifyApiService {
   };
 
 
-  /**
-   * Get all track URIs in an album using Web API with GraphQL fallback.
-   */
-  getAllTrackUrisInAlbum = async (albumUriOrId: string): Promise<string[]> => {
-    const webApiTrackUris = await this.getAllTrackUrisInAlbumFromWebApi(
-      albumUriOrId,
-    );
-
-    if (webApiTrackUris.length > 0) {
-      return webApiTrackUris;
-    }
-
-    return this.getAllTrackUrisInAlbumFromGraphQL(albumUriOrId);
-  };
-
-  private getAllTrackUrisInAlbumFromWebApi = async (
-    albumUriOrId: string,
-  ): Promise<string[]> => {
-    try {
-      const albumId = this.extractAlbumId(albumUriOrId);
-      const token =
-        Spicetify.Platform.AuthorizationAPI?.getState?.()?.token?.accessToken;
-
-      if (!albumId || !token) {
-        return [];
-      }
-
-      const trackUris: string[] = [];
-      let offset = 0;
-      const limit = 50;
-      let total: number | null = null;
-      let pages = 0;
-
-      do {
-        if (++pages > 100) throw new Error("Spotify album pagination exceeded its limit");
-        const response = await spotifyFetch(
-          `https://api.spotify.com/v1/albums/${albumId}/tracks?limit=${limit}&offset=${offset}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        );
-
-        if (!response.ok) {
-          return [];
-        }
-
-        const page = await response.json();
-        const items = Array.isArray(page?.items) ? page.items : [];
-
-        items.forEach((track: any) => {
-          if (typeof track?.uri === "string" && track.uri.startsWith("spotify:track:")) {
-            trackUris.push(track.uri);
-          }
-        });
-
-        total = typeof page?.total === "number" ? page.total : trackUris.length;
-        offset += items.length;
-
-        if (items.length === 0) {
-          break;
-        }
-      } while (total === null || offset < total);
-
-      return trackUris;
-    } catch (error) {
-      throwIfSpotifyRequestStopped(error);
-      console.warn("Error fetching album tracks from Spotify Web API:", error);
-      return [];
-    }
-  };
+  /** All track URIs in an album from Spotify's own client API (see getAlbumMetadata). */
+  getAllTrackUrisInAlbum = async (albumUriOrId: string): Promise<string[]> =>
+    this.getAllTrackUrisInAlbumFromGraphQL(albumUriOrId);
 
   private getAllTrackUrisInAlbumFromGraphQL = async (
     albumUriOrId: string,

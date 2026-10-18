@@ -488,8 +488,13 @@ function Test-SpicetifyState {
             $currentVersion = $state.SpicetifyVersion -replace 'spicetify version ', '' -replace 'v', ''
             
             if ([version]$latestVersion -gt [version]$currentVersion) {
-                $state.NeedsUpdate = $true
-                Write-Log "Spicetify update available: $currentVersion -> $latestVersion"
+                if (Test-SpicetifyPackageManaged $spicetifyExe) {
+                    Write-Log "Spicetify $currentVersion is managed by a package manager; using it as installed (latest is $latestVersion)."
+                }
+                else {
+                    $state.NeedsUpdate = $true
+                    Write-Log "Spicetify update available: $currentVersion -> $latestVersion"
+                }
             }
         }
         catch {
@@ -550,7 +555,7 @@ function Get-LatestSpicetifyReleaseInfo {
 }
 
 function Get-InstalledTagifyVersion {
-    $tagifyPath = "$env:USERPROFILE\AppData\Roaming\spicetify\CustomApps\tagify"
+    $tagifyPath = Join-Path (Get-SpicetifyCustomAppsDirectory) 'tagify'
     $packagePath = "$tagifyPath\package.json"
 
     if (Test-Path $packagePath) {
@@ -649,20 +654,54 @@ function Test-TagifyUpdateAvailable {
 
 #region Spicetify Detection
 function Get-SpicetifyPath {
-    # TODO verify that this is reliable
-    $paths = @(
-        "$env:LOCALAPPDATA\spicetify\spicetify.exe",
+    # Tagify Manager passes the copy it found, so setup and the Manager always agree.
+    if ($env:TAGIFY_SPICETIFY_PATH -and (Test-Path -LiteralPath $env:TAGIFY_SPICETIFY_PATH)) {
+        return $env:TAGIFY_SPICETIFY_PATH
+    }
+
+    # Spicetify can come from its PowerShell installer (current and older folders), Scoop, winget or Chocolatey.
+    $paths = @("$env:LOCALAPPDATA\spicetify\spicetify.exe")
+    $pathDirectories = (@($env:PATH, [Environment]::GetEnvironmentVariable('PATH', 'User'), [Environment]::GetEnvironmentVariable('PATH', 'Machine')) -join ';') -split ';'
+    foreach ($directory in $pathDirectories) {
+        if ($directory) {
+            try { $paths += Join-Path $directory.Trim().Trim('"') 'spicetify.exe' } catch { }
+        }
+    }
+    $scoop = if ($env:SCOOP) { $env:SCOOP } else { "$env:USERPROFILE\scoop" }
+    $paths += @(
+        "$env:USERPROFILE\spicetify-cli\spicetify.exe",
         "$env:USERPROFILE\.spicetify\spicetify.exe",
-        "$env:APPDATA\spicetify\spicetify.exe"
+        "$scoop\shims\spicetify.exe",
+        "$scoop\apps\spicetify-cli\current\spicetify.exe",
+        "$env:APPDATA\spicetify\spicetify.exe",
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Links\spicetify.exe",
+        "$env:ProgramData\chocolatey\bin\spicetify.exe"
     )
 
     foreach ($p in $paths) {
-        if (Test-Path $p) {
+        if ($p -and (Test-Path -LiteralPath $p)) {
             return $p
         }
     }
 
     return $null
+}
+
+# Scoop, winget and Chocolatey keep their own copy up to date; replacing it would leave two copies.
+function Test-SpicetifyPackageManaged {
+    param([string]$Path)
+
+    if ($env:TAGIFY_SPICETIFY_MANAGER) { return $true }
+    return [bool]($Path -match '\\scoop\\|\\WinGet\\|\\chocolatey\\')
+}
+
+# Custom apps live beside the Spicetify config in use, which isn't always the standard folder.
+function Get-SpicetifyCustomAppsDirectory {
+    $configFile = Get-SpicetifyConfigPath
+    if ($configFile) {
+        return Join-Path (Split-Path -Parent $configFile) 'CustomApps'
+    }
+    return "$env:APPDATA\spicetify\CustomApps"
 }
 
 function Get-SpicetifyVersion {
@@ -1046,7 +1085,7 @@ function Install-TagifyFiles {
     Write-UserProgress "Installing Tagify files..."
     Write-Log "Installing Tagify files..." -ForegroundColor DarkMagenta
     
-    $customAppsDir = "$env:USERPROFILE\AppData\Roaming\spicetify\CustomApps"
+    $customAppsDir = Get-SpicetifyCustomAppsDirectory
     $tagifyDir = "$customAppsDir\tagify"
     
     # Create CustomApps directory

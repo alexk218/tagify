@@ -224,7 +224,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
           <div className={styles.modalBody}>
             <div className={styles.trackStats}>
               <p>
-                Creating playlist with <strong>{trackCount}</strong> tracks
+                Creating playlist with <strong>{trackCount}</strong> {trackCount === 1 ? "track" : "tracks"}
               </p>
               {localTrackCount > 0 && (
                 <p className={styles.warning}>

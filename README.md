@@ -48,8 +48,8 @@ Select multiple tracks and apply tags in bulk.
 
 You'll need the **Spotify desktop app**, opened and signed in at least once.
 
-- **macOS:** [Download the Tagify installer](https://tagify.fm/download/mac)
-- **Windows:** [Download the Tagify installer](https://tagify.fm/download/windows)
+- **macOS:** download `TagifyInstaller-mac.dmg` from the [latest Tagify installer release](https://github.com/alexk218/tagify-installer/releases)
+- **Windows:** download `TagifyInstaller.exe` from the [latest Tagify installer release](https://github.com/alexk218/tagify-installer/releases)
 
 Open the installer and click **Install Tagify**. It sets up Spicetify and Tagify for you. Then open Spotify and choose **Tagify**. Use the installer again whenever you want to update or repair your setup.
 

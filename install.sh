@@ -6,7 +6,7 @@ set -e  # Exit on any error
 # compatibility entry point harmless for users following older instructions.
 if [ "$(uname -s)" = "Darwin" ]; then
     printf '%s\n' 'Install or repair Tagify with Tagify Manager for Mac:' \
-        'https://tagify.fm/download/mac' \
+        'https://github.com/alexk218/tagify-installer/releases' \
         'Download the newest Mac DMG, open it, and move Tagify Manager to Applications.' \
         'Your current Spotify and Tagify setup has not been changed.'
     exit 0

@@ -10,6 +10,7 @@ import {
   faTriangleExclamation,
 } from "@fortawesome/free-solid-svg-icons";
 import styles from "./SpotifyUpdateHelpModal.module.css";
+import { INSTALLER_RELEASES_URL } from "@/features/update-check";
 
 interface SpotifyUpdateHelpModalProps {
   onClose: () => void;
@@ -59,9 +60,6 @@ const SpotifyUpdateHelpModal: React.FC<SpotifyUpdateHelpModalProps> = ({
   );
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const platform = detectPlatform();
-  const installerUrl = platform === "windows"
-    ? "https://tagify.fm/download/windows"
-    : "https://tagify.fm";
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -133,14 +131,14 @@ const SpotifyUpdateHelpModal: React.FC<SpotifyUpdateHelpModalProps> = ({
                 </p>
                 <a
                   className={styles.installerLink}
-                  href={installerUrl}
+                  href={INSTALLER_RELEASES_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   <FontAwesomeIcon icon={faDownload} />
                   {platform === "windows"
                     ? "Get the Windows installer"
-                    : "Visit tagify.fm"}
+                    : "Get the Mac installer"}
                 </a>
               </div>
             )}

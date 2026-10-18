@@ -13,30 +13,15 @@ describe("SpotifyApiService entity metadata", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("falls back to Spotify Web API when playlist metadata has no usable name", async () => {
+  it("returns no playlist details without a Web API request when Spotify's desktop details have no usable name", async () => {
     vi.mocked(Spicetify.Platform.PlaylistAPI.getMetadata as any).mockResolvedValue({
       name: "Unknown Playlist",
     });
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          name: "Recovered Playlist",
-          owner: { display_name: "Alex" },
-          images: [{ url: "https://example.com/playlist.jpg" }],
-          tracks: { total: 42 },
-          snapshot_id: "snapshot-1",
-        }),
-        { status: 200 },
-      ),
-    );
 
     await expect(
       spotifyApiService.getPlaylistMetadata("spotify:playlist:playlist-1"),
-    ).resolves.toMatchObject({
-      name: "Recovered Playlist",
-      ownerName: "Alex",
-      trackCount: 42,
-    });
+    ).resolves.toBeNull();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it("uses desktop artist metadata without Web API requests", async () => {
@@ -75,10 +60,42 @@ describe("SpotifyApiService entity metadata", () => {
       delete (Spicetify.GraphQL.Definitions as any).getAlbum;
     });
 
-    it("stops album fallbacks when Spotify throttles the Web API", async () => {
-      vi.mocked(globalThis.fetch).mockResolvedValue(new Response(null, { status: 429 }));
-      await expect(spotifyApiService.getPlaylistMetadata("spotify:album:album-2")).rejects.toMatchObject({ status: 429 });
-      expect(Spicetify.GraphQL.Request).not.toHaveBeenCalled();
+    it("opens an album to tag without the throttled Web API pausing Tagify", async () => {
+      (Spicetify.Platform as any).AuthorizationAPI = { getState: () => ({ token: { accessToken: "test-token" } }) };
+      vi.mocked(globalThis.fetch).mockResolvedValue(new Response(null, { status: 429, headers: { "Retry-After": "40" } }));
+      vi.mocked(Spicetify.GraphQL.Request).mockResolvedValue(
+        albumUnion({ tracksV2: { totalCount: 1, items: [{ track: { uri: "spotify:track:one", name: "One", trackNumber: 1 } }] } }) as any);
+
+      // The album view asks for details and tracks together, and tagging hydrates details again.
+      const [metadata, tracks, uris] = await Promise.all([
+        spotifyApiService.getPlaylistMetadata("spotify:album:album-2"),
+        spotifyApiService.getAlbumTracks("spotify:album:album-2", { feature: "album-tracks" }),
+        spotifyApiService.getAllTrackUrisInAlbum("album-2"),
+      ]);
+      await expect(spotifyApiService.getPlaylistMetadata("spotify:album:album-2", { priority: "background", feature: "metadata-backfill" }))
+        .resolves.toMatchObject({ name: "Quiet Machines" });
+
+      expect(metadata).toMatchObject({ name: "Quiet Machines", ownerName: "Low Orbit", trackCount: 1, description: "Released 1992-02-12T00:00:00Z" });
+      expect(tracks?.map(track => track.uri)).toEqual(["spotify:track:one"]);
+      expect(uris).toEqual(["spotify:track:one"]);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(localStorage.getItem("tagify:spotify-cooldown:v1:current")).toBeNull();
+    });
+
+    it("returns no album details without a Web API request when Spotify's client can't describe the album", async () => {
+      delete (Spicetify.GraphQL.Definitions as any).getAlbum;
+      await expect(spotifyApiService.getPlaylistMetadata("spotify:album:album-2")).resolves.toBeNull();
+      await expect(spotifyApiService.getAllTrackUrisInAlbum("album-2")).resolves.toEqual([]);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it("does not switch to the Web API while Spotify's client album lookup is paused", async () => {
+      vi.mocked(Spicetify.GraphQL.Request).mockResolvedValue({ errors: [{ message: "Too Many Requests", extensions: { status: 429 } }] } as any);
+      await expect(spotifyApiService.getPlaylistMetadata("spotify:album:album-2"))
+        .rejects.toMatchObject({ spotifyFailure: { kind: "server-429", status: 429, dispatched: true } });
+      await expect(spotifyApiService.getAllTrackUrisInAlbum("album-2"))
+        .rejects.toMatchObject({ spotifyFailure: { kind: "local-pause", dispatched: false } });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
     it("asks only Spotify's client API for a length, one track per page", async () => {
@@ -132,39 +149,10 @@ describe("SpotifyApiService entity metadata", () => {
       expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
-    it("falls back to the Web API for an album's tracks", async () => {
+    it("returns no album tracks without a Web API request when Spotify's client can't list them", async () => {
       delete (Spicetify.GraphQL.Definitions as any).getAlbum;
-      (Spicetify.Platform as any).AuthorizationAPI = {
-        getState: () => ({ token: { accessToken: "test-token" } }),
-      };
-      vi.mocked(globalThis.fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            items: [
-              {
-                uri: "spotify:track:web",
-                name: "Web Track",
-                artists: [{ name: "Low Orbit" }],
-                disc_number: 1,
-                track_number: 1,
-              },
-            ],
-            next: null,
-          }),
-          { status: 200 },
-        ),
-      );
-
-      await expect(spotifyApiService.getAlbumTracks("spotify:album:album-5")).resolves.toEqual([
-        {
-          uri: "spotify:track:web",
-          name: "Web Track",
-          artists: "Low Orbit",
-          artistsData: [],
-          discNumber: 1,
-          trackNumber: 1,
-        },
-      ]);
+      await expect(spotifyApiService.getAlbumTracks("spotify:album:album-5")).resolves.toBeNull();
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
     it("keeps stable artist identities from album pages", async () => {

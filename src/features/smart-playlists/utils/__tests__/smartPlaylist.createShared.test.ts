@@ -46,9 +46,35 @@ describe("creating a playlist from a shared setup", () => {
     expect(create).not.toHaveBeenCalled(); expect(sync).toHaveBeenCalledWith("recovered-playlist");
     expect(localStorage.getItem(key)).toBeNull();
   });
-  it("requests a private, non-collaborative playlist using Spotify’s current endpoint", async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "NewSpotifyId" }) }); vi.stubGlobal("fetch", request);
+  it("creates a private playlist with its description on desktop, without the Web API", async () => {
+    const request = vi.fn(); vi.stubGlobal("fetch", request);
+    const createPlaylist = vi.fn().mockResolvedValue("spotify:playlist:NewSpotifyId");
+    const setBasePermission = vi.fn().mockResolvedValue(undefined), updateDetails = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("Spicetify", { ...Spicetify, Platform: { ...Spicetify.Platform, RootlistAPI: { createPlaylist, remove: vi.fn() },
+      PlaylistPermissionsAPI: { setBasePermission, getBasePermission: vi.fn().mockResolvedValue("BLOCKED") }, PlaylistAPI: { ...Spicetify.Platform.PlaylistAPI, updateDetails } } });
     await expect(spotifyApiService.createPrivatePlaylist("My mix", "Five stars")).resolves.toBe("NewSpotifyId");
-    expect(request).toHaveBeenCalledWith("https://api.spotify.com/v1/me/playlists", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "My mix", description: "Five stars", public: false, collaborative: false }) }));
+    expect(setBasePermission).toHaveBeenCalledWith("spotify:playlist:NewSpotifyId", "BLOCKED");
+    expect(updateDetails).toHaveBeenCalledWith("spotify:playlist:NewSpotifyId", { description: "Five stars" });
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("removes a new playlist again rather than leaving it public", async () => {
+    vi.useFakeTimers();
+    const remove = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("Spicetify", { ...Spicetify, Platform: { ...Spicetify.Platform, RootlistAPI: { createPlaylist: vi.fn().mockResolvedValue("spotify:playlist:Stuck"), remove },
+      PlaylistPermissionsAPI: { setBasePermission: vi.fn().mockResolvedValue(undefined), getBasePermission: vi.fn().mockResolvedValue("VIEWER") } } });
+    const result = expect(spotifyApiService.createPrivatePlaylist("My mix")).rejects.toThrow("removed it");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await result;
+    expect(remove).toHaveBeenCalledWith([{ uri: "spotify:playlist:Stuck" }]);
+    vi.useRealTimers();
+  });
+  it("tells the user to fix a playlist that stayed public when Spotify won't remove it either", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("Spicetify", { ...Spicetify, Platform: { ...Spicetify.Platform, RootlistAPI: { createPlaylist: vi.fn().mockResolvedValue("spotify:playlist:Stuck"), remove: vi.fn().mockRejectedValue(new Error("offline")) },
+      PlaylistPermissionsAPI: { setBasePermission: vi.fn().mockResolvedValue(undefined), getBasePermission: vi.fn().mockResolvedValue("VIEWER") } } });
+    const result = expect(spotifyApiService.createPrivatePlaylist("My mix")).rejects.toThrow("Make it private or delete it in Spotify");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await result;
+    vi.useRealTimers();
   });
 });

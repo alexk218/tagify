@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { findMacInstallerDownload, INSTALLER_RELEASES_URL } from "../installerDownloads";
+import { findInstallerDownload, INSTALLER_RELEASES_URL } from "../installerDownloads";
+
+const findMacInstallerDownload = (releases: unknown) => findInstallerDownload(releases, "mac");
 
 function release(version: string, name = "TagifyInstaller-mac.dmg") {
   return {
@@ -34,5 +36,24 @@ describe("Mac installer selection", () => {
       { ...valid, assets: [{ name: valid.assets[0].name, browser_download_url: "https://tagify.fm/releases/manager/v1.0.2/TagifyInstaller-mac.dmg" }] },
     ])).toBeNull();
     expect(findMacInstallerDownload({})).toBeNull();
+  });
+});
+
+describe("Windows installer selection", () => {
+  it("chooses the highest stable release with the Windows installer and ignores Mac-only releases", () => {
+    const selected = release("v1.0.14", "TagifyInstaller.exe");
+    expect(findInstallerDownload([
+      release("v1.0.12", "TagifyInstaller.exe"), selected, release("v1.0.15"),
+      { ...release("v1.0.16", "TagifyInstaller.exe"), prerelease: true },
+      release("v1.0.17-beta.1", "TagifyInstaller.exe"),
+    ], "windows")).toBe(selected.assets[0].browser_download_url);
+  });
+
+  it("never accepts a download hosted outside the matching GitHub release", () => {
+    const valid = release("v1.0.14", "TagifyInstaller.exe");
+    expect(findInstallerDownload([
+      { ...valid, assets: [{ name: "TagifyInstaller.exe", browser_download_url: "https://tagify.fm/download/windows" }] },
+      { ...valid, assets: release("v1.0.13", "TagifyInstaller.exe").assets },
+    ], "windows")).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
-import { spotifyWrite, spotifyFetch } from "@/services/SpotifyRequests";
+import { spotifyWrite } from "@/services/SpotifyRequests";
+import { spotifyApiService } from "@/services/SpotifyApiService";
 import { useState } from "react";
 
 export interface CreatedPlaylistInfo {
@@ -36,65 +37,8 @@ export function usePlaylistState() {
         uri.startsWith("spotify:local:"),
       );
 
-      let playlistUri: string | null = null;
-      let playlistId: string | null = null;
-
-      if (
-        typeof (Spicetify.Platform.RootlistAPI as any).createPlaylist ===
-        "function"
-      ) {
-        const result = await spotifyWrite<any>(() => (
-          Spicetify.Platform.RootlistAPI as any
-        ).createPlaylist(playlistName, { before: "start" }));
-        playlistUri = typeof result === "string" ? result : result?.uri;
-      } else {
-        const accessToken =
-          Spicetify.Platform.AuthorizationAPI?.getState?.()?.token
-            ?.accessToken ||
-          (Spicetify.Platform.PlaylistAPI as any)?._builder?._accessToken;
-
-        if (!accessToken) {
-          throw new Error("Could not get access token");
-        }
-
-        const createResponse = await spotifyFetch(
-          "https://api.spotify.com/v1/me/playlists",
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              name: playlistName,
-              description: playlistDescription,
-              public: isPublic,
-            }),
-          },
-        );
-
-        if (!createResponse.ok) {
-          throw new Error(
-            `Failed to create playlist: ${createResponse.status}`,
-          );
-        }
-
-        const playlistData = await createResponse.json();
-        playlistId = playlistData.id;
-        playlistUri = `spotify:playlist:${playlistId}`;
-      }
-
-      if (!playlistUri) {
-        throw new Error("Failed to create playlist");
-      }
-
-      if (!playlistId) {
-        playlistId = playlistUri.split(":").pop() || null;
-      }
-
-      if (!playlistId) {
-        throw new Error("Failed to get playlist ID");
-      }
+      const playlistId = await spotifyApiService.createPlaylist(playlistName, { description: playlistDescription, isPublic });
+      const playlistUri = `spotify:playlist:${playlistId}`;
 
       if (spotifyTrackUris.length > 0) {
         for (let index = 0; index < spotifyTrackUris.length; index += 100) {
@@ -116,7 +60,7 @@ export function usePlaylistState() {
 
         if (!isSmartPlaylist) {
           Spicetify.showNotification(
-            `Created ${type} "${playlistName}" with ${spotifyTrackUris.length} tracks. Local tracks need to be added manually.`,
+            `Created ${type} "${playlistName}" with ${spotifyTrackUris.length} ${spotifyTrackUris.length === 1 ? "track" : "tracks"}. Local tracks need to be added manually.`,
           );
         }
 
@@ -126,7 +70,7 @@ export function usePlaylistState() {
 
       if (!isSmartPlaylist) {
         Spicetify.showNotification(
-          `Created ${type} "${playlistName}" with ${spotifyTrackUris.length} tracks.`,
+          `Created ${type} "${playlistName}" with ${spotifyTrackUris.length} ${spotifyTrackUris.length === 1 ? "track" : "tracks"}.`,
         );
       }
 
@@ -137,7 +81,8 @@ export function usePlaylistState() {
     } catch (error) {
       console.error("Error creating playlist:", error);
       Spicetify.showNotification(
-        "Failed to create playlist. Please try again.",
+        // Playlist creation explains its own failures in plain language.
+        error instanceof Error && error.message.startsWith("Spotify") ? error.message : "Failed to create playlist. Please try again.",
         true,
       );
       return null;

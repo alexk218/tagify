@@ -86,7 +86,7 @@ describe("Spotify metadata request protection", () => {
     finish({}); await vi.advanceTimersByTimeAsync(0);
   });
 
-  it("retains the current GraphQL fallback when the Web API is unavailable", async () => {
+  it("describes an album from Spotify's client lookup without a Web API request", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false });
     vi.stubGlobal("fetch", fetchMock);
     Spicetify.GraphQL.Definitions.getAlbum = { name: "getAlbum" };
@@ -111,7 +111,7 @@ describe("Spotify metadata request protection", () => {
       "spotify:album:graphql-album",
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(Spicetify.GraphQL.Request).toHaveBeenCalledTimes(1);
     expect(metadata).toMatchObject({
       name: "GraphQL Album",

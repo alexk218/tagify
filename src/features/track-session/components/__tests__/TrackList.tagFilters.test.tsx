@@ -251,6 +251,8 @@ describe("TrackList tag filtering", () => {
 
       await waitFor(() => expect(onCreateSmartPlaylist).toHaveBeenCalledTimes(1));
       expect(createSpotifyPlaylist).toHaveBeenCalledTimes(1);
+      // "Public playlist" is unticked, so the new playlist is made private.
+      expect((Spicetify.Platform as any).PlaylistPermissionsAPI.setBasePermission).toHaveBeenCalledWith("spotify:playlist:new-smart-playlist", "BLOCKED");
       expect(addSpotifyTracks).toHaveBeenCalledTimes(1);
       expect(historyPush).not.toHaveBeenCalled();
 

@@ -67,12 +67,18 @@ const spicetifyMock = {
       getMetadata: vi.fn(),
       add: vi.fn(),
       remove: vi.fn(),
+      updateDetails: vi.fn(async () => undefined),
       _builder: {
         _accessToken: "test-token",
       },
     },
     RootlistAPI: {
       createPlaylist: vi.fn(),
+      remove: vi.fn(async () => undefined),
+    },
+    PlaylistPermissionsAPI: {
+      setBasePermission: vi.fn(async () => undefined),
+      getBasePermission: vi.fn(async () => "BLOCKED"),
     },
     LibraryAPI: {
       getTracks: vi.fn().mockResolvedValue([]),

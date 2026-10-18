@@ -3,6 +3,7 @@ import { Portal } from "@/components/ui";
 import communityPerspectivesScreenshot from "@/assets/communityPerspectivesScreenshot";
 import styles from "./InfoModal.module.css";
 import packageJson from "@/package";
+import { INSTALLER_RELEASES_URL } from "@/features/update-check";
 
 import {
   faBook,
@@ -53,7 +54,7 @@ interface InfoModalProps {
   initialSection?: string;
 }
 
-const LATEST_WHATS_NEW_VERSION = "3.3.0";
+const LATEST_WHATS_NEW_VERSION = "3.3.1";
 const WHATS_NEW_SEEN_VERSION_KEY = "tagify:info-modal:whats-new-seen-version";
 
 const hasSeenLatestWhatsNew = () => {
@@ -234,6 +235,29 @@ const InfoModal: React.FC<InfoModalProps> = ({
               {activeSection === "whats-new" && (
                 <div className={styles.section}>
                   <div className={styles.whatsNewHeader}>
+                    <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.3.1")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.3.1</a></h3>
+                  </div>
+                  <p className={styles.text}>Quick fix release!</p>
+                  <ul className={styles.compactUpdates}>
+                    {[
+                      { title: "Albums load again", description: "no more “Unknown Album” or pauses.", icon: faCompactDisc },
+                      { title: "Private playlists", description: "private unless you tick Public playlist.", icon: faLock },
+                      { title: "Shared Smart Playlists", description: "work again.", icon: faShareNodes },
+                    ].map(({ title, description, icon }) => (
+                      <li key={title} className={styles.compactUpdate}>
+                        <FontAwesomeIcon icon={icon} className={styles.compactUpdateIcon} aria-hidden="true" />
+                        <div className={styles.compactUpdateCopy}>
+                          <h4 className={styles.compactUpdateTitle}>{title}</h4>
+                          <p className={styles.compactUpdateDescription}>{description}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <details className={styles.releaseAccordion}>
+                    <summary className={styles.releaseSummary}><span>What's New in Tagify 3.3.0</span></summary>
+                    <div>
+                  {/* TAGIFY 3.3.0 */}
+                  <div className={styles.whatsNewHeader}>
                     <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.3.0")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.3.0</a></h3>
                   </div>
                   <p className={styles.text}>This one is all about Tagify and <a href="https://community.tagify.fm" target="_blank" rel="noopener noreferrer">Tagify Community</a> working together!</p>
@@ -254,6 +278,8 @@ const InfoModal: React.FC<InfoModalProps> = ({
                     ))}
                   </ul>
                   <p className={styles.text}><strong>Heads up:</strong> tag search now only finds your existing tags. Create new ones from the now-playing popup or Manage Tags.</p>
+                    </div>
+                  </details>
                   <details className={styles.releaseAccordion}>
                     <summary className={styles.releaseSummary}><span>What's New in Tagify 3.2.0</span></summary>
                     <div>
@@ -303,7 +329,7 @@ const InfoModal: React.FC<InfoModalProps> = ({
                     fixed the spotify lag, plus lots of fixes for tags going missing during background updates and cloud sync.
                   </p>
                   <p className={styles.text}>
-                    <a href="https://www.tagify.fm" target="_blank" rel="noopener noreferrer">download the Mac installer at tagify.fm</a>
+                    <a href={INSTALLER_RELEASES_URL} target="_blank" rel="noopener noreferrer">download the Mac installer on GitHub</a>
                   </p>
                     </div>
                   </details>

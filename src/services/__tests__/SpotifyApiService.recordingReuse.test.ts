@@ -32,38 +32,47 @@ it("confirms the discussion #39 single, EP and album using live-captured desktop
   expect(fetchMock.mock.calls.every(([url]) => url.startsWith("https://spclient.wg.spotify.com/metadata/4/track/"))).toBe(true);
 });
 
-it("shares the Web API cooldown with desktop matching", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 429, headers: new Headers({ "Retry-After": "120" }) }));
-  await expect(api.getRecordingIdentity(uri)).rejects.toMatchObject({ status: 429 });
-  desktopUris();
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ gid: exactGids[0], name: recording.name, duration: 180000, external_id: [{ type: "isrc", id: "USABC2400001" }], artist: [{ gid: artistGids[0] }] }) }));
-  await expect(api.getRecordingIdentity(`spotify:track:${exactIds[0]}`)).rejects.toMatchObject({ status: 429 });
+const desktopRecording = { gid: exactGids[0], name: "Song - Original Mix", duration: 180000, external_id: [{ type: "isrc", id: "USABC2400001" }], artist: [{ gid: artistGids[0] }] };
+
+it("never asks the Web API when Spotify's desktop metadata is unavailable", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("Spicetify", { ...Spicetify, URI: undefined });
+  await expect(api.getRecordingIdentity(`spotify:track:${exactIds[0]}`)).rejects.toThrow("couldn't check this recording");
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 it.each([
   { gid: exactGids[1] },
   { external_id: [] },
   { artist: [{ gid: "bad-artist" }] },
-])("does not trust incomplete or mismatched desktop metadata: %j", async (change) => {
+])("leaves incomplete or mismatched desktop metadata without an identity: %j", async (change) => {
   desktopUris();
-  const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ gid: exactGids[0], name: recording.name, duration: 180000, external_id: [{ type: "isrc", id: "USABC2400001" }], artist: [{ gid: artistGids[0] }], ...change }) })
-    .mockResolvedValueOnce({ ok: true, json: async () => recording });
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ...desktopRecording, ...change }) });
   vi.stubGlobal("fetch", fetchMock);
-  await expect(api.getRecordingIdentity(`spotify:track:${exactIds[0]}`)).resolves.toMatchObject({ artistIds: ["b".repeat(22), "c".repeat(22)] });
-  expect(fetchMock).toHaveBeenCalledTimes(2);
+  await expect(api.getRecordingIdentity(`spotify:track:${exactIds[0]}`)).resolves.toBeUndefined();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-it("stops Web API fallbacks during desktop cooldown", async () => {
+it("leaves a song Spotify's desktop metadata can't find without an identity, and asks nothing else", async () => {
+  desktopUris();
+  const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404, headers: new Headers() });
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(api.getRecordingIdentity(`spotify:track:${exactIds[0]}`)).resolves.toBeUndefined();
+  expect(fetchMock.mock.calls.map(([url]) => url.includes("spclient"))).toEqual([true]);
+});
+
+it("stops matching during Spotify's cooldown", async () => {
   desktopUris();
   const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 429, headers: new Headers({ "Retry-After": "120" }) })
-    .mockResolvedValue({ ok: true, json: async () => recording });
+    .mockResolvedValue({ ok: true, status: 200, json: async () => desktopRecording });
   vi.stubGlobal("fetch", fetchMock);
   await expect(api.getRecordingIdentity(`spotify:track:${exactIds[0]}`)).rejects.toMatchObject({ status: 429 });
   await expect(api.getRecordingIdentity(`spotify:track:${exactIds[1]}`)).rejects.toMatchObject({ status: 429 });
   expect(fetchMock.mock.calls.map(([url]) => url.includes("spclient"))).toEqual([true]);
 });
 
-it("does not fall back after a cancelled desktop lookup", async () => {
+it("does not retry after a cancelled desktop lookup", async () => {
   desktopUris();
   const controller = new AbortController();
   const fetchMock = vi.fn().mockImplementation(async () => { controller.abort(); throw new DOMException("Cancelled", "AbortError"); });
@@ -72,39 +81,15 @@ it("does not fall back after a cancelled desktop lookup", async () => {
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-const uri = `spotify:track:${"a".repeat(22)}`;
-const recording = {
-  external_ids: { isrc: "usabc2400001" },
-  artists: [{ id: "c".repeat(22) }, { id: "b".repeat(22) }],
-  duration_ms: 180000,
-  name: "Song - Original Mix",
-};
-
-it("confirms recording identity from authenticated Spotify metadata", async () => {
-  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => recording });
-  vi.stubGlobal("fetch", fetchMock);
-  const controller = new AbortController();
-  await expect(api.getRecordingIdentity(uri, controller.signal)).resolves.toEqual({
-    isrc: "USABC2400001", artistIds: ["b".repeat(22), "c".repeat(22)],
-    durationMs: 180000, name: "Song - Original Mix",
-  });
-  expect(fetchMock).toHaveBeenCalledWith(`https://api.spotify.com/v1/tracks/${"a".repeat(22)}`, {
-    headers: { Authorization: "Bearer test-token" }, signal: controller.signal,
-  });
-});
-
-it("does not confirm a release when Spotify omits its recording identifier", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ...recording, external_ids: {} }) }));
-  await expect(api.getRecordingIdentity(uri)).resolves.toBeUndefined();
-});
-
 it("backs off for Spotify's requested interval instead of retrying a rate-limited match", async () => {
+  desktopUris();
   let now = Date.now();
   vi.spyOn(Date, "now").mockImplementation(() => now);
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({ ok: false, status: 429, headers: new Headers({ "Retry-After": "120" }) })
-    .mockResolvedValueOnce({ ok: true, json: async () => recording });
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => desktopRecording });
   vi.stubGlobal("fetch", fetchMock);
+  const uri = `spotify:track:${exactIds[0]}`;
   await expect(api.getRecordingIdentity(uri)).rejects.toMatchObject({ status: 429 });
   now += 119999;
   await expect(api.getRecordingIdentity(uri)).rejects.toMatchObject({ status: 429 });

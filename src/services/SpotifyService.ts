@@ -1,5 +1,5 @@
 import { spotifyRequestAccounting, type SpotifyRequestFeature } from "@/utils/spotifyRequestAccounting";
-import { spotifyAccountKey, throwIfSpotifyRequestStopped } from "./SpotifyRequests";
+import { spotifyAccountKey, spotifyRead, throwIfSpotifyRequestStopped } from "./SpotifyRequests";
 import { rememberRuleFacts } from "@/features/automatic-tags/facts";
 import { trackArtistIdentitiesStore } from "@/services/trackArtistIdentities";
 import { requestSpicetifyGraphQL } from "@/services/spicetifyGraphQL";
@@ -269,22 +269,11 @@ class SpotifyService {
     const cached = this.playlistNames.get(key);
     if (cached && Date.now() - cached.at < 60_000) return cached.name;
     try {
-      const { GraphQL, Locale } = Spicetify;
-      const definition = GraphQL.Definitions.getPlaylist;
-
-      if (!definition) {
-        return null;
-      }
-
-      const response = await requestSpicetifyGraphQL<any>(
-        definition,
-        {
-          uri: playlistUri,
-          locale: Locale?.getLocale() || this.locale,
-        },
-      );
-
-      const name = response.data?.playlistV2?.name || null;
+      // Spotify renamed the GraphQL getPlaylist operation; the desktop playlist
+      // details read is the one Tagify already uses for playlists.
+      const metadata = await spotifyRead<{ name?: unknown }>(`desktop:playlist:getMetadata:${JSON.stringify([playlistUri])}`,
+        () => (Spicetify.Platform.PlaylistAPI as any).getMetadata(playlistUri), { feature: "track-details" });
+      const name = typeof metadata?.name === "string" && metadata.name.trim() ? metadata.name : null;
       if (name) {
         this.playlistNames.set(key, { name, at: Date.now() });
         if (this.playlistNames.size > 200) this.playlistNames.delete(this.playlistNames.keys().next().value!);

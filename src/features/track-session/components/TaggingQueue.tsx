@@ -55,17 +55,17 @@ export function TaggingQueue({ tracks, taxonomy, onTagTrack, onTagTracks, disabl
     let skipped = restart ? 0 : unavailable;
     const collected = new Map((restart ? [] : library).map((track) => [track.uri, track]));
     let pages = 0;
+    let previousPage = "";
     try {
       do {
         if (++pages > 2000) throw new Error("Your progress is saved. Choose Check all again to continue checking the rest of your library.");
-        let result = await spotifyApiService.getTaggingQueuePage(playlistId, offset!, signal);
+        const result = await spotifyApiService.getTaggingQueuePage(playlistId, offset!, signal);
         if (revision !== request.current || signal.aborted) return;
-        if (result.backend === "desktop" && offset! > 0 && result.tracks.length && result.tracks.every((track) => collected.has(track.uri))) {
-          // Some desktop versions ignore offset. The Web API also distinguishes
-          // repeated tracks in a playlist from a repeated first page.
-          result = await spotifyApiService.getTaggingQueuePage(playlistId, offset!, signal, true);
-          if (revision !== request.current || signal.aborted) return;
-        }
+        // A Spotify version that ignores offset returns the same page again. Songs
+        // repeated later in a playlist are fine; an identical page is not.
+        const page = JSON.stringify(result.tracks.map((track) => track.uri));
+        if (offset! > 0 && result.tracks.length && page === previousPage) throw new Error("Spotify stopped advancing through your library. Your progress is kept; try again later.");
+        previousPage = page;
         if (result.nextOffset !== null && result.nextOffset <= offset!) throw new Error("Spotify stopped advancing through your library. Your progress is kept; try again later.");
         result.tracks.forEach((track) => collected.set(track.uri, track));
         count += result.checked; skipped += result.unavailable;

@@ -774,7 +774,7 @@ const TrackList: React.FC<TrackListProps> = ({
       try {
         await onCreateSmartPlaylist(smartPlaylistCriteria);
         Spicetify.showNotification(
-          `Created smart playlist "${playlistName}" with ${trackUris.filter((uri) => !uri.startsWith("spotify:local:")).length} tracks.${trackUris.some((uri) => uri.startsWith("spotify:local:")) ? " Local tracks need to be added manually." : ""}`,
+          `Created smart playlist "${playlistName}" with ${trackUris.filter((uri) => !uri.startsWith("spotify:local:")).length} ${trackUris.filter((uri) => !uri.startsWith("spotify:local:")).length === 1 ? "track" : "tracks"}.${trackUris.some((uri) => uri.startsWith("spotify:local:")) ? " Local tracks need to be added manually." : ""}`,
         );
         if (!trackUris.some((uri) => uri.startsWith("spotify:local:"))) {
           Spicetify.Platform.History.push(`/playlist/${playlistId}`);
@@ -1022,8 +1022,8 @@ const TrackList: React.FC<TrackListProps> = ({
                     {activeFilterCount > 0 || searchTerm.trim() !== ""
                       ? `${filteredTracks.length}/${
                           uniqueTrackCount
-                        } tracks`
-                      : `${uniqueTrackCount} tracks`}
+                        } ${uniqueTrackCount === 1 ? "track" : "tracks"}`
+                      : `${uniqueTrackCount} ${uniqueTrackCount === 1 ? "track" : "tracks"}`}
                   </span>
                 </>
               )}
@@ -1048,7 +1048,7 @@ const TrackList: React.FC<TrackListProps> = ({
             className={styles.playAllButton}
             onClick={playAllFilteredTracks}
             {...(filteredTracks.length > 0 && {
-              title: `Play all ${filteredTracks.length} tracks`,
+              title: `Play all ${filteredTracks.length} ${filteredTracks.length === 1 ? "track" : "tracks"}`,
             })}
             disabled={filteredTracks.length === 0}
           ></button>
@@ -1062,7 +1062,7 @@ const TrackList: React.FC<TrackListProps> = ({
             {...((filteredTracks.length > 0 || editingSmartPlaylist) && {
               title: editingSmartPlaylist
                 ? `Save filters to ${editingSmartPlaylist.playlistName}`
-                : `Create playlist with ${filteredTracks.length} tracks`,
+                : `Create playlist with ${filteredTracks.length} ${filteredTracks.length === 1 ? "track" : "tracks"}`,
             })}
             disabled={filteredTracks.length === 0 && !editingSmartPlaylist}
           >
