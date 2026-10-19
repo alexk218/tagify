@@ -3,13 +3,13 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.30
+    1.0.31
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
 #>
 
-$SCRIPT_VERSION = "1.0.30"
+$SCRIPT_VERSION = "1.0.31"
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -25,6 +25,12 @@ $script:INSTALLATION_ACTION = "Unknown"
 $script:INSTALL_START_TIME = $null
 $spicetifyFolderPath = "$env:LOCALAPPDATA\spicetify"
 $spicetifyOldFolderPath = "$HOME\spicetify-cli"
+# Windows can give TEMP as an 8.3 short path such as C:\Users\HOMEPC~1\... when the user name has a space.
+# Windows PowerShell's archive and wildcard commands fail on it ("An object at the specified path
+# C:\Users\HOMEPC~1 does not exist"), so setup keeps its downloads in a full-length folder of its own.
+$localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+if (-not $localAppData) { $localAppData = $env:LOCALAPPDATA }
+$script:SETUP_TEMP = Join-Path $localAppData 'Tagify\Setup'
 
 # Status code for C# host to read
 $global:TAGIFY_INSTALL_EXIT_CODE = 0
@@ -370,9 +376,31 @@ function Finalize-Log {
 
 function Cleanup-TempFiles {
     Write-Log "Cleaning up temporary files..." -ForegroundColor DarkMagenta
-    Remove-Item -Path "$env:TEMP\tagify-download-*" -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$env:TEMP\spicetify-install-*" -Recurse -Force -ErrorAction SilentlyContinue
+    # Earlier setups downloaded into TEMP, so clear leftovers there too. Leftovers never stop setup.
+    foreach ($root in @($script:SETUP_TEMP, [System.IO.Path]::GetTempPath())) {
+        try {
+            if (-not (Test-Path -LiteralPath $root)) { continue }
+            Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like 'tagify-download-*' -or $_.Name -like 'spicetify-install-*' -or $_.Name -like 'spicetify-download-*' } |
+                ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+        catch {
+            Write-Log "Some temporary files in $root could not be removed: $_"
+        }
+    }
     Write-Log "Cleanup complete"
+}
+
+# Expand-Archive resolves paths through PowerShell's provider, which fails on 8.3 short paths.
+# .NET reads the same archive directly into an empty folder.
+function Expand-ZipFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$ZipPath,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Directory]::CreateDirectory($Destination) | Out-Null
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $Destination)
 }
 #endregion Logging
 
@@ -898,7 +926,8 @@ function Install-SpicetifyCore {
         Write-UserProgress "Downloading Spicetify v$targetVersion..."
         Write-Log "Latest Spicetify version: v$targetVersion"
         
-        $archivePath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "spicetify.zip")
+        [System.IO.Directory]::CreateDirectory($script:SETUP_TEMP) | Out-Null
+        $archivePath = Join-Path $script:SETUP_TEMP "spicetify-download-$PID.zip"
         
         Write-Log "Downloading Spicetify v$targetVersion..."
         $downloadUrl = "https://github.com/spicetify/cli/releases/download/v$targetVersion/spicetify-$targetVersion-windows-$architecture.zip"
@@ -907,11 +936,10 @@ function Install-SpicetifyCore {
         
         Write-UserProgress "Extracting Spicetify..."
         Write-Log 'Extracting Spicetify...'
-        if (Test-Path $spicetifyFolderPath) {
-            Remove-Item -Path $spicetifyFolderPath -Recurse -Force
+        if (Test-Path -LiteralPath $spicetifyFolderPath) {
+            Remove-Item -LiteralPath $spicetifyFolderPath -Recurse -Force
         }
-        New-Item -ItemType Directory -Path $spicetifyFolderPath -Force | Out-Null
-        Expand-Archive -Path $archivePath -DestinationPath $spicetifyFolderPath -Force
+        Expand-ZipFile -ZipPath $archivePath -Destination $spicetifyFolderPath
         Write-Log "Extracted Spicetify"
         
         # Add to PATH
@@ -927,7 +955,7 @@ function Install-SpicetifyCore {
         $env:PATH = $path
         Write-Log "Added to PATH"
         
-        Remove-Item -Path $archivePath -Force -ErrorAction 'SilentlyContinue'
+        Remove-Item -LiteralPath $archivePath -Force -ErrorAction 'SilentlyContinue'
         Write-UserProgress "Spicetify installed successfully"
         Write-Log 'Spicetify installation completed'
     }
@@ -1041,10 +1069,13 @@ function Download-TagifyRelease {
     Write-Log "Downloading Tagify..." -ForegroundColor DarkMagenta
     Show-Notification "Tagify Installer" "Downloading Tagify..."
     
-    $tempDir = "$env:TEMP\tagify-download-$PID"
-    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    $tempDir = Join-Path $script:SETUP_TEMP "tagify-download-$PID"
+    if (Test-Path -LiteralPath $tempDir) {
+        Remove-Item -LiteralPath $tempDir -Recurse -Force
+    }
+    [System.IO.Directory]::CreateDirectory($tempDir) | Out-Null
     
-    $zipPath = "$tempDir\tagify.zip"
+    $zipPath = Join-Path $tempDir "tagify.zip"
     
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" -TimeoutSec 15
@@ -1053,24 +1084,24 @@ function Download-TagifyRelease {
         Write-Log "Download URL: $DownloadUrl"
         Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipPath -UseBasicParsing
         
-        if (-not (Test-Path $zipPath) -or (Get-Item $zipPath).Length -eq 0) {
+        if (-not (Test-Path -LiteralPath $zipPath) -or (Get-Item -LiteralPath $zipPath).Length -eq 0) {
             Write-ErrorAndExit "Downloaded file is missing or empty"
         }
         
-        if ((Get-Item $zipPath).Length -ne $asset.size -or (Get-FileHash $zipPath -Algorithm SHA256).Hash -ne $asset.digest.Substring(7)) { throw "The download did not pass verification. Try again." }
-        $fileSize = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+        if ((Get-Item -LiteralPath $zipPath).Length -ne $asset.size -or (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash -ne $asset.digest.Substring(7)) { throw "The download did not pass verification. Try again." }
+        $fileSize = [math]::Round((Get-Item -LiteralPath $zipPath).Length / 1MB, 2)
         Write-Log "Downloaded tagify.zip ($fileSize MB)"
         
         Write-UserProgress "Extracting Tagify..."
         Write-Log "Extracting archive..."
-        Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
-        Remove-Item $zipPath -Force
+        Expand-ZipFile -ZipPath $zipPath -Destination $tempDir
+        Remove-Item -LiteralPath $zipPath -Force
         Write-Log "Archive extracted"
 
         return $tempDir;
     }
     catch {
-        Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         Write-ErrorAndExit "Failed to download Tagify: $_"
     }
 }
@@ -1098,24 +1129,24 @@ function Install-TagifyFiles {
     }
     
     # Find and move extracted files
-    $extractedFolder = Get-ChildItem $TempDir -Directory | Where-Object { $_.Name -eq "tagify" } | Select-Object -First 1
+    $extractedFolder = Get-ChildItem -LiteralPath $TempDir -Directory | Where-Object { $_.Name -eq "tagify" } | Select-Object -First 1
     
     if ($extractedFolder) {
-        Move-Item -Path $extractedFolder.FullName -Destination $tagifyDir -Force
+        Move-Item -LiteralPath $extractedFolder.FullName -Destination $tagifyDir -Force
     }
     else {
         # Try any directory (excluding __MACOSX)
-        $extractedFolder = Get-ChildItem $TempDir -Directory | Where-Object { $_.Name -ne "__MACOSX" } | Select-Object -First 1
+        $extractedFolder = Get-ChildItem -LiteralPath $TempDir -Directory | Where-Object { $_.Name -ne "__MACOSX" } | Select-Object -First 1
         
         if ($extractedFolder) {
-            Move-Item -Path $extractedFolder.FullName -Destination $tagifyDir -Force
+            Move-Item -LiteralPath $extractedFolder.FullName -Destination $tagifyDir -Force
         }
         else {
             # Copy files directly
-            $files = Get-ChildItem $TempDir -File -Recurse | Where-Object { $_.FullName -notlike "*__MACOSX*" }
+            $files = Get-ChildItem -LiteralPath $TempDir -File -Recurse | Where-Object { $_.FullName -notlike "*__MACOSX*" }
             if ($files.Count -gt 0) {
                 New-Item -ItemType Directory -Path $tagifyDir -Force | Out-Null
-                Copy-Item -Path "$TempDir\*" -Destination $tagifyDir -Recurse -Force
+                Get-ChildItem -LiteralPath $TempDir | Copy-Item -Destination $tagifyDir -Recurse -Force
             }
             else {
                 Write-ErrorAndExit "No files found in downloaded archive"
@@ -1124,7 +1155,7 @@ function Install-TagifyFiles {
     }
     
     # Cleanup temp
-    Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $TempDir -Recurse -Force -ErrorAction SilentlyContinue
     
     # Verify installation
     if (-not (Test-Path $tagifyDir)) {
