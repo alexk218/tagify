@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { isTagifyPlaylistAddition, readPlaylistAdditionOrigins, rememberPlaylistAdditions } from "../SpotifyPlaylistWriteOrigins";
 import { spotifyApiService } from "../SpotifyApiService";

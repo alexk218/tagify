@@ -41,6 +41,10 @@ import {
   faSliders,
   faShareNodes,
   faUsers,
+  faCloudArrowUp,
+  faHeart,
+  faPlay,
+  faUser,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -54,7 +58,7 @@ interface InfoModalProps {
   initialSection?: string;
 }
 
-const LATEST_WHATS_NEW_VERSION = "3.3.1";
+const LATEST_WHATS_NEW_VERSION = "3.3.2";
 const WHATS_NEW_SEEN_VERSION_KEY = "tagify:info-modal:whats-new-seen-version";
 
 const hasSeenLatestWhatsNew = () => {
@@ -235,6 +239,30 @@ const InfoModal: React.FC<InfoModalProps> = ({
               {activeSection === "whats-new" && (
                 <div className={styles.section}>
                   <div className={styles.whatsNewHeader}>
+                    <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.3.2")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.3.2</a></h3>
+                  </div>
+                  <p className={styles.text}>Community &lt;-&gt; Spotify on steroids</p>
+                  <ul className={styles.compactUpdates}>
+                    {[
+                      { title: "Send your Spotify library", description: "your Liked Songs and playlists, in their folders, so you can tag them on the website, even from your phone.", icon: faCloudArrowUp },
+                      { title: "Save songs from Community", description: "click ⊕ next to a song and Tagify adds it to your Liked Songs.", icon: faHeart },
+                      { title: "Play in your Spotify", description: "choose My Spotify app in Community's player.", icon: faPlay },
+                      { title: "Artist names are back", description: "songs you share show their artists again.", icon: faUser },
+                    ].map(({ title, description, icon }) => (
+                      <li key={title} className={styles.compactUpdate}>
+                        <FontAwesomeIcon icon={icon} className={styles.compactUpdateIcon} aria-hidden="true" />
+                        <div className={styles.compactUpdateCopy}>
+                          <h4 className={styles.compactUpdateTitle}>{title}</h4>
+                          <p className={styles.compactUpdateDescription}>{description}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <details className={styles.releaseAccordion}>
+                    <summary className={styles.releaseSummary}><span>What's New in Tagify 3.3.1</span></summary>
+                    <div>
+                  {/* TAGIFY 3.3.1 */}
+                  <div className={styles.whatsNewHeader}>
                     <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.3.1")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.3.1</a></h3>
                   </div>
                   <p className={styles.text}>Quick fix release!</p>
@@ -253,6 +281,8 @@ const InfoModal: React.FC<InfoModalProps> = ({
                       </li>
                     ))}
                   </ul>
+                    </div>
+                  </details>
                   <details className={styles.releaseAccordion}>
                     <summary className={styles.releaseSummary}><span>What's New in Tagify 3.3.0</span></summary>
                     <div>

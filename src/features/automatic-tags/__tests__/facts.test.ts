@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const lookup = vi.hoisted(() => vi.fn());
 vi.mock("@/services/SpotifyService", () => ({ spotifyService: { getTrack: lookup } }));

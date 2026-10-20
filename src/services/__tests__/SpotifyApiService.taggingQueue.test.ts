@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
 import { spotifyApiService } from "../SpotifyApiService";
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -26,5 +27,18 @@ it("does not turn a desktop failure into an empty completed library or a Web API
   vi.stubGlobal("fetch", fetchMock);
   vi.spyOn(Spicetify.Platform.LibraryAPI as any, "getTracks").mockRejectedValue(new Error("Desktop library unavailable"));
   await expect(spotifyApiService.getTaggingQueuePage(null, 0)).rejects.toThrow("couldn't check");
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+it("saves songs to Liked Songs and checks them through Spotify's desktop app, never the Web API", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  const add = vi.spyOn(Spicetify.Platform.LibraryAPI as any, "add").mockResolvedValue(undefined);
+  const contains = vi.spyOn(Spicetify.Platform.LibraryAPI as any, "contains").mockResolvedValue([true, false]);
+  await spotifyApiService.saveToLikedSongs(["spotify:track:one", "spotify:track:two"]);
+  expect(add).toHaveBeenCalledWith({ uris: ["spotify:track:one", "spotify:track:two"] });
+  await expect(spotifyApiService.likedSongsContain(["spotify:track:one", "spotify:track:two"])).resolves.toEqual([true, false]);
+  expect(contains).toHaveBeenCalledWith("spotify:track:one", "spotify:track:two");
+  contains.mockResolvedValue([true]);
+  await expect(spotifyApiService.likedSongsContain(["spotify:track:one", "spotify:track:two"])).rejects.toThrow("couldn't check your Liked Songs");
   expect(fetchMock).not.toHaveBeenCalled();
 });

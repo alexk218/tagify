@@ -14,6 +14,10 @@ import { isLibraryChoicePending } from "@/services/storage/libraryChoice";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { storageService } from "@/services/storage/StorageService";
 import { flushLocalPersistence, getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
+import { recordMeaningfulAction } from "@/features/discovery-survey/services/tagifyUsage";
+
+/** Where a change made outside the Tagify page came from, for usage counts. */
+export type EditSurface = "spotify_views" | "keyboard";
 
 export const LIBRARY_UNAVAILABLE_MESSAGE =
   "Tagify couldn't read your library just now, so that change wasn't saved. Try again in a moment.";
@@ -133,6 +137,16 @@ export function editSavedEntity<T extends PlaylistData | ArtistData>(
   return { ...next, dateCreated: current?.dateCreated ?? now, dateModified: now };
 }
 
+/**
+ * Counts a saved manual song change once per gesture, like edits on the Tagify page.
+ * Energy-only changes and playlist or artist edits are not counted, matching the Tagify page.
+ */
+function countSavedEdit(edit: AnnotationEdit, saved: Record<string, unknown>, surface: EditSurface | undefined): void {
+  if (!surface || !Object.keys(saved).length) return;
+  if (edit.addTagIds?.length || edit.removeTagIds?.length) void recordMeaningfulAction("tagging", surface);
+  if (edit.rating !== undefined || edit.toggleRating !== undefined) void recordMeaningfulAction("rating", surface);
+}
+
 /** Saves edits made on this page before applying a change made elsewhere. */
 async function flushPageEdits(): Promise<void> {
   try {
@@ -151,7 +165,7 @@ async function flushPageEdits(): Promise<void> {
 export async function saveTrackEdits(
   trackUris: readonly string[],
   edit: AnnotationEdit,
-  options: { details?: (trackUri: string) => Partial<TrackData>; undoable?: boolean } = {},
+  options: { details?: (trackUri: string) => Partial<TrackData>; undoable?: boolean; surface?: EditSurface } = {},
 ): Promise<Record<string, TrackData | null>> {
   const uris = [...new Set(trackUris)].filter(Boolean);
   if (!uris.length) return {};
@@ -160,11 +174,13 @@ export async function saveTrackEdits(
   await ensureLibraryReady();
   await flushPageEdits();
   const now = Date.now();
-  return indexedDBStorage.patchTracks(
+  const saved = await indexedDBStorage.patchTracks(
     Object.fromEntries(uris.map((uri) => [uri, (current: TrackData | null) =>
       editSavedTrack(current, edit, now, current ? undefined : options.details?.(uri))])),
     { expectedDatabaseName, undoable: options.undoable },
   );
+  countSavedEdit(edit, saved, options.surface);
+  return saved;
 }
 
 /** Applies one edit to a playlist, album, or artist's current saved record. */

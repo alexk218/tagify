@@ -8,29 +8,56 @@ const MAX_AGE = 7 * 86400000;
 const MAX_EVENTS = 200;
 const HOSTS = ["https://us.i.posthog.com", "https://eu.i.posthog.com"];
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
-const EVENTS = ["tagify_opened", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened", "update_banner_shown", "update_instructions_opened", "update_download_clicked", "update_banner_dismissed", "community_publish_prompt_shown", "community_publish_prompt_reminder_shown", "community_publish_prompt_snoozed", "community_publish_prompt_published", "community_profile_published", "community_publish_kept_private", "community_connect_prompt_shown", "community_connect_prompt_dismissed", "community_setup_opened", "community_connect_started", "community_connect_completed", "community_connect_failed"] as const;
+const EVENTS = ["tagify_opened", "tagify_present", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened", "update_banner_shown", "update_instructions_opened", "update_download_clicked", "update_banner_dismissed", "community_publish_prompt_shown", "community_publish_prompt_reminder_shown", "community_publish_prompt_snoozed", "community_publish_prompt_published", "community_profile_published", "community_publish_kept_private", "community_share_opened", "community_sharing_stopped", "community_sharing_resumed", "community_connect_prompt_shown", "community_connect_prompt_dismissed", "community_setup_opened", "community_connect_started", "community_connect_completed", "community_connect_failed", "invite_opened", "invite_link_copied", "start_reason_shown", "start_reason_answered", "start_reason_dismissed"] as const;
 export type ProductEventName = typeof EVENTS[number];
 // Details are fixed, coarse values so an event never carries content, versions or links.
 const DETAILS = {
   update_kind: ["patch", "minor", "major"],
   method: ["direct", "release_page", "command"],
   sync_state: ["connected", "disconnected", "not_connected"],
-  entry: ["prompt", "community", "sync"],
+  entry: ["prompt", "community", "sync", "invite"],
   relationship: ["first_link", "reconnect", "account_switch"],
   stage: ["start", "finish"],
+  invite_entry: ["action_bar", "milestone"],
+  invite_link: ["personal", "general"],
+  surface: ["workspace", "sync", "invitation", "onboarding"],
+  sharing_state: ["review", "private", "paused", "public"],
+  saved_songs: ["0", "1-9", "10-99", "100-999", "1000+"],
+  edit_surface: ["tagify_page", "spotify_views", "keyboard"],
+  start_reason: ["not_sure_where_to_start", "library_too_big", "just_looking", "something_broke", "other"],
 } as const;
 type DetailKey = keyof typeof DETAILS;
 export type ProductEventDetails = { [K in DetailKey]?: typeof DETAILS[K][number] };
 const EVENT_DETAILS: Partial<Record<ProductEventName, readonly DetailKey[]>> = {
   update_banner_shown: ["update_kind"],
   update_download_clicked: ["method"],
-  tagify_opened: ["sync_state"],
+  tagify_opened: ["sync_state", "saved_songs"],
+  tagify_present: ["saved_songs"],
+  tagging_completed: ["edit_surface"],
+  rating_completed: ["edit_surface"],
+  start_reason_answered: ["start_reason"],
   community_setup_opened: ["entry"],
   community_connect_started: ["entry"],
   community_connect_completed: ["entry", "relationship"],
   community_connect_failed: ["entry", "stage"],
+  invite_opened: ["invite_entry", "invite_link"],
+  invite_link_copied: ["invite_entry", "invite_link"],
+  community_share_opened: ["surface", "sharing_state"],
+  community_profile_published: ["surface"],
 };
-const BASE_PROPERTIES = ["app_version", "installation_id", "$process_person_profile", "$geoip_disable", "$ip"];
+const BASE_PROPERTIES = ["app_version", "spotify_version", "installation_id", "$process_person_profile", "$geoip_disable", "$ip"];
+const SPOTIFY_VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}(\.\d{1,6})?$/;
+const PRESENT_DAY_PREFIX = "tagify:product-analytics:present-day:";
+/** Spotify's release number only (for example 1.2.74.477), so removals after a Spotify update can be seen. Build hashes are dropped. */
+export function spotifyReleaseVersion(raw: unknown): string | undefined {
+  const match = typeof raw === "string" ? raw.match(/^\d{1,4}\.\d{1,4}\.\d{1,4}(\.\d{1,6})?/) : null;
+  return match?.[0];
+}
+/** Coarse library size: songs with tags, a rating or energy. */
+export function savedSongsBucket(count: number): ProductEventDetails["saved_songs"] {
+  if (!Number.isFinite(count) || count < 0) return undefined;
+  return count === 0 ? "0" : count < 10 ? "1-9" : count < 100 ? "10-99" : count < 1000 ? "100-999" : "1000+";
+}
 function validDetails(event: ProductEventName, details: Record<string, unknown>): boolean {
   const allowed = EVENT_DETAILS[event] ?? [];
   return Object.entries(details).every(([key, value]) =>
@@ -43,7 +70,7 @@ interface Event {
   event: ProductEventName;
   timestamp: string;
   distinct_id: string;
-  properties: { app_version: string; installation_id?: string; $process_person_profile: false; $geoip_disable: true; $ip: null } & ProductEventDetails;
+  properties: { app_version: string; spotify_version?: string; installation_id?: string; $process_person_profile: false; $geoip_disable: true; $ip: null } & ProductEventDetails;
 }
 interface State { schemaVersion: 2; enabled: boolean; events: Event[]; projectToken?: string; installationId?: string; installationExpiresAt?: string }
 interface Runtime {
@@ -78,10 +105,22 @@ function read(account: string): State {
     const events = value.events.filter((e: Event) => UUID.test(e.uuid) && e.distinct_id === `tagify-account-${account}` &&
       EVENTS.includes(e.event) && Date.parse(e.timestamp) <= Date.now() &&
       Date.parse(e.timestamp) > Date.now() - MAX_AGE && /^[0-9A-Za-z.-]{1,40}$/.test(e.properties?.app_version || "") &&
+      (e.properties.spotify_version === undefined || (e.event === "tagify_present" && SPOTIFY_VERSION.test(e.properties.spotify_version))) &&
       validDetails(e.event, detailsOf(e.properties)) &&
       e.properties.$process_person_profile === false && e.properties.$geoip_disable === true && e.properties.$ip === null && (!e.properties.installation_id || (linkValid && UUID.test(e.properties.installation_id) && e.properties.installation_id === value.installationId && Date.parse(e.timestamp) <= Date.parse(value.installationExpiresAt)))).slice(-MAX_EVENTS);
     return { schemaVersion: 2, enabled: true, events, projectToken: value.projectToken, installationId: linkValid ? value.installationId : undefined, installationExpiresAt: linkValid ? value.installationExpiresAt : undefined };
   } catch { return { schemaVersion: 2, enabled: false, events: [] }; }
+}
+
+/** Lets callers skip preparing details for a presence event that would be dropped. */
+export function presenceRecordedToday(account: string): boolean {
+  try { return localStorage.getItem(PRESENT_DAY_PREFIX + account) === new Date().toISOString().slice(0, 10); }
+  catch { return false; }
+}
+
+function spotifyVersionOf(): unknown {
+  try { return (globalThis as { Spicetify?: { Platform?: { version?: unknown } } }).Spicetify?.Platform?.version; }
+  catch { return undefined; }
 }
 
 function configuration() {
@@ -148,7 +187,11 @@ export function recordProductEvent(account: string, event: ProductEventName, det
     if (!state.enabled || !settings || !/^[a-f0-9]{64}$/.test(account) || !EVENTS.includes(event) || !validDetails(event, details)) return;
     const day = new Date().toISOString().slice(0, 10);
     if (event === "tagify_opened" && runtime.openedDays.get(account) === day) { schedule(account); return; }
+    // Spotify restarts and both bundles share this marker, so presence counts once per account and UTC day.
+    if (event === "tagify_present" && localStorage.getItem(PRESENT_DAY_PREFIX + account) === day) { schedule(account); return; }
     const properties: Event["properties"] = { ...details, app_version: packageJson.version, $process_person_profile: false, $geoip_disable: true, $ip: null };
+    const spotifyVersion = event === "tagify_present" ? spotifyReleaseVersion(spotifyVersionOf()) : undefined;
+    if (spotifyVersion) properties.spotify_version = spotifyVersion;
     if (state.installationId && Date.parse(state.installationExpiresAt || "") > Date.now()) properties.installation_id = state.installationId;
     if (state.projectToken !== settings.token) state.events = [];
     state.projectToken = settings.token;
@@ -156,6 +199,7 @@ export function recordProductEvent(account: string, event: ProductEventName, det
     state.events = state.events.slice(-MAX_EVENTS);
     localStorage.setItem(PREFIX + account, JSON.stringify(state));
     if (event === "tagify_opened") runtime.openedDays.set(account, day);
+    if (event === "tagify_present") localStorage.setItem(PRESENT_DAY_PREFIX + account, day);
     schedule(account);
   } catch { /* Optional measurements never interrupt editing. */ }
 }

@@ -9,5 +9,6 @@
   "/releases/install/Install-Tagify-Full.ps1": "https://raw.githubusercontent.com/alexk218/tagify/main/Install-Tagify-Full.ps1",
   "/releases/install/spotify-compatibility.json": "https://raw.githubusercontent.com/alexk218/tagify/main/config/spotify-compatibility.json",
   "/releases/client/v3.3.0/tagify-v3.3.0.zip": "https://github.com/alexk218/tagify/releases/download/v3.3.0/tagify-v3.3.0.zip",
-  "/releases/manager/latest": "https://github.com/alexk218/tagify-installer/releases"
+  "/releases/manager/latest": "https://github.com/alexk218/tagify-installer/releases",
+  "/releases/client/v3.3.1/tagify-v3.3.1.zip": "https://github.com/alexk218/tagify/releases/download/v3.3.1/tagify-v3.3.1.zip"
 }

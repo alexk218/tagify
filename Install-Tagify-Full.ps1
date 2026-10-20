@@ -1061,6 +1061,43 @@ function Install-CommunityRecoveryBootstrap {
     Write-Log "Automatic Community reconnection is ready"
 }
 
+# Tagify Manager passes a seven-day offer that links its setup statistics to the app's first week.
+# Optional: anything unexpected leaves the app's default bridge in place and setup continues.
+function Install-ManagerAnalyticsOffer {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TagifyDir
+    )
+
+    $offer = $env:TAGIFY_INSTALLER_ANALYTICS_OFFER
+    if (-not $offer) { return }
+    try {
+        $disabled = '\{"enabled":false,"schemaVersion":2\}'
+        $enabled = '\{"enabled":true,"expiresAt":"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z","installationId":"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}","schemaVersion":2\}'
+        if ($offer -cnotmatch "\A(?:$disabled|$enabled)\z") {
+            Write-Log "Optional setup statistics link unavailable; installation continues."
+            return
+        }
+        $target = Join-Path $TagifyDir 'productAnalyticsBridge.js'
+        $item = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            Write-Log "Optional setup statistics link unavailable; installation continues."
+            return
+        }
+        $manifest = [IO.File]::ReadAllText((Join-Path $TagifyDir 'manifest.json')) | ConvertFrom-Json -ErrorAction Stop
+        if (@($manifest.subfiles_extension) -cnotcontains 'productAnalyticsBridge.js') {
+            Write-Log "Optional setup statistics link unavailable; installation continues."
+            return
+        }
+        [IO.File]::WriteAllText($target, "window.__tagifyInstallerAnalyticsV1 = $offer;`n", (New-Object Text.UTF8Encoding($false)))
+        Write-Log "Optional setup statistics link prepared"
+    }
+    catch {
+        Write-Log "Optional setup statistics link unavailable; installation continues."
+    }
+}
+
 function Download-TagifyRelease {
     [CmdletBinding()]
     param([string]$DownloadUrl)
@@ -1168,7 +1205,8 @@ function Install-TagifyFiles {
     }
 
     Install-CommunityRecoveryBootstrap -TagifyDir $tagifyDir
-    
+    Install-ManagerAnalyticsOffer -TagifyDir $tagifyDir
+
     Write-Log "Tagify files installed: $installedFileCount files"
     return $tagifyDir
 }

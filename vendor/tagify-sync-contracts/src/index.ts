@@ -8,6 +8,9 @@ export const MAX_APP_STATE_DOCUMENT_BYTES = 512_000;
 
 export * from "./initialMerge";
 export * from "./privateNotes";
+export * from "./artistCredits";
+export * from "./songReleases";
+export * from "./playlistWrites";
 
 export const DURABLE_APP_STATE_DOMAINS = [
   "smart-playlists",

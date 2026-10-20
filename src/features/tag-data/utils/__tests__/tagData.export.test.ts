@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { TagDataStructure } from "@/types/tagData";
 import { buildExportData } from "../tagData.export";

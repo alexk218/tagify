@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import packageJson from "@/package";
 import { getDesktopSyncConnectionState } from "@/services/sync/SyncLocalState";
-import { ANALYTICS_CHOICE_EVENT, isAnalyticsSharing, recordProductEvent, trackAggregateRequest, releaseAggregateRequest } from "@/features/product-analytics/productAnalytics";
+import { ANALYTICS_CHOICE_EVENT, isAnalyticsSharing, presenceRecordedToday, recordProductEvent, savedSongsBucket, trackAggregateRequest, releaseAggregateRequest, type ProductEventDetails } from "@/features/product-analytics/productAnalytics";
 
 const USAGE_URL = "https://community.tagify.fm/api/v1/tagify-usage";
 /** How often a visible Tagify checks, locally, whether today's report is due. */
@@ -123,11 +123,14 @@ function scheduleActivityFlush(accountDigest: string, failures = 0, delay = ACTI
   activityTimers.set(accountDigest, timer);
 }
 
-/** Count one completed manual edit gesture, including a bulk edit, rather than each affected song. */
-export async function recordMeaningfulAction(action: "tagging" | "rating"): Promise<void> {
+/**
+ * Count one completed manual edit gesture, including a bulk edit, rather than each affected song.
+ * `surface` says where it was made: the Tagify page, the controls in Spotify's own views, or a keyboard shortcut.
+ */
+export async function recordMeaningfulAction(action: "tagging" | "rating", surface: NonNullable<ProductEventDetails["edit_surface"]> = "tagify_page"): Promise<void> {
   const accountDigest = await getUsageAccountDigest();
   if (!accountDigest || !isAnalyticsSharing(accountDigest)) return;
-  recordProductEvent(accountDigest, action === "tagging" ? "tagging_completed" : "rating_completed");
+  recordProductEvent(accountDigest, action === "tagging" ? "tagging_completed" : "rating_completed", { edit_surface: surface });
   try {
     const days = readActivity(accountDigest);
     let current = days.find(day => day.day === activityDay());
@@ -196,10 +199,38 @@ function sendUsage(accountDigest: string, appVersion: string, answer?: Discovery
   return request;
 }
 
+/**
+ * Coarse library size, or nothing when the library can't be read; a failure is never reported as an empty library.
+ * Storage loads on first use so analytics, which many features import, doesn't pull the library into their module graph.
+ */
+async function savedSongsDetail(): Promise<Pick<ProductEventDetails, "saved_songs">> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const { indexedDBStorage } = await import("@/services/storage/IndexedDBStorageService");
+    const count = await Promise.race([
+      indexedDBStorage.getTrackCount(),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 3_000); }),
+    ]);
+    const bucket = count === null ? undefined : savedSongsBucket(count);
+    return bucket ? { saved_songs: bucket } : {};
+  } catch { return {}; }
+  finally { if (timer) clearTimeout(timer); }
+}
+
 export async function recordTagifyOpen(appVersion: string, options: { batchActivity?: boolean } = {}): Promise<boolean> {
   const accountDigest = await getUsageAccountDigest();
-  if (accountDigest) recordProductEvent(accountDigest, "tagify_opened", { sync_state: getDesktopSyncConnectionState() });
+  if (accountDigest) recordProductEvent(accountDigest, "tagify_opened", { sync_state: getDesktopSyncConnectionState(), ...await savedSongsDetail() });
   return accountDigest ? sendUsage(accountDigest, appVersion, undefined, options) : false;
+}
+
+/**
+ * Daily sign that Spotify ran with Tagify installed, whether or not the Tagify page was opened.
+ * Lets inactivity be told apart from Tagify having been removed, for example by a Spotify update.
+ */
+export async function recordTagifyPresent(): Promise<void> {
+  const accountDigest = await getUsageAccountDigest();
+  if (!accountDigest || !isAnalyticsSharing(accountDigest) || presenceRecordedToday(accountDigest)) return;
+  recordProductEvent(accountDigest, "tagify_present", await savedSongsDetail());
 }
 
 export async function recordDiscoveryAnswer(appVersion: string, answer: DiscoveryAnswer, knownAccountDigest?: string | null): Promise<boolean> {

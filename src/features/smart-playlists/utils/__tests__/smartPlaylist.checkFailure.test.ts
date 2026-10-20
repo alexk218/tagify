@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { spotifyLocalPause } from "@/utils/spotifyRequestFailure";
 import { describeSmartPlaylistCheckFailure, formatCheckRetryWait, mostActionableCheckFailure } from "../smartPlaylist.checkFailure";

@@ -101,7 +101,20 @@
   gap: 7px;
   min-height: 36px;
   padding: 0 12px;
+  position: relative;
   transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+
+/* Shown while the member's tags aren't public yet and they never chose. */
+.communityDot {
+  background: #b7adff;
+  border: 2px solid var(--spice-main);
+  border-radius: 50%;
+  height: 10px;
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  width: 10px;
 }
 
 .communityButton:hover {

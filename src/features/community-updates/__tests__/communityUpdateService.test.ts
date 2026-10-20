@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COMMUNITY_UPDATE_INTERVAL_MS, COMMUNITY_UPDATE_SEEN_KEY, CommunityUpdateService, parseCommunityUpdates } from "../communityUpdateService";
 

@@ -6,6 +6,7 @@ import { defaultTagData } from "@/constants/defaultTagData";
 import { TAG_DATA_SCHEMA_VERSION } from "@/utils/tagTaxonomy";
 import type { TagDataStructure, TagTaxonomy } from "@/types/tagData";
 import { useTagData } from "../useTagData";
+import { RECOVERY_UNAVAILABLE_SKIP_MS, RECOVERY_UNAVAILABLE_UNTIL_KEY } from "@/services/sync/SyncInstallRecovery";
 
 const idOf = (name: string) => Object.values(defaultTagData.taxonomy.tagsById).find((tag) => tag.name === name)!.id;
 const [rock, pop] = [idOf("Rock"), idOf("Pop")];
@@ -31,6 +32,9 @@ function withLofi(taxonomy: TagTaxonomy): TagTaxonomy {
 beforeEach(async () => {
   vi.stubGlobal("indexedDB", new IDBFactory());
   localStorage.clear();
+  // Community already found nothing to reconnect on this computer, so opening the library
+  // doesn't wait 3 s for a Spotify sign-in this test page never provides.
+  localStorage.setItem(RECOVERY_UNAVAILABLE_UNTIL_KEY, String(Date.now() + RECOVERY_UNAVAILABLE_SKIP_MS));
   expect(await indexedDBStorage.init()).toBe(true);
   expect(await indexedDBStorage.saveAll(library)).toBe(true);
   localStorage.setItem("tagify:migrationCompleted", "true");

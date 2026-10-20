@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AUTOMATIC_ARTIST_CHECK_LIMIT, MANUAL_ARTIST_CHECK_LIMIT, TrackArtistIdentitiesStore } from "../trackArtistIdentities";
 

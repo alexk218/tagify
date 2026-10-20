@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { isNearDuplicateTagName, isSameTagName, tagSlug } from "@tagify/community-contracts";
 import matchFixtures from "@tagify/community-contracts/fixtures/tag-name-matches.fixtures.json";

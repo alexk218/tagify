@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Test suite for VersionCheckerService
  * Tests semantic version comparison functionality

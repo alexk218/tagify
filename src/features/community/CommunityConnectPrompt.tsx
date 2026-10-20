@@ -85,14 +85,14 @@ export function CommunityConnectPrompt({ enabled, connected, onConnect }: Commun
     <section className={styles.prompt} aria-labelledby="community-connect-prompt-title" aria-describedby="community-connect-prompt-description">
       <span className={styles.icon} aria-hidden="true"><Users size={18} /></span>
       <div className={styles.text}>
-        <h2 id="community-connect-prompt-title" className={styles.title}>Connect to Community</h2>
+        <h2 id="community-connect-prompt-title" className={styles.title}>Share your tags on Community</h2>
         <p id="community-connect-prompt-description" className={styles.description}>
-          Back up your tags and share them with friends. If someone invited you, this finishes joining them.
+          Put the music you tag on your own profile and back up your library. You choose what's public. If someone invited you, this finishes joining them.
         </p>
       </div>
       <div className={styles.actions}>
         <button type="button" className={styles.secondary} onClick={notNow}>Not now</button>
-        <button type="button" className={styles.primary} onClick={onConnect}>Connect</button>
+        <button type="button" className={styles.primary} onClick={onConnect}>Share my tags</button>
       </div>
     </section>
   );

@@ -1,18 +1,18 @@
 {
-  "tag_name": "v3.3.0",
-  "name": "v3.3.0",
+  "tag_name": "v3.3.1",
+  "name": "v3.3.1",
   "draft": false,
   "prerelease": false,
-  "published_at": "2026-10-18T00:59:37Z",
-  "html_url": "https://github.com/alexk218/tagify/releases/tag/v3.3.0",
-  "body": "### What's new in Tagify 3.3.0\n\nThis one is all about Tagify and [Tagify Community](https://community.tagify.fm) working together!\n\n**Tag names other people use**\nWhen you name a new tag, Tagify suggests the names other members already use and points out near-duplicates. So if you type \"male vocals\" and most people say \"male vocalist\", it tells you. You can always keep your own name. It also offers your existing tag when you type it a bit differently (\"lofi\" for \"Lo Fi\") instead of making a duplicate.\n\n**Share your tags from Sync**\nSync now shows if your profile is public, not public or paused, and you can publish, keep private or stop sharing right there. If you connected Community but never picked, Tagify asks once after you tag a song.\n\n**Every Community tag in Tag Manager**\nThe Community tab now goes through the whole catalog, with search and sorting. When you save a tag from there, the people who share it get a thank-you 💚\n\n**Lighter sync**\nWhen you tag a lot of songs in a row, Tagify backs them up in batches instead of after every little pause. If you only use Tagify on one computer, it doesn't keep a live connection open anymore. Tagify also uses less energy while it's open, and resetting Community to this computer's library now works for libraries with tens of thousands of songs.\n\n**Heads up:** tag search now only finds your existing tags. To create a new tag, use the now-playing popup or Manage Tags.\n\nAlso fixed: Smart Playlists say \"Not Checked\" when Spotify is busy instead of showing 0 songs, and your Tagify settings stay on each computer instead of syncing between them.\n\nLet me know what you guys think!\n\n**Install or update**\n\n- **macOS:** [Download Tagify Manager](https://github.com/alexk218/tagify-installer/releases/download/v1.0.14/TagifyInstaller-mac.dmg), move it to Applications and open it to install or update Tagify.\n- **Windows:** [Download the Windows installer](https://github.com/alexk218/tagify-installer/releases/download/v1.0.14/TagifyInstaller.exe) and run it to install or update Tagify.\n\nJoin the [Tagify Discord](https://discord.gg/C4qbPUbBKV) for help, suggestions, and upcoming betas!\n",
+  "published_at": "2026-10-18T05:05:02Z",
+  "html_url": "https://github.com/alexk218/tagify/releases/tag/v3.3.1",
+  "body": "### What's new in Tagify 3.3.1\n\nQuick fix release!\n\n- Albums load again, instead of showing \"Unknown Album\" and pausing Tagify.\n- Playlists you create from Tagify are private unless you tick Public playlist.\n- Creating a Smart Playlist from a shared setup works again.\n\n**Install or update**\n\n- **macOS:** [Download Tagify Manager](https://github.com/alexk218/tagify-installer/releases/download/v1.0.14/TagifyInstaller-mac.dmg), move it to Applications and open it to install or update Tagify.\n- **Windows:** [Download the Windows installer](https://github.com/alexk218/tagify-installer/releases/download/v1.0.14/TagifyInstaller.exe) and run it to install or update Tagify.\n\nJoin the [Tagify Discord](https://discord.gg/C4qbPUbBKV) for help, suggestions, and upcoming betas!\n",
   "assets": [
     {
-      "name": "tagify-v3.3.0.zip",
+      "name": "tagify-v3.3.1.zip",
       "state": "uploaded",
-      "size": 1470208,
-      "digest": "sha256:12f2efc0221014464eff2d5884a83bd05882138e87bcd0c208e734538c71604c",
-      "browser_download_url": "https://tagify.fm/releases/client/v3.3.0/tagify-v3.3.0.zip"
+      "size": 1471676,
+      "digest": "sha256:b7510e525297c297d6007305acef947c35bf2df34e0fae492c41a31f555db957",
+      "browser_download_url": "https://tagify.fm/releases/client/v3.3.1/tagify-v3.3.1.zip"
     }
   ]
 }

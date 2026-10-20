@@ -7,6 +7,9 @@ import { recordProductInteraction } from "@/features/product-analytics/productAn
 import {
   setDesktopSyncConfiguration,
 } from "@/services/sync/SyncLocalState";
+import { sharingStub, taxonomyFixture, tracksFixture } from "./sharingFixtures";
+
+const shared = () => ({ sharing: sharingStub(null, { phase: "idle" }), tracks: tracksFixture(), taxonomy: taxonomyFixture() });
 
 vi.mock("@/features/product-analytics/productAnalytics", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/product-analytics/productAnalytics")>()),
@@ -30,7 +33,7 @@ describe("CommunityOnboardingModal actions", () => {
         apiBaseUrl: "https://community.tagify.fm", deviceCode: "device-code", verifier: "verifier", userCode: "ABCD-EFGH",
         verificationUri: "https://community.tagify.fm/device?code=ABCD-EFGH", expiresAt: Date.now() + 60_000, interval: 60,
       });
-    render(<CommunityOnboardingModal entry="prompt" onClose={vi.fn()} />);
+    render(<CommunityOnboardingModal entry="prompt" {...shared()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
@@ -50,9 +53,9 @@ describe("CommunityOnboardingModal actions", () => {
 
   it("lets users cancel setup without adding a reminder", () => {
     const onClose = vi.fn();
-    render(<CommunityOnboardingModal entry="community" onClose={onClose} />);
+    render(<CommunityOnboardingModal entry="community" {...shared()} onClose={onClose} />);
 
-    expect(screen.getByRole("heading", { name: "Connect Tagify to Community" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Share your tags on Community" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Not now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Don't ask again" })).not.toBeInTheDocument();
@@ -76,10 +79,10 @@ describe("CommunityOnboardingModal actions", () => {
       profile: { handle: "alex", displayName: "Alex" },
     });
 
-    render(<CommunityOnboardingModal entry="community" onClose={vi.fn()} />);
+    render(<CommunityOnboardingModal entry="community" {...shared()} onClose={vi.fn()} />);
 
     expect(screen.getByText("Connected as Alex")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeInTheDocument();
+    expect(screen.getByText("Connect Tagify to Community to share your tags.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Finish later" })).not.toBeInTheDocument();
   });
 
@@ -123,7 +126,7 @@ describe("CommunityOnboardingModal actions", () => {
       downloadInitialMergeBackup: vi.fn(),
     } as unknown as NonNullable<typeof window.TagifySync>;
 
-    render(<CommunityOnboardingModal entry="community" onClose={vi.fn()} />);
+    render(<CommunityOnboardingModal entry="community" {...shared()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Combine libraries" }));
     expect(screen.getByRole("heading", { name: "Combine your Tagify libraries" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Combining libraries…" })).toBeDisabled();

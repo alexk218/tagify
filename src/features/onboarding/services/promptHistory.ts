@@ -72,7 +72,8 @@ export class PromptHistoryStore {
   private reruns = new Set<string>();
   private active = 0;
   private identityRevision = 0;
-  private lastSyncedAt = new Map<string, number>();
+  /** Accounts whose history Community returned during this Spotify session. */
+  private readThisSession = new Set<string>();
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private retries = 0;
   private nextAttemptAt = 0;
@@ -114,10 +115,10 @@ export class PromptHistoryStore {
     void this.refresh();
   };
 
-  // Showing Spotify again checks for dismissals from other devices, but never
-  // restarts a failed request's back-off.
+  // Showing Spotify again only retries a read that hasn't succeeded yet, and
+  // never restarts a failed request's back-off.
   private resumeVisible = (): void => {
-    if (document.visibilityState === "hidden" || this.retryTimer || Date.now() < this.nextAttemptAt) return;
+    if (document.visibilityState === "hidden" || this.snapshot.ready || this.retryTimer || Date.now() < this.nextAttemptAt) return;
     void this.refresh();
   };
 
@@ -134,13 +135,15 @@ export class PromptHistoryStore {
       const history = mergeHistory(adoptLegacyHistory(accountDigest), this.unresolvedDismissals);
       this.unresolvedDismissals = { ...emptyHistory };
       saveHistory(accountDigest, history);
-      this.publish({ ...history, accountDigest, ready: false });
+      this.publish({ ...history, accountDigest, ready: this.readThisSession.has(accountDigest) });
     }
     if (isConfirmedComplete(accountDigest)) {
       if (!this.snapshot.ready && this.snapshot.accountDigest === accountDigest) this.publish({ ...this.snapshot, ready: true });
       return;
     }
-    if (this.snapshot.ready && Date.now() - (this.lastSyncedAt.get(accountDigest) ?? 0) < 5 * 60_000) return;
+    // Read once per Spotify session. Dismissals on this device are sent as they
+    // happen (markSeen); ones made on another device arrive with the next start.
+    if (this.readThisSession.has(accountDigest)) return;
     await this.sync(accountDigest);
   }
 
@@ -154,7 +157,6 @@ export class PromptHistoryStore {
     saveHistory(accountDigest, history);
     this.publish({ ...this.snapshot, ...history });
     if (isConfirmedComplete(accountDigest)) return;
-    this.lastSyncedAt.delete(accountDigest);
     void this.sync(accountDigest);
   }
 
@@ -194,7 +196,7 @@ export class PromptHistoryStore {
         const history = mergeHistory(latest, recovered);
         saveHistory(accountDigest, history);
         if (this.snapshot.accountDigest === accountDigest) this.publish({ ...history, accountDigest, ready: true });
-        this.lastSyncedAt.set(accountDigest, Date.now());
+        this.readThisSession.add(accountDigest);
         // Dismissals only ever turn on, so once Community holds both there is nothing left to sync.
         if (isComplete(history) && isComplete(recovered)) markConfirmedComplete(accountDigest);
         this.retries = 0;

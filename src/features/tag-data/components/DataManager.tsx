@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import packageJson from "@/package";
 import { initializeStatsIntroduction, dismissStatsIntroduction } from "@/features/library-stats/model/statsIntroduction";
 import styles from "./DataManager.module.css";
@@ -18,11 +18,13 @@ import {
   faLightbulb,
   faShieldHalved,
   faUpload,
+  faUserPlus,
 } from "@fortawesome/free-solid-svg-icons";
 import { faDiscord } from "@fortawesome/free-brands-svg-icons";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
 import { useProductAnalyticsView } from "@/features/product-analytics/useProductAnalyticsView";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
+import { InviteFriendsPopover } from "@/features/invite";
 
 interface DataManagerProps {
   onExportTagData: () => Promise<void>;
@@ -33,6 +35,10 @@ interface DataManagerProps {
   onResetTagifyData: () => Promise<void>;
   onRetryMigration: () => Promise<OrchestratorResult>;
   historyControls?: React.ReactNode;
+  /** Opens Community setup from the Invite panel, so invites can carry the member's name. */
+  onConnectCommunity: () => void;
+  /** Opens the Sync dialog from the Invite panel, where the member makes their tags public. */
+  onOpenSync: () => void;
 }
 
 const SHOW_SUPPORT_BUTTONS_KEY = "tagify:showSupportButtons";
@@ -47,6 +53,8 @@ const DataManager: React.FC<DataManagerProps> = ({
   onResetTagifyData,
   onRetryMigration,
   historyControls,
+  onConnectCommunity,
+  onOpenSync,
 }) => {
   const [highlightStats, setHighlightStats] = useState(() => initializeStatsIntroduction(packageJson.version));
   const openStats = () => {
@@ -68,6 +76,9 @@ const DataManager: React.FC<DataManagerProps> = ({
   const [showUpdateProtectionButton, setShowUpdateProtectionButton] =
     useLocalStorage(SHOW_UPDATE_PROTECTION_BUTTON_KEY, true);
   const [infoModalSection, setInfoModalSection] = useState<string>("whats-new");
+  const inviteButtonRef = useRef<HTMLButtonElement>(null);
+  const [showInvite, setShowInvite] = useState(false);
+  const closeInvite = useCallback(() => setShowInvite(false), []);
 
   const handleOpenInfoModal = (section: string) => {
     setInfoModalSection(section);
@@ -208,6 +219,17 @@ const DataManager: React.FC<DataManagerProps> = ({
           </>
         )}
         <button
+          ref={inviteButtonRef}
+          className={`${styles.pillButton} ${styles.inviteButton}`}
+          onClick={() => setShowInvite((open) => !open)}
+          title="Invite a friend to Tagify"
+          aria-label="Invite a friend to Tagify"
+          aria-haspopup="dialog"
+          aria-expanded={showInvite}
+        >
+          <FontAwesomeIcon icon={faUserPlus} />
+        </button>
+        <button
           className={`${styles.pillButton} ${styles.discordButton}`}
           onClick={() => {
             const discordUrl = "https://discord.gg/C4qbPUbBKV";
@@ -218,6 +240,15 @@ const DataManager: React.FC<DataManagerProps> = ({
           <FontAwesomeIcon icon={faDiscord} />
         </button>
       </div>
+
+      {showInvite && (
+        <InviteFriendsPopover
+          anchor={inviteButtonRef.current}
+          onClose={closeInvite}
+          onConnectCommunity={onConnectCommunity}
+          onOpenSync={onOpenSync}
+        />
+      )}
 
       <input
         ref={fileInputRef}

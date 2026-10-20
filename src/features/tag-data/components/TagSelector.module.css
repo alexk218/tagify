@@ -116,6 +116,17 @@
   width: 100%;
 }
 
+/* Indent folders inside folders by the same small step as top-level folders. */
+.nestedSubcategoryList {
+  box-sizing: border-box;
+  padding: 8px;
+  background: var(--spice-main);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
 .subcategoryHeader {
   padding: 8px 10px;
   cursor: pointer;

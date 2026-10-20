@@ -1124,6 +1124,172 @@ describe.skipIf(!enabled)("Tagify and the Community website editing one library"
     }, 240_000);
   });
 
+  describe("songs only rated in Tagify", () => {
+    // Tagify backs up songs that have a rating, energy, BPM or key but no tags, and restoring,
+    // second computers, combining and resetting all depend on Community keeping them.
+    const RATED_AT = 1_700_000_500_000;
+    const rated = (fields: Partial<TrackData>): TrackData => ({ ...track([]), dateCreated: RATED_AT, dateModified: RATED_AT, ...fields });
+    const values = (item: TrackData | null) => item && { rating: item.rating, energy: item.energy, bpm: item.bpm ?? null, key: item.camelotKey ?? null, tagIds: item.tagIds, dateCreated: item.dateCreated };
+    const shelf = () => sql("select to_regclass('tagify_sync.shelved_annotations') is not null") === "t";
+    /** Whether this Community keeps such songs on its compact shelf (migration "ratings store", switch on). */
+    const shelving = () => shelf() && sql("select coalesce((select enabled from public.community_feature_flags where key='shelve_rated_only_songs'), false)") === "t";
+    const onShelf = (library: string, providerId: string) => sql(`select count(*) from tagify_sync.shelved_annotations where library_id='${library}' and provider_id='${providerId}'`) === "1";
+    /** The song as Community keeps it, wherever it is stored: rating|energy|bpm|key, or "" when Community has no live copy. */
+    const cloudSong = (library: string, providerId: string) => sql(`select coalesce((
+        select concat(a.rating, '|', a.energy, '|', a.bpm, '|', a.musical_key) from tagify_sync.annotations a join tagify_sync.entities e on e.library_id=a.library_id and e.id=a.entity_id
+        where a.library_id='${library}' and e.provider_id='${providerId}' and a.deleted_at is null)${shelf() ? `, (
+        select concat(s.rating, '|', s.energy, '|', s.bpm, '|', s.musical_key) from tagify_sync.shelved_annotations s
+        where s.library_id='${library}' and s.provider_id='${providerId}')` : ""}, '')`);
+    async function memberRpc(member: Member, name: string, body: unknown) {
+      const response = await realFetch(`${env.api}/rest/v1/rpc/${name}`, {
+        method: "POST", headers: { apikey: env.key, authorization: `Bearer ${member.webToken}`, "content-type": "application/json" }, body: JSON.stringify(body),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(`${name} failed: ${JSON.stringify(result)}`);
+      return result;
+    }
+    /** Brings the cloud library down onto a new computer, as accepting the restore offer does. */
+    async function restoreOnNewComputer(member: Member) {
+      const install = newInstall();
+      await useInstall(install);
+      await link(member);
+      await syncRuntime.syncNow();
+      expect(syncRuntime.getStatus()).toBe("recovery-available");
+      await syncRuntime.restoreFromCloud();
+      expect(await syncTagify()).toEqual([]);
+      return install;
+    }
+    /** Computer A with the starting library and two untagged songs: one rated, one with only energy, BPM and key. */
+    async function ratedOnTwoComputers() {
+      const first = newInstall();
+      await useInstall(first);
+      const context = await setup();
+      const ratedId = songId(), detailsId = songId();
+      const ratedUri = `spotify:track:${ratedId}`, detailsUri = `spotify:track:${detailsId}`;
+      expect(await indexedDBStorage.saveTrack(ratedUri, rated({ rating: 4.5 }))).toBe(true);
+      expect(await indexedDBStorage.saveTrack(detailsUri, rated({ energy: 7, bpm: 124, camelotKey: "8A" }))).toBe(true);
+      expect(await syncTagify()).toEqual([]);
+      expect(cloudSong(context.library, ratedId)).toBe("4.5|||");
+      expect(cloudSong(context.library, detailsId)).toBe("|7|124.00|8A");
+      if (shelving()) expect([onShelf(context.library, ratedId), onShelf(context.library, detailsId)], "Community keeps them on its shelf").toEqual([true, true]);
+      const second = await restoreOnNewComputer(context.member);
+      return { ...context, first, second, ratedId, ratedUri, detailsId, detailsUri };
+    }
+
+    it("reach a second computer and a newly restored one with their values and dates", async () => {
+      const world = await ratedOnTwoComputers();
+      expect(values(await indexedDBStorage.getTrack(world.ratedUri))).toEqual({ rating: 4.5, energy: 0, bpm: null, key: null, tagIds: [], dateCreated: RATED_AT });
+      expect(values(await indexedDBStorage.getTrack(world.detailsUri))).toEqual({ rating: 0, energy: 7, bpm: 124, key: "8A", tagIds: [], dateCreated: RATED_AT });
+      // A later change on the first computer reaches the second.
+      await useInstall(world.first);
+      await editTrack(world.ratedUri, (current) => ({ ...current, rating: 3, dateModified: RATED_AT + 1000 }));
+      expect(await syncTagify()).toEqual([]);
+      await useInstall(world.second);
+      expect(await syncTagify()).toEqual([]);
+      expect((await indexedDBStorage.getTrack(world.ratedUri))?.rating).toBe(3);
+      expect((await indexedDBStorage.getTrack(world.ratedUri))?.dateModified).toBe(RATED_AT + 1000);
+      expect(await readOutbox()).toEqual([]);
+      expect(openConflicts(world.library)).toBe("0");
+    }, 120_000);
+
+    it("stay on the other computer after one computer resets the cloud copy, and after a new computer combines its own", async () => {
+      const world = await ratedOnTwoComputers();
+      // The first computer resets Community to its own copy.
+      await useInstall(world.first);
+      syncRuntime.armCloudReplacement();
+      await syncRuntime.replaceCloudWithCurrentLocalState();
+      expect(cloudSong(world.library, world.ratedId)).toBe("4.5|||");
+      // The second computer must reload Community's copy, and keeps the ratings.
+      await useInstall(world.second);
+      expect(await syncTagify()).toEqual([]);
+      expect((await indexedDBStorage.getTrack(world.ratedUri))?.rating).toBe(4.5);
+      expect((await indexedDBStorage.getTrack(world.detailsUri))?.camelotKey).toBe("8A");
+      // A third computer that already rated a song of its own combines its library with Community's.
+      const third = newInstall();
+      await useInstall(third);
+      const ownId = songId(), ownUri = `spotify:track:${ownId}`;
+      expect(await indexedDBStorage.saveTrack(ownUri, rated({ rating: 2 }))).toBe(true);
+      await link(world.member, "Tagify E2E third");
+      await syncRuntime.syncNow();
+      if (syncRuntime.getStatus() === "merge-required") await syncRuntime.commitInitialMerge({});
+      expect(await syncTagify()).toEqual([]);
+      expect((await indexedDBStorage.getTrack(ownUri))?.rating).toBe(2);
+      expect((await indexedDBStorage.getTrack(world.ratedUri))?.rating).toBe(4.5);
+      expect(cloudSong(world.library, ownId)).toBe("2.0|||");
+      // Both earlier computers keep every rating and receive the new one.
+      for (const install of [world.first, world.second]) {
+        await useInstall(install);
+        expect(await syncTagify()).toEqual([]);
+        expect((await indexedDBStorage.getTrack(world.ratedUri))?.rating).toBe(4.5);
+        expect((await indexedDBStorage.getTrack(world.detailsUri))?.bpm).toBe(124);
+        expect((await indexedDBStorage.getTrack(ownUri))?.rating).toBe(2);
+        expect(await readOutbox()).toEqual([]);
+      }
+    }, 240_000);
+
+    it("keep their rating and date when the song is tagged on the website", async () => {
+      const world = await ratedOnTwoComputers();
+      const catalogId = catalogTrack(world.ratedId);
+      expect((await webEdit(world.member, { items: [{ catalogEntityId: catalogId, add: [world.ids.calm] }] })).status).toBe("applied");
+      for (const install of [world.first, world.second]) {
+        await useInstall(install);
+        expect(await syncTagify()).toEqual([]);
+        const song = await indexedDBStorage.getTrack(world.ratedUri);
+        expect(song?.rating).toBe(4.5);
+        expect(song?.dateCreated).toBe(RATED_AT);
+        expect(await tagNamesOnSong(world.ratedUri)).toEqual(["Calm"]);
+        await expectInSync(world.library, world.ratedUri, world.ratedId);
+      }
+      expect(cloudSong(world.library, world.ratedId)).toBe("4.5|||");
+    }, 180_000);
+
+    it("rated differently on two computers at once end with one rating everywhere", async () => {
+      const world = await ratedOnTwoComputers();
+      await useInstall(world.first);
+      await editTrack(world.ratedUri, (current) => ({ ...current, rating: 1, dateModified: RATED_AT + 2000 }));
+      await useInstall(world.second);
+      await editTrack(world.ratedUri, (current) => ({ ...current, rating: 5, dateModified: RATED_AT + 3000 }));
+      await useInstall(world.first);
+      expect(await syncTagify()).toEqual([]);
+      await useInstall(world.second);
+      expect(await syncTagify()).toEqual([]);
+      await useInstall(world.first);
+      expect(await syncTagify()).toEqual([]);
+      const cloud = cloudSong(world.library, world.ratedId);
+      expect(["1.0|||", "5.0|||"]).toContain(cloud);
+      for (const install of [world.first, world.second]) {
+        await useInstall(install);
+        expect(await syncTagify()).toEqual([]);
+        expect((await indexedDBStorage.getTrack(world.ratedUri))?.rating).toBe(Number(cloud.split("|")[0]));
+        expect(await readOutbox()).toEqual([]);
+      }
+      expect(openConflicts(world.library)).toBe("0");
+    }, 180_000);
+
+    it("come back when an earlier backup is restored, and their removal reaches the other computer", async () => {
+      const world = await ratedOnTwoComputers();
+      sql(`select tagify_sync.create_recovery_point('${world.library}', 'daily')`);
+      const point = sql(`select id from tagify_sync.recovery_points where library_id='${world.library}' and reason='daily' order by created_at desc limit 1`);
+      // The first computer removes the rating; the song now holds nothing, and the second computer loses the rating too.
+      await useInstall(world.first);
+      await editTrack(world.ratedUri, (current) => ({ ...current, rating: 0, dateModified: RATED_AT + 4000 }));
+      expect(await syncTagify()).toEqual([]);
+      expect(cloudSong(world.library, world.ratedId)).not.toContain("4.5");
+      await useInstall(world.second);
+      expect(await syncTagify()).toEqual([]);
+      expect((await indexedDBStorage.getTrack(world.ratedUri))?.rating ?? 0).toBe(0);
+      // Restoring the earlier backup on the website brings the rating back on both computers.
+      await memberRpc(world.member, "restore_private_sync_recovery_point", { p_recovery_point_id: point, p_operation_id: randomUUID() });
+      expect(cloudSong(world.library, world.ratedId)).toBe("4.5|||");
+      for (const install of [world.first, world.second]) {
+        await useInstall(install);
+        expect(await syncTagify()).toEqual([]);
+        expect((await indexedDBStorage.getTrack(world.ratedUri))?.rating).toBe(4.5);
+        expect((await indexedDBStorage.getTrack(world.detailsUri))?.energy).toBe(7);
+      }
+    }, 180_000);
+  });
+
   describe("random edits from two computers and the website", () => {
     const NAMES = ["Neon", "Dusk", "Glow", "Late", "calm", "Haze"];
     const seeds = (process.env.E2E_FUZZ_SEEDS ?? "1,2,3,4,5,6").split(",").map(Number);

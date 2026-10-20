@@ -2,21 +2,27 @@ import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityOnboardingModal } from "../CommunityOnboardingModal";
-import { CloudSyncModal } from "../CloudSyncModal";
+import { CloudSyncModal as CloudSyncDialog } from "../CloudSyncModal";
 import { PENDING_PAIRING_STORAGE_KEY, syncPairingService, type ApprovedPairing, type PairingRelationship } from "@/services/sync/SyncPairingService";
 import { setDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 
+import { policyFixture, sharingStub, taxonomyFixture } from "./sharingFixtures";
+
+const sharing = sharingStub(policyFixture({ reviewedAt: null }));
 /** Community setup always knows where it was opened from. */
-const CommunitySetup = (props: { onClose: () => void }) => <CommunityOnboardingModal entry="community" {...props} />;
+const CommunitySetup = (props: { onClose: () => void }) => <CommunityOnboardingModal entry="community" sharing={sharing} tracks={{}} taxonomy={taxonomyFixture()} {...props} />;
+const CloudSyncModal = (props: { onClose: () => void }) => <CloudSyncDialog sharing={sharing} onOpenSharing={vi.fn()} {...props} />;
 
 vi.mock("@/features/product-analytics/productAnalytics", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/product-analytics/productAnalytics")>()),
   recordProductInteraction: vi.fn(),
 }));
 
-vi.mock("../CommunityPublicVisibilityReview", () => ({
-  CommunityVisibilityReview: () => <div>Review your public visibility</div>,
+// Both dialogs show the sharing choice once connected: Sync as a line, setup as its share step.
+vi.mock("../CommunityShareDialog", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../CommunityShareDialog")>()),
+  CommunitySharePanel: () => <div>Your tags: Not public yet</div>,
 }));
 
 const configuration = {
@@ -74,7 +80,8 @@ describe.each([
     render(<Modal onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
 
-    expect(await screen.findByText("Review your public visibility")).toBeInTheDocument();
+    if (relationship === "account-switch") expect(await screen.findByText(/Reload Spotify to finish switching accounts/)).toBeInTheDocument();
+    else expect(await screen.findByText("Your tags: Not public yet")).toBeInTheDocument();
     expect(complete).toHaveBeenCalledTimes(1);
     expect(complete).toHaveBeenCalledWith(expect.objectContaining({
       relationship,
@@ -84,7 +91,9 @@ describe.each([
     if (relationship === "account-switch") {
       expect(screen.getByText(/Reload Spotify to finish switching accounts/)).toBeInTheDocument();
       expect(activateCurrentAccount).not.toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
+      // Choosing what to share waits until Spotify has reloaded into the new account.
+      if (Modal === CommunitySetup) expect(screen.queryByText("Your tags: Not public yet")).not.toBeInTheDocument();
+      else expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
     } else {
       await waitFor(() => expect(activateCurrentAccount).toHaveBeenCalledTimes(1));
     }
@@ -98,7 +107,7 @@ describe.each([
     approve("reconnect");
     render(<Modal onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
-    expect(await screen.findByText("Review your public visibility")).toBeInTheDocument();
+    expect(await screen.findByText("Your tags: Not public yet")).toBeInTheDocument();
 
     expect(connectEvents()).toEqual([
       ["community_setup_opened", { entry }],
@@ -111,7 +120,7 @@ describe.each([
     render(<Modal onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
-    expect(await screen.findByText("Review your public visibility")).toBeInTheDocument();
+    expect(await screen.findByText("Your tags: Not public yet")).toBeInTheDocument();
 
     expect(connectEvents().slice(1)).toEqual([
       ["community_connect_failed", { entry, stage: "finish" }],
@@ -137,7 +146,7 @@ describe.each([
     fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
 
-    expect(await screen.findByText("Review your public visibility")).toBeInTheDocument();
+    expect(await screen.findByText("Your tags: Not public yet")).toBeInTheDocument();
     expect(complete).toHaveBeenCalledTimes(2);
     expect(activateCurrentAccount).toHaveBeenCalledTimes(1);
   });
@@ -150,7 +159,7 @@ describe.each([
 
     expect(complete).toHaveBeenCalledTimes(1);
     expect(activateCurrentAccount).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Review your public visibility")).toBeInTheDocument();
+    expect(screen.getByText("Your tags: Not public yet")).toBeInTheDocument();
   });
 
   it("shows connection progress and prevents overlapping completion", async () => {
@@ -168,6 +177,6 @@ describe.each([
     expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
     expect(complete).toHaveBeenCalledTimes(1);
     await act(async () => { finish?.(); });
-    expect(await screen.findByText("Review your public visibility")).toBeInTheDocument();
+    expect(await screen.findByText("Your tags: Not public yet")).toBeInTheDocument();
   });
 });

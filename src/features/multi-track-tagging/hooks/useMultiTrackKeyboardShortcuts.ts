@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { keyboardShortcutService } from "@/services/KeyboardShortcutService";
+import { isTypingOrDialogTarget } from "@/utils/keyboardTargets";
 
 interface UseMultiTrackKeyboardShortcutsOptions {
   hasUnsavedChanges: boolean;
@@ -85,11 +86,7 @@ export function useMultiTrackKeyboardShortcuts({
         return;
       }
 
-      if (
-        event.target instanceof HTMLInputElement ||
-        event.target instanceof HTMLTextAreaElement ||
-        (event.target instanceof HTMLElement && event.target.isContentEditable)
-      ) {
+      if (isTypingOrDialogTarget(event.target)) {
         return;
       }
 

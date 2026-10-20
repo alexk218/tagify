@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import { recordUpdateBannerShown, updateKind } from "../updateAnalytics";

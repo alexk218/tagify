@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it } from "vitest";
 import { matchesQueueGap, normalizeQueuePage } from "../taggingQueue.logic";
 it("distinguishes automatic metadata from intentional tags, rating, energy and category coverage", () => {

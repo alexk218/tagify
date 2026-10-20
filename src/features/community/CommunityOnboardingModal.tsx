@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Cloud, ExternalLink, Link2, RefreshCw, ShieldAlert, ShieldCheck, UserCircle2, X } from "lucide-react";
-import { fetchCommunityProfile } from "./communityDevice";
+import { fetchCommunityProfile, hydrateSyncProfile } from "./communityDevice";
 import { COMMUNITY_ORIGIN, openCommunityUrl } from "./communityLinks";
-import { CommunityVisibilityReview } from "./CommunityPublicVisibilityReview";
-import { getDesktopSyncConfiguration, setDesktopSyncConfiguration, type DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
+import { CommunitySharePanel, communityProfileUrl } from "./CommunityShareDialog";
+import type { CommunitySharing } from "./useCommunitySharing";
+import type { TagTaxonomy, TrackData } from "@/types/tagData";
+import { getDesktopSyncConfiguration, type DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncPairingService, type ApprovedPairing } from "@/services/sync/SyncPairingService";
 import { clearRecoveryUnavailable } from "@/services/sync/SyncInstallRecovery";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
@@ -23,9 +25,15 @@ import {
 
 export function CommunityOnboardingModal({
   entry,
+  sharing,
+  tracks,
+  taxonomy,
   onClose,
 }: {
   entry: CommunityConnectEntry;
+  sharing: CommunitySharing;
+  tracks: Record<string, TrackData>;
+  taxonomy: TagTaxonomy;
   onClose: () => void;
 }) {
   const [configuration, setConfiguration] = useState(() => getDesktopSyncConfiguration());
@@ -39,7 +47,6 @@ export function CommunityOnboardingModal({
   const [finished, setFinished] = useState(false);
   const [finishedPrivately, setFinishedPrivately] = useState(false);
   const [requiresReload, setRequiresReload] = useState(false);
-  const [visibilityReviewed, setVisibilityReviewed] = useState<boolean | null>(null);
   const polling = useRef(false);
 
   const close = () => {
@@ -157,7 +164,14 @@ export function CommunityOnboardingModal({
     return () => window.clearInterval(timer);
   }, [pending, poll]);
 
-  const profileHref = configuration?.profile?.handle ? `${COMMUNITY_ORIGIN}/@${configuration.profile.handle}` : COMMUNITY_ORIGIN;
+  // Once a sharing choice exists, set up or saved before, setup is done.
+  useEffect(() => {
+    if (!configuration || finished || showingMergeReview || !sharing.state || sharing.state === "review") return;
+    setFinishedPrivately(sharing.state === "private");
+    setFinished(true);
+  }, [configuration, finished, showingMergeReview, sharing.state]);
+
+  const profileHref = communityProfileUrl(configuration?.profile?.handle || sharing.handle);
 
   return <Portal><div className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="community-onboarding-title">
     <section className={`${styles.modal} ${styles.onboardingModal}`}>
@@ -168,8 +182,8 @@ export function CommunityOnboardingModal({
       <div className={styles.body}>
         {!configuration && !pending && !approvedPairing ? <>
           <div className={styles.onboardingIntro}>
-            <h3>Connect Tagify to Community</h3>
-            <p>Back up your library and choose which tags appear on your public profile.</p>
+            <h3>Share your tags on Community</h3>
+            <p>Connect Tagify to your Community account. Your library is backed up, and you choose which tags appear on your profile.</p>
           </div>
           <div className={styles.actions}>
             <button type="button" onClick={close} className={styles.secondary}>Cancel</button>
@@ -202,19 +216,13 @@ export function CommunityOnboardingModal({
         </> : null}
 
         {configuration && !finished ? <>
-          <div className={styles.connected}><CheckCircle2 /><div><strong>Connected as {profileLabel(configuration)}</strong><span>{communitySyncStatusLabel(status, visibilityReviewed)}</span></div></div>
-          {!showingMergeReview ? <p>Tagify is syncing this library now. Before Community publishes your profile, review the tag categories, subfolders, and tags that can appear publicly.</p> : null}
+          <div className={styles.connected}><CheckCircle2 /><div><strong>Connected as {profileLabel(configuration)}</strong><span>{communitySyncStatusLabel(status)}</span></div></div>
           {requiresReload ? <div className={styles.warning}><ShieldCheck /><span>Reload Spotify to finish switching accounts before continuing setup.</span></div> : null}
           {status === "snapshot-required" ? <div className={styles.warning}><ShieldAlert /><span>Your library is still on this device. Try Sync now again. If it keeps stopping, save a Tagify backup and contact support.</span></div> : null}
           {showingMergeReview && mergePreview ? <InitialLibraryMergeReview review={mergePreview} onCommit={(resolutions) => activeSyncRuntime().commitInitialMerge(resolutions)} onDownloadBackup={() => activeSyncRuntime().downloadInitialMergeBackup()} /> : null}
-          {!showingMergeReview ? <CommunityVisibilityReview connected={Boolean(configuration)} onReviewStateChange={setVisibilityReviewed} onSaved={(policy) => {
-            if (policy.reviewedAt) {
-              setFinishedPrivately(!policy.enabled);
-              setFinished(true);
-            }
-          }} /> : null}
-          {!showingMergeReview ? <div className={styles.actions}>
-            <button type="button" onClick={() => void activeSyncRuntime().syncNow()} disabled={busy || requiresReload || status === "idle" || status === "syncing" || status === "publishing" || visibilityReviewed === false}><RefreshCw size={15} /> {status === "syncing" ? "Syncing…" : visibilityReviewed === false ? "Choose what to share first" : "Sync now"}</button>
+          {!showingMergeReview && !requiresReload ? <CommunitySharePanel surface="onboarding" sharing={sharing} tracks={tracks} taxonomy={taxonomy} /> : null}
+          {status === "snapshot-required" ? <div className={styles.actions}>
+            <button type="button" onClick={() => void activeSyncRuntime().syncNow()} disabled={busy}><RefreshCw size={15} /> Sync now</button>
           </div> : null}
         </> : null}
 
@@ -224,12 +232,12 @@ export function CommunityOnboardingModal({
             <div>
               <h3>Your Community setup is ready.</h3>
               <p>{finishedPrivately
-                ? "Tagify backs up your library automatically, and your tags stay private. You can publish them any time from Sync."
-                : "Future syncs run automatically with your saved public visibility rules. You can reopen Sync any time to review or change what appears publicly."}</p>
+                ? "Tagify backs up your library automatically, and your tags stay private. You can publish them any time from Community in Tagify."
+                : "Your tags appear on your profile within a minute, and Tagify keeps it up to date as you tag. You can change what's hidden any time from Community in Tagify."}</p>
             </div>
           </div>
           <div className={styles.actions}>
-            {!finishedPrivately ? <button type="button" onClick={() => openCommunityUrl(profileHref)}><ExternalLink size={15} /> Open my profile</button> : null}
+            {!finishedPrivately ? <button type="button" onClick={() => openCommunityUrl(profileHref)}><ExternalLink size={15} /> View my profile</button> : null}
             <button type="button" className={styles.primary} onClick={close}>Done</button>
           </div>
         </> : null}
@@ -243,10 +251,3 @@ export function CommunityOnboardingModal({
 function deviceName() { return `Tagify on ${navigator.userAgent.includes("Mac") ? "Mac" : navigator.userAgent.includes("Windows") ? "Windows" : "desktop"}`; }
 function activeSyncRuntime() { return window.TagifySync || syncRuntime; }
 function profileLabel(configuration: DesktopSyncConfiguration) { return configuration.profile?.displayName || (configuration.profile?.handle ? `@${configuration.profile.handle}` : `Community account …${configuration.accountId.slice(-6)}`); }
-async function hydrateSyncProfile(configuration: DesktopSyncConfiguration): Promise<DesktopSyncConfiguration | null> {
-  const profile = await fetchCommunityProfile(configuration.accessToken);
-  if (!profile?.handle) return null;
-  const next = { ...configuration, profile };
-  setDesktopSyncConfiguration(next);
-  return next;
-}

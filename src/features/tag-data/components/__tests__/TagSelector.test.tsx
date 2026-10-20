@@ -185,6 +185,52 @@ describe("TagSelector", () => {
   });
 });
 
+it("places folders nested inside other folders in their own indented list", () => {
+  window.localStorage.clear();
+  window.localStorage.setItem("tagify:expandedCategories", JSON.stringify(["genre"]));
+  window.localStorage.setItem(
+    "tagify:expandedSubcategories",
+    JSON.stringify(["genre:electronic", "genre:house", "genre:deep"]),
+  );
+  renderTagSelector({
+    categories: [
+      {
+        id: "genre",
+        name: "Genre",
+        subcategories: [
+          {
+            id: "electronic",
+            name: "Electronic",
+            tags: [{ id: "french", name: "French House" }],
+            subcategories: [
+              {
+                id: "house",
+                name: "House Sub",
+                tags: [{ id: "sub", name: "Sub Tag" }],
+                subcategories: [
+                  { id: "deep", name: "Deep", tags: [{ id: "deep-tag", name: "Deep Tag" }] },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  expect(styles.nestedSubcategoryList).toBeTruthy();
+  const folderOf = (name: string) => screen.getByText(name).closest(`.${styles.subcategory}`);
+  const electronic = folderOf("Electronic");
+  const house = folderOf("House Sub");
+  const deep = folderOf("Deep");
+
+  expect(house?.parentElement).toHaveClass(styles.nestedSubcategoryList);
+  expect(house?.parentElement?.parentElement).toBe(electronic);
+  expect(deep?.parentElement).toHaveClass(styles.nestedSubcategoryList);
+  expect(deep?.parentElement?.parentElement).toBe(house);
+  expect(screen.getByRole("button", { name: "Deep Tag" })).toBeInTheDocument();
+});
+
 it("keeps the full name of a long clipped tag available on hover and to assistive technology", () => {
   seedExpandedState();
   const name = "Song length · from 3:00 through 5:00 · regular songs";

@@ -25,7 +25,7 @@ describe("SpotifyUpdateHelpModal", () => {
         onExportTagData={vi.fn()}
         onImportTagData={vi.fn()}
         onResetTagifyData={vi.fn()}
-        onRetryMigration={vi.fn()}
+        onRetryMigration={vi.fn()} onConnectCommunity={vi.fn()} onOpenSync={vi.fn()}
       />,
     );
 

@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { TagTaxonomy, TrackData } from "@/types/tagData";
 import { CommunityPublishPrompt } from "../CommunityPublishPrompt";
-import { savePublicationPolicy } from "../communityPublication";
+import { publishTags } from "../communityPublication";
 import { canAskToPublish, COMMUNITY_PUBLISH_PROMPT_PREFIX } from "../communityPublishPromptHistory";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
@@ -136,7 +136,7 @@ describe("Community publish invitation", () => {
     }
   });
 
-  it("credits a publish to the invitation only when the invitation opened Sync", async () => {
+  it("credits a publish to the invitation only when sharing opened from it", async () => {
     const { tagSong, onReview } = renderPrompt();
     tagSong(1);
     await settle();
@@ -146,13 +146,13 @@ describe("Community publish invitation", () => {
     expect(invitation()).toBeNull();
 
     communityRequest.mockImplementation(async (_path, options) => ({ policy: { ...(options?.body as { policy: object }).policy, revision: 5 } }));
-    await savePublicationPolicy(policy() as never, { enabled: true });
+    await publishTags(policy() as never, "invitation");
     expect(recordProductInteraction).toHaveBeenCalledWith("community_publish_prompt_published");
-    expect(recordProductInteraction).not.toHaveBeenCalledWith("community_profile_published");
+    expect(recordProductInteraction).not.toHaveBeenCalledWith("community_profile_published", expect.anything());
 
-    // A later publish from Sync on its own is counted separately.
-    await savePublicationPolicy(policy({ enabled: false, reviewedAt: "2026-10-17T12:00:00Z" }) as never, { enabled: true });
-    expect(recordProductInteraction).toHaveBeenCalledWith("community_profile_published");
+    // A later publish opened from Sync on its own is counted separately, with where it came from.
+    await publishTags(policy({ enabled: false, reviewedAt: "2026-10-17T12:00:00Z" }) as never, "sync");
+    expect(recordProductInteraction).toHaveBeenCalledWith("community_profile_published", { surface: "sync" });
   });
 
   it("waits for five tagged songs", async () => {
@@ -239,7 +239,7 @@ describe("Community publish invitation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Keep my tags private" }));
     expect(screen.getByRole("region", { name: "Keep your tags private?" })).toHaveAccessibleDescription(
-      "Tagify keeps backing up your library and won't ask again. You can publish any time from Sync.",
+      "Tagify keeps backing up your library and won't ask again. You can publish any time from Community in Tagify.",
     );
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(invitation()).toBeInTheDocument();

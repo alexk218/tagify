@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { discussion39Artists, discussion39Releases } from "../../../scripts/tests/fixtures/discussion39";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -97,4 +98,22 @@ it("backs off for Spotify's requested interval instead of retrying a rate-limite
   now += 1;
   await expect(api.getRecordingIdentity(uri)).resolves.toMatchObject({ isrc: "USABC2400001" });
   expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it("reads a song's ISRC and album for Community from the same desktop metadata, without the Web API", async () => {
+  const albumGid = "0123456789abcdef0123456789abcdef";
+  vi.stubGlobal("Spicetify", { ...Spicetify, URI: {
+    idToHex: (id: string) => exactGids[exactIds.indexOf(id)],
+    hexToId: (gid: string) => gid === albumGid ? "4m2880jivSbbyEGAKfITCa" : artistIds[artistGids.indexOf(gid)],
+  } });
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ...desktopRecording, external_id: [{ type: "ISRC", id: "USABC2400001" }], album: { gid: albumGid, name: "Ignored here" } }) })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ...desktopRecording, gid: exactGids[1], external_id: [], album: { gid: "not-a-gid" } }) })
+    .mockResolvedValueOnce({ ok: false, status: 404, headers: new Headers() });
+  vi.stubGlobal("fetch", fetchMock);
+  const options = { priority: "background" as const, feature: "recording-matching" as const };
+  await expect(api.getTrackRelease(`spotify:track:${exactIds[0]}`, options)).resolves.toEqual({ isrc: "USABC2400001", albumUri: "spotify:album:4m2880jivSbbyEGAKfITCa" });
+  await expect(api.getTrackRelease(`spotify:track:${exactIds[1]}`, options)).resolves.toEqual({ isrc: null, albumUri: null });
+  await expect(api.getTrackRelease(`spotify:track:${exactIds[2]}`, options)).resolves.toBeUndefined();
+  expect(fetchMock.mock.calls.every(([url]) => url.startsWith("https://spclient.wg.spotify.com/metadata/4/track/"))).toBe(true);
 });

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it } from "vitest";
 import { detachInconsistentRecordingGroups, expandRecordingEdits, normalizeRecordingIdentity, sameRecording } from "../recordingReuse";
 const identity = { isrc: "USABC2400001", artistIds: ["a".repeat(22)], durationMs: 180000, name: "Song (Original Mix)" };

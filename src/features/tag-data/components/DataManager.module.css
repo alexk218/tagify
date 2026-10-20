@@ -99,6 +99,17 @@
   border-color: rgb(191 111 59 / 50%);
 }
 
+.pillButton.inviteButton {
+  border: 1px solid rgb(30 215 96 / 15%);
+  background: rgb(30 215 96 / 5%);
+}
+
+.pillButton.inviteButton:hover,
+.pillButton.inviteButton[aria-expanded="true"] {
+  background: rgb(30 215 96 / 25%);
+  border-color: rgb(30 215 96 / 50%);
+}
+
 .pillButton.discordButton {
   border: 1px solid rgb(88 101 242 / 15%);
   background: rgb(88 101 242 / 5%);

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { TagTaxonomy } from "@/types/tagData";
 import { normalizeTaxonomyTree } from "@/utils/tagTaxonomy";

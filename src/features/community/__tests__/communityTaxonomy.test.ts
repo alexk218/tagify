@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { PublishedTaxonomyArtifactV1 } from "@tagify/community-contracts";
 import { assertPublishedTaxonomyArtifactV1, assertTaxonomyArtifactChecksum } from "@tagify/community-contracts";

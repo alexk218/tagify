@@ -23,7 +23,7 @@ import type {
   InitialMergeResultV1,
   InitialMergeSource,
 } from "@tagify/sync-contracts";
-import { assertLibrarySnapshotV1, assertLibrarySnapshotV2, assertSyncMutationV1, DURABLE_APP_STATE_DOMAINS, entityKeyV1, INITIAL_MERGE_REVIEW_VERSION, MAX_APP_STATE_DOCUMENT_BYTES, MAX_SYNC_BATCH_OPERATIONS, planInitialLibraryMerge, PRIVATE_SYNC_PROTOCOL_VERSION } from "@tagify/sync-contracts";
+import { assertLibrarySnapshotV1, assertLibrarySnapshotV2, assertSyncMutationV1, DURABLE_APP_STATE_DOMAINS, entityKeyV1, INITIAL_MERGE_REVIEW_VERSION, MAX_APP_STATE_DOCUMENT_BYTES, MAX_SYNC_BATCH_OPERATIONS, planInitialLibraryMerge, PLAYLIST_WRITE_REQUEST_EVENT, PRIVATE_SYNC_PROTOCOL_VERSION } from "@tagify/sync-contracts";
 import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import { storageService } from "@/services/storage/StorageService";
 import { indexedDBStorage, type SyncTransactionContext, type SyncTransactionWrites } from "@/services/storage/IndexedDBStorageService";
@@ -50,6 +50,8 @@ import {
   flushLocalPersistence,
   setLocalPersistencePaused,
   classifyLocalReplica,
+  SESSION_REFRESH_AHEAD_MS,
+  sessionNeedsRefresh,
   setDesktopSyncConfiguration,
   SYNC_OUTBOX_CHANGED_EVENT,
   SYNC_STORES,
@@ -68,6 +70,16 @@ import {
 } from "@/features/smart-playlists/utils/smartPlaylist.storage";
 import { knownCloudTaxonomy, rebuildDeviceTaxonomy } from "./PreserveLocalTaxonomyMetadata";
 import { privateNoteBackupStatus, syncPrivateNotes } from "./PrivateNotes";
+import { canReadSpotifyLibrary, isNewSpotifyLibraryRequest, markSpotifyLibraryRequestHandled, reportDesktopFeatures, runSpotifyLibrarySend, SPOTIFY_LISTS_FEATURE, type SendSession, type SpotifySendFailure, type SpotifySendOutcome } from "./SpotifyLibrarySender";
+import { canSaveToLikedSongs, runSpotifySaves, SPOTIFY_SAVES_FEATURE, spotifySaveNotice } from "./SpotifySaveRunner";
+import { canWritePlaylists, localCreatedPlaylists, PLAYLIST_WRITES_FEATURE, PlaylistWriteScheduler, playlistWriteNotice, runPlaylistWrites } from "./PlaylistWriteRunner";
+import { runArtistCreditReports } from "./CommunityArtistCredits";
+import { communityArtistCreditSources } from "./CommunityArtistCreditSources";
+import { runSongReleaseReports } from "./CommunitySongReleases";
+import { communitySongReleaseSources } from "./CommunitySongReleaseSources";
+import { canPlayFromCommunity, DESKTOP_PLAY_FEATURE, DesktopPlayer, readDesktopPlayRequest } from "./DesktopPlay";
+import { spotifyApiService } from "@/services/SpotifyApiService";
+import { spotifyAccountKey } from "@/services/SpotifyRequests";
 import {
   chunkLocalFileEntries,
   LOCAL_FILE_BACKUP_SHADOW_KEY,
@@ -83,6 +95,7 @@ import { expandSyncTaxonomy, flattenTaxonomy, keepTaxonomyTombstones, taxonomyFr
 export { expandSyncTaxonomy, type TaxonomyShadowRecord } from "./SyncTaxonomy";
 import { syncPairingService } from "./SyncPairingService";
 import { enrollDesktopRecovery } from "./SyncInstallRecovery";
+import { isBusyStatus, retryAfterSeconds } from "./SyncRetryAfter";
 import packageJson from "@/package";
 import { downloadTagDataBackup } from "@/features/tag-data/utils/tagData.backup";
 import { readCompleteBackupContents } from "@/features/tag-data/utils/tagData.backupContents";
@@ -100,6 +113,17 @@ export interface BackupHealth {
   retrying: Array<"local-files" | "notes">;
   /** Items with a value Community cannot hold, kept on this device only. */
   deviceOnlyChanges: number;
+}
+export interface CommunityRequestOptions {
+  method?: "GET" | "POST" | "PUT";
+  body?: unknown;
+  /**
+   * False for a Community route outside sync, such as /api/v2/device/profile. Those
+   * answer CORS with Community's external API headers, which allow only
+   * authorization, content-type and if-none-match, so Spotify can't send them
+   * sync's client headers.
+   */
+  syncHeaders?: boolean;
 }
 export function canCombineInitialLibrariesWithoutReview(review: InitialMergeReview | null): boolean {
   return Boolean(review?.supported && review.conflicts.length === 0);
@@ -126,7 +150,8 @@ interface PullPage {
   headCursor?: number;
   batches?: PullBatch[];
   conflicts?: SyncConflictV1[];
-  liveSync?: { realtime?: unknown };
+  /** `listenWhileHidden`: the member plays songs from Community in this Spotify (Community 9002). */
+  liveSync?: { realtime?: unknown; listenWhileHidden?: unknown };
 }
 interface PushOutcome {
   sent: number; accepted: number; confirmed: number; snapshot: boolean;
@@ -171,7 +196,46 @@ export const EDIT_SESSION_GAP_MS = 2 * 60_000;
 export const VISIBLE_RESYNC_AFTER_MS = 5 * 60_000;
 /** Spotify hidden this long releases its live Community connection until it is shown again. */
 export const HIDDEN_REALTIME_CLOSE_MS = 2 * 60_000;
+/**
+ * A sync waits at most this long for a live connection that is opening, so
+ * its one pull covers everything until Realtime starts announcing changes.
+ */
+export const REALTIME_JOIN_WAIT_MS = 10_000;
+/** Per library: Community's latest word on whether anyone else uses it (`liveSync.realtime`). */
+export const LIVE_SYNC_HINT_PREFIX = "tagify:sync:live-sync:";
+/** The hint covers the last three hours; an older one can't say whether to connect before the first pull. */
+export const LIVE_SYNC_HINT_MAX_AGE_MS = 3 * 60 * 60_000;
+/** An unchanged hint is saved again at most this often. */
+const LIVE_SYNC_HINT_SAVE_MS = 15 * 60_000;
+/** setTimeout fires at once beyond about 24.8 days, so long waits are re-armed daily. */
+const MAX_TIMER_MS = 24 * 60 * 60_000;
 const SIDE_SYNC_BACKOFF_MAX_MS = 60 * 60_000;
+
+/** Community's last word on whether another device or the website uses this library, while it is recent. */
+export function liveSyncHint(libraryId: string, now = Date.now()): boolean | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(`${LIVE_SYNC_HINT_PREFIX}${libraryId}`) || "null") as { realtime?: unknown; at?: unknown } | null;
+    if (typeof value?.realtime !== "boolean" || typeof value.at !== "number") return null;
+    const age = now - value.at;
+    return age >= 0 && age < LIVE_SYNC_HINT_MAX_AGE_MS ? value.realtime : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * When a refreshed session expires, by this device's clock. Supabase names
+ * the time by its own clock; counting `expires_in` from now as well keeps
+ * refreshes early on a device whose clock is behind.
+ */
+export function sessionExpiresAt(session: { expires_at?: unknown; expires_in?: unknown }, now = Date.now()): number {
+  const nowSeconds = Math.floor(now / 1_000);
+  const byLifetime = typeof session.expires_in === "number" && Number.isFinite(session.expires_in) && session.expires_in > 0 ? nowSeconds + Math.floor(session.expires_in) : null;
+  const byServer = typeof session.expires_at === "number" && Number.isFinite(session.expires_at) ? session.expires_at : null;
+  if (byLifetime !== null && byServer !== null) return Math.min(byLifetime, byServer);
+  // Supabase sends both; without either, assume its default one-hour session.
+  return byLifetime ?? byServer ?? nowSeconds + 3_600;
+}
 
 export function safetySyncDelayMs(stage = 2, random = Math.random, quiet = false): number {
   const intervals = quiet ? QUIET_RECOVERY_POLL_INTERVALS_MS : RECOVERY_POLL_INTERVALS_MS;
@@ -226,13 +290,63 @@ export class SideSyncBackoff {
   failed(now = Date.now()): void { this.failures++; this.notBefore = now + sideSyncBackoffMs(this.failures, this.random); }
 }
 
-export interface PullSideDocuments { localFilesRevision: number; privateNotesCursor: number }
+export interface PullSideDocuments {
+  localFilesRevision: number;
+  privateNotesCursor: number;
+  /** When the member last asked on Community for their Spotify lists (Community 0233), if ever. */
+  spotifyLibraryRequestedAt?: string | null;
+  /** Songs the member asked on Community to save to their Liked Songs are waiting, only when some are. */
+  spotifySavesWaiting?: boolean;
+}
 
 /** Revisions of the separately stored backups, reported by newer Community pull responses. */
 export function pullSideDocuments(response: unknown): PullSideDocuments | null {
-  const value = (response as { sideDocuments?: { localFilesRevision?: unknown; privateNotesCursor?: unknown } } | null)?.sideDocuments;
+  const value = (response as { sideDocuments?: { localFilesRevision?: unknown; privateNotesCursor?: unknown; spotifyLibraryRequestedAt?: unknown; spotifySavesWaiting?: unknown } } | null)?.sideDocuments;
   if (!value || !Number.isSafeInteger(value.localFilesRevision) || !Number.isSafeInteger(value.privateNotesCursor)) return null;
-  return { localFilesRevision: Number(value.localFilesRevision), privateNotesCursor: Number(value.privateNotesCursor) };
+  return {
+    localFilesRevision: Number(value.localFilesRevision), privateNotesCursor: Number(value.privateNotesCursor),
+    ...(typeof value.spotifyLibraryRequestedAt === "string" ? { spotifyLibraryRequestedAt: value.spotifyLibraryRequestedAt } : {}),
+    ...(value.spotifySavesWaiting === true ? { spotifySavesWaiting: true } : {}),
+  };
+}
+
+const SEND_FAILURE_NOTICES: Record<SpotifySendFailure, string> = {
+  spotify_busy: "Spotify asked Tagify to slow down, so your Spotify lists weren't all sent to Community. Try again there in a minute.",
+  spotify_unavailable: "Tagify couldn't read your Spotify lists. Make sure Spotify is online, then try again on Community.",
+  too_large: "Your Spotify lists are more than Community can keep. Remove some lists there, then try again.",
+  daily_limit: "You've sent your Spotify lists to Community a lot today. Try again tomorrow.",
+  paused: "Community isn't taking Spotify lists right now. Try again later.",
+  signed_out: "Connect Tagify to Community again in Cloud Sync, then ask for your Spotify lists again.",
+  network: "Tagify lost its connection to Community while sending your Spotify lists. Try again there once you're online.",
+  unknown: "Tagify couldn't send your Spotify lists to Community. Try again there in a moment.",
+};
+
+/** What Tagify says in Spotify when a send ends; nothing when another computer has it or nothing was asked. */
+export function spotifySendNotice(outcome: SpotifySendOutcome): { text: string; error: boolean } | null {
+  switch (outcome.status) {
+    case "done":
+    case "sent":
+      return { text: `Sent ${outcome.songs.toLocaleString()} songs in ${outcome.lists.toLocaleString()} lists to Tagify Community.`, error: false };
+    case "cancelled":
+      return { text: "Stopped sending your Spotify lists, as you asked on Community.", error: false };
+    case "failed":
+      return { text: SEND_FAILURE_NOTICES[outcome.failure], error: true };
+    default:
+      return null;
+  }
+}
+
+/** What this Tagify tells Community it can do, from what this Spotify's desktop app offers. Each report replaces the last. */
+export function desktopFeatures(
+  platform: unknown = typeof Spicetify === "undefined" ? undefined : Spicetify.Platform,
+  player: unknown = typeof Spicetify === "undefined" ? undefined : Spicetify.Player,
+): string[] {
+  return [
+    ...(canReadSpotifyLibrary(platform) ? [SPOTIFY_LISTS_FEATURE] : []),
+    ...(canSaveToLikedSongs(platform) ? [SPOTIFY_SAVES_FEATURE] : []),
+    ...(canWritePlaylists(platform) ? [PLAYLIST_WRITES_FEATURE] : []),
+    ...(canPlayFromCommunity(player) ? [DESKTOP_PLAY_FEATURE] : []),
+  ];
 }
 
 /** Community and Supabase answers that mean this device must be reconnected, not retried. */
@@ -241,6 +355,11 @@ export function isDefinitiveSessionFailure(message: string): boolean {
 }
 
 export { syncClientHeaders } from "./SyncClientHeaders";
+
+/** How often Tagify looks again for songs Community has no artists for. */
+const ARTIST_CREDITS_INTERVAL_MS = 3 * 60 * 60_000;
+/** How often Tagify looks again for songs Community knows no album for. */
+const SONG_RELEASES_INTERVAL_MS = 3 * 60 * 60_000;
 
 export function capabilitiesCacheKey(apiBaseUrl: string): string {
   return `tagify:sync-capabilities:${CLIENT_VERSION}:notes-v1:merge-v2:${new URL(apiBaseUrl).origin}`;
@@ -468,6 +587,18 @@ class SyncRuntime extends EventTarget {
   /** The refresh token Community or Supabase rejected; automatic retries stop until the device reconnects. */
   private inactiveRefreshToken: string | null = null;
   private refreshing: { refreshToken: string; result: Promise<DesktopSyncConfiguration> } | null = null;
+  /** An access token Community refused before this device's clock says it expires; the next use refreshes it. */
+  private refusedAccessToken: string | null = null;
+  /** Refreshes the session shortly before it expires while Realtime holds it. */
+  private sessionRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Syncs waiting for the live connection that is opening; it lets them go once it joins or fails. */
+  private readonly realtimeJoinWaiters = new Set<() => void>();
+  /** A channel subscription was sent and has not answered yet. */
+  private realtimeJoinPending = false;
+  /** Syncs started but not yet past their wait for the live connection; each pulls after any join. */
+  private syncsBeforeJoin = 0;
+  /** Community's live-sync hint as last saved for this library, and when. */
+  private liveSyncHintSaved: { libraryId: string; realtime: boolean; at: number } | null = null;
   private readonly localFileBackoff = new SideSyncBackoff();
   private readonly privateNotesBackoff = new SideSyncBackoff();
   /** Set when Community stopped accepting the cursor in a pull's body during this session. */
@@ -476,11 +607,42 @@ class SyncRuntime extends EventTarget {
   private directPullUnavailable = false;
   /** Cleared when Spotify cannot read Community's "not modified" reply to a local-file check. */
   private conditionalLocalFileReads = true;
+  /** Sending the member's Spotify lists to Community, which they asked for on the website. */
+  private spotifyLibrarySend: Promise<void> | null = null;
+  private readonly desktopPlayer = new DesktopPlayer();
+  /** Community says the member plays songs from the website here, so the live channel stays open while Spotify is hidden. */
+  private listenWhileHidden = false;
+  /** The device whose features were reported to Community since this start, and that report. */
+  private featuresReportedFor: string | null = null;
+  private featuresReport: Promise<boolean> | null = null;
+  /** Keeping playlists the member made on Community in their Spotify (PlaylistWriteRunner.ts). */
+  private readonly playlistWrites = new PlaylistWriteScheduler({
+    run: async (capability) => {
+      const configuration = getDesktopSyncConfiguration();
+      if (!configuration || !canWritePlaylists()) return { written: 0, failed: 0, created: [] };
+      const run = await runPlaylistWrites(this.sideSession(configuration), spotifyApiService, capability, localCreatedPlaylists(spotifyAccountKey));
+      const notice = playlistWriteNotice(run);
+      if (notice) Spicetify.showNotification(notice);
+      return run;
+    },
+  });
+  /** Saving songs the member asked for on Community to their Liked Songs, and whether to look again after. */
+  private spotifySaves: Promise<void> | null = null;
+  private artistCredits: Promise<void> | null = null;
+  private artistCreditsRanAt = 0;
+  private artistCreditsUnsupported = false;
+  private songReleases: Promise<void> | null = null;
+  private songReleasesRanAt = 0;
+  private songReleasesUnsupported = false;
+  private spotifySavesAgain = false;
 
   start(): void {
     if (this.started) return;
     this.started = true;
     const configuration = getDesktopSyncConfiguration();
+    // When Community said recently that someone else uses this library, the
+    // live connection joins before the first pull, so that pull is the only one.
+    if (configuration && this.realtimeWanted === null) this.realtimeWanted = liveSyncHint(configuration.libraryId);
     this.setStatus(configuration ? this.recoveryPreview ? "recovery-available" : "idle" : "unlinked");
     window.addEventListener("online", this.handleOnline);
     document.addEventListener("visibilitychange", this.handleVisibilityChange);
@@ -498,10 +660,15 @@ class SyncRuntime extends EventTarget {
 
   stop(): void {
     this.started = false;
+    this.featuresReportedFor = null;
+    this.featuresReport = null;
+    this.playlistWrites.stop();
     if (this.timer) clearTimeout(this.timer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.editSyncTimer) clearTimeout(this.editSyncTimer);
     if (this.realtimeSuspendTimer) clearTimeout(this.realtimeSuspendTimer);
+    if (this.sessionRefreshTimer) clearTimeout(this.sessionRefreshTimer);
+    this.sessionRefreshTimer = null;
     this.timer = null;
     this.nextSafetySyncAt = 0;
     this.reconnectTimer = null;
@@ -518,6 +685,7 @@ class SyncRuntime extends EventTarget {
     window.removeEventListener(LOCAL_FILES_CHANGED_EVENT, this.handleOutboxChanged);
     if (this.channel && this.realtime) void this.realtime.removeChannel(this.channel);
     this.channel = null; this.realtime = null;
+    this.settleRealtimeJoin();
   }
 
   getStatus(): SyncStatus { return this.status; }
@@ -673,6 +841,8 @@ class SyncRuntime extends EventTarget {
     this.headConfirmedAt = 0;
     this.announcedHead = 0;
     this.realtimeWanted = null;
+    this.liveSyncHintSaved = null;
+    this.refusedAccessToken = null;
     // Another account's failed backups say nothing about this one.
     this.localFileBackoff.succeeded();
     this.privateNotesBackoff.succeeded();
@@ -732,17 +902,21 @@ class SyncRuntime extends EventTarget {
     }
   }
 
-  async communityRequest(path: string, options: { method?: "GET" | "POST" | "PUT"; body?: unknown } = {}): Promise<any> {
+  async communityRequest(path: string, options: CommunityRequestOptions = {}): Promise<any> {
     const configuration = getDesktopSyncConfiguration();
     if (!configuration) throw new Error("Community Sync is not connected");
     const active = await this.refreshIfNeeded(configuration);
+    const session = options.syncHeaders === false ? { authorization: `Bearer ${active.accessToken}` } : syncClientHeaders(active.accessToken);
     const response = await fetch(`${active.apiBaseUrl}${path}`, {
       method: options.method || (options.body === undefined ? "GET" : "POST"),
-      headers: { ...syncClientHeaders(active.accessToken), ...(options.body === undefined ? {} : { "content-type": "application/json" }) },
+      headers: { ...session, ...(options.body === undefined ? {} : { "content-type": "application/json" }) },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw Object.assign(new Error(payload.error?.message || response.statusText), { status: response.status });
+    if (!response.ok) {
+      this.sessionRefused(response, payload, active.accessToken);
+      throw Object.assign(new Error(payload.error?.message || response.statusText), { status: response.status });
+    }
     return payload;
   }
 
@@ -766,11 +940,25 @@ class SyncRuntime extends EventTarget {
     // Until Community says whether anyone else uses this library, connect
     // after the run instead, so a library used alone never opens a channel.
     if (this.realtimeWanted) this.ensureRealtime(configuration);
+    // Counted from now, because the account lock may be granted only after a
+    // quick join has already answered.
+    let beforeJoin = true;
+    const pastJoin = () => {
+      if (beforeJoin) this.syncsBeforeJoin--;
+      beforeJoin = false;
+    };
+    this.syncsBeforeJoin++;
     this.running = runWithAccountSyncLock(configuration.accountId, async () => {
+      // A live connection that is opening joins first. Then this run's pull
+      // covers everything until Realtime announces more, and joining needs no
+      // catch-up pull of its own.
+      await this.waitForRealtimeJoin();
+      pastJoin();
       const activeConfiguration = getDesktopSyncConfiguration();
       if (!activeConfiguration || activeConfiguration.accountId !== configuration.accountId) return;
       await this.run(activeConfiguration, !automatic);
     }).finally(() => {
+      pastJoin();
       this.running = null;
       const current = getDesktopSyncConfiguration();
       if (current && this.realtimeWanted !== false) this.ensureRealtime(current);
@@ -981,12 +1169,17 @@ class SyncRuntime extends EventTarget {
     try {
       return await this.pullDirectly(configuration, cursor);
     } catch (error) {
-      // Community's own address answers with the same page, or reports the
-      // failure the usual way (an inactive session, a pause, an outage).
-      const page = await this.requestPullPageFromCommunity(configuration, cursor);
+      // Changes come through Community's own address for the rest of this session.
       this.directPullUnavailable = true;
       console.warn("Tagify sync: reading changes directly failed; using Community's address this session", error instanceof Error ? error.message : error);
-      return page;
+      // A busy database (429 or 5xx) is busy behind Community's address too:
+      // asking it at once would double the load during an outage. This sync
+      // stops, and the next one waits out Retry-After or the usual back-off.
+      if (error instanceof SyncHttpError && isBusyStatus(error.status)) throw error;
+      // Refused or unreachable (switched off, CORS, a gateway's error page):
+      // Community's address answers with the same page, or reports the failure
+      // the usual way (an inactive session, a pause, an outage).
+      return this.requestPullPageFromCommunity(configuration, cursor);
     }
   }
 
@@ -1006,7 +1199,13 @@ class SyncRuntime extends EventTarget {
       headers: { apikey: configuration.supabasePublishableKey, authorization: `Bearer ${configuration.accessToken}`, "content-type": "application/json" },
       body: JSON.stringify({ p_device_id: configuration.deviceId, p_after_cursor: cursor, p_limit: PULL_PAGE_SIZE, p_direct: true }),
     });
-    if (!response.ok) throw new Error(`direct pull answered ${response.status}`);
+    if (!response.ok) {
+      throw new SyncHttpError(
+        `${isBusyStatus(response.status) ? "sync_unavailable" : "direct_pull_refused"}: reading changes directly answered ${response.status}`,
+        response.status,
+        retryAfterSeconds(response.headers.get("retry-after")),
+      );
+    }
     const page: unknown = await response.json();
     if (!isPullPage(page)) throw new Error("direct pull returned an unexpected page");
     return page as PullPage;
@@ -1043,6 +1242,14 @@ class SyncRuntime extends EventTarget {
   private async applyPullPage(configuration: DesktopSyncConfiguration, cursor: number, response: PullPage, requestedAt: number): Promise<{ applied: boolean; done: boolean }> {
     this.lastPullReachedHead = false;
     this.lastSideDocuments = this.hasCapability("pullSideDocuments") && !response.snapshotRequired ? pullSideDocuments(response) : null;
+    // Community learns what this Tagify can do once per start, after a pull shows the session works.
+    this.reportDesktopFeaturesOnce(configuration);
+    // A request made while this computer was off is answered on its next pull.
+    this.handleSpotifyLibraryRequest(this.lastSideDocuments?.spotifyLibraryRequestedAt);
+    if (this.lastSideDocuments?.spotifySavesWaiting) this.handleSpotifySaves();
+    this.handleArtistCredits(configuration);
+    this.handleSongReleases(configuration);
+    this.pollPlaylistWrites();
     this.noteLiveSync(response);
     if (response.unchanged) {
       this.noteHeadReached(requestedAt);
@@ -1532,7 +1739,10 @@ class SyncRuntime extends EventTarget {
         }
         if (response.status === 304) return null;
         const payload: { unchanged?: unknown; revision?: unknown; entries?: LocalFileEntries; nextAfter?: unknown; error?: { code?: string; message?: string } } = await response.json().catch(() => ({}));
-        if (!response.ok) throw new SyncHttpError(`${payload.error?.code || "sync_error"}: ${payload.error?.message || response.statusText}`, response.status, positiveNumber(response.headers.get("retry-after")));
+        if (!response.ok) {
+          this.sessionRefused(response, payload, configuration.accessToken);
+          throw syncResponseError(response, payload);
+        }
         // Community may answer an unchanged backup with a small success reply instead of a 304.
         if (after === null && payload.unchanged === true) return null;
         if (revision !== null && payload.revision !== revision) { restarted = true; break; }
@@ -1552,7 +1762,10 @@ class SyncRuntime extends EventTarget {
       body: JSON.stringify({ deviceId: configuration.deviceId, entries }),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new SyncHttpError(`${payload.error?.code || "sync_error"}: ${payload.error?.message || response.statusText}`, response.status, positiveNumber(response.headers.get("retry-after")));
+    if (!response.ok) {
+      this.sessionRefused(response, payload, configuration.accessToken);
+      throw syncResponseError(response, payload);
+    }
     return { revision: Number(payload.revision), changed: payload.changed === true };
   }
 
@@ -1782,11 +1995,10 @@ class SyncRuntime extends EventTarget {
     });
     if (response.status === 304) return { unchanged: true };
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new SyncHttpError(
-      `${payload.error?.code || "sync_error"}: ${payload.error?.message || response.statusText}`,
-      response.status,
-      positiveNumber(response.headers.get("retry-after")),
-    );
+    if (!response.ok) {
+      this.sessionRefused(response, payload, configuration.accessToken);
+      throw syncResponseError(response, payload);
+    }
     return payload;
   }
 
@@ -1810,11 +2022,10 @@ class SyncRuntime extends EventTarget {
       body: compressed,
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new SyncHttpError(
-      `${payload.error?.code || "sync_error"}: ${payload.error?.message || response.statusText}`,
-      response.status,
-      positiveNumber(response.headers.get("retry-after")),
-    );
+    if (!response.ok) {
+      this.sessionRefused(response, payload, configuration.accessToken);
+      throw syncResponseError(response, payload);
+    }
     return payload;
   }
 
@@ -1826,11 +2037,7 @@ class SyncRuntime extends EventTarget {
     } catch { /* An unavailable cache must never block sync. */ }
     const response = await fetch(`${configuration.apiBaseUrl}/api/v2/sync/capabilities`, { headers: syncClientHeaders() });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new SyncHttpError(
-      `${payload.error?.code || "sync_error"}: ${payload.error?.message || response.statusText}`,
-      response.status,
-      positiveNumber(response.headers.get("retry-after")),
-    );
+    if (!response.ok) throw syncResponseError(response, payload);
     if (!isSyncCapabilities(payload)) throw new Error("invalid_capabilities: Community returned an invalid sync capability document");
     try { localStorage.setItem(cacheKey, JSON.stringify({ cachedAt: Date.now(), value: payload })); } catch { /* Best-effort deployment metadata cache. */ }
     return payload;
@@ -1858,8 +2065,16 @@ class SyncRuntime extends EventTarget {
     }
   }
 
+  /**
+   * Community refused a session this device's clock still counts as current
+   * (the clock may be off). The next use refreshes it instead of sending it again.
+   */
+  private sessionRefused(response: Response, payload: { error?: { code?: string } }, accessToken: string): void {
+    if (response.status === 401 && payload.error?.code === "authentication_required") this.refusedAccessToken = accessToken;
+  }
+
   private async refreshIfNeeded(configuration: DesktopSyncConfiguration): Promise<DesktopSyncConfiguration> {
-    if (configuration.expiresAt * 1000 - Date.now() > 60_000) return configuration;
+    if (!sessionNeedsRefresh(configuration) && this.refusedAccessToken !== configuration.accessToken) return configuration;
     // Supabase already rejected this refresh token; asking again cannot succeed.
     if (this.inactiveRefreshToken === configuration.refreshToken) throw new Error("session_inactive");
     // Sync and Realtime may both need a fresh session; a refresh token is spent once.
@@ -1887,11 +2102,57 @@ class SyncRuntime extends EventTarget {
       }
       throw new Error("refresh_failed");
     }
-    const next = { ...configuration, accessToken: session.access_token, refreshToken: session.refresh_token, expiresAt: session.expires_at };
+    const next = { ...configuration, accessToken: session.access_token, refreshToken: session.refresh_token, expiresAt: sessionExpiresAt(session) };
     setDesktopSyncConfiguration(next);
+    this.refusedAccessToken = null;
     await this.realtime?.realtime.setAuth(next.accessToken);
+    this.scheduleSessionRefresh();
     void enrollDesktopRecovery(next);
     return next;
+  }
+
+  /**
+   * While Realtime holds this device's session, refreshes it shortly before
+   * it expires. Realtime closes a channel once its token expires, which cost
+   * a reconnect, a new join and a catch-up pull about every hour. Requests
+   * refresh the session themselves when it is close to expiring.
+   */
+  private scheduleSessionRefresh(): void {
+    if (this.sessionRefreshTimer) clearTimeout(this.sessionRefreshTimer);
+    this.sessionRefreshTimer = null;
+    const configuration = getDesktopSyncConfiguration();
+    if (!this.started || !this.channel || !configuration || this.inactiveRefreshToken === configuration.refreshToken) return;
+    const delay = Math.min(MAX_TIMER_MS, Math.max(0, configuration.expiresAt * 1_000 - SESSION_REFRESH_AHEAD_MS - Date.now()));
+    this.sessionRefreshTimer = setTimeout(() => {
+      this.sessionRefreshTimer = null;
+      const current = getDesktopSyncConfiguration();
+      if (!this.started || !this.channel || !current) return;
+      // A refresh that failed is tried again by the next sync or reconnect; a
+      // rejected one stops automatic retries.
+      void this.refreshIfNeeded(current).then(() => this.scheduleSessionRefresh(), () => undefined);
+    }, delay);
+  }
+
+  /** Resolves once a live connection that is opening has joined or failed, or after `timeoutMs`. */
+  private waitForRealtimeJoin(timeoutMs = REALTIME_JOIN_WAIT_MS): Promise<void> {
+    if (!this.realtimeConnecting && !this.realtimeJoinPending) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.realtimeJoinWaiters.delete(done);
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      this.realtimeJoinWaiters.add(done);
+    });
+  }
+
+  /** The opening connection joined or failed. Returns whether a sync was waiting for it. */
+  private settleRealtimeJoin(): boolean {
+    this.realtimeJoinPending = false;
+    const waiting = this.realtimeJoinWaiters.size > 0;
+    for (const done of [...this.realtimeJoinWaiters]) done();
+    return waiting;
   }
 
   /** Connects Realtime with a current session unless it is connected, reconnecting, or paused. */
@@ -1907,7 +2168,135 @@ class SyncRuntime extends EventTarget {
       .catch((error) => {
         this.realtimeConnecting = false;
         if (!(error instanceof Error && isDefinitiveSessionFailure(error.message))) this.scheduleRealtimeReconnect(configuration);
+      })
+      .finally(() => {
+        // No subscription went out (or it already answered): a waiting sync goes ahead.
+        if (!this.realtimeConnecting && !this.realtimeJoinPending) this.settleRealtimeJoin();
       });
+  }
+
+  /** The device session for side requests, refreshed shortly before it expires. */
+  private sideSession(fallback: DesktopSyncConfiguration): SendSession {
+    return () => this.refreshIfNeeded(getDesktopSyncConfiguration() ?? fallback);
+  }
+
+  private reportDesktopFeaturesOnce(configuration: DesktopSyncConfiguration): void {
+    if (!this.started || this.featuresReportedFor === configuration.deviceId) return;
+    this.featuresReportedFor = configuration.deviceId;
+    this.featuresReport = reportDesktopFeatures(this.sideSession(configuration), undefined, desktopFeatures());
+  }
+
+  /**
+   * Asks Community for playlists to write once Community knows this Tagify can (Community offers
+   * them only to computers that reported `playlistWrites`): when Tagify starts, then at most every
+   * `pollMinutes`. Nothing when Community doesn't advertise playlist writes.
+   */
+  private pollPlaylistWrites(): void {
+    const capabilities = canWritePlaylists() ? this.capabilities : null;
+    const report = this.featuresReport;
+    if (!report) { this.playlistWrites.poll(capabilities); return; }
+    void report.then(() => { if (this.started) this.playlistWrites.poll(capabilities); });
+  }
+
+  /**
+   * Sends Community the artists of songs and albums in this library it has none for, read through
+   * Spotify's desktop app in the background (Community migration 0252). Once a start, then at most
+   * every few hours; a Community without the feature is left alone until the next start.
+   */
+  private handleArtistCredits(configuration: DesktopSyncConfiguration): void {
+    // One background Spotify reader at a time; a skipped run starts on a later pull.
+    if (!this.started || this.artistCredits || this.songReleases || this.artistCreditsUnsupported) return;
+    if (!(this.capabilities as { artistCredits?: { protocolVersion?: unknown } } | null)?.artistCredits) return;
+    if (Date.now() - this.artistCreditsRanAt < ARTIST_CREDITS_INTERVAL_MS) return;
+    this.artistCreditsRanAt = Date.now();
+    this.artistCredits = runArtistCreditReports(this.sideSession(configuration), communityArtistCreditSources())
+      .then((run) => { if (run.stopped === "unsupported") this.artistCreditsUnsupported = true; })
+      .catch((error) => { console.warn("Tagify sync: artist names were not sent", error instanceof Error ? error.message : error); })
+      .finally(() => { this.artistCredits = null; });
+  }
+
+  /**
+   * Sends Community the ISRC and album of songs in this library it knows no release for, read
+   * through Spotify's desktop app in the background (Community migration 0261), so song pages name
+   * their album and every version of a song shares one page. Only when Community advertises
+   * `songReleases`; once a start, then at most every few hours, never beside the artist credits run.
+   */
+  private handleSongReleases(configuration: DesktopSyncConfiguration): void {
+    if (!this.started || this.songReleases || this.artistCredits || this.songReleasesUnsupported) return;
+    if ((this.capabilities as { songReleases?: { protocolVersion?: unknown } } | null)?.songReleases?.protocolVersion !== 1) return;
+    if (Date.now() - this.songReleasesRanAt < SONG_RELEASES_INTERVAL_MS) return;
+    this.songReleasesRanAt = Date.now();
+    this.songReleases = runSongReleaseReports(this.sideSession(configuration), communitySongReleaseSources())
+      .then((run) => { if (run.stopped === "unsupported") this.songReleasesUnsupported = true; })
+      .catch((error) => { console.warn("Tagify sync: album details were not sent", error instanceof Error ? error.message : error); })
+      .finally(() => { this.songReleases = null; });
+  }
+
+  /**
+   * The member asked on Community to save songs to their Liked Songs. Saves every waiting song
+   * through Spotify's desktop app in the background, then looks again if more were asked meanwhile.
+   */
+  private handleSpotifySaves(): void {
+    const configuration = getDesktopSyncConfiguration();
+    if (!this.started || !configuration || !canSaveToLikedSongs()) return;
+    if (this.spotifySaves) { this.spotifySavesAgain = true; return; }
+    this.spotifySaves = (async () => {
+      const total = { saved: 0, alreadySaved: 0, failed: 0 };
+      try {
+        do {
+          this.spotifySavesAgain = false;
+          const run = await runSpotifySaves(this.sideSession(configuration), spotifyApiService);
+          total.saved += run.saved; total.alreadySaved += run.alreadySaved; total.failed += run.failed;
+          if (run.stopped) break;
+        } while (this.spotifySavesAgain && this.started);
+      } catch (error) {
+        console.warn("Tagify sync: songs were not saved to Liked Songs", error instanceof Error ? error.message : error);
+      } finally {
+        this.spotifySaves = null;
+      }
+      const notice = spotifySaveNotice(total);
+      if (notice) Spicetify.showNotification(notice.text, notice.error);
+    })();
+  }
+
+  /**
+   * The member asked on Community for their Spotify lists. Picks the send up, reads Liked Songs
+   * and every playlist through Spotify's desktop APIs and sends them as it goes, in the background,
+   * with progress Community shows. A send that ends (done, failed, stopped or another computer's)
+   * answers the request; one cut off because Spotify closed is picked up again on the next start.
+   */
+  private handleSpotifyLibraryRequest(requestedAt: string | null | undefined): void {
+    const configuration = getDesktopSyncConfiguration();
+    if (!this.started || !configuration || !requestedAt || this.spotifyLibrarySend || !isNewSpotifyLibraryRequest(configuration, requestedAt)) return;
+    this.spotifyLibrarySend = (async () => {
+      let outcome: SpotifySendOutcome = { status: "failed", failure: "unknown" };
+      try {
+        outcome = await runSpotifyLibrarySend(this.sideSession(configuration), spotifyApiService, {
+          onStarted: () => Spicetify.showNotification("Sending your Spotify lists to Tagify Community. You can keep using Spotify."),
+        });
+      } catch (error) {
+        console.warn("Tagify sync: Spotify lists were not sent to Community", error instanceof Error ? error.message : error);
+      } finally {
+        markSpotifyLibraryRequestHandled(configuration, requestedAt);
+        this.spotifyLibrarySend = null;
+      }
+      const notice = spotifySendNotice(outcome);
+      if (notice) Spicetify.showNotification(notice.text, notice.error);
+    })();
+  }
+
+  /**
+   * The member pressed Play on Community with "My Spotify app" chosen. Only the computer Community
+   * asked plays the song, once, and only a request from the last minute (DesktopPlay.ts).
+   */
+  private handleDesktopPlayRequest(payload: unknown): void {
+    const configuration = getDesktopSyncConfiguration();
+    if (!this.started || !configuration) return;
+    const request = readDesktopPlayRequest(payload, configuration);
+    if (!request) return;
+    void this.desktopPlayer.handle(request, this.sideSession(configuration)).then((outcome) => {
+      if (outcome === "failed") Spicetify.showNotification("Spotify couldn't play the song from Tagify Community. Try again in a moment.", true);
+    });
   }
 
   private async connectRealtime(configuration: DesktopSyncConfiguration) {
@@ -1929,6 +2318,7 @@ class SyncRuntime extends EventTarget {
       if (!this.started || this.realtime !== realtime || this.realtimeSuspended || (this.realtimeWanted as boolean | null) === false) return;
       const channel = realtime.channel(`tagify-library:${configuration.libraryId}`, { config: { private: true } });
       this.channel = channel;
+      this.realtimeJoinPending = true;
       channel
         .on("broadcast", { event: "head_cursor" }, ({ payload }) => {
           if (payload?.libraryId !== configuration.libraryId || !Number.isSafeInteger(payload?.headCursor)) return;
@@ -1938,24 +2328,42 @@ class SyncRuntime extends EventTarget {
           this.announcedHead = Math.max(this.announcedHead, Number(payload.headCursor));
           void this.handleRemoteHead(Number(payload.headCursor));
         })
+        .on("broadcast", { event: "spotify_library_request" }, ({ payload }) => {
+          if (payload?.libraryId !== configuration.libraryId) return;
+          this.handleSpotifyLibraryRequest(typeof payload.requestedAt === "string" ? payload.requestedAt : null);
+        })
+        .on("broadcast", { event: "spotify_save_request" }, ({ payload }) => {
+          if (payload?.libraryId !== configuration.libraryId) return;
+          this.handleSpotifySaves();
+        })
+        .on("broadcast", { event: PLAYLIST_WRITE_REQUEST_EVENT }, ({ payload }) => {
+          if (payload?.libraryId !== configuration.libraryId) return;
+          this.playlistWrites.request();
+        })
+        .on("broadcast", { event: "desktop_play_request" }, ({ payload }) => this.handleDesktopPlayRequest(payload))
         .on("broadcast", { event: "projection_cursor" }, ({ payload }) => {
           if (payload?.libraryId !== configuration.libraryId || !Number.isSafeInteger(payload?.projectionCursor)) return;
           if (Number(payload.projectionCursor) < this.projectionTargetCursor) return;
           this.projectionPending = false;
           this.projectionReviewRequired = false;
           this.projectionTargetCursor = Number(payload.projectionCursor);
-          if (this.status === "publishing") this.setStatus("idle");
+          // A finished projection also means the member chose what to share, possibly on Community.
+          if (this.status === "publishing" || this.status === "publication-review-required") this.setStatus("idle");
         })
         .subscribe((status) => {
           // Removing an old channel also emits CLOSED. It must not schedule a new retry.
           if (this.channel !== channel) return;
           if (status === "SUBSCRIBED") {
             this.realtimeSubscribedAt = Date.now();
-            // Announcements made before joining were not heard: check once,
-            // after which Realtime covers every change.
-            if (this.headConfirmedAt < this.realtimeSubscribedAt) void this.syncNow(true);
+            // A sync that waited for this join, or is about to start, pulls
+            // next. Otherwise announcements made before joining were not
+            // heard: check once, after which Realtime covers every change.
+            const syncPullsNext = this.settleRealtimeJoin() || this.syncsBeforeJoin > 0;
+            if (!syncPullsNext && this.headConfirmedAt < this.realtimeSubscribedAt) void this.syncNow(true);
             this.scheduleSafetySync(true);
+            this.scheduleSessionRefresh();
           }
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") this.settleRealtimeJoin();
           if (this.started && (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED")) {
             if (this.realtimeSubscribedAt && Date.now() - this.realtimeSubscribedAt >= 30_000) this.reconnectAttempts = 0;
             this.realtimeSubscribedAt = 0;
@@ -1964,7 +2372,11 @@ class SyncRuntime extends EventTarget {
             this.scheduleRealtimeReconnect(configuration);
           }
         });
-    } finally { this.realtimeConnecting = false; }
+    } finally {
+      this.realtimeConnecting = false;
+      // Stopped before subscribing, or the subscription couldn't be sent.
+      if (!this.realtimeJoinPending) this.settleRealtimeJoin();
+    }
   }
 
   private setStatus(status: SyncStatus) {
@@ -2111,7 +2523,12 @@ class SyncRuntime extends EventTarget {
   /** Pull pages from Community with `liveSyncHints` say whether anyone else uses this library. */
   private noteLiveSync(response: PullPage): void {
     const realtime = response?.liveSync?.realtime;
-    if (this.hasCapability("liveSyncHints") && typeof realtime === "boolean") this.setRealtimeWanted(realtime);
+    if (this.hasCapability("liveSyncHints") && typeof realtime === "boolean") this.noteRealtimeWanted(realtime);
+    if (this.hasCapability("liveSyncHints")) this.listenWhileHidden = response?.liveSync?.listenWhileHidden === true;
+    if (this.listenWhileHidden && this.realtimeSuspendTimer) {
+      clearTimeout(this.realtimeSuspendTimer);
+      this.realtimeSuspendTimer = null;
+    }
   }
 
   /**
@@ -2122,7 +2539,23 @@ class SyncRuntime extends EventTarget {
   private noteLibrarySummary(summary: { devices?: unknown } | null | undefined): void {
     const devices = summary?.devices;
     if (this.hasCapability("liveSyncHints") || typeof devices !== "number" || !Number.isSafeInteger(devices)) return;
-    this.setRealtimeWanted(devices > 1);
+    this.noteRealtimeWanted(devices > 1);
+  }
+
+  /** Follows Community's word and keeps it for the next start (see `liveSyncHint`). */
+  private noteRealtimeWanted(wanted: boolean): void {
+    this.setRealtimeWanted(wanted);
+    const libraryId = getDesktopSyncConfiguration()?.libraryId;
+    if (!libraryId) return;
+    const now = Date.now();
+    const saved = this.liveSyncHintSaved;
+    if (saved?.libraryId === libraryId && saved.realtime === wanted && now - saved.at < LIVE_SYNC_HINT_SAVE_MS) return;
+    try {
+      localStorage.setItem(`${LIVE_SYNC_HINT_PREFIX}${libraryId}`, JSON.stringify({ realtime: wanted, at: now }));
+      this.liveSyncHintSaved = { libraryId, realtime: wanted, at: now };
+    } catch {
+      // Without the hint the next start pulls first, as before.
+    }
   }
 
   private setRealtimeWanted(wanted: boolean): void {
@@ -2149,6 +2582,8 @@ class SyncRuntime extends EventTarget {
     if (!this.started || this.realtimeSuspended || this.realtimeSuspendTimer) return;
     // Nothing to release, and nothing to catch up on when shown again.
     if (this.realtimeWanted === false) return;
+    // The member plays songs here from Community, usually while Spotify is behind their browser.
+    if (this.listenWhileHidden) return;
     this.realtimeSuspendTimer = setTimeout(() => {
       this.realtimeSuspendTimer = null;
       if (!this.started || document.visibilityState === "visible") return;
@@ -2164,6 +2599,9 @@ class SyncRuntime extends EventTarget {
     const channel = this.channel;
     this.channel = null;
     this.realtimeSubscribedAt = 0;
+    if (this.sessionRefreshTimer) clearTimeout(this.sessionRefreshTimer);
+    this.sessionRefreshTimer = null;
+    this.settleRealtimeJoin();
     // Removing the last channel also closes the socket.
     if (channel && this.realtime) void this.realtime.removeChannel(channel);
   }
@@ -2211,6 +2649,16 @@ class SyncRuntime extends EventTarget {
 
   private setSettledStatus() {
     this.setStatus(this.projectionReviewRequired ? "publication-review-required" : this.projectionPending ? "publishing" : "idle");
+  }
+
+  /**
+   * The member's saved sharing choice is no longer waiting for review, chosen
+   * here or on Community. A sync with nothing to send makes no request, so
+   * without this the last reply's review flag would keep asking.
+   */
+  notePublicationReviewed(): void {
+    this.projectionReviewRequired = false;
+    if (this.status === "publication-review-required") this.setSettledStatus();
   }
 
   private installPublicApi() {
@@ -2909,7 +3357,7 @@ declare global {
       downloadInitialMergeBackup(): Promise<void>;
       armCloudReplacement(): void;
       replaceCloudWithCurrentLocalState(): Promise<void>;
-      communityRequest(path: string, options?: { method?: "GET" | "POST" | "PUT"; body?: unknown }): Promise<any>;
+      communityRequest(path: string, options?: CommunityRequestOptions): Promise<any>;
       unlinkLocal(): Promise<void>;
     };
   }
@@ -2921,9 +3369,13 @@ class SyncHttpError extends Error {
   }
 }
 
-function positiveNumber(value: string | null): number | null {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+/** The error a failed Community answer becomes; its Retry-After sets the back-off. */
+function syncResponseError(response: Response, payload: { error?: { code?: string; message?: string } }): SyncHttpError {
+  return new SyncHttpError(
+    `${payload.error?.code || "sync_error"}: ${payload.error?.message || response.statusText}`,
+    response.status,
+    retryAfterSeconds(response.headers.get("retry-after")),
+  );
 }
 
 /** A pull reply as Community returns it, also when it comes back with a push. */

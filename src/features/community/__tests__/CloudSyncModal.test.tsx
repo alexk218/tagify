@@ -3,13 +3,11 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncPairingService } from "@/services/sync/SyncPairingService";
-import { syncRuntime } from "@/services/sync/SyncRuntime";
-import { storageService } from "@/services/storage/StorageService";
 import { CommunityOnboardingModal } from "../CommunityOnboardingModal";
 import { CloudSyncModal } from "../CloudSyncModal";
+import { policyFixture, sharingStub, taxonomyFixture, tracksFixture } from "./sharingFixtures";
 
-/** Community setup always knows where it was opened from. */
-const CommunitySetup = (props: { onClose: () => void }) => <CommunityOnboardingModal entry="community" {...props} />;
+const sharing = () => sharingStub(policyFixture());
 
 const configuration = {
   accountId: "account-a",
@@ -37,85 +35,70 @@ describe("CloudSyncModal revoked device recovery", () => {
     vi.restoreAllMocks();
   });
 
-  it.each([["Cloud Sync", CloudSyncModal], ["Community setup", CommunitySetup]] as const)("avoids redundant syncs and saves changed visibility before retrying in %s", async (_name, Modal) => {
-    let status = "error";
+  it("enables Sync now by backup state alone and shows sharing in one line", async () => {
+    let status = "publication-review-required";
     const emit = (next: string) => {
       status = next;
       window.dispatchEvent(new CustomEvent("tagify:syncStatus", { detail: { status } }));
     };
-    const syncNow = vi.spyOn(syncRuntime, "syncNow").mockImplementation(async () => { emit("syncing"); });
-    const policy = {
-      revision: 1, reviewedAt: "2026-10-01T00:00:00Z", enabled: true, shareTaxonomy: true,
-      hiddenTagIds: [], hiddenNodeIds: [],
-      entities: { track: { tags: true }, album: { tags: true }, artist: { tags: true } },
-    };
-    let failSave = true;
-    vi.spyOn(syncRuntime, "communityRequest").mockImplementation(async (_path, options) => {
-      if (options?.method === "PUT" && failSave) { failSave = false; throw new Error("Server unavailable"); }
-      return { policy: options?.method === "PUT" ? { ...(options.body as { policy: typeof policy }).policy, revision: 2 } : policy };
-    });
-    vi.spyOn(storageService, "getTaxonomy").mockResolvedValue({
-      categoryOrder: ["mood"], categoriesById: { mood: { id: "mood", name: "Mood", childIds: ["happy"], subcategoryIds: [] } },
-      tagsById: { happy: { id: "happy", name: "Happy", parentId: "mood", subcategoryId: "mood" } },
-      foldersById: {}, childrenByParentId: { mood: ["happy"] }, subcategoriesById: {},
-      customAccentsById: {}, colorThemesById: {}, colorThemeOrder: [], ungroupedColorIds: [],
-    });
+    const syncNow = vi.fn(async () => { emit("syncing"); });
     window.TagifySync = {
       getStatus: () => status, getInitialMergePreview: () => null, getBackupHealth: () => null, syncNow,
     } as unknown as NonNullable<typeof window.TagifySync>;
-    render(<Modal onClose={vi.fn()} />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
-    expect(screen.getByRole("button", { name: "Syncing…" })).toBeDisabled();
-    act(() => emit("idle"));
+    const onOpenSharing = vi.fn();
+    const { rerender } = render(<CloudSyncModal sharing={sharingStub(policyFixture({ reviewedAt: null }))} onOpenSharing={onOpenSharing} onClose={vi.fn()} />);
+
+    // A pending sharing choice no longer blocks backing up.
     expect(screen.getByText("Up to date")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
-    act(() => emit("publishing"));
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
-    act(() => emit("snapshot-required"));
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
-    act(() => emit("error"));
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
-    act(() => emit("idle"));
-    fireEvent.click(await screen.findByRole("button", { name: /Public visibility Sharing all tags/ }));
-    expect(await screen.findByRole("button", { name: "Save visibility" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("checkbox", { name: /Exclude Mood/ }));
-    expect(screen.getByRole("button", { name: "Choose what to share first" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("checkbox", { name: /Exclude Mood/ }));
-    expect(screen.getByRole("button", { name: "Save visibility" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("checkbox", { name: /Exclude Mood/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Save visibility" }));
-    await screen.findByText("Couldn't save your sharing choices. Please try again.");
+    expect(screen.getByText("Your tags: Not public yet")).toBeInTheDocument();
+    expect(screen.queryByText(/Public visibility/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
     expect(syncNow).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Choose what to share first" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save visibility" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Save visibility" }));
-    await waitFor(() => expect(syncNow).toHaveBeenCalledTimes(2));
-    if (Modal === CommunitySetup) {
-      expect(screen.getByText("Your Community setup is ready.")).toBeInTheDocument();
-      return;
-    }
     expect(screen.getByRole("button", { name: "Syncing…" })).toBeDisabled();
-    act(() => emit("publishing"));
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
     act(() => emit("idle"));
     expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
-    act(() => emit("snapshot-required"));
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
+    act(() => emit("publishing"));
+    expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
     act(() => emit("error"));
     expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish my tags" }));
+    expect(onOpenSharing).toHaveBeenCalledTimes(1);
+
+    rerender(<CloudSyncModal sharing={sharingStub(policyFixture())} onOpenSharing={onOpenSharing} onClose={vi.fn()} />);
+    expect(screen.getByText("Your tags: Public")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    expect(onOpenSharing).toHaveBeenCalledTimes(2);
+
+    rerender(<CloudSyncModal sharing={sharingStub(null, { phase: "error" })} onOpenSharing={onOpenSharing} onClose={vi.fn()} />);
+    expect(screen.getByText("Your tags: Couldn't check")).toBeInTheDocument();
   });
 
-  it.each([["Cloud Sync", CloudSyncModal], ["Community setup", CommunitySetup]] as const)("keeps backup retry available if visibility cannot load in %s", async (_name, Modal) => {
-    vi.spyOn(syncRuntime, "communityRequest").mockRejectedValue(new Error("Temporarily offline"));
-    vi.spyOn(storageService, "getTaxonomy").mockRejectedValue(new Error("Temporarily unavailable"));
+  it("asks for the sharing choice right after connecting, then finishes setup", async () => {
     window.TagifySync = {
-      getStatus: () => "error", getInitialMergePreview: () => null, getBackupHealth: () => null,
+      getStatus: () => "publication-review-required", getInitialMergePreview: () => null, getBackupHealth: () => null,
     } as unknown as NonNullable<typeof window.TagifySync>;
-    render(<Modal onClose={vi.fn()} />);
-    await waitFor(() => expect(syncRuntime.communityRequest).toHaveBeenCalled());
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
+    const props = { tracks: tracksFixture(), taxonomy: taxonomyFixture(), onClose: vi.fn() };
+    const { rerender } = render(<CommunityOnboardingModal entry="community" sharing={sharingStub(null)} {...props} />);
+    expect(screen.getByText("Checking what's public…")).toBeInTheDocument();
+
+    rerender(<CommunityOnboardingModal entry="community" sharing={sharingStub(policyFixture({ reviewedAt: null }))} {...props} />);
+    expect(screen.getByText((_, node) => node?.textContent === "3 tags on 3 songs would appear on your profile.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish my tags" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Choose what to share first" })).not.toBeInTheDocument();
+
+    rerender(<CommunityOnboardingModal entry="community" sharing={sharingStub(policyFixture())} {...props} />);
+    expect(await screen.findByText("Your Community setup is ready.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View my profile" })).toBeInTheDocument();
+  });
+
+  it("finishes setup without publishing for a member who keeps tags private", async () => {
+    window.TagifySync = {
+      getStatus: () => "idle", getInitialMergePreview: () => null, getBackupHealth: () => null,
+    } as unknown as NonNullable<typeof window.TagifySync>;
+    render(<CommunityOnboardingModal entry="community" sharing={sharingStub(policyFixture({ enabled: false }))} tracks={tracksFixture()} taxonomy={taxonomyFixture()} onClose={vi.fn()} />);
+    expect(await screen.findByText(/your tags stay private. You can publish them any time from Community in Tagify./)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View my profile" })).not.toBeInTheDocument();
   });
 
   it("reconnects a revoked device without discarding its local library", async () => {
@@ -136,7 +119,7 @@ describe("CloudSyncModal revoked device recovery", () => {
       interval: 5,
     });
 
-    render(<CloudSyncModal onClose={vi.fn()} />);
+    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByText("Device revoked")).toBeInTheDocument();
     expect(screen.getByText("Reconnect required")).toBeInTheDocument();
@@ -156,7 +139,7 @@ describe("CloudSyncModal revoked device recovery", () => {
       unlinkLocal,
     } as unknown as NonNullable<typeof window.TagifySync>;
 
-    render(<CloudSyncModal onClose={vi.fn()} />);
+    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Keep data on this device only" }));
 
     await waitFor(() => expect(unlinkLocal).toHaveBeenCalledTimes(1));
@@ -176,7 +159,7 @@ describe("CloudSyncModal revoked device recovery", () => {
       }),
     } as unknown as NonNullable<typeof window.TagifySync>;
 
-    render(<CloudSyncModal onClose={vi.fn()} />);
+    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByText(/972 tagged items/)).toBeInTheDocument();
     expect(screen.getByText(/Smart Playlists pending/)).toBeInTheDocument();
@@ -196,7 +179,7 @@ describe("CloudSyncModal revoked device recovery", () => {
       resolveSettingsChoice: async (...args: unknown[]) => { await resolveSettingsChoice(...args); needsChoice = []; },
     } as unknown as NonNullable<typeof window.TagifySync>;
 
-    render(<CloudSyncModal onClose={vi.fn()} />);
+    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByText("Choose which saved settings to keep")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Your saved settings changed on another device too" })).toHaveTextContent("Smart Playlists");
@@ -246,7 +229,7 @@ describe("CloudSyncModal revoked device recovery", () => {
       downloadInitialMergeBackup: vi.fn(),
     } as unknown as NonNullable<typeof window.TagifySync>;
 
-    render(<CloudSyncModal onClose={vi.fn()} />);
+    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("radio", { name: "Use this device for differences" }));
     fireEvent.click(screen.getByRole("button", { name: "Combine libraries" }));
     expect(screen.getByRole("button", { name: "Combining libraries…" })).toBeDisabled();

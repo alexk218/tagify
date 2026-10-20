@@ -213,6 +213,18 @@ export interface DesktopSyncConfiguration {
   };
 }
 
+/**
+ * A Community session is refreshed this long before it expires (by this
+ * device's clock), so neither a request nor the live connection ever
+ * carries an expired one, even when the clock is a few minutes off.
+ */
+export const SESSION_REFRESH_AHEAD_MS = 5 * 60_000;
+
+/** Whether a session is close enough to expiring that it should be refreshed before use. */
+export function sessionNeedsRefresh(configuration: Pick<DesktopSyncConfiguration, "expiresAt">, now = Date.now()): boolean {
+  return !(configuration.expiresAt * 1_000 - now > SESSION_REFRESH_AHEAD_MS);
+}
+
 export interface DisconnectedSyncProvenance {
   accountId: string;
   libraryId: string;

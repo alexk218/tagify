@@ -1,3 +1,4 @@
+// @vitest-environment node
 import cssText from "../TagManager.module.css?inline";
 import { describe, expect, it } from "vitest";
 

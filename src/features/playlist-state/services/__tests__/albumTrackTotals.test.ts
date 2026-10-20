@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ALBUM_TRACK_TOTALS_STORAGE_KEY,

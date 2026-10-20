@@ -61,6 +61,38 @@
   display: block;
 }
 
+.copy .lead {
+  max-width: 440px;
+  margin: 6px auto 0;
+  color: var(--spice-subtext);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.inlineLink {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--spice-text);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.inlineLink:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
+.message {
+  margin: -6px 0 0;
+  color: var(--spice-button);
+  font-size: 12px;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -86,8 +118,13 @@
   color: var(--spice-text);
 }
 
-.primaryAction:hover {
+.primaryAction:hover:not(:disabled) {
   filter: brightness(1.08);
+}
+
+.actions button:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 .secondaryAction {

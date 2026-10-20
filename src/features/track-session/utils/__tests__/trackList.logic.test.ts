@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { filterTrackEntries } from "@/features/track-session/utils/trackList.logic";
 import type {

@@ -12,13 +12,15 @@ function Write-UserProgress {param($Message)}
 function Show-Notification {param($Title,$Message)}
 function Write-ErrorAndExit {param($Message) throw $Message}
 $env:TEMP=[System.IO.Path]::GetTempPath()
+$script:SETUP_TEMP=$env:TEMP
+$REPO_OWNER='alexk218'; $REPO_NAME='tagify'
 $payload=[System.Text.Encoding]::UTF8.GetBytes('archive fixture')
 $sha=[Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($payload)).ToLower()
-$script:manifest=@{tag_name='v3.2.0';body='notes';assets=@(@{name='tagify-v3.2.0.zip';browser_download_url='https://tagify.fm/releases/client/v3.2.0/tagify-v3.2.0.zip';digest="sha256:$sha";size=$payload.Length})}
-function Invoke-RestMethod {param($Uri,$TimeoutSec) if($Uri -ne 'https://tagify.fm/releases/client/latest.json'){throw 'Unexpected request'};return $script:manifest}
+$script:manifest=@{tag_name='v3.2.0';body='notes';assets=@(@{name='tagify-v3.2.0.zip';browser_download_url='https://github.com/alexk218/tagify/releases/download/v3.2.0/tagify-v3.2.0.zip';digest="sha256:$sha";size=$payload.Length})}
+function Invoke-RestMethod {param($Uri,$TimeoutSec) if($Uri -ne 'https://api.github.com/repos/alexk218/tagify/releases/latest'){throw 'Unexpected request'};return $script:manifest}
 function Invoke-WebRequest {param($Uri,$OutFile,[switch]$UseBasicParsing) [IO.File]::WriteAllBytes($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutFile),$payload)}
 $script:extracted=$false
-function Expand-Archive {param($Path,$DestinationPath,[switch]$Force) $script:extracted=$true}
+function Expand-ZipFile {param($ZipPath,$Destination) $script:extracted=$true}
 $result=Get-LatestTagifyVersion
 if(-not $result.Success -or $result.Version -ne '3.2.0'){throw 'Wrong client version'}
 $folder=Download-TagifyRelease -DownloadUrl $result.DownloadUrl
@@ -29,4 +31,4 @@ try { Download-TagifyRelease -DownloadUrl $result.DownloadUrl; throw 'BAD_HASH_A
 if($script:extracted){throw 'Corrupt download extracted'}
 $script:manifest.assets[0].browser_download_url='https://evil.example/file.zip'
 try {Download-TagifyRelease -DownloadUrl 'https://evil.example/file.zip'; throw 'FOREIGN_ACCEPTED'} catch {if($_ -match 'FOREIGN_ACCEPTED'){throw}}
-'PASS: PowerShell parsing, new release lookup, valid checksum, corrupt download rejection, foreign URL rejection'
+'PASS: PowerShell parsing, GitHub release lookup, valid checksum, corrupt download rejection, foreign URL rejection'

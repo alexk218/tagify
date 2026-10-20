@@ -4,6 +4,7 @@ import { restoreBulkTrack, type DraftTagState } from "@/features/multi-track-tag
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { flushLocalPersistence, getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
 import { buildValidTagIdSet } from "@/utils/tagTaxonomy";
+import { isTypingOrDialogTarget } from "@/utils/keyboardTargets";
 import { draftTracks, editSelectionKey, trackEditHistory, type EditMode, type TrackEditEntry } from "@/services/TrackEditHistory";
 
 export function useTrackEditHistory(mode: EditMode, uris: string[], options: {
@@ -66,8 +67,7 @@ export function useTrackEditHistory(mode: EditMode, uris: string[], options: {
   useEffect(() => {
     if (!mode) return;
     const keyboard = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable=true], [role=dialog]") || event.isComposing || event.altKey || !(event.metaKey || event.ctrlKey)) return;
+      if (isTypingOrDialogTarget(event.target) || event.isComposing || event.altKey || !(event.metaKey || event.ctrlKey)) return;
       const key = event.key.toLowerCase();
       const direction = key === "z" ? event.shiftKey ? "redo" : "undo" : key === "y" && event.ctrlKey ? "redo" : null;
       if (!direction || trackEditHistory.getSnapshot().busy || !trackEditHistory.getSnapshot()[direction].length) return;

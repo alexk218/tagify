@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { trackArtistIdentitiesStore } from "@/services/trackArtistIdentities";

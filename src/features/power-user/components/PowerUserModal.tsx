@@ -1,10 +1,15 @@
-import React from "react";
+import React, { useState } from "react";
 import { Portal } from "@/components/ui";
+import { InviteFriendsPanel } from "@/features/invite";
 import styles from "./PowerUserModal.module.css";
 
 interface PowerUserModalProps {
   taggedTrackCount: number;
   onClose: () => void;
+  /** Opens Community setup from the invite, so it can carry the member's name. */
+  onConnectCommunity: () => void;
+  /** Opens the Sync dialog from the invite, where the member makes their tags public. */
+  onOpenSync: () => void;
 }
 
 const GITHUB_URL = "https://github.com/alexk218/tagify";
@@ -14,7 +19,10 @@ const PROMO_VIDEO_URL = "https://www.youtube.com/watch?v=iDsSasHFOJQ";
 const PowerUserModal: React.FC<PowerUserModalProps> = ({
   taggedTrackCount,
   onClose,
+  onConnectCommunity,
+  onOpenSync,
 }) => {
+  const [inviting, setInviting] = useState(false);
   const openExternalLink = (url: string) => {
     window.open(url, "_blank", "noopener,noreferrer");
   };
@@ -32,6 +40,11 @@ const PowerUserModal: React.FC<PowerUserModalProps> = ({
             </div>
             <h2 className={styles.title}>You are a Tagify power user</h2>
           </div>
+          {inviting ? (
+            <div className={styles.content}>
+              <InviteFriendsPanel entry="milestone" onConnectCommunity={onConnectCommunity} onOpenSync={onOpenSync} />
+            </div>
+          ) : (
           <div className={styles.content}>
             <p className={styles.highlight}>
               You've tagged{" "}
@@ -84,27 +97,39 @@ const PowerUserModal: React.FC<PowerUserModalProps> = ({
               </a>{" "}
               would mean the world.
             </p>
-            <p>Your support helps others discover Tagify.</p>
+            <p>
+              Know someone who'd love Tagify too? Sending them an invite is
+              the best way to help it grow 💚
+            </p>
             <p>Thank you.</p>
 
             <p className={styles.signature}>- Alex</p>
           </div>
+          )}
           <div className={styles.footer}>
-            <button
-              className={styles.primaryButton}
-              onClick={() => openExternalLink(GITHUB_URL)}
-            >
-              Star on GitHub
-            </button>
-            <button
-              className={styles.secondaryButton}
-              onClick={() => openExternalLink(PROMO_VIDEO_URL)}
-            >
-              Promo video (like & comment!)
-            </button>
-            <button className={styles.closeButton} onClick={onClose}>
-              Close
-            </button>
+            {inviting ? (
+              <button className={styles.closeButton} onClick={() => setInviting(false)}>
+                Back
+              </button>
+            ) : (
+              <>
+                <button
+                  className={styles.primaryButton}
+                  onClick={() => setInviting(true)}
+                >
+                  Invite a friend
+                </button>
+                <button
+                  className={styles.secondaryButton}
+                  onClick={() => openExternalLink(GITHUB_URL)}
+                >
+                  Star on GitHub
+                </button>
+                <button className={styles.closeButton} onClick={onClose}>
+                  Close
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

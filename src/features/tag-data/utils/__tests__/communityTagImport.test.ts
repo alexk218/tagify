@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { buildTaxonomyFromCategoryTree } from "@/utils/tagTaxonomy";
 import { importCommunityTagPackage, type CommunityTagImportPackage } from "../communityTagImport";

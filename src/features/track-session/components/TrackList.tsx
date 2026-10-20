@@ -8,6 +8,7 @@ import React, {
   useState,
 } from "react";
 import styles from "./TrackList.module.css";
+import { GettingStartedQuestion } from "@/features/discovery-survey";
 import { parseLocalFileUri } from "@/utils/LocalFileParser";
 import type { SmartPlaylistCriteria } from "@/features/smart-playlists";
 import type { SmartPlaylistImportSummary } from "@/features/smart-playlists";
@@ -1835,11 +1836,14 @@ const TrackList: React.FC<TrackListProps> = ({
       {notePreviews.error && <PrivateNotePreviewError onRetry={notePreviews.retry} />}
       <div className={styles.trackList}>
         {sortedTracksVisible.length === 0 ? (
-          <p className={styles.noTracks}>
-            {Object.keys(deferredTracks).length === 0
-              ? "No tagged tracks yet. Start tagging your favorite tracks!"
-              : "No tracks match your filters."}
-          </p>
+          <>
+            <p className={styles.noTracks}>
+              {Object.keys(deferredTracks).length === 0
+                ? "No tagged tracks yet. Start tagging your favorite tracks!"
+                : "No tracks match your filters."}
+            </p>
+            {Object.keys(deferredTracks).length === 0 && <GettingStartedQuestion />}
+          </>
         ) : (
           sortedTracksVisible.map(([uri, data]) => {
             const trackData = data;

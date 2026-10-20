@@ -36,7 +36,7 @@ type Runtime = {
  * acknowledgements, and, when `fewerRequests` is on, the migration 0114
  * behavior (pull revisions, acknowledging pulls, `known=` reads).
  */
-function fakeCommunity({ fewerRequests, laterBatches = false, pullRequestBody = false, othersActive, directPullDown = false }: { fewerRequests: boolean; laterBatches?: boolean; pullRequestBody?: boolean; othersActive?: boolean; directPullDown?: boolean }) {
+function fakeCommunity({ fewerRequests, laterBatches = false, pullRequestBody = false, othersActive, directPullDown = false, directPullAnswer }: { fewerRequests: boolean; laterBatches?: boolean; pullRequestBody?: boolean; othersActive?: boolean; directPullDown?: boolean; directPullAnswer?: { status: number; retryAfter?: string } }) {
   const community = new FakeCommunity();
   // `localFilesRead` is the revision Community recorded this device reading (migration 0118).
   const server = { acknowledged: 0, localFilesRevision: 0, localFilesRead: -1, localFileEntries: {} as Record<string, unknown>, notesCursor: 0, requests: [] as string[], preflights: [] as string[] };
@@ -77,6 +77,7 @@ function fakeCommunity({ fewerRequests, laterBatches = false, pullRequestBody = 
     // Migration 0170's function, called through the database's API (docs/DESKTOP_DIRECT_PULL.md).
     if (url.origin === "https://supabase.example" && url.pathname === "/rest/v1/rpc/pull_sync_changes_with_live_sync") {
       if (directPullDown) throw new TypeError("Failed to fetch");
+      if (directPullAnswer) return Response.json({ message: "unavailable" }, { status: directPullAnswer.status, headers: directPullAnswer.retryAfter ? { "retry-after": directPullAnswer.retryAfter } : {} });
       const body = JSON.parse(String(init?.body));
       if (headers.apikey !== configuration.supabasePublishableKey || headers.authorization !== `Bearer ${configuration.accessToken}` || body.p_direct !== true) return Response.json({ code: "28000" }, { status: 403 });
       return Response.json(await pullPage(Number(body.p_after_cursor)));
@@ -143,7 +144,7 @@ describe("Community requests per sync run", () => {
     vi.unstubAllGlobals();
   });
 
-  type Support = { laterBatches?: boolean; pullRequestBody?: boolean; othersActive?: boolean; directPull?: boolean; directPullDown?: boolean };
+  type Support = { laterBatches?: boolean; pullRequestBody?: boolean; othersActive?: boolean; directPull?: boolean; directPullDown?: boolean; directPullAnswer?: { status: number; retryAfter?: string } };
   function useCapabilities(fewerRequests: boolean, { laterBatches = false, pullRequestBody = false, othersActive, directPull = false }: Support = {}) {
     runtime.capabilities = {
       protocolVersion: 2,
@@ -439,6 +440,35 @@ describe("Community requests per sync run", () => {
       const { server } = await primedCommunity(true, direct, { ...direct, directPullDown: true });
       await runtime.settleLocalAndPublicSync(configuration);
       // The first sync already met the failure and switched.
+      expect(server.requests).toEqual(["POST /api/v2/sync/pull (if-none-match)"]);
+    });
+
+    it.each([
+      ["a 503", { status: 503, retryAfter: "120" }, 120],
+      ["a 429", { status: 429, retryAfter: "90" }, 90],
+      ["a 502 without Retry-After", { status: 502 }, null],
+    ])("waits out %s from a busy database instead of asking Community's address at once", async (_label, answer, retryAfterSeconds) => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      useCapabilities(true, direct);
+      const { server } = fakeCommunity({ fewerRequests: true, ...direct, directPullAnswer: answer });
+
+      // Before: the website was asked for the same page straight away, so an
+      // outage doubled the reads. Now this sync stops and backs off.
+      await expect(runtime.settleLocalAndPublicSync(configuration)).rejects.toMatchObject({ status: answer.status, retryAfterSeconds });
+      expect(server.requests).toEqual(["DIRECT POST /rest/v1/rpc/pull_sync_changes_with_live_sync"]);
+
+      // The next sync, after the wait, reads through Community's address.
+      server.requests.length = 0;
+      await runtime.settleLocalAndPublicSync(configuration);
+      expect(server.requests[0]).toBe("POST /api/v2/sync/pull (if-none-match)");
+      expect(server.requests.some((request) => request.startsWith("DIRECT"))).toBe(false);
+    });
+
+    it("reads through Community's address at once when the database refuses the direct read", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      // Switched off with app.settings.desktop_direct_pull (TDP01 reaches Tagify as a 400).
+      const { server } = await primedCommunity(true, direct, { ...direct, directPullAnswer: { status: 400 } });
+      await runtime.settleLocalAndPublicSync(configuration);
       expect(server.requests).toEqual(["POST /api/v2/sync/pull (if-none-match)"]);
     });
 

@@ -76,13 +76,17 @@ import {
   CommunityOnboardingModal,
   CloudSyncModal,
   CloudRecoveryModal,
+  CommunityShareDialog,
   CommunityWorkspace,
   isCloudRecoveryStatus,
+  useCommunitySharing,
   type CommunityConnectEntry,
+  type SharingSurface,
 } from "@/features/community";
 import { Users } from "lucide-react";
 import { syncRuntime, type SyncStatus } from "@/services/sync/SyncRuntime";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
+import { syncPairingService } from "@/services/sync/SyncPairingService";
 
 const EMPTY_TRACK_DETAILS_DATA = {
   rating: 0,
@@ -138,6 +142,8 @@ function App() {
   const showCommunityOnboarding = communitySetupEntry !== null;
   const [showCloudRecovery, setShowCloudRecovery] = useState(false);
   const [showCloudSync, setShowCloudSync] = useState(false);
+  // Where the sharing window was opened from; null while it is closed.
+  const [shareSurface, setShareSurface] = useState<SharingSurface | null>(null);
   const [syncConnected, setSyncConnected] = useState(
     () => Boolean(getDesktopSyncConfiguration()),
   );
@@ -151,6 +157,11 @@ function App() {
       return isCloudRecoveryStatus(status) || (status !== "unlinked" && Boolean(runtime.getRecoveryPreview()));
     },
   );
+  const communitySharing = useCommunitySharing({
+    connected: syncConnected,
+    status: syncStatus,
+    active: showCommunityWorkspace || showCommunityOnboarding || showCloudSync || shareSurface !== null,
+  });
   const [activeView, setActiveView] = useState<AppView>(getStoredActiveView);
   const [activePlaylistUri, setActivePlaylistUri] = useState<string | null>(null);
   const [activePlaylistMetadata, setActivePlaylistMetadata] =
@@ -365,7 +376,7 @@ function App() {
     lastUserTrackAddedEvent,
     canShowSurvey: !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode &&
       !shouldShowPowerUserModal && !showCommunityOnboarding && !showCloudRecovery &&
-      !cloudRecoveryPending && !showCloudSync && !showMigrationModal && !showTagManager &&
+      !cloudRecoveryPending && !showCloudSync && shareSurface === null && !showMigrationModal && !showTagManager &&
       !showStats && !showLocalTracksModal,
   });
 
@@ -420,6 +431,19 @@ function App() {
     setShowCloudSync(true);
   }, [cloudRecoveryPending]);
 
+  const openCommunitySharing = useCallback((surface: SharingSurface) => {
+    if (cloudRecoveryPending) {
+      setShowCloudRecovery(true);
+      return;
+    }
+    if (!getDesktopSyncConfiguration()) {
+      connectCommunity("community");
+      return;
+    }
+    setShowCloudSync(false);
+    setShareSurface(surface);
+  }, [cloudRecoveryPending, connectCommunity]);
+
   const disconnectCommunitySync = useCallback(async () => {
     await (window.TagifySync || syncRuntime).unlinkLocal();
   }, []);
@@ -434,6 +458,7 @@ function App() {
       if (recoveryPending) {
         setShowCloudRecovery(true);
         setShowCloudSync(false);
+        setShareSurface(null);
         setShowCommunityWorkspace(false);
         setCommunitySetupEntry(null);
       }
@@ -1179,8 +1204,14 @@ function App() {
   const canShowOptionalPrompts =
     !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode &&
     !shouldShowSurvey && !shouldShowPowerUserModal && !showCommunityOnboarding &&
-    !showCloudRecovery && !cloudRecoveryPending && !showCloudSync &&
+    !showCloudRecovery && !cloudRecoveryPending && !showCloudSync && shareSurface === null &&
     !showMigrationModal && !showTagManager && !showStats;
+  // Only a member who never chose gets the dot; keeping tags private is respected.
+  const sharingNeedsChoice = syncConnected && syncStatus === "publication-review-required" &&
+    !showCommunityWorkspace && shareSurface === null;
+  const communityButtonLabel = sharingNeedsChoice
+    ? "Open the Tagify Community workspace. Your tags aren't public yet."
+    : "Open the Tagify Community workspace";
 
   return (
     <div ref={appRootRef} className={styles.container}>
@@ -1234,12 +1265,13 @@ function App() {
           <button
             className={`${styles.communityButton} ${showCommunityWorkspace ? styles.communityButtonActive : ""}`}
             onClick={openCommunityWorkspace}
-            title="Open the Tagify Community workspace"
-            aria-label="Open the Tagify Community workspace"
+            title={communityButtonLabel}
+            aria-label={communityButtonLabel}
             aria-pressed={showCommunityWorkspace}
           >
             <Users size={15} aria-hidden="true" />
             <span>Community</span>
+            {sharingNeedsChoice ? <span className={styles.communityDot} aria-hidden="true" /> : null}
           </button>
         </div>
       </div>
@@ -1308,7 +1340,7 @@ function App() {
         lastUserTrackAddedEvent={lastUserTrackAddedEvent}
         tracks={tagData.tracks}
         taxonomy={tagData.taxonomy}
-        onReview={openCloudSync}
+        onReview={() => openCommunitySharing("invitation")}
       />
 
       <SmartPlaylistTagChoices enabled={canShowOptionalPrompts} />
@@ -1324,12 +1356,17 @@ function App() {
         <PowerUserModal
           taggedTrackCount={taggedTrackCount}
           onClose={dismissPowerUserModal}
+          onConnectCommunity={() => { dismissPowerUserModal(); connectCommunity("invite"); }}
+          onOpenSync={() => { dismissPowerUserModal(); openCloudSync(); }}
         />
       )}
 
       {communitySetupEntry && (
         <CommunityOnboardingModal
           entry={communitySetupEntry}
+          sharing={communitySharing}
+          tracks={tagData.tracks}
+          taxonomy={tagData.taxonomy}
           onClose={() => setCommunitySetupEntry(null)}
         />
       )}
@@ -1339,7 +1376,22 @@ function App() {
       )}
 
       {showCloudSync && !cloudRecoveryPending && (
-        <CloudSyncModal onClose={() => setShowCloudSync(false)} />
+        <CloudSyncModal
+          sharing={communitySharing}
+          onOpenSharing={() => openCommunitySharing("sync")}
+          onClose={() => setShowCloudSync(false)}
+        />
+      )}
+
+      {shareSurface && !cloudRecoveryPending && (
+        <CommunityShareDialog
+          surface={shareSurface}
+          sharing={communitySharing}
+          tracks={tagData.tracks}
+          taxonomy={tagData.taxonomy}
+          waitingForLibrary={syncStatus === "merge-required"}
+          onClose={() => setShareSurface(null)}
+        />
       )}
 
       <DataManager
@@ -1350,14 +1402,21 @@ function App() {
         onResetTagifyData={handleResetTagifyState}
         onRetryMigration={retryMigration}
         historyControls={editingMode && <TrackEditHistoryControls canUndo={editHistory.canUndo} canRedo={editHistory.canRedo} busy={editHistory.busy} onUndo={editHistory.undo} onRedo={editHistory.redo} />}
+        onConnectCommunity={() => connectCommunity("invite")}
+        onOpenSync={openCloudSync}
       />
 
       {showCommunityWorkspace ? (
         <CommunityWorkspace
           onConnectCommunity={() => connectCommunity("community")}
           onOpenCloudSync={openCloudSync}
+          onOpenSharing={() => openCommunitySharing("workspace")}
           connected={syncConnected}
+          connectionPending={!syncConnected && Boolean(syncPairingService.getPending())}
           status={syncStatus}
+          sharing={communitySharing}
+          tracks={tagData.tracks}
+          taxonomy={tagData.taxonomy}
           connectedAccountId={getDesktopSyncConfiguration()?.accountId || null}
           connectedDeviceId={getDesktopSyncConfiguration()?.deviceId || null}
           onDisconnect={disconnectCommunitySync}

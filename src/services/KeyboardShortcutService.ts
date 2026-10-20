@@ -29,6 +29,7 @@ import {
   saveTrackEdits,
   type AnnotationEdit,
 } from "@/extensions/extensionEdits";
+import { isTypingOrDialogTarget } from "@/utils/keyboardTargets";
 
 const PLAYLIST_CHANGED_EVENT = "tagify:playlistChanged";
 const ARTIST_CHANGED_EVENT = "tagify:artistChanged";
@@ -245,7 +246,7 @@ class KeyboardShortcutService {
             return {
               name: lockedTrack.name || "Unknown Track",
               artists:
-                lockedTrack.artists?.map((a: any) => a.name).join(", ") ||
+                lockedTrack.artists?.map((a: { name?: string }) => a.name).join(", ") ||
                 "Unknown Artist",
             };
           }
@@ -264,7 +265,7 @@ class KeyboardShortcutService {
       return {
         name: item.name || "Unknown Track",
         artists:
-          item.artists?.map((a: any) => a.name).join(", ") || "Unknown Artist",
+          item.artists?.map((a: { name?: string }) => a.name).join(", ") || "Unknown Artist",
       };
     } catch (error) {
       console.error("Error getting current track metadata:", error);
@@ -278,6 +279,7 @@ class KeyboardShortcutService {
     let saved: Record<string, TrackData | null>;
     try {
       saved = await saveTrackEdits([trackUri], edit, {
+        surface: "keyboard",
         details: () => {
           created = true;
           const metadata = this.getTargetTrackMetadata();
@@ -393,12 +395,8 @@ class KeyboardShortcutService {
     if (this.isTemporarilyDisabled) {
       return;
     }
-    // Ignore if typing in an input field
-    if (
-      event.target instanceof HTMLInputElement ||
-      event.target instanceof HTMLTextAreaElement ||
-      (event.target instanceof HTMLElement && event.target.isContentEditable)
-    ) {
+    // Ignore keys typed into a field or pressed inside a dialog or popover
+    if (isTypingOrDialogTarget(event.target)) {
       return;
     }
 

@@ -31,16 +31,16 @@ it("starts an unlinked library without account setup and keeps connecting option
   expect(screen.queryByRole("group", { name: "Song edit history" })).not.toBeInTheDocument();
   expect(screen.queryByRole("dialog", { name: "Community setup" })).not.toBeInTheDocument();
   // Connecting is suggested inline, but setup opens only when the listener chooses it.
-  const invitation = await screen.findByRole("region", { name: "Connect to Community" }, { timeout: 5000 });
+  const invitation = await screen.findByRole("region", { name: "Share your tags on Community" }, { timeout: 5000 });
   expect(screen.queryByRole("dialog", { name: "Community setup" })).not.toBeInTheDocument();
-  fireEvent.click(within(invitation).getByRole("button", { name: "Connect" }));
+  fireEvent.click(within(invitation).getByRole("button", { name: "Share my tags" }));
   expect(screen.getByRole("dialog", { name: "Community setup" })).toBeInTheDocument();
-  expect(screen.queryByRole("region", { name: "Connect to Community" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Share your tags on Community" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Open the Tagify Community workspace" }));
-  expect(screen.queryByRole("region", { name: "Connect to Community" })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Connect Community" }));
+  expect(screen.queryByRole("region", { name: "Share your tags on Community" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Share my tags" }));
   expect(screen.getByRole("dialog", { name: "Community setup" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(screen.queryByRole("dialog", { name: "Community setup" })).not.toBeInTheDocument();

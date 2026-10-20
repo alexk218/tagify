@@ -88,16 +88,22 @@
 .mergeSuccess div { display: grid; gap: 3px; }
 .mergeSuccess span { color: var(--spice-subtext); font-size: 11px; }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.visibilityPanel { overflow: hidden; border: 1px solid rgb(255 255 255 / 9%); border-radius: 10px; background: rgb(255 255 255 / 3%); }
-.visibilityPanelExpanded { background: rgb(255 255 255 / 4%); }
-.visibilityDisclosure { display: flex; justify-content: space-between; gap: 12px; align-items: center; width: 100%; min-height: 46px; padding: 10px 12px; border: 0; color: var(--spice-text); background: transparent; cursor: pointer; text-align: left; }
-.visibilityDisclosure:hover { background: rgb(255 255 255 / 5%); }
-.visibilityDisclosure > span { display: grid; gap: 2px; min-width: 0; }
-.visibilityDisclosure strong { display: inline-flex; gap: 7px; align-items: center; font-size: 13px; }
-.visibilityDisclosure small { color: var(--spice-subtext); font-size: 11px; }
-.visibilityDisclosure > svg { flex: 0 0 auto; color: var(--spice-subtext); }
-.visibilityContent { display: grid; gap: 12px; padding: 0 12px 12px; border-top: 1px solid rgb(255 255 255 / 7%); }
-.visibilitySummary { margin: 0; padding-top: 12px; color: var(--spice-subtext); font-size: 12px; line-height: 1.5; }
+.sharePanel { display: grid; gap: 12px; }
+.sharePanel > p { font-size: 13px; }
+.sharePanel .shareLead { color: var(--spice-text); font-size: 16px; line-height: 1.45; }
+.shareLead strong { color: #c3b9ff; }
+.sharePanel .warningText { color: #f1d0a8; }
+.sharePanel .success, .sharePanel .error { font-size: 13px; line-height: 1.45; }
+.disclosureLink { justify-self: start; padding: 2px 0; border: 0; color: #c3b9ff; background: transparent; cursor: pointer; font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.disclosureLink:hover { color: var(--spice-text); }
+.disclosureLink:focus-visible { outline: 2px solid #c3b9ff; outline-offset: 2px; border-radius: 4px; }
+.sharingChoices { display: grid; gap: 10px; }
+.sharingRow { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding: 11px 12px; border: 1px solid rgb(155 140 255 / 26%); border-radius: 10px; background: rgb(155 140 255 / 7%); }
+.sharingRow > span { display: grid; gap: 2px; }
+.sharingRow strong { font-size: 13px; }
+.sharingRow small { color: var(--spice-subtext); font-size: 12px; }
+.sharingRow button { min-height: 34px; padding: 6px 12px; }
+.visibilitySummary { margin: 0; color: var(--spice-subtext); font-size: 12px; line-height: 1.5; }
 .visibilityActions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .quietAction { min-height: 38px; padding: 8px 10px; border: 0; border-radius: 9px; color: var(--spice-subtext); background: transparent; cursor: pointer; font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .quietAction:hover:not(:disabled) { color: var(--spice-text); }
@@ -112,8 +118,6 @@
 .visibilityCheckbox { margin-top: 2px; accent-color: #e74c3c; }
 .visibilityToolbar { display: flex; gap: 10px; align-items: center; }
 .visibilityToolbar .searchBox { flex: 1 1 auto; }
-.visibilityReloadButton { display: grid; flex: 0 0 auto; place-items: center; width: 32px; height: 32px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 8px; color: var(--spice-subtext); background: rgb(255 255 255 / 5%); cursor: pointer; }
-.visibilityReloadButton:hover { color: var(--spice-text); background: rgb(255 255 255 / 9%); }
 .visibilityTreeActions { display: inline-flex; gap: 6px; flex: 0 0 auto; }
 .visibilityTreeActions button { min-height: 32px; padding: 0 10px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 8px; color: var(--spice-subtext); background: rgb(255 255 255 / 5%); cursor: pointer; font-size: 12px; font-weight: 700; }
 .visibilityTreeActions button:hover { color: var(--spice-text); background: rgb(255 255 255 / 9%); }
@@ -124,6 +128,7 @@
 .visibilityNode { display: grid; gap: 6px; }
 .visibilityNodeRow { display: grid; grid-template-columns: 24px auto minmax(0, 1fr); gap: 8px; align-items: center; min-height: 32px; padding: 4px 6px; border-radius: 8px; color: var(--spice-text); }
 .visibilityNodeRow:hover { background: rgb(255 255 255 / 5%); }
+.visibilityNodeRowHidden .visibilityNodeLabel strong { color: var(--spice-subtext); }
 .visibilityExpandButton { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; color: var(--spice-subtext); background: transparent; cursor: pointer; }
 .visibilityExpandButton:hover:not(:disabled) { color: var(--spice-text); background: rgb(255 255 255 / 8%); }
 .visibilityExpandButton:disabled { opacity: .65; cursor: default; }

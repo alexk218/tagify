@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { validRymCandidate, type SpotifyAlbumCandidate, type SpotifyAlbumSearchResult } from "../rym/albumCandidate";
 import type { RymRelease } from "../rym/rymExport.mjs";

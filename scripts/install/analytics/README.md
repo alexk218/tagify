@@ -1,6 +1,13 @@
 # Installer analytics
 
-Mac manager events and GitHub asset counters answer different questions. Download counts include repeat downloads and automation; installation IDs are pseudonymous device-local records, not people. Manager opens measure manager use, not Tagify activity inside Spotify. Windows contributes download counters only until its native tracking is implemented.
+Mac manager events and GitHub asset counters answer different questions. Download counts include repeat downloads and automation; installation IDs are pseudonymous device-local records, not people. Manager opens measure manager use, not Tagify activity inside Spotify. The Windows Manager sends the same events (`platform` = `windows`) from `TagifyInstaller/Services/InstallerAnalytics.cs` in the installer repository.
+
+## Linking setup to the first week of app use
+
+Both Managers offer their installation ID to the Tagify app for seven days so a setup can be matched with that computer's first app events. The offer is `window.__tagifyInstallerAnalyticsV1 = {"enabled":true,"expiresAt":"<now + 7 days, UTC>","installationId":"<Manager installation UUID>","schemaVersion":2};` in `CustomApps/tagify/productAnalyticsBridge.js`, or `{"enabled":false,"schemaVersion":2}` when Manager reporting is off. It is written after Tagify's files are copied and before Spicetify applies them, only when the bridge is a regular file listed in the manifest's `subfiles_extension`; otherwise setup continues without a link.
+
+- **Mac:** `InstallerAnalytics.writeHistoricalHandoff(to:)`, called from the install engine.
+- **Windows:** the Manager passes the offer to the setup script in `TAGIFY_INSTALLER_ANALYTICS_OFFER`; `Install-ManagerAnalyticsOffer` in `Install-Tagify-Full.ps1` accepts only the two exact shapes above and writes the file. Older Managers don't set the variable, so the app keeps its default unlinked bridge. Windows links need both the published script and a Manager release that sends the offer.
 
 ## Mac behavior and privacy
 

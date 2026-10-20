@@ -1,9 +1,18 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { backupNotices, communityErrorMessage, communitySyncStatusLabel } from "../communitySyncCopy";
+import { backupLabel, backupNotices, communityErrorMessage, communitySyncStatusLabel } from "../communitySyncCopy";
 
 describe("Community sync copy", () => {
+  it("describes the backup on its own, since sharing has its own line", () => {
+    expect(communitySyncStatusLabel("publication-review-required")).toBe("Up to date");
+    expect(communitySyncStatusLabel("publication-review-required", true)).toBe("Choose which saved settings to keep");
+    expect(backupLabel("publication-review-required")).toBe("Backed up");
+    expect(backupLabel("publishing")).toBe("Backed up");
+    expect(backupLabel("offline")).toBe("Offline. Your changes will back up when you reconnect.");
+  });
+
   it("explains an interrupted backup without exposing internal recovery terms", () => {
-    expect(communitySyncStatusLabel("snapshot-required", false)).toBe("Backup paused. Your library is still on this device.");
+    expect(communitySyncStatusLabel("snapshot-required")).toBe("Backup paused. Your library is still on this device.");
     expect(communityErrorMessage(new Error("snapshot_required: local change set exceeds a normal sync batch"), "Try again."))
       .toContain("Your data is still on this device");
   });

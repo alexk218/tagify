@@ -10,7 +10,7 @@ import { isAnotherDialogOpen } from "@/utils/openDialogs";
 import {
   fetchPublicationPolicy,
   keepTagsPrivate,
-  notePublishInvitationFollowed,
+  plural,
   publicationState,
   publicTagSummary,
   sharesRatings,
@@ -160,7 +160,6 @@ export function CommunityPublishPrompt({ enabled, connected, status, taggedTrack
   if (!eligible || !visible || !invitation) return null;
 
   const review = () => {
-    notePublishInvitationFollowed();
     setHandled(true);
     onReview();
   };
@@ -191,7 +190,7 @@ export function CommunityPublishPrompt({ enabled, connected, status, taggedTrack
         <div className={styles.text}>
           <h2 id="community-publish-prompt-title" className={styles.title}>Keep your tags private?</h2>
           <p id="community-publish-prompt-description" className={styles.description}>
-            Tagify keeps backing up your library and won't ask again. You can publish any time from Sync.
+            Tagify keeps backing up your library and won't ask again. You can publish any time from Community in Tagify.
           </p>
           {error ? <p className={styles.error} role="alert">{error}</p> : null}
         </div>
@@ -222,8 +221,4 @@ export function CommunityPublishPrompt({ enabled, connected, status, taggedTrack
       </div>
     </section>
   );
-}
-
-function plural(count: number, noun: string): string {
-  return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
 }

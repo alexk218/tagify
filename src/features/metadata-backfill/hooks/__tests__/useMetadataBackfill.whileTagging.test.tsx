@@ -8,6 +8,7 @@ import { TAG_DATA_SCHEMA_VERSION } from "@/utils/tagTaxonomy";
 import type { TagDataStructure } from "@/types/tagData";
 import { useTagData } from "@/features/tag-data";
 import { useMetadataBackfill } from "../useMetadataBackfill";
+import { RECOVERY_UNAVAILABLE_SKIP_MS, RECOVERY_UNAVAILABLE_UNTIL_KEY } from "@/services/sync/SyncInstallRecovery";
 
 const uri = `spotify:track:${"b".repeat(22)}`;
 const library: TagDataStructure = {
@@ -25,6 +26,9 @@ const library: TagDataStructure = {
 beforeEach(async () => {
   vi.stubGlobal("indexedDB", new IDBFactory());
   localStorage.clear();
+  // Community already found nothing to reconnect on this computer, so opening the library
+  // doesn't wait 3 s for a Spotify sign-in this test page never provides.
+  localStorage.setItem(RECOVERY_UNAVAILABLE_UNTIL_KEY, String(Date.now() + RECOVERY_UNAVAILABLE_SKIP_MS));
   expect(await indexedDBStorage.init()).toBe(true);
   expect(await indexedDBStorage.saveAll(library)).toBe(true);
   localStorage.setItem("tagify:migrationCompleted", "true");

@@ -20,6 +20,7 @@ import {
   saveTrackEdits,
 } from "./extensionEdits";
 import { restoreDesktopSyncConfiguration } from "../services/sync/SyncInstallRecovery";
+import { recordTagifyPresent } from "../features/discovery-survey/services/tagifyUsage";
 import { syncRuntime } from "../services/sync/SyncRuntime";
 import { smartPlaylistSyncService } from "../services/SmartPlaylistSyncService";
 import { loadSmartPlaylistsFromStorage } from "../features/smart-playlists/utils/smartPlaylist.storage";
@@ -616,6 +617,7 @@ function findUriInObject(root, maxDepth = 6) {
       let observedTracks;
       const saved = await saveTrackEdits(uniqueTrackUris, edit, {
         undoable: uniqueTrackUris.length > 1,
+        surface: "spotify_views",
         details: uri => {
           observedTracks ??= new Map(getSpotifyTrackRows(document).map(row => tracklistEnhancer.trackFromRow(row)).filter(Boolean).map(track => [track.uri, track]));
           const observed = observedTracks.get(uri);
@@ -4061,6 +4063,10 @@ function findUriInObject(root, maxDepth = 6) {
     playbarEnhancer.initialize();
     smartPlaylistIndicatorEnhancer.initialize();
     artistProfileIndicatorEnhancer.initialize();
+
+    // Once per day while Spotify runs with Tagify installed; hourly checks catch a new day.
+    void recordTagifyPresent();
+    setInterval(() => void recordTagifyPresent(), 60 * 60 * 1000);
 
     window.addEventListener(RECORDING_REUSE_EVENT, (event) => {
       if (event.detail?.account === getTagifyDatabaseName()) {

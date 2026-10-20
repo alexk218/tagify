@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { createBulkTagHistoryLocation } from "../contextMenu.navigation";
 import { parseHistoryTrackSelection } from "../../features/track-session/utils/spicetifyHistory.location";

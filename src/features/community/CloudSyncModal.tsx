@@ -1,15 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Cloud, ExternalLink, Link2, RefreshCw, ShieldAlert, UserCircle2, X } from "lucide-react";
 import { openCommunityUrl } from "./communityLinks";
-import { fetchCommunityProfile } from "./communityDevice";
-import { getDesktopSyncConfiguration, setDesktopSyncConfiguration, type DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
+import { fetchCommunityProfile, hydrateSyncProfile } from "./communityDevice";
+import { getDesktopSyncConfiguration, type DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncPairingService, type ApprovedPairing } from "@/services/sync/SyncPairingService";
 import { clearRecoveryUnavailable } from "@/services/sync/SyncInstallRecovery";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
-import { CommunityVisibilityReview } from "./CommunityPublicVisibilityReview";
+import { currentSpotifyLibrarySend, SPOTIFY_LIBRARY_SEND_EVENT, type SpotifySendProgress, type SpotifySendSnapshot } from "@/services/sync/SpotifyLibrarySender";
 import { Portal } from "@/components/ui";
 import { InitialLibraryMergeReview } from "./InitialLibraryMergeReview";
 import { backupNotices, communityErrorMessage, communitySyncStatusLabel, savedSettingsLabel } from "./communitySyncCopy";
+import { SHARING_STATE_LABELS } from "./communityPublication";
+import type { CommunitySharing } from "./useCommunitySharing";
 import type { DurableAppStateDomain } from "@tagify/sync-contracts";
 import {
   recordCommunityConnectCompleted,
@@ -23,7 +25,7 @@ import styles from "./CloudSyncModal.module.css";
 
 const COMMUNITY_URL = "https://community.tagify.fm";
 
-export function CloudSyncModal({ onClose }: { onClose: () => void }) {
+export function CloudSyncModal({ sharing, onOpenSharing, onClose }: { sharing: CommunitySharing; onOpenSharing: () => void; onClose: () => void }) {
   const [configuration, setConfiguration] = useState(() => getDesktopSyncConfiguration());
   const [pending, setPending] = useState(() => syncPairingService.getPending());
   const [approvedPairing, setApprovedPairing] = useState<ApprovedPairing | null>(null);
@@ -35,7 +37,6 @@ export function CloudSyncModal({ onClose }: { onClose: () => void }) {
   const polling = useRef(false);
   const [error, setError] = useState("");
   const [requiresReload, setRequiresReload] = useState(false);
-  const [visibilityReviewed, setVisibilityReviewed] = useState<boolean | null>(null);
   const syncing = status === "syncing";
   const settingsChoices = backupHealth?.needsChoice ?? [];
   const smartPlaylistsDeviceOnly = backupHealth?.notBackedUp?.includes("smart-playlists") ?? false;
@@ -52,6 +53,14 @@ export function CloudSyncModal({ onClose }: { onClose: () => void }) {
     window.addEventListener("tagify:syncStatus", handleStatus);
     handleStatus(new CustomEvent("tagify:syncStatus", { detail: { status: activeSyncRuntime().getStatus() } }));
     return () => window.removeEventListener("tagify:syncStatus", handleStatus);
+  }, []);
+
+  // Your Spotify lists on their way to Community, when you asked for them there.
+  const [spotifySend, setSpotifySend] = useState<SpotifySendSnapshot>(() => currentSpotifyLibrarySend());
+  useEffect(() => {
+    const handleSend = (event: Event) => setSpotifySend((event as CustomEvent<SpotifySendSnapshot>).detail ?? null);
+    window.addEventListener(SPOTIFY_LIBRARY_SEND_EVENT, handleSend);
+    return () => window.removeEventListener(SPOTIFY_LIBRARY_SEND_EVENT, handleSend);
   }, []);
 
   useEffect(() => {
@@ -179,7 +188,7 @@ export function CloudSyncModal({ onClose }: { onClose: () => void }) {
             <button type="button" className={styles.secondary} disabled={busy} onClick={() => void keepLocalOnly()}>Keep data on this device only</button>
           </div>
         </> : configuration ? <>
-          <div className={styles.connected}><CheckCircle2 /><div><strong>Connected</strong><span>{communitySyncStatusLabel(status, visibilityReviewed, settingsChoices.length > 0)}</span></div></div>
+          <div className={styles.connected}><CheckCircle2 /><div><strong>Connected</strong><span>{communitySyncStatusLabel(status, settingsChoices.length > 0)}</span></div></div>
           <div className={styles.accountCard}>
             <UserCircle2 size={18} />
             <div>
@@ -188,6 +197,7 @@ export function CloudSyncModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
           <p>Tagify is syncing this desktop library directly to Community.</p>
+          {spotifySend ? <p role="status"><strong>Sending your Spotify lists to Community:</strong> {spotifySendLine(spotifySend.progress)}</p> : null}
           {backupHealth ? <p><strong>Latest cloud backup:</strong> {backupHealth.lastBackupAt ? new Date(backupHealth.lastBackupAt).toLocaleString() : "Waiting for the first successful backup"} · {backupHealth.annotations.toLocaleString()} tagged items · {backupHealth.taxonomyNodes.toLocaleString()} tags and groups · {smartPlaylistsDeviceOnly ? "Smart Playlists saved on this device only" : backupHealth.appStateDocuments > 0 ? "Smart Playlists protected" : "Smart Playlists pending"}</p> : null}
           {settingsChoices.length ? <div className={styles.choice} role="group" aria-labelledby="cloud-sync-settings-choice">
             <div><strong id="cloud-sync-settings-choice">Your saved settings changed on another device too</strong><span>Choose which copy to keep. The other copy is replaced on your devices.</span></div>
@@ -200,11 +210,11 @@ export function CloudSyncModal({ onClose }: { onClose: () => void }) {
             </div>)}
           </div> : null}
           {backupNotices(backupHealth).map((notice) => <div className={styles.warning} key={notice}><ShieldAlert /><span>{notice}</span></div>)}
-          {!showingMergeReview ? <CommunityVisibilityReview connected={Boolean(configuration)} onReviewStateChange={setVisibilityReviewed} /> : null}
+          {!showingMergeReview ? <SharingRow sharing={sharing} onOpen={onOpenSharing} /> : null}
           {requiresReload ? <div className={styles.warning}><ShieldAlert /><span>Reload Spotify to finish switching accounts. Your library from the previous account will stay on this device.</span></div> : null}
           {status === "snapshot-required" ? <div className={styles.warning}><ShieldAlert /><span>Your changes are still on this device. Try Sync now again. If it keeps stopping, download a Tagify backup and contact support.</span></div> : null}
           {showingMergeReview && mergePreview ? <InitialLibraryMergeReview review={mergePreview} onCommit={(resolutions) => activeSyncRuntime().commitInitialMerge(resolutions)} onDownloadBackup={() => activeSyncRuntime().downloadInitialMergeBackup()} /> : null}
-          {!showingMergeReview ? <div className={styles.actions}><button type="button" onClick={() => void activeSyncRuntime().syncNow()} disabled={busy || requiresReload || syncing || status === "idle" || status === "publishing" || visibilityReviewed === false}><RefreshCw size={15} /> {syncing ? "Syncing…" : visibilityReviewed === false ? "Choose what to share first" : "Sync now"}</button><button type="button" onClick={() => openCommunityUrl(`${COMMUNITY_URL}/settings/devices`)}><ExternalLink size={15} /> Linked devices</button></div> : null}
+          {!showingMergeReview ? <div className={styles.actions}><button type="button" onClick={() => void activeSyncRuntime().syncNow()} disabled={busy || requiresReload || syncing || status === "idle" || status === "publishing"}><RefreshCw size={15} /> {syncing ? "Syncing…" : "Sync now"}</button><button type="button" onClick={() => openCommunityUrl(`${COMMUNITY_URL}/settings/devices`)}><ExternalLink size={15} /> Linked devices</button></div> : null}
         </> : <>
           <p>Back up your tags, ratings, and Smart Playlists. Your Tagify settings stay on this device. You choose what appears on your public profile.</p>
           <label className={styles.consent}><input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} /><span>I understand my Tagify library will be saved to Community and have reviewed the privacy terms.</span></label>
@@ -219,10 +229,21 @@ export function CloudSyncModal({ onClose }: { onClose: () => void }) {
 function deviceName() { return `Tagify on ${navigator.userAgent.includes("Mac") ? "Mac" : navigator.userAgent.includes("Windows") ? "Windows" : "desktop"}`; }
 function activeSyncRuntime() { return window.TagifySync || syncRuntime; }
 function profileLabel(configuration: DesktopSyncConfiguration) { return configuration.profile?.displayName || (configuration.profile?.handle ? `@${configuration.profile.handle}` : `Community account …${configuration.accountId.slice(-6)}`); }
-async function hydrateSyncProfile(configuration: DesktopSyncConfiguration): Promise<DesktopSyncConfiguration | null> {
-  const profile = await fetchCommunityProfile(configuration.accessToken);
-  if (!profile?.handle) return null;
-  const next = { ...configuration, profile };
-  setDesktopSyncConfiguration(next);
-  return next;
+
+/** Sharing lives in its own window; Sync shows where it stands in one line. */
+function SharingRow({ sharing, onOpen }: { sharing: CommunitySharing; onOpen: () => void }) {
+  const notPublic = sharing.state === "review" || sharing.state === "private";
+  return <div className={styles.sharingRow}>
+    <span>
+      <strong>Your tags: {sharing.state ? SHARING_STATE_LABELS[sharing.state] : sharing.phase === "error" ? "Couldn't check" : "Checking…"}</strong>
+      {notPublic ? <small>Publish them to show them on your Community profile.</small> : null}
+    </span>
+    <button type="button" className={notPublic ? styles.primary : styles.secondary} onClick={onOpen}>{notPublic ? "Publish my tags" : "Change"}</button>
+  </div>;
+}
+
+function spotifySendLine(progress: SpotifySendProgress): string {
+  if (progress.listsTotal === null) return "getting your playlists ready.";
+  if (progress.listsDone === 0) return `reading Liked Songs (${progress.currentSongs.toLocaleString()} so far).`;
+  return `${progress.listsDone.toLocaleString()} of ${progress.listsTotal.toLocaleString()} lists.`;
 }

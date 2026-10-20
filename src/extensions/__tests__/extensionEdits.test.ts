@@ -5,6 +5,7 @@ import { TAG_DATA_SCHEMA_VERSION } from "@/utils/tagTaxonomy";
 import type { TagDataStructure, TrackData } from "@/types/tagData";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { storageService } from "@/services/storage/StorageService";
+import * as tagifyUsage from "@/features/discovery-survey/services/tagifyUsage";
 import {
   editSavedEntity,
   editSavedTrack,
@@ -127,6 +128,16 @@ describe("saving edits to the saved library", () => {
     const saved = await saveTrackEdits([first], { rating: 5 });
     expect(saved[first]?.rating).toBe(5);
     expect(saved[second]?.rating).toBe(5);
+  });
+
+  it("counts one manual gesture per kind, with where it was made, only when something changed", async () => {
+    const counted = vi.spyOn(tagifyUsage, "recordMeaningfulAction").mockResolvedValue();
+    await saveTrackEdits([first, second], { addTagIds: [jazz] }, { surface: "spotify_views" });
+    await saveTrackEdits([first], { toggleRating: 4 }, { surface: "keyboard" });
+    await saveTrackEdits([first], { addTagIds: [jazz] }, { surface: "spotify_views" });
+    await saveTrackEdits([first], { energy: 7 }, { surface: "keyboard" });
+    await saveTrackEdits([second], { rating: 2 });
+    expect(counted.mock.calls).toEqual([["tagging", "spotify_views"], ["rating", "keyboard"]]);
   });
 
   it("reports a library that can't be read instead of an empty one", async () => {

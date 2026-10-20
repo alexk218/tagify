@@ -176,6 +176,7 @@ const TagSelector: React.FC<TagSelectorProps> = ({
   const renderSubcategory = (categoryId: string, subcategory: TagSubcategory) => {
     const subcategoryKey = buildSubcategoryKey(categoryId, subcategory.id);
     const isSubcategoryExpanded = expandedSubcategories.has(subcategoryKey);
+    const childSubcategories = subcategory.subcategories || [];
 
     return (
       <div key={subcategory.id} className={styles.subcategory}>
@@ -194,8 +195,12 @@ const TagSelector: React.FC<TagSelectorProps> = ({
         {isSubcategoryExpanded && (
           <>
             {subcategory.tags.length > 0 && renderTagGrid(subcategory.tags)}
-            {(subcategory.subcategories || []).map((child) =>
-              renderSubcategory(categoryId, child),
+            {childSubcategories.length > 0 && (
+              <div className={styles.nestedSubcategoryList}>
+                {childSubcategories.map((child) =>
+                  renderSubcategory(categoryId, child),
+                )}
+              </div>
             )}
           </>
         )}

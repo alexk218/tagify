@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 
@@ -155,6 +156,26 @@ describe("SpotifyApiService entity metadata", () => {
       expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
+    it("describes a release for Community with one getAlbum request and no Web API request", async () => {
+      vi.mocked(Spicetify.GraphQL.Request).mockResolvedValue(albumUnion({ type: "SINGLE", date: { isoString: "1992-02-12T00:00:00Z", precision: "DAY" } }) as any);
+      await expect(spotifyApiService.getAlbumRelease("spotify:album:album-2", { priority: "background", feature: "metadata-backfill" })).resolves.toEqual({
+        name: "Quiet Machines", type: "SINGLE", date: { isoString: "1992-02-12T00:00:00Z", precision: "DAY" },
+        coverSources: [{ url: "https://example.com/cover.jpg" }],
+      });
+      expect(Spicetify.GraphQL.Request).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(Spicetify.GraphQL.Request).mock.calls[0][0]).toEqual({ name: "getAlbum" });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it("never describes one release with another's details", async () => {
+      vi.mocked(Spicetify.GraphQL.Request).mockResolvedValue(albumUnion({ uri: "spotify:album:album-9", type: "ALBUM" }) as any);
+      await expect(spotifyApiService.getAlbumRelease("spotify:album:album-2")).resolves.toBeNull();
+      delete (Spicetify.GraphQL.Definitions as any).getAlbum;
+      await expect(spotifyApiService.getAlbumRelease("spotify:album:album-2")).resolves.toBeNull();
+      expect(Spicetify.GraphQL.Request).toHaveBeenCalledTimes(1);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
     it("keeps stable artist identities from album pages", async () => {
       vi.mocked(Spicetify.GraphQL.Request).mockResolvedValue(albumUnion({ tracksV2: {
         totalCount: 1, items: [{ track: { uri: "spotify:track:one", artists: { items: [
@@ -234,9 +255,43 @@ describe("SpotifyApiService entity metadata", () => {
     await expect(
       spotifyApiService.getAllUserPlaylistReferencesStrict(),
     ).resolves.toEqual([
-      { playlistId: "top", playlistName: "4★" },
-      { playlistId: "nested", playlistName: "4.5★" },
+      { playlistId: "top", playlistName: "4★", folders: [] },
+      { playlistId: "nested", playlistName: "4.5★", folders: [] },
     ]);
+  });
+
+  it("names the folders each playlist sits in, without the account name in their addresses", async () => {
+    (Spicetify.Platform as any).RootlistAPI = {
+      getContents: vi.fn().mockResolvedValue({
+        items: [
+          { type: "playlist", uri: "spotify:playlist:top", name: "Top" },
+          {
+            type: "folder", name: "Workout", hash: "a1b2c3d4e5f60718", uri: "spotify:user:alex.k:folder:a1b2c3d4e5f60718:Workout",
+            items: [
+              // An older Spotify without `hash`: the ID comes from the address.
+              { type: "folder", name: "Running", uri: "spotify:user:alex.k:folder:0f1e2d3c4b5a6978:Running", items: [
+                { type: "playlist", uri: "spotify:playlist:tempo", name: "Tempo" },
+              ] },
+              { type: "playlist", uri: "spotify:playlist:stretch", name: "Stretch" },
+            ],
+          },
+          // A folder Tagify can't identify adds no level.
+          { type: "folder", name: "Odd", uri: "spotify:folder", items: [{ type: "playlist", uri: "spotify:playlist:odd", name: "Odd one" }] },
+          // A playlist listed twice keeps its first place.
+          { type: "folder", name: "Again", hash: "ffffffffffffffff", items: [{ type: "playlist", uri: "spotify:playlist:top", name: "Top" }] },
+        ],
+      }),
+    };
+
+    const references = await spotifyApiService.getAllUserPlaylistReferencesStrict();
+    expect(references).toEqual([
+      { playlistId: "top", playlistName: "Top", folders: [] },
+      { playlistId: "tempo", playlistName: "Tempo", folders: [{ id: "a1b2c3d4e5f60718", name: "Workout" }, { id: "0f1e2d3c4b5a6978", name: "Running" }] },
+      { playlistId: "stretch", playlistName: "Stretch", folders: [{ id: "a1b2c3d4e5f60718", name: "Workout" }] },
+      { playlistId: "odd", playlistName: "Odd one", folders: [] },
+    ]);
+    expect(JSON.stringify(references)).not.toContain("alex.k");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it("reads every desktop playlist page without a Web API fallback", async () => {

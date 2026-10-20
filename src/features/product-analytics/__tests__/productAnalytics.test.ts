@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import { webcrypto } from "node:crypto";
-import { recordProductEvent, setAnalyticsSharing, isAnalyticsSharing, flushProductEvents, canLinkInstallation } from "../productAnalytics";
+import { recordProductEvent, setAnalyticsSharing, isAnalyticsSharing, flushProductEvents, canLinkInstallation, presenceRecordedToday, savedSongsBucket, spotifyReleaseVersion } from "../productAnalytics";
 const account = "0".repeat(64);
 const key = "tagify:product-analytics:v1:" + account;
 const installationId = "ad824ac0-c441-4f56-85a7-ff1434d865bc";
@@ -194,7 +194,56 @@ describe("automatic Tagify product analytics", () => {
       ["community_connect_completed", { entry: "prompt", relationship: "first_link" }],
     ]);
   });
+  it("records presence once per day across restarts, with Spotify's release number only", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("Spicetify", { Platform: { version: "1.2.74.477.g8bc3e1a9", UserAPI: { getUser: async () => ({ username: "private-spotify-name" }) } } });
+    recordProductEvent(account, "tagify_present", { saved_songs: "100-999" });
+    (window as any).__tagifyProductAnalyticsV1.openedDays.clear();
+    recordProductEvent(account, "tagify_present", { saved_songs: "100-999" });
+    expect(queue().events).toHaveLength(1);
+    expect(presenceRecordedToday(account)).toBe(true);
+    expect(queue().events[0].properties).toMatchObject({ spotify_version: "1.2.74.477", saved_songs: "100-999" });
+    vi.setSystemTime(Date.now() + 86400000);
+    expect(presenceRecordedToday(account)).toBe(false);
+    recordProductEvent(account, "tagify_present");
+    expect(queue().events).toHaveLength(2);
+  });
+  it("sends the Spotify version only with presence, and edit surfaces from the fixed list", async () => {
+    vi.stubGlobal("Spicetify", { Platform: { version: "1.2.74.477", UserAPI: { getUser: async () => ({ username: "private-spotify-name" }) } } });
+    recordProductEvent(account, "tagify_opened", { sync_state: "connected", saved_songs: "0" });
+    recordProductEvent(account, "rating_completed", { edit_surface: "spotify_views" });
+    recordProductEvent(account, "tagging_completed", { edit_surface: "keyboard" });
+    expect(await flushProductEvents(account)).toBe(true);
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+    const details = body.batch.map(({ event, properties: { app_version: _version, $geoip_disable: _geo, $ip: _ip, $process_person_profile: _person, ...rest } }: any) => [event, rest]);
+    expect(details).toEqual([
+      ["tagify_opened", { sync_state: "connected", saved_songs: "0" }],
+      ["rating_completed", { edit_surface: "spotify_views" }],
+      ["tagging_completed", { edit_surface: "keyboard" }],
+    ]);
+  });
+  it("discards a stored Spotify version that was altered or moved to another event", () => {
+    recordProductEvent(account, "tagify_present");
+    const stored = queue();
+    stored.events[0].properties.spotify_version = "1.2.74 private";
+    stored.events.push({ ...stored.events[0], uuid: webcrypto.randomUUID(), event: "tagify_opened", properties: { ...stored.events[0].properties, spotify_version: "1.2.74.477" } });
+    localStorage.setItem(key, JSON.stringify(stored));
+    recordProductEvent(account, "settings_opened");
+    expect(queue().events.map((event: any) => event.event)).toEqual(["settings_opened"]);
+  });
+  it("buckets library size and keeps only Spotify's release number", () => {
+    expect([0, 1, 9, 10, 99, 100, 999, 1000, 25000].map(savedSongsBucket)).toEqual(["0", "1-9", "1-9", "10-99", "10-99", "100-999", "100-999", "1000+", "1000+"]);
+    expect(savedSongsBucket(-1)).toBeUndefined();
+    expect(savedSongsBucket(Number.NaN)).toBeUndefined();
+    expect(spotifyReleaseVersion("1.2.74.477.g8bc3e1a9")).toBe("1.2.74.477");
+    expect(spotifyReleaseVersion("1.2.74")).toBe("1.2.74");
+    expect(spotifyReleaseVersion("unknown")).toBeUndefined();
+    expect(spotifyReleaseVersion(undefined)).toBeUndefined();
+  });
   it.each([
+    ["an edit surface outside the fixed list", "tagging_completed", { edit_surface: "context_menu" }],
+    ["a library size outside the fixed list", "tagify_opened", { saved_songs: "1234" }],
+    ["an edit surface on presence", "tagify_present", { edit_surface: "keyboard" }],
     ["an unknown detail", "update_banner_shown", { update_kind: "minor", latest_version: "3.3.0" }],
     ["a sync state outside the fixed list", "tagify_opened", { sync_state: "paused" }],
     ["a connection detail on another event", "community_connect_started", { relationship: "reconnect" }],

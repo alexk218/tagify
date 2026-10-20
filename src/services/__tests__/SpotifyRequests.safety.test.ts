@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { graphqlRateLimiter } from "@/utils/RateLimiter";
 import { spotifyFetch, spotifyRead, spotifyWrite } from "../SpotifyRequests";

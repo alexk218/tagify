@@ -138,6 +138,40 @@ describe("account prompt history", () => {
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
   });
 
+  it("reads history once per Spotify session, however often Spotify is shown or Tagify reopened", async () => {
+    vi.useFakeTimers();
+    try {
+      const request = vi.fn(async () => response());
+      const { store } = start(undefined, request);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.getSnapshot().ready).toBe(true);
+      expect(request).toHaveBeenCalledTimes(1);
+
+      // Before: every return to Spotify more than five minutes later read it again.
+      for (let hour = 0; hour < 3; hour++) {
+        await vi.advanceTimersByTimeAsync(60 * 60_000);
+        document.dispatchEvent(new Event("visibilitychange"));
+        // Tagify's page closes and opens again.
+        stops.splice(0).forEach((stop) => stop());
+        stops.push(store.start("3.0.0"));
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(request).toHaveBeenCalledTimes(1);
+
+      // A dismissal on this device is still sent at once.
+      store.markSeen("discoverySurveyDismissed");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request).toHaveBeenCalledTimes(2);
+
+      // The next Spotify start reads it again.
+      start(undefined, request);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("honors a rate limit and does not restart retries when Spotify is shown again", async () => {
     vi.useFakeTimers();
     try {

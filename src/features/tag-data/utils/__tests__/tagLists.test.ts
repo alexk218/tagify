@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it } from "vitest";
 import { listTags, matchTagList, parseTagList } from "../tagLists";
 it("reads quoted commas, pasted brackets, escaped quotes and deduplicates names", () => {

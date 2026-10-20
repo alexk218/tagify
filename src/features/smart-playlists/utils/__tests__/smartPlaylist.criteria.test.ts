@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { TrackData } from "@/types/tagData";
 import { SmartPlaylistFilterCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";

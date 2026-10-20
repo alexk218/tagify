@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { beforeEach, expect, it } from "vitest";
 import { TrackEditHistory } from "../TrackEditHistory";
 const song = (rating: number) => ({ rating, energy: 0, bpm: null, tagIds: [], dateModified: rating });

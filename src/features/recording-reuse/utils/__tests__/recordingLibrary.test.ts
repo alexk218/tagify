@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it } from "vitest";
 import { collapseRecordingEntries, confirmedRecordingSets, hasRecordingConflict, recordingCandidates, recordingDisplayKeys } from "../recordingLibrary";
 import { collectMatchingTrackUris } from "@/features/smart-playlists/utils/smartPlaylist.syncUtils";

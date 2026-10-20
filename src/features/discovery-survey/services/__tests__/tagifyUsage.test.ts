@@ -1,9 +1,11 @@
+import * as productAnalytics from "@/features/product-analytics/productAnalytics";
 import { setAnalyticsSharing } from "@/features/product-analytics/productAnalytics";
+import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 vi.mock("@/features/product-analytics/config.json", () => ({ default: { token: "", host: "https://us.i.posthog.com" } }));
 import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { ACTIVITY_REPORT_INTERVAL_MS, activityDay, recordMeaningfulAction, getUsageAccountDigest, isUsageReportDue, recordDiscoveryAnswer, recordTagifyOpen, retryAfterMs, USAGE_PAUSED_UNTIL_KEY, useTagifyUsage } from "../tagifyUsage";
+import { ACTIVITY_REPORT_INTERVAL_MS, activityDay, recordMeaningfulAction, getUsageAccountDigest, isUsageReportDue, recordDiscoveryAnswer, recordTagifyOpen, recordTagifyPresent, retryAfterMs, USAGE_PAUSED_UNTIL_KEY, useTagifyUsage } from "../tagifyUsage";
 
 describe("private Tagify usage recording", () => {
   let getUser: ReturnType<typeof vi.fn>;
@@ -55,6 +57,31 @@ describe("private Tagify usage recording", () => {
     expect(Object.keys(body).sort()).toEqual(["accountDigest", "activityCapable", "appVersion"]);
     expect(body.accountDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(body)).not.toContain("stable-account");
+  });
+
+  it("adds a library size bucket to opens and presence, and leaves it out when the library can't be read", async () => {
+    const recorded = vi.spyOn(productAnalytics, "recordProductEvent");
+    const count = vi.spyOn(indexedDBStorage, "getTrackCount").mockResolvedValueOnce(240).mockRejectedValueOnce(new Error("unreadable")).mockResolvedValueOnce(0);
+    await recordTagifyOpen("3.3.2");
+    await recordTagifyOpen("3.3.2");
+    await recordTagifyPresent();
+    expect(recorded.mock.calls.map(([, event, details]) => [event, details])).toEqual([
+      ["tagify_opened", { sync_state: expect.any(String), saved_songs: "100-999" }],
+      ["tagify_opened", { sync_state: expect.any(String) }],
+      ["tagify_present", { saved_songs: "0" }],
+    ]);
+    count.mockRestore(); recorded.mockRestore();
+  });
+
+  it("records edits from the Tagify page unless another surface is named", async () => {
+    const recorded = vi.spyOn(productAnalytics, "recordProductEvent");
+    await recordMeaningfulAction("tagging");
+    await recordMeaningfulAction("rating", "spotify_views");
+    expect(recorded.mock.calls.map(([, event, details]) => [event, details])).toEqual([
+      ["tagging_completed", { edit_surface: "tagify_page" }],
+      ["rating_completed", { edit_surface: "spotify_views" }],
+    ]);
+    recorded.mockRestore();
   });
 
   it("keeps retried counters stable and preserves actions made during a request", async () => {

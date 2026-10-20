@@ -23,7 +23,7 @@ const ACCOUNT_B = "b".repeat(64);
 const advance = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 /** Lets the account lookup finish, then waits out the delay that keeps the invitation from flashing. */
 const settle = async () => { await advance(0); await advance(1100); };
-const prompt = () => screen.queryByRole("region", { name: "Connect to Community" });
+const prompt = () => screen.queryByRole("region", { name: "Share your tags on Community" });
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -57,14 +57,14 @@ describe("Community connection invitation", () => {
     await settle();
 
     expect(prompt()).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Connect to Community" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Share your tags on Community" })).toBeInTheDocument();
     expect(prompt()).toHaveAccessibleDescription(
-      "Back up your tags and share them with friends. If someone invited you, this finishes joining them.",
+      "Put the music you tag on your own profile and back up your library. You choose what's public. If someone invited you, this finishes joining them.",
     );
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("button", { name: "Tag a song" })).toHaveFocus();
 
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share my tags" }));
     expect(onConnect).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem(`${COMMUNITY_CONNECT_PROMPT_PREFIX}${ACCOUNT_A}`)).toBeNull();
   });

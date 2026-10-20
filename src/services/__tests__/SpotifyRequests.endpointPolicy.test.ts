@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
 import { spotifyFetch, spotifyRead } from "../SpotifyRequests";
 import { spotifyApiService } from "../SpotifyApiService";

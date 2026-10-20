@@ -5,6 +5,7 @@ import { spotifyFetch, spotifyRead, spotifyWrite, spotifyAccountKey, promoteSpot
 import { rememberRuleFacts } from "@/features/automatic-tags/facts";
 import { normalizeRecordingIdentity } from "@/features/recording-reuse/utils/recordingReuse";
 import { normalizeQueuePage } from "@/features/track-session/utils/taggingQueue.logic";
+import type { SpotifyTrack } from "@/types/SpotifyTypes";
 import { trackArtistIdentitiesStore, type TrackArtist } from "@/services/trackArtistIdentities";
 import { audioFeaturesService } from "@/services/AudioFeaturesService";
 import { requestSpicetifyGraphQL } from "@/services/spicetifyGraphQL";
@@ -60,6 +61,13 @@ export interface SpotifyArtistMetadata {
   genres: string[];
 }
 
+/** Spotify's desktop Liked Songs calls (checked live on 2026-10-19; SPOTIFY_ENDPOINT_POLICY.md). */
+interface DesktopLikedSongs {
+  contains(...uris: string[]): Promise<unknown>;
+  add(options: { uris: string[] }): Promise<unknown>;
+}
+const desktopLikedSongs = () => Spicetify.Platform.LibraryAPI as unknown as DesktopLikedSongs;
+
 class SpotifyApiService {
   private playlistReadsBlockedUntil = 0;
   private getAccessToken(): string | null {
@@ -77,6 +85,38 @@ class SpotifyApiService {
    * desktop metadata can't describe has no identity for now and is retried later.
    */
   getRecordingIdentity = async (uri: string, signal?: AbortSignal, options?: RequestOptions) => {
+    const value = await this.readTrackMetadata(uri, signal, options);
+    if (!value) return undefined;
+    return normalizeRecordingIdentity({
+      isrc: value.external_id?.find((entry: { type?: string }) => entry.type?.toLowerCase() === "isrc")?.id?.toUpperCase(),
+      artistIds: value.artist?.map((artist: { gid?: string }) =>
+        typeof artist.gid === "string" && /^[a-f0-9]{32}$/i.test(artist.gid) ? Spicetify.URI.hexToId(artist.gid) : undefined),
+      durationMs: value.duration, name: value.name,
+    });
+  };
+
+  /**
+   * A song's ISRC and the album Spotify files it under, from the same desktop
+   * metadata as getRecordingIdentity (one request, no Web API). `isrc` is null
+   * when Spotify lists none; `albumUri` is null when the answer names no album.
+   * Undefined when Spotify can't describe the song right now.
+   */
+  getTrackRelease = async (uri: string, options?: RequestOptions): Promise<{ isrc: string | null; albumUri: string | null } | undefined> => {
+    const value = await this.readTrackMetadata(uri, undefined, options);
+    if (!value) return undefined;
+    const isrc = Array.isArray(value.external_id)
+      ? value.external_id.find((entry: { type?: unknown }) => typeof entry?.type === "string" && entry.type.toLowerCase() === "isrc")?.id
+      : undefined;
+    const albumGid = value.album?.gid;
+    const albumId = typeof albumGid === "string" && /^[a-f0-9]{32}$/i.test(albumGid) ? Spicetify.URI.hexToId(albumGid) : undefined;
+    return {
+      isrc: typeof isrc === "string" ? isrc : null,
+      albumUri: typeof albumId === "string" && /^[A-Za-z0-9]{22}$/.test(albumId) ? `spotify:album:${albumId}` : null,
+    };
+  };
+
+  /** Spotify's desktop metadata for one song, or undefined when Spotify can't describe it. */
+  private readTrackMetadata = async (uri: string, signal?: AbortSignal, options?: RequestOptions): Promise<any | undefined> => {
     const id = uri.match(/^spotify:track:([A-Za-z0-9]{22})$/)?.[1];
     if (!id) throw new Error("Recording matching is available for Spotify songs.");
     const token = this.getAccessToken();
@@ -87,16 +127,11 @@ class SpotifyApiService {
     const response = await spotifyFetch(`https://spclient.wg.spotify.com/metadata/4/track/${hex}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal,
     }, undefined, options);
-    // A 429 throws inside spotifyFetch and pauses requests; other failures mean no identity yet.
+    // A 429 throws inside spotifyFetch and pauses requests; other failures mean no answer yet.
     if (!response.ok) return undefined;
     const value = await response.json();
-    if (typeof value.gid !== "string" || value.gid.toLowerCase() !== hex.toLowerCase()) return undefined;
-    return normalizeRecordingIdentity({
-      isrc: value.external_id?.find((entry: { type?: string }) => entry.type?.toLowerCase() === "isrc")?.id?.toUpperCase(),
-      artistIds: value.artist?.map((artist: { gid?: string }) =>
-        typeof artist.gid === "string" && /^[a-f0-9]{32}$/i.test(artist.gid) ? Spicetify.URI.hexToId(artist.gid) : undefined),
-      durationMs: value.duration, name: value.name,
-    });
+    if (typeof value?.gid !== "string" || value.gid.toLowerCase() !== hex.toLowerCase()) return undefined;
+    return value;
   };
 
   getTaggingQueuePage = async (playlistId: string | null, offset = 0, signal?: AbortSignal) => {
@@ -173,6 +208,56 @@ class SpotifyApiService {
   };
 
   createPrivatePlaylist = (name: string, description = ""): Promise<string> => this.createPlaylist(name, { description, isPublic: false });
+
+  /**
+   * Whether a playlist is still in the member's library and theirs to change. Spotify keeps a
+   * deleted playlist readable, so deletion shows as `isSaved: false`.
+   */
+  ownPlaylistState = async (playlistId: string): Promise<"mine" | "gone"> => {
+    const uri = `spotify:playlist:${playlistId}`;
+    const metadata = await spotifyRead<any>(`desktop:playlist:getMetadata:${JSON.stringify([uri])}`, () => (Spicetify.Platform.PlaylistAPI as any).getMetadata(uri), { resource: uri, feature: "playlist-details" });
+    if (!metadata || typeof metadata !== "object") throw new Error("Spotify didn't describe the playlist");
+    return metadata.isOwnedBySelf === true && metadata.isSaved === true && metadata.canEditItems !== false ? "mine" : "gone";
+  };
+
+  /** Renames a playlist and sets its description through Spotify's desktop app. */
+  updatePlaylistDetails = async (playlistId: string, details: { name: string; description: string }): Promise<void> => {
+    const uri = `spotify:playlist:${playlistId}`;
+    await spotifyWrite(() => (Spicetify.Platform.PlaylistAPI as any).updateDetails(uri, details), { resource: uri, feature: "playlist-details" });
+  };
+
+  /**
+   * Leaves a playlist holding exactly `uris`, in order, through Spotify's desktop app. Songs that
+   * already start the playlist in the right order stay; everything after them is removed (by
+   * occurrence) and the rest added at the end, then the result is read back and checked.
+   */
+  replacePlaylistTracks = async (playlistId: string, uris: string[], options?: RequestOptions): Promise<void> => {
+    const uri = `spotify:playlist:${playlistId}`;
+    const api = Spicetify.Platform.PlaylistAPI as any;
+    options = { feature: "playlist-contents", ...options };
+    this.membershipCache.delete(`${spotifyAccountKey()}:${playlistId}`);
+    try {
+      const current = (await this.readPlaylistItems(playlistId, options)).map(item => ({ uri: (item.uri ?? item.link) as string, uid: item.uid as string | undefined }));
+      let keep = 0;
+      while (keep < current.length && keep < uris.length && current[keep].uri === uris[keep]) keep++;
+      const removing = current.slice(keep);
+      if (removing.some(item => !item.uid)) throw new Error("Spotify did not identify the songs to remove");
+      for (let index = 0; index < removing.length; index += 100) {
+        const batch = removing.slice(index, index + 100).map(item => ({ uri: item.uri, uid: item.uid }));
+        await spotifyWrite(() => api.remove(uri, batch), { ...options, resource: uri });
+      }
+      const adding = uris.slice(keep);
+      for (let index = 0; index < adding.length; index += 100) {
+        const batch = adding.slice(index, index + 100);
+        await spotifyWrite(() => api.add(uri, batch, { after: "end" }), { ...options, resource: uri });
+      }
+      if (!removing.length && !adding.length) return;
+      const written = (await this.readPlaylistItems(playlistId, options)).map(item => item.uri ?? item.link);
+      if (written.length !== uris.length || written.some((value, index) => value !== uris[index])) throw new Error("Spotify didn't keep the playlist's songs in order");
+    } finally {
+      this.membershipCache.delete(`${spotifyAccountKey()}:${playlistId}`);
+    }
+  };
 
   private hasUsableName(value: unknown, placeholder: string): value is string {
     return (
@@ -313,6 +398,43 @@ class SpotifyApiService {
       console.error("Error fetching album metadata:", error);
       return null;
     }
+  };
+
+  /**
+   * An album's artists (IDs and names) from Spotify's own client API, the
+   * main artist first. Empty when Spotify lists none; there is no Web API fallback.
+   */
+  getAlbumArtists = async (albumUri: string, options?: RequestOptions): Promise<Array<{ uri: string; name: string }>> => {
+    const { GraphQL, Locale } = Spicetify;
+    const definition = GraphQL?.Definitions?.getAlbum || GraphQL?.Definitions?.albumMetadata;
+    if (!definition) return [];
+    const response = await requestSpicetifyGraphQL<{ data?: unknown }>(definition, {
+      uri: albumUri, locale: Locale?.getLocale?.() || "en", offset: 0, limit: 1,
+    }, undefined, options);
+    const album = this.findAlbumMetadataNode(response?.data, albumUri);
+    const items: unknown = album?.artists?.items ?? album?.albumArtists?.items ?? [];
+    return (Array.isArray(items) ? items : []).flatMap((artist: { uri?: unknown; profile?: { name?: unknown }; name?: unknown }) => {
+      const name = artist?.profile?.name ?? artist?.name;
+      return typeof artist?.uri === "string" && artist.uri.startsWith("spotify:artist:") && typeof name === "string" ? [{ uri: artist.uri, name }] : [];
+    });
+  };
+
+  /**
+   * What Spotify's own client API says about a release: its name, kind
+   * (ALBUM, SINGLE, EP or COMPILATION), release date and cover, unchecked.
+   * One getAlbum request; null when Spotify can't describe this album.
+   */
+  getAlbumRelease = async (albumUri: string, options?: RequestOptions): Promise<{ name: unknown; type: unknown; date: unknown; coverSources: unknown } | null> => {
+    const { GraphQL, Locale } = Spicetify;
+    const definition = GraphQL?.Definitions?.getAlbum;
+    if (!definition) return null;
+    const response = await requestSpicetifyGraphQL<{ data?: unknown }>(definition, {
+      uri: albumUri, locale: Locale?.getLocale?.() || "en", offset: 0, limit: 1,
+    }, undefined, options);
+    const album = this.findAlbumMetadataNode(response?.data, albumUri);
+    // Never describe one release with another's details.
+    if (!album || album.uri !== albumUri) return null;
+    return { name: album.name, type: album.type, date: album.date, coverSources: album.coverArt?.sources };
   };
 
   /**
@@ -913,36 +1035,23 @@ class SpotifyApiService {
     return extractPlaylistIds(contents.items);
   };
 
-  getAllUserPlaylistReferencesStrict = async (signal?: AbortSignal): Promise<
-    Array<{ playlistId: string; playlistName: string }>
-  > => {
+  /** Every playlist in the member's library, in Spotify's order, with the folders it sits in. */
+  getAllUserPlaylistReferencesStrict = async (signal?: AbortSignal): Promise<RootlistPlaylist[]> => {
     const root = await spotifyRead<any>("desktop:rootlist:getContents:[]", () => (Spicetify.Platform.RootlistAPI as any).getContents(), { signal });
     if (!Array.isArray(root?.items)) throw new Error("Spotify did not return your playlists");
-    const names = new Map<string, string>();
-    const collect = (items: any[]) => {
-      for (const item of items) {
-        if (item.type === "playlist" && typeof item.uri === "string") names.set(item.uri.split(":").pop()!, typeof item.name === "string" ? item.name : "");
-        else if (item.type === "folder" && Array.isArray(item.items)) collect(item.items);
-      }
-    };
-    collect(root.items);
-    const playlistIds = [...names.keys()];
-    const references: Array<{ playlistId: string; playlistName: string } | null> = [];
-    for (const playlistId of [...new Set(playlistIds)]) {
+    const references: Array<RootlistPlaylist | null> = [];
+    for (const playlist of rootlistPlaylists(root.items)) {
       if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
-      if (names.get(playlistId)?.trim()) { references.push({ playlistId, playlistName: names.get(playlistId)! }); continue; }
+      if (playlist.playlistName.trim()) { references.push(playlist); continue; }
       try {
-        const metadata = await spotifyRead<any>(`desktop:playlist:getMetadata:${JSON.stringify([`spotify:playlist:${playlistId}`])}`, () =>
-          (Spicetify.Platform.PlaylistAPI as any).getMetadata(`spotify:playlist:${playlistId}`), { signal });
+        const metadata = await spotifyRead<any>(`desktop:playlist:getMetadata:${JSON.stringify([`spotify:playlist:${playlist.playlistId}`])}`, () =>
+          (Spicetify.Platform.PlaylistAPI as any).getMetadata(`spotify:playlist:${playlist.playlistId}`), { signal });
         references.push(typeof metadata?.name === "string" && metadata.name.trim()
-          ? { playlistId, playlistName: metadata.name } : null);
+          ? { ...playlist, playlistName: metadata.name } : null);
       } catch (error) { throwIfSpotifyRequestStopped(error); }
     }
 
-    return references.filter(
-      (reference): reference is { playlistId: string; playlistName: string } =>
-        reference !== null,
-    );
+    return references.filter((reference): reference is RootlistPlaylist => reference !== null);
   };
 
   /**
@@ -1076,6 +1185,18 @@ class SpotifyApiService {
     }
   };
 
+  /** Whether each song is in the member's Liked Songs, read fresh from Spotify's desktop app. */
+  likedSongsContain = async (uris: string[]): Promise<boolean[]> => {
+    const flags = await spotifyRead<unknown>(`desktop:library:contains:${JSON.stringify(uris)}`, () => desktopLikedSongs().contains(...uris), { feature: "library" });
+    if (!Array.isArray(flags) || flags.length !== uris.length) throw new Error("Spotify couldn't check your Liked Songs");
+    return flags.map(Boolean);
+  };
+
+  /** Saves songs to the member's Liked Songs through Spotify's desktop app, never the Web API. */
+  saveToLikedSongs = async (uris: string[]): Promise<void> => {
+    await spotifyWrite(() => desktopLikedSongs().add({ uris }), { feature: "library" });
+  };
+
   /**
    * Add single track to playlist using Platform API
    */
@@ -1154,6 +1275,12 @@ class SpotifyApiService {
     throw new Error("Spotify playlist check exceeded its page limit");
   };
 
+  /** Every song in a playlist through the desktop API (strict pagination), for Tagify Community's lists. */
+  readPlaylistTracks = async (playlistId: string, options?: RequestOptions): Promise<SpotifyTrack[]> => {
+    const items = await this.readPlaylistItems(playlistId, { feature: "playlist-contents", priority: "background", ...options });
+    return normalizeQueuePage({ items, totalLength: items.length }, 0).tracks;
+  };
+
   /** Collect stable occurrence IDs before deleting so pagination cannot skip shifted rows. */
   removeDuplicatePlaylistOccurrences = async (playlistId: string, options?: RequestOptions): Promise<number> => {
     const playlistUri = `spotify:playlist:${playlistId}`;
@@ -1174,3 +1301,42 @@ class SpotifyApiService {
 }
 
 export const spotifyApiService = new SpotifyApiService();
+
+/** A Spotify playlist folder: Spotify's own ID for it (never the account name in its address) and its name. */
+export interface RootlistFolder { id: string; name: string }
+/** A playlist in the member's library, with the folders it sits in, outermost first (only where Tagify read them). */
+export interface RootlistPlaylist { playlistId: string; playlistName: string; folders?: RootlistFolder[] }
+
+const ROOTLIST_FOLDER_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** A folder's ID: Spotify's `hash` for it, or the part of its address after ":folder:". */
+function rootlistFolderId(item: { hash?: unknown; uri?: unknown }): string | null {
+  if (typeof item.hash === "string" && ROOTLIST_FOLDER_ID.test(item.hash)) return item.hash;
+  const match = typeof item.uri === "string" ? /:folder:([A-Za-z0-9_-]{1,64})(?::|$)/.exec(item.uri) : null;
+  return match ? match[1] : null;
+}
+
+/**
+ * The playlists in Spotify's library tree (RootlistAPI.getContents), in Spotify's order, each with
+ * the folders it sits in, outermost first. A playlist listed twice keeps its first place. A folder
+ * Tagify can't identify is left out, and its playlists sit in the folder around it.
+ */
+export function rootlistPlaylists(items: unknown[]): Array<Required<RootlistPlaylist>> {
+  const found = new Map<string, Required<RootlistPlaylist>>();
+  const visit = (nodes: unknown[], folders: RootlistFolder[]) => {
+    for (const node of nodes) {
+      const item = node as { type?: unknown; uri?: unknown; name?: unknown; items?: unknown; hash?: unknown } | null;
+      if (!item) continue;
+      if (item.type === "playlist" && typeof item.uri === "string") {
+        const playlistId = item.uri.split(":").pop()!;
+        if (!found.has(playlistId)) found.set(playlistId, { playlistId, playlistName: typeof item.name === "string" ? item.name : "", folders });
+      } else if (item.type === "folder" && Array.isArray(item.items)) {
+        const id = rootlistFolderId(item);
+        const inside = id && !folders.some((folder) => folder.id === id) ? [...folders, { id, name: typeof item.name === "string" ? item.name : "" }] : folders;
+        visit(item.items, inside);
+      }
+    }
+  };
+  visit(items, []);
+  return [...found.values()];
+}

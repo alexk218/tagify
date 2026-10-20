@@ -37,12 +37,9 @@ export function backupNotices(health: Partial<BackupHealth> | null): string[] {
   return notices;
 }
 
-export function communitySyncStatusLabel(status: SyncStatus, visibilityReviewed: boolean | null, settingsNeedChoice = false): string {
-  if (status === "snapshot-required") return "Backup paused. Your library is still on this device.";
-  if (settingsNeedChoice && (status === "idle" || status === "publishing")) return "Choose which saved settings to keep";
-  if (visibilityReviewed === false || status === "publication-review-required") {
-    return "Choose what appears on your public profile";
-  }
+/** How the backup stands. Sharing has its own line, so a pending sharing choice reads as backed up. */
+export function communitySyncStatusLabel(status: SyncStatus, settingsNeedChoice = false): string {
+  if (settingsNeedChoice && (status === "idle" || status === "publishing" || status === "publication-review-required")) return "Choose which saved settings to keep";
   const labels: Record<SyncStatus, string> = {
     idle: "Up to date",
     syncing: "Saving your changes…",
@@ -51,7 +48,7 @@ export function communitySyncStatusLabel(status: SyncStatus, visibilityReviewed:
     reauthorize: "Reconnect Tagify to keep backing up",
     "snapshot-required": "Backup paused. Your library is still on this device.",
     "merge-required": "Choose how to combine your libraries",
-    "publication-review-required": "Choose what appears on your public profile",
+    "publication-review-required": "Up to date",
     "recovery-available": "Your Community backup can restore this device",
     restoring: "Getting your library back…",
     "restore-failed": "Couldn't restore yet. Your Community backup is safe.",
@@ -59,6 +56,12 @@ export function communitySyncStatusLabel(status: SyncStatus, visibilityReviewed:
     unlinked: "Not connected",
   };
   return labels[status];
+}
+
+/** The short backup half of the Community screen's status line. */
+export function backupLabel(status: SyncStatus): string {
+  if (status === "idle" || status === "publishing" || status === "publication-review-required") return "Backed up";
+  return communitySyncStatusLabel(status);
 }
 
 export function communityErrorMessage(error: unknown, fallback: string): string {

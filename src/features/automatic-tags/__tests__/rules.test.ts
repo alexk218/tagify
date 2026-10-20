@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { defaultTagData } from "@/constants/defaultTagData";
 import { normalizeRules, planRule, ruleMatch, spotifyScope, type AutomaticTagRule } from "../rules";

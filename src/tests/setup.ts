@@ -1,6 +1,9 @@
-import "@testing-library/jest-dom";
-import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
+
+// Test files that never touch the DOM opt into the faster node environment with a
+// `// @vitest-environment node` comment. They get the same storage and Spicetify mocks, without
+// loading jsdom or the DOM-only setup.
+const { cleanup } = typeof document !== "undefined" ? await import("./setupDom") : { cleanup: () => {} };
 
 const storage = new Map<string, string>();
 
@@ -24,7 +27,7 @@ const localStorageMock = {
   },
 };
 
-Object.defineProperty(window, "localStorage", {
+Object.defineProperty(globalThis, "localStorage", {
   value: localStorageMock,
   writable: true,
   configurable: true,
@@ -82,6 +85,9 @@ const spicetifyMock = {
     },
     LibraryAPI: {
       getTracks: vi.fn().mockResolvedValue([]),
+      // Spotify answers one boolean per URI.
+      contains: vi.fn(async (...uris: string[]) => uris.map(() => false)),
+      add: vi.fn(async () => undefined),
     },
   },
   GraphQL: {
@@ -99,23 +105,6 @@ Object.defineProperty(globalThis, "Spicetify", {
   configurable: true,
 });
 
-if (!window.matchMedia) {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: vi.fn().mockImplementation((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
-  });
-}
-
 if (!URL.createObjectURL) {
   Object.defineProperty(URL, "createObjectURL", {
     value: vi.fn(() => "blob:mock-url"),
@@ -130,10 +119,6 @@ if (!URL.revokeObjectURL) {
     writable: true,
     configurable: true,
   });
-}
-
-if (!HTMLElement.prototype.scrollIntoView) {
-  HTMLElement.prototype.scrollIntoView = vi.fn();
 }
 
 beforeEach(() => {

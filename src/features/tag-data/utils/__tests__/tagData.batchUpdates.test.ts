@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { TagDataStructure, TrackTag } from "@/types/tagData";
 import { applyBatchTagUpdatesToData } from "../tagData.batchUpdates";

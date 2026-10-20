@@ -1,54 +1,10 @@
+import { getDesktopSyncConfiguration, sessionNeedsRefresh, setDesktopSyncConfiguration, type DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { COMMUNITY_ORIGIN } from "./communityLinks";
-
-export const COMMUNITY_DEVICE_CREDENTIAL_KEY = "tagify:communityDeviceCredentialV1";
-
-export interface CommunityDeviceCredentialV1 {
-  accessToken: string;
-  refreshToken?: string;
-  accessTokenExpiresAt?: string;
-  refreshTokenExpiresAt?: string;
-  profile?: {
-    id?: string | null;
-    handle: string | null;
-    displayName: string | null;
-  };
-}
 
 export interface CommunityProfileSummary {
   id?: string | null;
   handle: string | null;
   displayName: string | null;
-}
-
-export function readCommunityDeviceCredential(): CommunityDeviceCredentialV1 | null {
-  try {
-    const value = JSON.parse(localStorage.getItem(COMMUNITY_DEVICE_CREDENTIAL_KEY) || "null") as unknown;
-    if (!value || typeof value !== "object" || typeof (value as Record<string, unknown>).accessToken !== "string") return null;
-    return value as CommunityDeviceCredentialV1;
-  } catch {
-    return null;
-  }
-}
-
-export function clearCommunityDeviceCredential(): void {
-  localStorage.removeItem(COMMUNITY_DEVICE_CREDENTIAL_KEY);
-}
-
-export function writeCommunityDeviceCredential(credential: CommunityDeviceCredentialV1): void {
-  localStorage.setItem(COMMUNITY_DEVICE_CREDENTIAL_KEY, JSON.stringify(credential));
-}
-
-export async function refreshCommunityDeviceProfile(): Promise<CommunityDeviceCredentialV1 | null> {
-  const credential = readCommunityDeviceCredential();
-  if (!credential?.accessToken) return null;
-  const profile = await fetchCommunityProfile(credential.accessToken, communityDeviceFetch);
-  if (!profile) return readCommunityDeviceCredential();
-  const next = {
-    ...(readCommunityDeviceCredential() ?? credential),
-    profile,
-  };
-  writeCommunityDeviceCredential(next);
-  return next;
 }
 
 export async function fetchCommunityProfile(
@@ -65,6 +21,24 @@ export async function fetchCommunityProfile(
   };
 }
 
+/** Saves the Community handle on this device's connection the first time it is known. */
+export async function hydrateSyncProfile(configuration: DesktopSyncConfiguration): Promise<DesktopSyncConfiguration | null> {
+  // Sync may have refreshed the session since this view opened.
+  const current = getDesktopSyncConfiguration();
+  if (current?.deviceId !== configuration.deviceId) return null;
+  // Community would refuse a session about to expire. Sync refreshes it, and
+  // the next opening asks again.
+  if (sessionNeedsRefresh(current)) return null;
+  const profile = await fetchCommunityProfile(current.accessToken);
+  if (!profile?.handle) return null;
+  // Keep a session sync refreshed during the request.
+  const latest = getDesktopSyncConfiguration();
+  if (latest?.deviceId !== configuration.deviceId) return null;
+  const next = { ...latest, profile };
+  setDesktopSyncConfiguration(next);
+  return next;
+}
+
 export function sameCommunityProfile(
   left: CommunityProfileSummary | null | undefined,
   right: CommunityProfileSummary | null | undefined,
@@ -72,28 +46,4 @@ export function sameCommunityProfile(
   if (!left?.handle || !right?.handle) return true;
   if (left.id && right.id) return left.id === right.id;
   return left.handle.toLowerCase() === right.handle.toLowerCase();
-}
-
-export async function communityDeviceFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  let credential = readCommunityDeviceCredential();
-  if (!credential?.accessToken) return new Response(null, { status: 401 });
-  const request = () => fetch(`${COMMUNITY_ORIGIN}${path}`, {
-    ...init,
-    headers: { ...init.headers, authorization: `Bearer ${credential!.accessToken}` },
-  });
-  let response = await request();
-  if (response.status !== 401 || !credential.refreshToken) return response;
-  const refresh = await fetch(`${COMMUNITY_ORIGIN}/api/v2/device/refresh`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ refreshToken: credential.refreshToken }),
-  });
-  if (!refresh.ok) {
-    clearCommunityDeviceCredential();
-    return response;
-  }
-  credential = await refresh.json() as CommunityDeviceCredentialV1;
-  writeCommunityDeviceCredential(credential);
-  response = await request();
-  return response;
 }
