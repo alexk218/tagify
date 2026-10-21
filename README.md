@@ -4,6 +4,7 @@ Tagify is a powerful [Spicetify](https://github.com/spicetify/cli) custom app th
 
 [![GitHub release](https://img.shields.io/github/release/alexk218/tagify.svg)](https://github.com/alexk218/tagify/releases)
 [![GitHub Discussions](https://img.shields.io/github/discussions/alexk218/tagify?color=blue&logo=github&label=discussions)](https://github.com/alexk218/tagify/discussions)
+[![Discord](https://img.shields.io/discord/1446966761806368820?logo=discord&logoColor=white&label=discord&color=5865F2)](https://discord.gg/C4qbPUbBKV)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buymeacoffee&logoColor=000)](https://buymeacoffee.com/alexk218)
 
 
