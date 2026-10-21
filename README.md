@@ -68,13 +68,11 @@ Restart Spotify and choose **Tagify**.
 
 ## Community & Support
 
-Discover music and share your tags on [Tagify Community](https://community.tagify.fm).
+Join the [Discord](https://discord.gg/qWDu5hWgp)! 
+For anything from feature ideas, bug reports, to sharing tag setups and music. 
 
-- **Upcoming Features**: [Tagify Roadmap](https://github.com/alexk218/tagify/discussions/4)
-- **Feature Requests**: [Share your ideas](https://github.com/alexk218/tagify/discussions/categories/ideas-feature-requests)
-- **Get Help**: [Ask questions](https://github.com/alexk218/tagify/discussions/categories/q-a)
-- **Report Bugs**: [Bug reports](https://github.com/alexk218/tagify/discussions/categories/bug-report)
-- **Announcements**: [Latest updates](https://github.com/alexk218/tagify/discussions/categories/announcements)
+Or, feel free to create an Issue on this repo if there's a problem you'd like to report.
+Discover music and share your tags on [Tagify Community](https://community.tagify.fm).
 
 ## Support me ☕
 Many coffees were consumed in the making of Tagify. 
