@@ -24,6 +24,15 @@ vi.mock("@/extensions/WelcomeModal", () => ({ welcomeModal: { initialize: vi.fn(
 vi.mock("@/features/smart-playlists/utils/smartPlaylist.storage", () => ({ loadSmartPlaylistsFromStorage: vi.fn(async () => []) }));
 // The test page must never ask the real Community site for tag names.
 vi.mock("@/features/tag-data/utils/communityPopularTags", () => ({ preloadCommunityPopularTags: vi.fn(async () => undefined), getCommunityPopularTags: () => [] }));
+// Nor for what other members tagged the playing song with.
+const communityEntities = vi.hoisted(() => ({ answers: new Map<string, unknown>() }));
+vi.mock("@/features/community/communityEntityCache", () => ({
+  peekCommunityEntity: vi.fn(() => undefined),
+  lookupCommunityEntity: vi.fn(async (_kind: string, providerId: string) => {
+    const entity = communityEntities.answers.get(providerId) ?? null;
+    return { found: Boolean(entity), entity };
+  }),
+}));
 
 const tagId = (name: string) =>
   Object.values(defaultTagData.taxonomy.tagsById).find((tag) => tag.name === name)!.id;
@@ -459,4 +468,34 @@ it("retains the available title when rating a previously unsaved song from the p
     await eventually(async () => expect(await indexedDBStorage.getTrack(uri)).toMatchObject({ rating: 5, name: "Seventh Ciel", artists: "SimbaSōl" }));
     expect(lookup).not.toHaveBeenCalled();
   } finally { lookup.mockRestore(); player.data = previous; songChange(); }
+});
+
+it("shows how many other people tagged the playing song on Community, with their tags on hover", async () => {
+  const other = `spotify:track:${"o".repeat(22)}`;
+  const player = spicetify.Player as unknown as { data: unknown };
+  const previous = player.data;
+  const songChange = (vi.mocked(spicetify.Player.addEventListener).mock.calls as unknown as [string, () => void][]).find(([event]) => event === "songchange")![1];
+  const chip = () => document.querySelector<HTMLElement>(".tagify-playbar-info .tagify-playbar-community-tags");
+  const tags = (labels: string[]) => labels.map((label) => ({ label, path: `Mood / ${label}` }));
+  communityEntities.answers.set("o".repeat(22), {
+    contributors: [
+      { handle: "ana", displayName: "Ana", ratingHalfStars: null, isFollowing: false, tags: tags(["Dreamy", "Late night"]) },
+      { handle: "ben", displayName: "Ben", ratingHalfStars: null, isFollowing: false, tags: tags(["dreamy"]) },
+    ],
+  });
+  try {
+    expect(chip()).toBeNull();
+    player.data = { item: { uri: other, name: "Other" } }; songChange();
+    await eventually(() => expect(chip()?.textContent).toBe("2"));
+    chip()!.dispatchEvent(new MouseEvent("mouseenter"));
+    expect([...document.querySelectorAll(".tagify-tag-popover-chip")].map((tag) => tag.textContent)).toEqual(["Dreamy · 2", "Late night"]);
+    chip()!.dispatchEvent(new MouseEvent("click"));
+    // A song no one else tagged shows nothing.
+    player.data = previous; songChange();
+    await eventually(() => expect(control()?.dataset.tagifyTrackUri).toBe(songUri));
+    expect(chip()).toBeNull();
+  } finally {
+    player.data = previous; communityEntities.answers.clear();
+    window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+  }
 });

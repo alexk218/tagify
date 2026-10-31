@@ -64,7 +64,7 @@ describe("CommunityWorkspace", () => {
     expect(onOpenCloudSync).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Visit Community" }));
-    expect(openSpy).toHaveBeenCalledWith("https://community.tagify.fm", "_blank", "noopener,noreferrer");
+    expect(openSpy).toHaveBeenCalledWith("https://tagify.fm", "_blank", "noopener,noreferrer");
     expect(screen.queryByRole("button", { name: "Sync" })).not.toBeInTheDocument();
   });
 
@@ -99,7 +99,7 @@ describe("CommunityWorkspace", () => {
 
     expect(screen.getByText("Public · Backed up")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View my profile" }));
-    expect(openSpy).toHaveBeenCalledWith("https://community.tagify.fm/@alex", "_blank", "noopener,noreferrer");
+    expect(openSpy).toHaveBeenCalledWith("https://tagify.fm/@alex", "_blank", "noopener,noreferrer");
     fireEvent.click(screen.getByRole("button", { name: "Choose what's hidden" }));
     expect(onOpenSharing).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Visit Community" })).toBeInTheDocument();
@@ -144,7 +144,7 @@ describe("CommunityWorkspace", () => {
 
     await waitFor(() => expect(onDisconnect).toHaveBeenCalledTimes(1));
     expect(openSpy).toHaveBeenCalledWith(
-      `https://community.tagify.fm/auth/disconnect?account=${ACCOUNT}&device=${DEVICE}`,
+      `https://tagify.fm/auth/disconnect?account=${ACCOUNT}&device=${DEVICE}`,
       "_blank",
       "noopener,noreferrer",
     );

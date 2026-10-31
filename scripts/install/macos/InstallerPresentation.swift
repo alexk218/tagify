@@ -31,12 +31,19 @@ func installerLogo(_ name: String, size: CGFloat = 28) -> NSImageView {
 // Retain NSButton's keyboard, accessibility and target/action behavior while matching the Windows controls.
 final class InstallerButton: NSButton {
     var primary = false { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    // A green dot and short status after the title, such as how many people are online.
+    var badge: String? { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    private var badgeFont: NSFont { .systemFont(ofSize: 11, weight: .medium) }
+    private var badgeWidth: CGFloat {
+        guard let badge = badge else { return 0 }
+        return 10 + 7 + 5 + ceil((badge as NSString).size(withAttributes: [.font: badgeFont]).width)
+    }
     private var hovering = false
     private var hoverArea: NSTrackingArea?
 
     override var intrinsicContentSize: NSSize {
         let width = (title as NSString).size(withAttributes: [.font: font ?? NSFont.systemFont(ofSize: 12)]).width
-        return NSSize(width: ceil(width) + 28, height: primary ? 50 : 32)
+        return NSSize(width: ceil(width) + 28 + badgeWidth, height: primary ? 50 : 32)
     }
 
     override func updateTrackingAreas() {
@@ -59,7 +66,15 @@ final class InstallerButton: NSButton {
         let color = !isEnabled ? NSColor(white: 0.43, alpha: 1) : primary ? NSColor(srgbRed: 7 / 255, green: 26 / 255, blue: 13 / 255, alpha: 1) : NSColor(white: 0.90, alpha: 1)
         let label = NSAttributedString(string: title, attributes: [.font: font ?? NSFont.systemFont(ofSize: 12), .foregroundColor: color])
         let size = label.size()
-        label.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
+        let start = (bounds.width - size.width - badgeWidth) / 2
+        label.draw(at: NSPoint(x: start, y: (bounds.height - size.height) / 2))
+        if let badge = badge {
+            let dotX = start + size.width + 10
+            InstallerTheme.green.setFill()
+            NSBezierPath(ovalIn: NSRect(x: dotX, y: bounds.midY - 3.5, width: 7, height: 7)).fill()
+            let text = NSAttributedString(string: badge, attributes: [.font: badgeFont, .foregroundColor: NSColor(srgbRed: 142 / 255, green: 227 / 255, blue: 168 / 255, alpha: 1)])
+            text.draw(at: NSPoint(x: dotX + 12, y: (bounds.height - text.size().height) / 2))
+        }
     }
     override func drawFocusRingMask() {
         NSBezierPath(roundedRect: bounds, xRadius: primary ? 10 : 8, yRadius: primary ? 10 : 8).fill()

@@ -28,10 +28,11 @@ import {
 import { formatTagFilterFormula } from "@/utils/tagFilterGroups";
 import {
   parsePersonalSmartPlaylistBackup,
+  SMART_PLAYLIST_BACKUP_MAX_BYTES,
   SmartPlaylistImportSummary,
   SpotifyPlaylistReference,
 } from "@/features/smart-playlists/utils/smartPlaylist.import";
-import { parseSmartPlaylistShare, SMART_PLAYLIST_SHARE_MAX_BYTES, type SmartPlaylistRecipeSelection } from "@/features/smart-playlists/utils/smartPlaylist.recipes";
+import { parseSmartPlaylistShare, type SmartPlaylistRecipeSelection } from "@/features/smart-playlists/utils/smartPlaylist.recipes";
 import type { SmartPlaylistRecipeBundle } from "../model/smartPlaylist.types";
 import SmartPlaylistSharingDialog from "./SmartPlaylistSharingDialog";
 import {
@@ -148,8 +149,9 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     event.target.value = "";
     if (!file) return;
     setImportError("");
-    if (file.size > SMART_PLAYLIST_SHARE_MAX_BYTES) {
-      setImportError("This file is too large. Choose a backup or share with fewer Smart Playlists."); return;
+    // Shared setups keep their own 2 MB limit, checked once the file is known to be one (parseSmartPlaylistShare).
+    if (file.size > SMART_PLAYLIST_BACKUP_MAX_BYTES) {
+      setImportError("This file is too large to be a Tagify backup. Choose the backup file Tagify saved."); return;
     }
     setReadingFile(true);
     const reader = new FileReader();

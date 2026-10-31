@@ -24,6 +24,8 @@ interface TagSelectorProps {
   targetType?: "track" | "tracks" | "playlist" | "album" | "artist";
   isMultiTagging: boolean;
   isLockedTrack: boolean;
+  // A library with no tags yet opens every group, unless the person already chose what's open.
+  expandForFirstRun?: boolean;
 }
 
 const TagSelector: React.FC<TagSelectorProps> = ({
@@ -36,6 +38,7 @@ const TagSelector: React.FC<TagSelectorProps> = ({
   targetType = "track",
   isMultiTagging = false,
   isLockedTrack = false,
+  expandForFirstRun = false,
 }) => {
   const [expandedCategoryIds, setExpandedCategoryIds] = useLocalStorage<string[]>(
     "tagify:expandedCategories",
@@ -119,6 +122,16 @@ const TagSelector: React.FC<TagSelectorProps> = ({
     setExpandedSubcategoryKeys([]);
     setAreAllExpanded(false);
   };
+
+  useEffect(() => {
+    if (!expandForFirstRun || sortedCategories.length === 0) return;
+    try {
+      if (localStorage.getItem("tagify:expandedCategories") !== null) return;
+    } catch { return; }
+    expandAll();
+    // Only the first render of a new library decides this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandForFirstRun, sortedCategories.length]);
 
   const toggleExpandAll = () => {
     if (areAllExpanded) {
@@ -209,7 +222,7 @@ const TagSelector: React.FC<TagSelectorProps> = ({
   };
 
   return (
-    <div className={styles.container} ref={containerRef}>
+    <div className={styles.container} ref={containerRef} data-tagify-tag-selector="">
       <div className={styles.header}>
         <div className={styles.titleContainer}>
           <h2 className={styles.title}>

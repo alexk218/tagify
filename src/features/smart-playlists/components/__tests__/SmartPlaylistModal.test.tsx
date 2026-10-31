@@ -288,6 +288,42 @@ describe("SmartPlaylistModal", () => {
       expect(mockOnExportSmartPlaylists).toHaveBeenCalledTimes(2);
     });
 
+    // @adu101 (2026-10-22): a backup of Smart Playlists holding ~60,000 songs is over 2 MB, the limit for shared setups.
+    describe("restoring a large backup", () => {
+      const songs = (count: number) => Array.from({ length: count }, (_, index) => `spotify:track:${index.toString(36).padStart(22, "0")}`);
+      const choose = async (content: string, name: string) => {
+        const file = new File([content], name, { type: "application/json" });
+        await userEvent.setup().upload(document.querySelector<HTMLInputElement>('input[type="file"]')!, file);
+        return file;
+      };
+
+      it("restores a backup over 2 MB", async () => {
+        renderModal();
+        const playlists = mockSmartPlaylists.map((playlist) => ({ ...playlist, smartPlaylistTrackUris: songs(30_000) }));
+        const file = await choose(JSON.stringify({ format: "tagify-smart-playlist-backup", version: 1, exportedAt: "2026-10-18T00:00:00.000Z", playlists }, null, 2), "tagify-smart-playlists-backup-2026-10-18.json");
+        expect(file.size).toBeGreaterThan(2 * 1024 * 1024);
+        expect(await screen.findByRole("button", { name: "Restore Smart Playlists" })).toBeInTheDocument();
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      });
+
+      it("still refuses a shared setup over 2 MB", async () => {
+        renderModal();
+        const share = { format: "tagify-smart-playlist-recipes", version: 1, recipes: [], padding: "x".repeat(2 * 1024 * 1024) };
+        await choose(JSON.stringify(share), "shared-setups.json");
+        expect(await screen.findByRole("alert")).toHaveTextContent("This file is too large. Ask the sender to share fewer setups at a time.");
+      });
+
+      it("refuses a file far larger than any backup without reading it", async () => {
+        renderModal();
+        const file = new File(["x"], "huge.json", { type: "application/json" });
+        Object.defineProperty(file, "size", { value: 65 * 1024 * 1024 });
+        const read = vi.spyOn(FileReader.prototype, "readAsText");
+        await userEvent.setup().upload(document.querySelector<HTMLInputElement>('input[type="file"]')!, file);
+        expect(await screen.findByRole("alert")).toHaveTextContent("This file is too large to be a Tagify backup. Choose the backup file Tagify saved.");
+        expect(read).not.toHaveBeenCalled();
+      });
+    });
+
     it("should render empty state when no smart playlists exist", () => {
       renderModal({ smartPlaylists: [] });
 

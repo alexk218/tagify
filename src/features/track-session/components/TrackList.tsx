@@ -8,7 +8,6 @@ import React, {
   useState,
 } from "react";
 import styles from "./TrackList.module.css";
-import { GettingStartedQuestion } from "@/features/discovery-survey";
 import { parseLocalFileUri } from "@/utils/LocalFileParser";
 import type { SmartPlaylistCriteria } from "@/features/smart-playlists";
 import type { SmartPlaylistImportSummary } from "@/features/smart-playlists";
@@ -191,6 +190,8 @@ interface TrackListProps {
   ) => Promise<SmartPlaylistImportSummary>;
   requestedSmartPlaylistEditId?: string | null;
   onSmartPlaylistEditRequestHandled?: () => void;
+  // Each new value opens Create Playlist for the songs the filters show.
+  createPlaylistRequest?: number;
   /**
    * Tracks opened from Stats; while set, the list shows only these. A new id starts from clear
    * filters and scrolls the list into view, unless `reveal` is "track" (a song was opened instead).
@@ -230,6 +231,7 @@ const TrackList: React.FC<TrackListProps> = ({
   onImportSmartPlaylists,
   requestedSmartPlaylistEditId = null,
   onSmartPlaylistEditRequestHandled,
+  createPlaylistRequest = 0,
   statsTrackSet = null,
   onClearStatsTrackSet,
   onReturnToStats,
@@ -796,6 +798,13 @@ const TrackList: React.FC<TrackListProps> = ({
     }
   };
 
+  const handledCreatePlaylistRequest = useRef(createPlaylistRequest);
+  useEffect(() => {
+    if (createPlaylistRequest === handledCreatePlaylistRequest.current) return;
+    handledCreatePlaylistRequest.current = createPlaylistRequest;
+    if (filteredTracks.length > 0) setShowCreatePlaylistModal(true);
+  }, [createPlaylistRequest, filteredTracks.length]);
+
   const handleCloseCreatePlaylistModal = () => {
     setShowCreatePlaylistModal(false);
     setEditingSmartPlaylist(null);
@@ -991,7 +1000,7 @@ const TrackList: React.FC<TrackListProps> = ({
   };
 
   return (
-    <div ref={listContainerRef} className={styles.container}>
+    <div ref={listContainerRef} className={styles.container} data-tagify-track-list="">
       <div className={styles.filterControlsGrid}>
         {/* HEADER */}
         <div className={styles.filterControlsLeftGrid}>
@@ -1836,14 +1845,11 @@ const TrackList: React.FC<TrackListProps> = ({
       {notePreviews.error && <PrivateNotePreviewError onRetry={notePreviews.retry} />}
       <div className={styles.trackList}>
         {sortedTracksVisible.length === 0 ? (
-          <>
-            <p className={styles.noTracks}>
-              {Object.keys(deferredTracks).length === 0
-                ? "No tagged tracks yet. Start tagging your favorite tracks!"
-                : "No tracks match your filters."}
-            </p>
-            {Object.keys(deferredTracks).length === 0 && <GettingStartedQuestion />}
-          </>
+          <p className={styles.noTracks}>
+            {Object.keys(deferredTracks).length === 0
+              ? "No tagged tracks yet. Start tagging your favorite tracks!"
+              : "No tracks match your filters."}
+          </p>
         ) : (
           sortedTracksVisible.map(([uri, data]) => {
             const trackData = data;

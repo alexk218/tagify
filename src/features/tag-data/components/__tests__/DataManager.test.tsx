@@ -105,7 +105,7 @@ describe("DataManager", () => {
     });
   });
 
-  it("controls update protection independently from support buttons", async () => {
+  const renderDataManager = () =>
     render(
       <DataManager
         onExportTagData={vi.fn().mockResolvedValue(undefined)}
@@ -115,35 +115,37 @@ describe("DataManager", () => {
         onRetryMigration={vi.fn()} onConnectCommunity={vi.fn()} onOpenSync={vi.fn()}
       />,
     );
+  const optionalButtonNames = [
+    "Spotify update protection help",
+    "Give feedback - shape Tagify's future",
+    "Support Tagify :)",
+    "Invite a friend to Tagify",
+    "Join the Discord!",
+  ];
 
-    expect(
-      screen.getByRole("button", { name: "Spotify update protection help" }),
-    ).toBeInTheDocument();
+  it("hides every optional top menu button with one setting", async () => {
+    renderDataManager();
+    for (const name of optionalButtonNames) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
 
     fireEvent.click(screen.getByTitle("Settings"));
     fireEvent.click(
-      await screen.findByRole("checkbox", { name: "Show support buttons" }),
+      await screen.findByRole("checkbox", { name: "Show optional buttons" }),
     );
 
-    expect(
-      screen.getByRole("button", { name: "Spotify update protection help" }),
-    ).toBeInTheDocument();
-    expect(localStorage.getItem("tagify:showSupportButtons")).toBe("false");
+    for (const name of optionalButtonNames) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+    expect(localStorage.getItem("tagify:showOptionalButtons")).toBe("false");
+  });
 
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: "Show update protection button",
-      }),
-    );
-
-    expect(
-      screen.queryByRole("button", {
-        name: "Spotify update protection help",
-      }),
-    ).not.toBeInTheDocument();
-    expect(localStorage.getItem("tagify:showUpdateProtectionButton")).toBe(
-      "false",
-    );
+  it("keeps the top menu quiet for members who hid buttons with the earlier toggles", () => {
+    localStorage.setItem("tagify:showSupportButtons", "false");
+    renderDataManager();
+    for (const name of optionalButtonNames) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
   });
 
   it("opens the Stats view and shows when it is open", () => {
@@ -195,7 +197,7 @@ describe("DataManager", () => {
     render(<DataManager onExportTagData={vi.fn()} onImportTagData={vi.fn()} onOpenStats={vi.fn()} onResetTagifyData={vi.fn()} onRetryMigration={vi.fn()} onConnectCommunity={onConnectCommunity} onOpenSync={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Invite a friend to Tagify" }));
     // Not connected on this computer: the general link, with Community setup to add a name.
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Invite link" })).toHaveTextContent("https://community.tagify.fm/join"));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Invite link" })).toHaveTextContent("https://tagify.fm/join"));
     fireEvent.click(screen.getByRole("button", { name: "Connect Community" }));
     expect(onConnectCommunity).toHaveBeenCalledOnce();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

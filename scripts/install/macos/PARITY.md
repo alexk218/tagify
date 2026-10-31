@@ -5,7 +5,8 @@ The Mac manager lives here; Windows lives in the private `alexk218/tagify-instal
 For every installer change, review both platforms before release:
 
 - App name: **Tagify Manager**.
-- Footer: **Tutorial** and **Get help on Discord** (`https://discord.gg/C4qbPUbBKV`).
+- Footer: **Tutorial** and **Join the Discord** (`https://discord.gg/C4qbPUbBKV`), showing "N online" from Discord's public invite counts once at least 10 people are online, and nothing when counts are unavailable.
+- Discord community: after a successful setup, one line invites people to join (member total shown from 100 members). Failures offer **Ask on Discord**, which copies diagnostics before opening the invite; ordinary failure copy points to that action.
 - Setup: Spotify, Spicetify and Tagify status; **Logs**, **Check again**, and repair.
 - Tutorial: Spicetify homepage link and purpose; desktop Spotify requirement; keep the manager for future repairs.
 - Update protection: enabled by default; explain that Spotify updates remove Spicetify and Tagify; preserve pending/error feedback without a redundant saved-choice message. With **Block Spotify updates** unchecked, a protection error never stops setup; the protection status shows what still needs attention.

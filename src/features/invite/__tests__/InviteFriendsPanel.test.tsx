@@ -10,7 +10,7 @@ vi.mock("@/features/product-analytics/productAnalytics", async (importOriginal) 
   recordProductInteraction: vi.fn(),
 }));
 
-const personal: InviteLink = { kind: "personal", url: "https://community.tagify.fm/join/alex", preview: "https://community.tagify.fm/join/alex/opengraph-image" };
+const personal: InviteLink = { kind: "personal", url: "https://tagify.fm/join/alex", preview: "https://tagify.fm/join/alex/opengraph-image" };
 const general = (nameStep: "connect" | "publish" | null): InviteLink => ({ kind: "general", url: GENERAL_INVITE_URL, preview: GENERAL_INVITE_PREVIEW, nameStep });
 
 function renderPanel(link: InviteLink, entry: "action_bar" | "milestone" = "action_bar") {
@@ -54,8 +54,8 @@ describe("InviteFriendsPanel", () => {
   it("offers Community setup to put the member's name on the invite", async () => {
     const actions = renderPanel(general("connect"), "milestone");
     await findLinkField(GENERAL_INVITE_URL);
-    expect(GENERAL_INVITE_URL).toBe("https://community.tagify.fm/join");
-    expect(screen.getByRole("img", { name: "You're invited to Tagify" })).toHaveAttribute("src", "https://community.tagify.fm/join/opengraph-image");
+    expect(GENERAL_INVITE_URL).toBe("https://tagify.fm/join");
+    expect(screen.getByRole("img", { name: "You're invited to Tagify" })).toHaveAttribute("src", "https://tagify.fm/join/opengraph-image");
     expect(recordProductInteraction).toHaveBeenCalledWith("invite_opened", { invite_entry: "milestone", invite_link: "general" });
 
     fireEvent.click(screen.getByRole("button", { name: "Connect Community" }));
@@ -77,11 +77,11 @@ describe("InviteFriendsPanel", () => {
 
   it("shows a long handle whole, letting the link wrap only after a slash", async () => {
     const handle = "the_longest_handle_allowed_x30";
-    const long: InviteLink = { kind: "personal", url: `https://community.tagify.fm/join/${handle}`, preview: `https://community.tagify.fm/join/${handle}/opengraph-image` };
+    const long: InviteLink = { kind: "personal", url: `https://tagify.fm/join/${handle}`, preview: `https://tagify.fm/join/${handle}/opengraph-image` };
     renderPanel(long);
     const field = await findLinkField(long.url);
     const wrapsAfter = [...field.querySelectorAll("wbr")].map((mark) => mark.previousSibling?.textContent);
-    expect(wrapsAfter).toEqual(["https://", "community.tagify.fm/", "join/"]);
+    expect(wrapsAfter).toEqual(["https://", "tagify.fm/", "join/"]);
     expect(field.lastChild?.textContent).toBe(handle);
   });
 

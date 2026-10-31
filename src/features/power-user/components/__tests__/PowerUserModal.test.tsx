@@ -13,7 +13,7 @@ describe("PowerUserModal", () => {
     expect(buttons).toEqual(["Invite a friend", "Star on GitHub", "Close"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Invite a friend" }));
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Invite link" })).toHaveTextContent("https://community.tagify.fm/join"));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Invite link" })).toHaveTextContent("https://tagify.fm/join"));
     expect(screen.queryByRole("button", { name: "Star on GitHub" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Connect Community" }));

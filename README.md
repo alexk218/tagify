@@ -4,7 +4,6 @@ Tagify is a powerful [Spicetify](https://github.com/spicetify/cli) custom app th
 
 [![GitHub release](https://img.shields.io/github/release/alexk218/tagify.svg)](https://github.com/alexk218/tagify/releases)
 [![GitHub Discussions](https://img.shields.io/github/discussions/alexk218/tagify?color=blue&logo=github&label=discussions)](https://github.com/alexk218/tagify/discussions)
-[![Discord](https://img.shields.io/discord/1446966761806368820?logo=discord&logoColor=white&label=discord&color=5865F2)](https://discord.gg/C4qbPUbBKV)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buymeacoffee&logoColor=000)](https://buymeacoffee.com/alexk218)
 
 
@@ -69,11 +68,13 @@ Restart Spotify and choose **Tagify**.
 
 ## Community & Support
 
-Join the [Discord](https://discord.gg/qWDu5hWgp)! 
-For anything from feature ideas, bug reports, to sharing tag setups and music. 
+Discover music and share your tags on [Tagify Community](https://tagify.fm).
 
-Or, feel free to create an Issue on this repo if there's a problem you'd like to report.
-Discover music and share your tags on [Tagify Community](https://community.tagify.fm).
+- **Upcoming Features**: [Tagify Roadmap](https://github.com/alexk218/tagify/discussions/4)
+- **Feature Requests**: [Share your ideas](https://github.com/alexk218/tagify/discussions/categories/ideas-feature-requests)
+- **Get Help**: [Ask questions](https://github.com/alexk218/tagify/discussions/categories/q-a)
+- **Report Bugs**: [Bug reports](https://github.com/alexk218/tagify/discussions/categories/bug-report)
+- **Announcements**: [Latest updates](https://github.com/alexk218/tagify/discussions/categories/announcements)
 
 ## Support me ☕
 Many coffees were consumed in the making of Tagify. 

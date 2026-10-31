@@ -58,7 +58,7 @@ interface InfoModalProps {
   initialSection?: string;
 }
 
-const LATEST_WHATS_NEW_VERSION = "3.3.2";
+const LATEST_WHATS_NEW_VERSION = "3.3.3";
 const WHATS_NEW_SEEN_VERSION_KEY = "tagify:info-modal:whats-new-seen-version";
 
 const hasSeenLatestWhatsNew = () => {
@@ -239,6 +239,28 @@ const InfoModal: React.FC<InfoModalProps> = ({
               {activeSection === "whats-new" && (
                 <div className={styles.section}>
                   <div className={styles.whatsNewHeader}>
+                    <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.3.3")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.3.3</a></h3>
+                  </div>
+                  <ul className={styles.compactUpdates}>
+                    {[
+                      { title: "Community tags in Now Playing", description: "see how many people tagged the song and what they tagged.", icon: faUsers },
+                      { title: "Pick your playlists", description: "choose which playlists go to Community.", icon: faFolderTree },
+                      { title: "Smart Playlists fixes", description: "they now follow tags from Community and other computers, and big backups restore.", icon: faBrain },
+                    ].map(({ title, description, icon }) => (
+                      <li key={title} className={styles.compactUpdate}>
+                        <FontAwesomeIcon icon={icon} className={styles.compactUpdateIcon} aria-hidden="true" />
+                        <div className={styles.compactUpdateCopy}>
+                          <h4 className={styles.compactUpdateTitle}>{title}</h4>
+                          <p className={styles.compactUpdateDescription}>{description}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <details className={styles.releaseAccordion}>
+                    <summary className={styles.releaseSummary}><span>What's New in Tagify 3.3.2</span></summary>
+                    <div>
+                  {/* TAGIFY 3.3.2 */}
+                  <div className={styles.whatsNewHeader}>
                     <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.3.2")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.3.2</a></h3>
                   </div>
                   <p className={styles.text}>Community &lt;-&gt; Spotify on steroids</p>
@@ -258,6 +280,8 @@ const InfoModal: React.FC<InfoModalProps> = ({
                       </li>
                     ))}
                   </ul>
+                    </div>
+                  </details>
                   <details className={styles.releaseAccordion}>
                     <summary className={styles.releaseSummary}><span>What's New in Tagify 3.3.1</span></summary>
                     <div>
@@ -290,7 +314,7 @@ const InfoModal: React.FC<InfoModalProps> = ({
                   <div className={styles.whatsNewHeader}>
                     <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.3.0")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.3.0</a></h3>
                   </div>
-                  <p className={styles.text}>This one is all about Tagify and <a href="https://community.tagify.fm" target="_blank" rel="noopener noreferrer">Tagify Community</a> working together!</p>
+                  <p className={styles.text}>This one is all about Tagify and <a href="https://tagify.fm" target="_blank" rel="noopener noreferrer">Tagify Community</a> working together!</p>
                   <ul className={styles.compactUpdates}>
                     {[
                       { title: "Tag names other people use", description: "when you name a new tag, Tagify suggests the names other members already use and points out near-duplicates.", icon: faTag },
@@ -320,7 +344,7 @@ const InfoModal: React.FC<InfoModalProps> = ({
                   <p className={styles.text}>New Stats, quicker tagging and more reliable Smart Playlists.</p>
                   <h4 className={styles.featureTitle}>See the music behind your stats</h4>
                   <p className={styles.text}>Explore your tagging calendar, streaks, favorite tags, ratings, artists, tempo, energy and musical keys. Open a chart’s songs to search, play or turn them into a playlist.</p>
-                  <p className={styles.text}>You can also choose to share your tagging calendar, longest streak, average rating and favorite tag pairs on your <a href="https://community.tagify.fm" target="_blank" rel="noopener noreferrer">Tagify Community profile</a>!</p>
+                  <p className={styles.text}>You can also choose to share your tagging calendar, longest streak, average rating and favorite tag pairs on your <a href="https://tagify.fm" target="_blank" rel="noopener noreferrer">Tagify Community profile</a>!</p>
                   <h4 className={styles.featureTitle}>Your tags follow matching releases</h4>
                   <p className={styles.text}>Spotify often has multiple releases of the same recording, like a single and an album release. Tagify detects matching copies and keeps your tags, ratings and energy consistent across them.</p>
                   <p className={styles.text}>+ other minor bug fixes!</p>
@@ -445,7 +469,7 @@ const InfoModal: React.FC<InfoModalProps> = ({
                         </ul>
                         <a
                           className={styles.primaryFeatureLink}
-                          href="https://community.tagify.fm"
+                          href="https://tagify.fm"
                           target="_blank"
                           rel="noopener noreferrer"
                         >
@@ -1860,7 +1884,7 @@ const InfoModal: React.FC<InfoModalProps> = ({
                   />
                 </a>
                 <a
-                  href="https://www.tagify.fm"
+                  href="https://tagify.fm"
                   target="_blank"
                   rel="noopener noreferrer"
                   title="Visit our website"

@@ -103,6 +103,13 @@ export function mergeImportedSmartPlaylists(
   ];
 }
 
+/**
+ * Personal backups keep every song each Smart Playlist added, so a large library writes one well over
+ * the 2 MB limit for shared setups (SMART_PLAYLIST_SHARE_MAX_BYTES): ~60,000 songs is about 2.8 MB.
+ * This limit only turns away files no backup could reach, before they are read.
+ */
+export const SMART_PLAYLIST_BACKUP_MAX_BYTES = 64 * 1024 * 1024;
+
 /** Personal backups retain Spotify connections; shared files deliberately do not. */
 export function parsePersonalSmartPlaylistBackup(value: unknown): SmartPlaylistCriteria[] | null {
   const candidate = Array.isArray(value) ? value : value && typeof value === "object" &&

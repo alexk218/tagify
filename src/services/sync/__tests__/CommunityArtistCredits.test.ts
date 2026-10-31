@@ -119,9 +119,9 @@ describe("sending artist credits", () => {
       if (init?.method === "POST") { posted.push(JSON.parse(String(init.body))); return Response.json({ accepted: 1, ignored: 0 }); }
       return Response.json({ items: [track(1), track(2)], hasMore: true });
     });
-    const trackArtists = vi.fn().mockResolvedValueOnce([artist(1)]).mockRejectedValueOnce(new Error("Spotify paused"));
+    const trackArtists = vi.fn().mockResolvedValueOnce([artist(1)]).mockRejectedValueOnce(Object.assign(new Error("Spotify paused"), { status: 429, retryAfterSeconds: 60 }));
     const run = await runArtistCreditReports(session, sources({ trackArtists }), { request: request as typeof fetch, storage: memory() });
-    expect(run).toEqual({ sent: 1, reads: 2, stopped: "spotify" });
+    expect(run).toEqual({ sent: 1, reads: 2, stopped: "spotify", cause: { kind: "rate-limit", status: 429, retryAfterSeconds: 60 } });
     expect(posted).toHaveLength(1);
     expect(request).toHaveBeenCalledTimes(2);
   });

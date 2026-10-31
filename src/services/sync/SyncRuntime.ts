@@ -1,4 +1,6 @@
 import { syncClientHeaders } from "./SyncClientHeaders";
+import { catalogFillLive, watchedRequest } from "./CatalogFillLive";
+import { CatalogFillRunLog, catalogFillRun, type CatalogFillRunOutcome, type CatalogFillRunStart } from "./CommunityCatalogFillRunLog";
 import type {
   AnnotationField,
   AnnotationPatchMutationV1,
@@ -23,7 +25,8 @@ import type {
   InitialMergeResultV1,
   InitialMergeSource,
 } from "@tagify/sync-contracts";
-import { assertLibrarySnapshotV1, assertLibrarySnapshotV2, assertSyncMutationV1, DURABLE_APP_STATE_DOMAINS, entityKeyV1, INITIAL_MERGE_REVIEW_VERSION, MAX_APP_STATE_DOCUMENT_BYTES, MAX_SYNC_BATCH_OPERATIONS, planInitialLibraryMerge, PLAYLIST_WRITE_REQUEST_EVENT, PRIVATE_SYNC_PROTOCOL_VERSION } from "@tagify/sync-contracts";
+import { assertLibrarySnapshotV1, assertLibrarySnapshotV2, assertSyncMutationV1, DURABLE_APP_STATE_DOMAINS, entityKeyV1, INITIAL_MERGE_REVIEW_VERSION, MAX_APP_STATE_DOCUMENT_BYTES, MAX_SYNC_BATCH_OPERATIONS, planInitialLibraryMerge, PLAYLIST_WRITE_REQUEST_EVENT, PRIVATE_SYNC_PROTOCOL_VERSION, SPOTIFY_LIST_CATALOG_REQUEST_EVENT, SPOTIFY_LIST_CHOICE_FEATURE } from "@tagify/sync-contracts";
+import { isNewCatalogRequest, markCatalogRequestHandled, sendSpotifyListCatalog } from "./SpotifyListCatalog";
 import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import { storageService } from "@/services/storage/StorageService";
 import { indexedDBStorage, type SyncTransactionContext, type SyncTransactionWrites } from "@/services/storage/IndexedDBStorageService";
@@ -76,10 +79,19 @@ import { canWritePlaylists, localCreatedPlaylists, PLAYLIST_WRITES_FEATURE, Play
 import { runArtistCreditReports } from "./CommunityArtistCredits";
 import { communityArtistCreditSources } from "./CommunityArtistCreditSources";
 import { runSongReleaseReports } from "./CommunitySongReleases";
+import { runCatalogFillJobs } from "./CommunityCatalogFillJobs";
+import { NowPlayingLookupScheduler, runNowPlayingLookups } from "./CommunityNowPlayingLookups";
+import { communityNowPlayingLookupSources } from "./CommunityNowPlayingLookupSources";
+import { SpotifySearchLookupScheduler, runSpotifySearchLookups } from "./CommunitySpotifySearchLookups";
+import { communitySpotifySearchLookupSources } from "./CommunitySpotifySearchLookupSources";
+import { communityCatalogFillJobSources } from "./CommunityCatalogFillJobSources";
 import { communitySongReleaseSources } from "./CommunitySongReleaseSources";
+import { runSongNameReports } from "./CommunitySongNames";
+import { communitySongNameSources } from "./CommunitySongNameSources";
 import { canPlayFromCommunity, DESKTOP_PLAY_FEATURE, DesktopPlayer, readDesktopPlayRequest } from "./DesktopPlay";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { spotifyAccountKey } from "@/services/SpotifyRequests";
+import { smartPlaylistSyncService } from "@/services/SmartPlaylistSyncService";
 import {
   chunkLocalFileEntries,
   LOCAL_FILE_BACKUP_SHADOW_KEY,
@@ -177,7 +189,9 @@ const DEVICE_ONLY_CHANGES_KEY = "device-only-changes";
 interface AppStateChoiceRecord { key?: string; domain: DurableAppStateDomain; createdAt: string; keep?: "device" }
 interface DeviceOnlyChangesRecord { key: typeof DEVICE_ONLY_CHANGES_KEY; items: Record<string, { types: string[]; at: string }> }
 const LIBRARY_SUMMARY_REFRESH_MS = 6 * 60 * 60_000;
-const CAPABILITIES_CACHE_MS = 24 * 60 * 60_000;
+// How long Tagify trusts Community's capability list, saved or in memory, before asking again, so a
+// desktop picks up what a Community release adds within the hour even while Spotify stays open.
+const CAPABILITIES_REFRESH_MS = 60 * 60_000;
 const CLIENT_VERSION = packageJson.version;
 /** Edits are backed up once typing pauses, and at least this often during continuous editing. */
 export const EDIT_SYNC_DEBOUNCE_MS = 3_000;
@@ -295,24 +309,27 @@ export interface PullSideDocuments {
   privateNotesCursor: number;
   /** When the member last asked on Community for their Spotify lists (Community 0233), if ever. */
   spotifyLibraryRequestedAt?: string | null;
+  /** When the member last opened Community's playlist picker (Community's spotify_list_choice migration), if ever. */
+  spotifyLibraryCatalogRequestedAt?: string | null;
   /** Songs the member asked on Community to save to their Liked Songs are waiting, only when some are. */
   spotifySavesWaiting?: boolean;
 }
 
 /** Revisions of the separately stored backups, reported by newer Community pull responses. */
 export function pullSideDocuments(response: unknown): PullSideDocuments | null {
-  const value = (response as { sideDocuments?: { localFilesRevision?: unknown; privateNotesCursor?: unknown; spotifyLibraryRequestedAt?: unknown; spotifySavesWaiting?: unknown } } | null)?.sideDocuments;
+  const value = (response as { sideDocuments?: { localFilesRevision?: unknown; privateNotesCursor?: unknown; spotifyLibraryRequestedAt?: unknown; spotifyLibraryCatalogRequestedAt?: unknown; spotifySavesWaiting?: unknown } } | null)?.sideDocuments;
   if (!value || !Number.isSafeInteger(value.localFilesRevision) || !Number.isSafeInteger(value.privateNotesCursor)) return null;
   return {
     localFilesRevision: Number(value.localFilesRevision), privateNotesCursor: Number(value.privateNotesCursor),
     ...(typeof value.spotifyLibraryRequestedAt === "string" ? { spotifyLibraryRequestedAt: value.spotifyLibraryRequestedAt } : {}),
+    ...(typeof value.spotifyLibraryCatalogRequestedAt === "string" ? { spotifyLibraryCatalogRequestedAt: value.spotifyLibraryCatalogRequestedAt } : {}),
     ...(value.spotifySavesWaiting === true ? { spotifySavesWaiting: true } : {}),
   };
 }
 
 const SEND_FAILURE_NOTICES: Record<SpotifySendFailure, string> = {
-  spotify_busy: "Spotify asked Tagify to slow down, so your Spotify lists weren't all sent to Community. Try again there in a minute.",
-  spotify_unavailable: "Tagify couldn't read your Spotify lists. Make sure Spotify is online, then try again on Community.",
+  spotify_busy: "Spotify asked Tagify to pause for longer than a send can wait, so not all your Spotify lists reached Community. Lists that arrived are kept. Try again there later.",
+  spotify_unavailable: "Spotify stopped answering while Tagify read your lists, so not all of them reached Community. Lists that arrived are kept. Make sure Spotify is online, then try again there.",
   too_large: "Your Spotify lists are more than Community can keep. Remove some lists there, then try again.",
   daily_limit: "You've sent your Spotify lists to Community a lot today. Try again tomorrow.",
   paused: "Community isn't taking Spotify lists right now. Try again later.",
@@ -325,8 +342,13 @@ const SEND_FAILURE_NOTICES: Record<SpotifySendFailure, string> = {
 export function spotifySendNotice(outcome: SpotifySendOutcome): { text: string; error: boolean } | null {
   switch (outcome.status) {
     case "done":
-    case "sent":
-      return { text: `Sent ${outcome.songs.toLocaleString()} songs in ${outcome.lists.toLocaleString()} lists to Tagify Community.`, error: false };
+    case "sent": {
+      const sent = `Sent ${outcome.songs.toLocaleString()} songs in ${outcome.lists.toLocaleString()} lists to Tagify Community.`;
+      const skipped = outcome.status === "done" ? outcome.skipped : [];
+      if (!skipped.length) return { text: sent, error: false };
+      const named = skipped.slice(0, 3).map((name) => `“${name}”`).join(", ") + (skipped.length > 3 ? ` and ${(skipped.length - 3).toLocaleString()} more` : "");
+      return { text: `${sent} Spotify couldn't open ${skipped.length === 1 ? "one playlist" : `${skipped.length.toLocaleString()} playlists`} (${named}). Ask for your lists again on Community later to add ${skipped.length === 1 ? "it" : "them"}.`, error: false };
+    }
     case "cancelled":
       return { text: "Stopped sending your Spotify lists, as you asked on Community.", error: false };
     case "failed":
@@ -342,7 +364,7 @@ export function desktopFeatures(
   player: unknown = typeof Spicetify === "undefined" ? undefined : Spicetify.Player,
 ): string[] {
   return [
-    ...(canReadSpotifyLibrary(platform) ? [SPOTIFY_LISTS_FEATURE] : []),
+    ...(canReadSpotifyLibrary(platform) ? [SPOTIFY_LISTS_FEATURE, SPOTIFY_LIST_CHOICE_FEATURE] : []),
     ...(canSaveToLikedSongs(platform) ? [SPOTIFY_SAVES_FEATURE] : []),
     ...(canWritePlaylists(platform) ? [PLAYLIST_WRITES_FEATURE] : []),
     ...(canPlayFromCommunity(player) ? [DESKTOP_PLAY_FEATURE] : []),
@@ -360,6 +382,10 @@ export { syncClientHeaders } from "./SyncClientHeaders";
 const ARTIST_CREDITS_INTERVAL_MS = 3 * 60 * 60_000;
 /** How often Tagify looks again for songs Community knows no album for. */
 const SONG_RELEASES_INTERVAL_MS = 3 * 60 * 60_000;
+/** How often Tagify asks Community again for track lists and discographies to fill (catalog filler desktops only). */
+const CATALOG_FILL_INTERVAL_MS = 3 * 60 * 60_000;
+/** At most this often Tagify sends Community the names of music it synced. */
+const SONG_NAMES_INTERVAL_MS = 10 * 60_000;
 
 export function capabilitiesCacheKey(apiBaseUrl: string): string {
   return `tagify:sync-capabilities:${CLIENT_VERSION}:notes-v1:merge-v2:${new URL(apiBaseUrl).origin}`;
@@ -543,6 +569,7 @@ class SyncRuntime extends EventTarget {
   private batchSalt = "";
   private taxonomyRefreshRequested = false;
   private capabilities: SyncCapabilitiesV1 | SyncCapabilitiesV2 | null = null;
+  private capabilitiesFetchedAt = 0;
   private lastLibrarySummaryAt = 0;
   private automaticRetryNotBefore = 0;
   private lastShadowRepairAt = -Infinity;
@@ -609,12 +636,15 @@ class SyncRuntime extends EventTarget {
   private conditionalLocalFileReads = true;
   /** Sending the member's Spotify lists to Community, which they asked for on the website. */
   private spotifyLibrarySend: Promise<void> | null = null;
+  private spotifyListCatalog: Promise<void> | null = null;
   private readonly desktopPlayer = new DesktopPlayer();
   /** Community says the member plays songs from the website here, so the live channel stays open while Spotify is hidden. */
   private listenWhileHidden = false;
   /** The device whose features were reported to Community since this start, and that report. */
   private featuresReportedFor: string | null = null;
   private featuresReport: Promise<boolean> | null = null;
+  /** Synced songs waiting for Smart Playlists, in the order they arrived. */
+  private smartPlaylistUpdates: Promise<void> = Promise.resolve();
   /** Keeping playlists the member made on Community in their Spotify (PlaylistWriteRunner.ts). */
   private readonly playlistWrites = new PlaylistWriteScheduler({
     run: async (capability) => {
@@ -626,6 +656,29 @@ class SyncRuntime extends EventTarget {
       return run;
     },
   });
+  /**
+   * Searching Spotify for songs Community's Now playing card couldn't find (Community hands lookups
+   * only to a catalog filler desktop; every other desktop is told it isn't one).
+   */
+  private readonly nowPlayingLookups = new NowPlayingLookupScheduler({
+    run: async (memory) => {
+      const configuration = getDesktopSyncConfiguration();
+      if (!configuration || !this.started) return { filler: false, lookups: 0, answered: 0, searches: 0, stopped: "signed_out" };
+      return runNowPlayingLookups(this.sideSession(configuration), communityNowPlayingLookupSources(), { memory });
+    },
+  });
+  /**
+   * Running members' Search Spotify when Community can't reach Spotify's Web API (Community hands
+   * searches only to a catalog filler desktop). Its own schedule and backoff, so a Community without
+   * one lane's route doesn't hold up the other.
+   */
+  private readonly spotifySearchLookups = new SpotifySearchLookupScheduler({
+    run: async (memory) => {
+      const configuration = getDesktopSyncConfiguration();
+      if (!configuration || !this.started) return { filler: false, lookups: 0, answered: 0, searches: 0, stopped: "signed_out" };
+      return runSpotifySearchLookups(this.sideSession(configuration), communitySpotifySearchLookupSources(), { memory });
+    },
+  });
   /** Saving songs the member asked for on Community to their Liked Songs, and whether to look again after. */
   private spotifySaves: Promise<void> | null = null;
   private artistCredits: Promise<void> | null = null;
@@ -634,11 +687,29 @@ class SyncRuntime extends EventTarget {
   private songReleases: Promise<void> | null = null;
   private songReleasesRanAt = 0;
   private songReleasesUnsupported = false;
+  private catalogFill: Promise<void> | null = null;
+  private catalogFillRanAt = 0;
+  private catalogFillUnsupported = false;
+  /** What Community's catalog fill jobs said this start: a filler (true), not one (false), or not asked yet. */
+  private catalogFiller: boolean | null = null;
+  /** A filler's next background reader run, armed whether or not Spotify is visible. */
+  private backgroundReadersTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Summaries of the three background Spotify readers' runs, for Community's catalog filler run log. */
+  private readonly fillRunLog = new CatalogFillRunLog();
+  private songNames: Promise<void> | null = null;
+  private songNamesRanAt = 0;
+  private songNamesUnsupported = false;
+  /** Set when Tagify starts and when sync sent music, until a run sends its names. */
+  private songNamesWanted = true;
+  /** Held while sync is sending changes, so one run names everything that sync sent. */
+  private songNamesHeld = false;
+  private songNamesTimer: ReturnType<typeof setTimeout> | null = null;
   private spotifySavesAgain = false;
 
   start(): void {
     if (this.started) return;
     this.started = true;
+    this.songNamesWanted = true;
     const configuration = getDesktopSyncConfiguration();
     // When Community said recently that someone else uses this library, the
     // live connection joins before the first pull, so that pull is the only one.
@@ -663,11 +734,20 @@ class SyncRuntime extends EventTarget {
     this.featuresReportedFor = null;
     this.featuresReport = null;
     this.playlistWrites.stop();
+    this.nowPlayingLookups.stop();
+    this.spotifySearchLookups.stop();
     if (this.timer) clearTimeout(this.timer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.editSyncTimer) clearTimeout(this.editSyncTimer);
     if (this.realtimeSuspendTimer) clearTimeout(this.realtimeSuspendTimer);
     if (this.sessionRefreshTimer) clearTimeout(this.sessionRefreshTimer);
+    if (this.songNamesTimer) clearTimeout(this.songNamesTimer);
+    this.songNamesTimer = null;
+    if (this.backgroundReadersTimer) clearTimeout(this.backgroundReadersTimer);
+    this.backgroundReadersTimer = null;
+    this.catalogFiller = null;
+    catalogFillLive.setFiller(null);
+    catalogFillLive.setNextWake(null);
     this.sessionRefreshTimer = null;
     this.timer = null;
     this.nextSafetySyncAt = 0;
@@ -986,8 +1066,7 @@ class SyncRuntime extends EventTarget {
     this.setStatus("syncing");
     try {
       const active = await this.refreshIfNeeded(configuration);
-      const capabilities = this.capabilities ?? await this.loadCapabilities(active);
-      this.capabilities = capabilities;
+      const capabilities = await this.currentCapabilities(active);
       if ("minimumEfficientClientVersion" in capabilities && typeof capabilities.minimumEfficientClientVersion === "string" && compareVersions(CLIENT_VERSION, capabilities.minimumEfficientClientVersion) < 0) {
         throw new Error("efficient_client_required: Update Tagify to keep Community Sync running.");
       }
@@ -1004,7 +1083,13 @@ class SyncRuntime extends EventTarget {
       this.deviceOnlyChangeCount = Object.keys((await getState<DeviceOnlyChangesRecord>(DEVICE_ONLY_CHANGES_KEY))?.items ?? {}).length;
       await this.refreshSettingsChoices();
       await syncPairingService.recoverLegacyReplica(active.accountId);
-      await this.settleLocalAndPublicSync(active, explicit);
+      this.songNamesHeld = true;
+      try {
+        await this.settleLocalAndPublicSync(active, explicit);
+      } finally {
+        this.songNamesHeld = false;
+        this.handleSongNames(active);
+      }
       if (this.backupHealthRefreshRequested) {
         const confirmedSummary = (await this.request(active, "/api/v2/library")).library;
         this.backupHealth = backupHealthFromSummary(confirmedSummary);
@@ -1245,10 +1330,13 @@ class SyncRuntime extends EventTarget {
     // Community learns what this Tagify can do once per start, after a pull shows the session works.
     this.reportDesktopFeaturesOnce(configuration);
     // A request made while this computer was off is answered on its next pull.
+    this.handleSpotifyListCatalogRequest(this.lastSideDocuments?.spotifyLibraryCatalogRequestedAt);
     this.handleSpotifyLibraryRequest(this.lastSideDocuments?.spotifyLibraryRequestedAt);
     if (this.lastSideDocuments?.spotifySavesWaiting) this.handleSpotifySaves();
-    this.handleArtistCredits(configuration);
-    this.handleSongReleases(configuration);
+    this.handleBackgroundReaders(configuration);
+    this.handleSongNames(configuration);
+    this.nowPlayingLookups.poll();
+    this.spotifySearchLookups.poll();
     this.pollPlaylistWrites();
     this.noteLiveSync(response);
     if (response.unchanged) {
@@ -1345,8 +1433,25 @@ class SyncRuntime extends EventTarget {
     if (outcome.taxonomyShadowOnly) this.taxonomyRefreshRequested = true;
     // Changes this device sent are already shown; only other devices' changes
     // ask the open views to reload.
-    if (!own) dispatchSyncEvent("remote", batch.batchId, batch.operations);
+    if (!own) {
+      dispatchSyncEvent("remote", batch.batchId, batch.operations);
+      this.updateSmartPlaylists(urisFor("tracks"));
+    }
     return true;
+  }
+
+  /**
+   * Songs tagged on the website or another computer join and leave Smart
+   * Playlists here as if they were tagged here, with the song as now saved.
+   * Spotify writes run in the background so they never hold up the next pull.
+   */
+  private updateSmartPlaylists(uris: string[]): void {
+    const unique = [...new Set(uris)];
+    if (!unique.length) return;
+    this.smartPlaylistUpdates = this.smartPlaylistUpdates
+      .then(() => storageService.getTracks(unique))
+      .then((saved) => smartPlaylistSyncService.syncTracks(Object.fromEntries(unique.map((uri) => [uri, saved.get(uri) ?? null]))))
+      .catch((error) => console.error("Tagify: Smart Playlists could not take changes from Community", error));
   }
 
   /**
@@ -1425,6 +1530,8 @@ class SyncRuntime extends EventTarget {
           }
         }
         const outcome = await this.push(configuration);
+        // Community now lists this music; its names follow once sync settles.
+        if (outcome.accepted || outcome.snapshot) this.songNamesWanted = true;
         // Confirming queued edits sends nothing, so there is nothing new to pull.
         caughtUp = outcome.sent === 0 && !outcome.snapshot;
         if (!caughtUp) {
@@ -1685,7 +1792,10 @@ class SyncRuntime extends EventTarget {
         for (const [uri, track] of Object.entries(plan.save)) {
           if (!(await storageService.saveTrack(uri, track, { captureSync: false }))) throw new Error("A local file from Community could not be saved on this device");
         }
-        if (plan.remove.length || Object.keys(plan.save).length) dispatchSyncEvent("remote", crypto.randomUUID(), []);
+        if (plan.remove.length || Object.keys(plan.save).length) {
+          dispatchSyncEvent("remote", crypto.randomUUID(), []);
+          this.updateSmartPlaylists([...plan.remove, ...Object.keys(plan.save)]);
+        }
         known = remote.entries;
         revision = remote.revision;
         readRevision = remote.revision;
@@ -2029,17 +2139,37 @@ class SyncRuntime extends EventTarget {
     return payload;
   }
 
+  /**
+   * Community's capability list for this run: the one in memory while it is under an hour old,
+   * otherwise asked for again. A failed refresh keeps the list Tagify already has.
+   */
+  private async currentCapabilities(configuration: DesktopSyncConfiguration): Promise<SyncCapabilitiesV1 | SyncCapabilitiesV2> {
+    if (this.capabilities && Date.now() - this.capabilitiesFetchedAt < CAPABILITIES_REFRESH_MS) return this.capabilities;
+    try {
+      this.capabilities = await this.loadCapabilities(configuration);
+    } catch (error) {
+      if (!this.capabilities) throw error;
+    }
+    return this.capabilities;
+  }
+
   private async loadCapabilities(configuration: DesktopSyncConfiguration): Promise<SyncCapabilitiesV1 | SyncCapabilitiesV2> {
     const cacheKey = capabilitiesCacheKey(configuration.apiBaseUrl);
     try {
       const cached = JSON.parse(localStorage.getItem(cacheKey) || "null") as { cachedAt?: unknown; value?: unknown } | null;
-      if (cached && typeof cached.cachedAt === "number" && Date.now() - cached.cachedAt < CAPABILITIES_CACHE_MS && isSyncCapabilities(cached.value)) return cached.value;
+      if (cached && typeof cached.cachedAt === "number" && Date.now() - cached.cachedAt < CAPABILITIES_REFRESH_MS && isSyncCapabilities(cached.value)) {
+        this.capabilitiesFetchedAt = cached.cachedAt;
+        return cached.value;
+      }
     } catch { /* An unavailable cache must never block sync. */ }
-    const response = await fetch(`${configuration.apiBaseUrl}/api/v2/sync/capabilities`, { headers: syncClientHeaders() });
+    // `no-cache` asks Community each time (a cheap 304 when nothing changed) instead of taking a copy
+    // Spotify's browser cache may hold for a day after a release.
+    const response = await fetch(`${configuration.apiBaseUrl}/api/v2/sync/capabilities`, { headers: syncClientHeaders(), cache: "no-cache" });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw syncResponseError(response, payload);
     if (!isSyncCapabilities(payload)) throw new Error("invalid_capabilities: Community returned an invalid sync capability document");
-    try { localStorage.setItem(cacheKey, JSON.stringify({ cachedAt: Date.now(), value: payload })); } catch { /* Best-effort deployment metadata cache. */ }
+    this.capabilitiesFetchedAt = Date.now();
+    try { localStorage.setItem(cacheKey, JSON.stringify({ cachedAt: this.capabilitiesFetchedAt, value: payload })); } catch { /* Best-effort deployment metadata cache. */ }
     return payload;
   }
 
@@ -2199,20 +2329,74 @@ class SyncRuntime extends EventTarget {
   }
 
   /**
+   * Starts whichever background Spotify reader is due (one at a time), after every pull and, on a
+   * desktop Community lists as a catalog filler, on its own schedule too. When Community offers
+   * catalog fill, its run goes first each start: its first jobs page says whether this desktop is a
+   * filler and carries the pace the other readers' reads outside this library keep. A filler then
+   * runs the readers back to back and wakes for the next one due even while Spotify is hidden or
+   * minimized, when no pull happens; every other desktop goes on reading one reader per pull.
+   */
+  private handleBackgroundReaders(configuration: DesktopSyncConfiguration): void {
+    if (!this.started) return;
+    if (this.catalogFiller === null && !this.catalogFillRanAt && this.offersCatalogFill()) {
+      this.handleCatalogFill(configuration);
+      return;
+    }
+    this.handleArtistCredits(configuration);
+    this.handleSongReleases(configuration);
+    this.handleCatalogFill(configuration);
+    this.scheduleBackgroundReaders();
+  }
+
+  private offersCatalogFill(): boolean {
+    return !this.catalogFillUnsupported
+      && (this.capabilities as { catalogFill?: { protocolVersion?: unknown } } | null)?.catalogFill?.protocolVersion === 1;
+  }
+
+  /** A background reader finished: a filler starts the next one due; the first catalog fill run hands over to the rest. */
+  private backgroundReaderFinished(configuration: DesktopSyncConfiguration, firstCatalogFill = false): void {
+    if (!this.started || (!this.catalogFiller && !firstCatalogFill)) return;
+    this.handleBackgroundReaders(getDesktopSyncConfiguration() ?? configuration);
+  }
+
+  /** On a filler, wakes when the next reader is due, independent of pulls and of Spotify being visible. */
+  private scheduleBackgroundReaders(): void {
+    if (!this.started || !this.catalogFiller || this.artistCredits || this.songReleases || this.catalogFill) return;
+    const offered = this.capabilities as { artistCredits?: unknown; songReleases?: { protocolVersion?: unknown } } | null;
+    const due = [
+      !this.artistCreditsUnsupported && offered?.artistCredits ? this.artistCreditsRanAt + ARTIST_CREDITS_INTERVAL_MS : Infinity,
+      !this.songReleasesUnsupported && offered?.songReleases?.protocolVersion === 1 ? this.songReleasesRanAt + SONG_RELEASES_INTERVAL_MS : Infinity,
+      this.offersCatalogFill() ? this.catalogFillRanAt + CATALOG_FILL_INTERVAL_MS : Infinity,
+    ];
+    const next = Math.min(...due);
+    if (this.backgroundReadersTimer) clearTimeout(this.backgroundReadersTimer);
+    this.backgroundReadersTimer = null;
+    catalogFillLive.setNextWake(Number.isFinite(next) ? Math.max(next, Date.now()) : null);
+    if (!Number.isFinite(next)) return;
+    this.backgroundReadersTimer = setTimeout(() => {
+      this.backgroundReadersTimer = null;
+      const current = getDesktopSyncConfiguration();
+      if (current) this.handleBackgroundReaders(current);
+    }, Math.max(0, next - Date.now()));
+  }
+
+  /**
    * Sends Community the artists of songs and albums in this library it has none for, read through
    * Spotify's desktop app in the background (Community migration 0252). Once a start, then at most
    * every few hours; a Community without the feature is left alone until the next start.
    */
   private handleArtistCredits(configuration: DesktopSyncConfiguration): void {
     // One background Spotify reader at a time; a skipped run starts on a later pull.
-    if (!this.started || this.artistCredits || this.songReleases || this.artistCreditsUnsupported) return;
+    if (!this.started || this.artistCredits || this.songReleases || this.catalogFill || this.artistCreditsUnsupported) return;
     if (!(this.capabilities as { artistCredits?: { protocolVersion?: unknown } } | null)?.artistCredits) return;
     if (Date.now() - this.artistCreditsRanAt < ARTIST_CREDITS_INTERVAL_MS) return;
     this.artistCreditsRanAt = Date.now();
-    this.artistCredits = runArtistCreditReports(this.sideSession(configuration), communityArtistCreditSources())
-      .then((run) => { if (run.stopped === "unsupported") this.artistCreditsUnsupported = true; })
+    const started = this.beginFillRun("artistCredits");
+    let outcome: CatalogFillRunOutcome = "error";
+    this.artistCredits = runArtistCreditReports(this.sideSession(configuration), communityArtistCreditSources(), { request: watchedRequest() })
+      .then((run) => { outcome = run; if (run.stopped === "unsupported") this.artistCreditsUnsupported = true; })
       .catch((error) => { console.warn("Tagify sync: artist names were not sent", error instanceof Error ? error.message : error); })
-      .finally(() => { this.artistCredits = null; });
+      .finally(() => { this.artistCredits = null; this.reportFillRun(configuration, started, outcome); this.backgroundReaderFinished(configuration); });
   }
 
   /**
@@ -2222,14 +2406,95 @@ class SyncRuntime extends EventTarget {
    * `songReleases`; once a start, then at most every few hours, never beside the artist credits run.
    */
   private handleSongReleases(configuration: DesktopSyncConfiguration): void {
-    if (!this.started || this.songReleases || this.artistCredits || this.songReleasesUnsupported) return;
+    if (!this.started || this.songReleases || this.artistCredits || this.catalogFill || this.songReleasesUnsupported) return;
     if ((this.capabilities as { songReleases?: { protocolVersion?: unknown } } | null)?.songReleases?.protocolVersion !== 1) return;
     if (Date.now() - this.songReleasesRanAt < SONG_RELEASES_INTERVAL_MS) return;
     this.songReleasesRanAt = Date.now();
-    this.songReleases = runSongReleaseReports(this.sideSession(configuration), communitySongReleaseSources())
-      .then((run) => { if (run.stopped === "unsupported") this.songReleasesUnsupported = true; })
+    const started = this.beginFillRun("songReleases");
+    let outcome: CatalogFillRunOutcome = "error";
+    this.songReleases = runSongReleaseReports(this.sideSession(configuration), communitySongReleaseSources(), { request: watchedRequest() })
+      .then((run) => { outcome = run; if (run.stopped === "unsupported") this.songReleasesUnsupported = true; })
       .catch((error) => { console.warn("Tagify sync: album details were not sent", error instanceof Error ? error.message : error); })
-      .finally(() => { this.songReleases = null; });
+      .finally(() => { this.songReleases = null; this.reportFillRun(configuration, started, outcome); this.backgroundReaderFinished(configuration); });
+  }
+
+  /**
+   * Fills album track lists and artist discographies Community couldn't get elsewhere, read through
+   * Spotify's desktop app (Community pending migration 9004). Community hands jobs only to a desktop
+   * it lists as a catalog filler, with the pace to keep; every other desktop is handed none and
+   * reads nothing. Only when Community advertises `catalogFill` protocol 1; once a start, then at
+   * most every few hours, never beside the artist credits or song releases run.
+   */
+  private handleCatalogFill(configuration: DesktopSyncConfiguration): void {
+    if (!this.started || this.catalogFill || this.artistCredits || this.songReleases || this.catalogFillUnsupported) return;
+    if ((this.capabilities as { catalogFill?: { protocolVersion?: unknown } } | null)?.catalogFill?.protocolVersion !== 1) return;
+    if (Date.now() - this.catalogFillRanAt < CATALOG_FILL_INTERVAL_MS) return;
+    const first = !this.catalogFillRanAt;
+    this.catalogFillRanAt = Date.now();
+    const started = this.beginFillRun("catalogFill");
+    let outcome: CatalogFillRunOutcome = "error";
+    let answered = false;
+    this.catalogFill = runCatalogFillJobs(this.sideSession(configuration), communityCatalogFillJobSources(), { request: watchedRequest() })
+      .then((run) => {
+        outcome = run;
+        if (run.stopped === "unsupported") this.catalogFillUnsupported = true;
+        if (run.filler !== undefined) { this.catalogFiller = run.filler; catalogFillLive.setFiller(run.filler); answered = true; }
+      })
+      .catch((error) => { console.warn("Tagify sync: album and artist details were not sent", error instanceof Error ? error.message : error); })
+      .finally(() => {
+        this.catalogFill = null;
+        this.reportFillRun(configuration, started, outcome);
+        // Once Community has answered, the other readers needn't wait for another pull.
+        this.backgroundReaderFinished(configuration, first && answered);
+      });
+  }
+
+  /** Notes a background reader's run starting, for the run log and the local filler widget (CatalogFillLive.ts). */
+  private beginFillRun(job: CatalogFillRunStart["job"]): CatalogFillRunStart {
+    catalogFillLive.started(job);
+    return this.fillRunLog.begin(job);
+  }
+
+  /**
+   * Tells Community how a background Spotify reader's run went, after its slot is free, without
+   * waiting: the log never holds up a reader or reads Spotify (CommunityCatalogFillRunLog.ts).
+   */
+  private reportFillRun(configuration: DesktopSyncConfiguration, started: CatalogFillRunStart, outcome: CatalogFillRunOutcome): void {
+    catalogFillLive.finished(catalogFillRun(started, outcome, new Date()));
+    void this.fillRunLog.finish(this.sideSession(configuration), this.capabilities, started, outcome);
+  }
+
+  /**
+   * Sends Community the names and artwork Tagify saved for music in this library that Community
+   * has no name for (Community migration desktop_song_names), so its pages show them without
+   * asking Spotify. Reads only this computer's saved library, so it needs no turn beside the Spotify readers above.
+   * Only when Community advertises `songNames`: once a start and after sync sent music, at most
+   * every ten minutes, one run at a time; a Community without the route is left alone until the
+   * next start.
+   */
+  private handleSongNames(configuration: DesktopSyncConfiguration): void {
+    if (!this.started || !this.songNamesWanted || this.songNamesHeld || this.songNames || this.songNamesUnsupported) return;
+    if ((this.capabilities as { songNames?: { protocolVersion?: unknown } } | null)?.songNames?.protocolVersion !== 1) return;
+    const wait = this.songNamesRanAt + SONG_NAMES_INTERVAL_MS - Date.now();
+    if (wait > 0) {
+      // Music sent meanwhile is named once the interval passes, without waiting for another sync.
+      this.songNamesTimer ??= setTimeout(() => { this.songNamesTimer = null; this.handleSongNames(configuration); }, wait);
+      return;
+    }
+    this.songNamesWanted = false;
+    this.songNamesRanAt = Date.now();
+    this.songNames = runSongNameReports(this.sideSession(configuration), communitySongNameSources())
+      .then((run) => {
+        if (run.stopped === "unsupported") this.songNamesUnsupported = true;
+        // Community was unreachable: try again on a later sync. A paused Community waits for new music.
+        if (run.stopped === "network") this.songNamesWanted = true;
+      })
+      .catch((error) => { console.warn("Tagify sync: song names were not sent", error instanceof Error ? error.message : error); })
+      .finally(() => {
+        this.songNames = null;
+        // Sync sent more music during the run.
+        this.handleSongNames(configuration);
+      });
   }
 
   /**
@@ -2265,6 +2530,23 @@ class SyncRuntime extends EventTarget {
    * with progress Community shows. A send that ends (done, failed, stopped or another computer's)
    * answers the request; one cut off because Spotify closed is picked up again on the next start.
    */
+  /**
+   * The member opened Community's playlist picker: list their playlists for it (one read from
+   * Spotify, no songs). Each request is answered once; a newer one while answering waits for the next.
+   */
+  private handleSpotifyListCatalogRequest(requestedAt: string | null | undefined): void {
+    const configuration = getDesktopSyncConfiguration();
+    if (!this.started || !configuration || !requestedAt || this.spotifyListCatalog || !isNewCatalogRequest(configuration.libraryId, requestedAt)) return;
+    this.spotifyListCatalog = (async () => {
+      try {
+        await sendSpotifyListCatalog(this.sideSession(configuration), spotifyApiService, requestedAt);
+      } finally {
+        markCatalogRequestHandled(configuration.libraryId, requestedAt);
+        this.spotifyListCatalog = null;
+      }
+    })();
+  }
+
   private handleSpotifyLibraryRequest(requestedAt: string | null | undefined): void {
     const configuration = getDesktopSyncConfiguration();
     if (!this.started || !configuration || !requestedAt || this.spotifyLibrarySend || !isNewSpotifyLibraryRequest(configuration, requestedAt)) return;
@@ -2331,6 +2613,10 @@ class SyncRuntime extends EventTarget {
         .on("broadcast", { event: "spotify_library_request" }, ({ payload }) => {
           if (payload?.libraryId !== configuration.libraryId) return;
           this.handleSpotifyLibraryRequest(typeof payload.requestedAt === "string" ? payload.requestedAt : null);
+        })
+        .on("broadcast", { event: SPOTIFY_LIST_CATALOG_REQUEST_EVENT }, ({ payload }) => {
+          if (payload?.libraryId !== configuration.libraryId) return;
+          this.handleSpotifyListCatalogRequest(typeof payload.requestedAt === "string" ? payload.requestedAt : null);
         })
         .on("broadcast", { event: "spotify_save_request" }, ({ payload }) => {
           if (payload?.libraryId !== configuration.libraryId) return;

@@ -1,5 +1,5 @@
 // Playlists a member made on Community that their Tagify desktop keeps in Spotify (Community
-// migration 0261_community_playlists). Tagify reports the `playlistWrites` device feature; then:
+// migration 0264_community_playlists). Tagify reports the `playlistWrites` device feature; then:
 //   * the website broadcasts `playlist_write_request` on the library's private channel
 //     (`tagify-library:<libraryId>`, payload { libraryId, requestedAt }) when a playlist needs writing;
 //   * Tagify claims waiting playlists: POST /api/v2/sync/playlist-writes { deviceId } answers

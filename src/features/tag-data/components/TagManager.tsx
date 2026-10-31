@@ -68,7 +68,7 @@ import {
 import { useCommunityTagCatalog } from "@/features/tag-data/hooks/useCommunityTagCatalog";
 import { useCommunityPopularTags } from "@/features/tag-data/hooks/useCommunityPopularTags";
 import { findTagSuggestions, findUsualTagName } from "@tagify/community-contracts";
-import { COMMUNITY_ORIGIN } from "@/features/community/communityLinks";
+import { COMMUNITY_PAGES_ORIGIN } from "@/features/community/communityLinks";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
 import {
@@ -1814,7 +1814,7 @@ const TagManager: React.FC<TagManagerProps> = ({
           contributorCount: tag.contributorCount,
           assignmentCount: tag.assignmentCount,
         },
-        publicUrl: `${COMMUNITY_ORIGIN}/tags`,
+        publicUrl: `${COMMUNITY_PAGES_ORIGIN}/tags`,
       };
       const result = importCommunityTagPackage(localTaxonomy, importPackage, {
         targetCategoryId,

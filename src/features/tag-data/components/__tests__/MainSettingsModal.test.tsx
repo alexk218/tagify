@@ -7,10 +7,8 @@ function renderSettings() {
   return render(
     <MainSettingsModal
       onClose={vi.fn()}
-      showSupportButtons
-      onToggleSupportButtons={vi.fn()}
-      showUpdateProtectionButton
-      onToggleUpdateProtectionButton={vi.fn()}
+      showOptionalButtons
+      onToggleOptionalButtons={vi.fn()}
     />,
   );
 }
@@ -87,10 +85,8 @@ describe("MainSettingsModal when changes can't be saved", () => {
     render(
       <MainSettingsModal
         onClose={vi.fn()}
-        showSupportButtons
-        onToggleSupportButtons={vi.fn()}
-        showUpdateProtectionButton
-        onToggleUpdateProtectionButton={vi.fn()}
+        showOptionalButtons
+        onToggleOptionalButtons={vi.fn()}
         onRetryMigration={onRetryMigration}
       />,
     );

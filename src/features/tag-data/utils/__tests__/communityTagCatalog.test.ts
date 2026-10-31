@@ -26,6 +26,6 @@ describe("Community tag catalog", () => {
   });
 
   it("links a tag to its songs on Community", () => {
-    expect(buildCommunityTagSearchUrl({ name: "Night Drive" })).toBe("https://community.tagify.fm/search?tag=label%3ANight%2520Drive");
+    expect(buildCommunityTagSearchUrl({ name: "Night Drive" })).toBe("https://tagify.fm/search?tag=label%3ANight%2520Drive");
   });
 });

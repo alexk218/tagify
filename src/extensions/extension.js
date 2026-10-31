@@ -4,7 +4,9 @@ import { getTagifyDatabaseName } from "../services/sync/SyncLocalState";
 import { buildCategoryTree } from "../utils/tagTaxonomy";
 import { createQuickTagSearch } from "./inlineEditor.quickTags";
 import { getCommunityPopularTags, preloadCommunityPopularTags } from "../features/tag-data/utils/communityPopularTags";
-import { flushLocalPersistence, isLocalPersistencePaused } from "../services/sync/SyncLocalState";
+import { flushLocalPersistence, getDesktopSyncConfiguration, isLocalPersistencePaused } from "../services/sync/SyncLocalState";
+import { lookupCommunityEntity, peekCommunityEntity } from "../features/community/communityEntityCache";
+import { createCommunityTagsChip, summarizeCommunityTags } from "./nowPlaying.communityTags";
 /* global Spicetify */
 import { keyboardShortcutService } from "../services/KeyboardShortcutService";
 import { storageService } from "../services/storage/StorageService";
@@ -2620,6 +2622,7 @@ function findUriInObject(root, maxDepth = 6) {
         state.nowPlayingWidgetTagInfo.appendChild(
           inlineEditor.createControl(trackUri, true),
         );
+        playbarEnhancer.showCommunityTags(trackUri);
 
         const item = Spicetify.Player.data.item;
         tracklistEnhancer.checkRecording({
@@ -2644,6 +2647,25 @@ function findUriInObject(root, maxDepth = 6) {
       } catch (error) {
         console.error("Tagify: Error updating Now Playing widget", error);
       }
+    },
+
+    /**
+     * Shows what other members tagged the playing song with on Community.
+     * A known answer shows at once; Community is asked again at most once a
+     * minute per song (the shared entity cache), and only Spotify songs have pages.
+     */
+    showCommunityTags(trackUri) {
+      const providerId = trackUri.startsWith("spotify:track:") ? trackUri.slice("spotify:track:".length) : "";
+      if (!providerId) return;
+      const render = (lookup) => {
+        const container = state.nowPlayingWidgetTagInfo;
+        if (!container || Spicetify.Player.data?.item?.uri !== trackUri) return;
+        container.querySelector(".tagify-playbar-community-tags")?.remove();
+        const summary = summarizeCommunityTags(lookup?.entity, getDesktopSyncConfiguration()?.profile?.handle);
+        if (summary) container.appendChild(createCommunityTagsChip(summary));
+      };
+      render(peekCommunityEntity("track", providerId));
+      void lookupCommunityEntity("track", providerId).then(render).catch(() => {});
     },
 
     disable() {

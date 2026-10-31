@@ -60,7 +60,7 @@ function positionPopover(popover, anchor) {
     : `${Math.max(margin, window.innerHeight - bounds.top + 6)}px`;
 }
 
-function showPopover(anchor, groups, emptyMessage) {
+function showPopover(anchor, groups, emptyMessage, footer) {
   closePopover();
   const tags = flattenTags(groups);
   const popover = document.createElement("div");
@@ -88,7 +88,7 @@ function showPopover(anchor, groups, emptyMessage) {
   } else {
     groups.forEach((group, index) => {
       const heading = document.createElement("div");
-      heading.textContent = `${group.categoryName} · ${group.subcategoryName}`;
+      heading.textContent = [group.categoryName, group.subcategoryName].filter(Boolean).join(" · ");
       heading.style.margin = index === 0 ? "0 0 6px" : "10px 0 6px";
       heading.style.color = "var(--spice-subtext)";
       heading.style.fontSize = "11px";
@@ -115,6 +115,15 @@ function showPopover(anchor, groups, emptyMessage) {
     });
   }
 
+  if (footer) {
+    const note = document.createElement("div");
+    note.textContent = footer;
+    note.style.marginTop = "10px";
+    note.style.color = "var(--spice-subtext)";
+    note.style.fontSize = "11px";
+    popover.appendChild(note);
+  }
+
   popover.addEventListener("mouseenter", () => {
     if (closeTimer) clearTimeout(closeTimer);
   });
@@ -122,6 +131,22 @@ function showPopover(anchor, groups, emptyMessage) {
   document.body.appendChild(popover);
   positionPopover(popover, anchor);
   activePopover = popover;
+}
+
+/** Shows `groups` in the tag popover while the pointer or focus is on `anchor`. */
+export function attachTagPopover(anchor, groups, { footer } = {}) {
+  const reveal = () => showPopover(anchor, groups, undefined, footer);
+  anchor.addEventListener("mouseenter", reveal);
+  anchor.addEventListener("mouseleave", scheduleClose);
+  anchor.addEventListener("focus", reveal);
+  anchor.addEventListener("blur", scheduleClose);
+  anchor.addEventListener("click", closePopover);
+  anchor.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      closePopover();
+    }
+  });
 }
 
 export function createTagStatusIndicator({

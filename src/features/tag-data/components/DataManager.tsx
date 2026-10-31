@@ -41,9 +41,23 @@ interface DataManagerProps {
   onOpenSync: () => void;
 }
 
-const SHOW_SUPPORT_BUTTONS_KEY = "tagify:showSupportButtons";
-const SHOW_UPDATE_PROTECTION_BUTTON_KEY =
-  "tagify:showUpdateProtectionButton";
+const SHOW_OPTIONAL_BUTTONS_KEY = "tagify:showOptionalButtons";
+// Members who hid the support or update protection buttons with the earlier
+// separate toggles keep a quiet top menu.
+const LEGACY_OPTIONAL_BUTTON_KEYS = [
+  "tagify:showSupportButtons",
+  "tagify:showUpdateProtectionButton",
+];
+
+const readLegacyShowOptionalButtons = (): boolean => {
+  try {
+    return !LEGACY_OPTIONAL_BUTTON_KEYS.some(
+      (key) => window.localStorage.getItem(key) === "false",
+    );
+  } catch {
+    return true;
+  }
+};
 
 const DataManager: React.FC<DataManagerProps> = ({
   onExportTagData,
@@ -69,12 +83,11 @@ const DataManager: React.FC<DataManagerProps> = ({
   useProductAnalyticsView(showMainSettings ? "settings_opened" : null);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [showSpotifyUpdateHelp, setShowSpotifyUpdateHelp] = useState(false);
-  const [showSupportButtons, setShowSupportButtons] = useLocalStorage(
-    SHOW_SUPPORT_BUTTONS_KEY,
-    true
+  const [defaultShowOptionalButtons] = useState(readLegacyShowOptionalButtons);
+  const [showOptionalButtons, setShowOptionalButtons] = useLocalStorage(
+    SHOW_OPTIONAL_BUTTONS_KEY,
+    defaultShowOptionalButtons,
   );
-  const [showUpdateProtectionButton, setShowUpdateProtectionButton] =
-    useLocalStorage(SHOW_UPDATE_PROTECTION_BUTTON_KEY, true);
   const [infoModalSection, setInfoModalSection] = useState<string>("whats-new");
   const inviteButtonRef = useRef<HTMLButtonElement>(null);
   const [showInvite, setShowInvite] = useState(false);
@@ -181,18 +194,16 @@ const DataManager: React.FC<DataManagerProps> = ({
         >
           <FontAwesomeIcon icon={faInfo} />
         </button>
-        {showUpdateProtectionButton && (
-          <button
-            aria-label="Spotify update protection help"
-            className={`${styles.pillButton} ${styles.updateProtectionButton}`}
-            onClick={() => setShowSpotifyUpdateHelp(true)}
-            title="Keep Tagify working after Spotify updates"
-          >
-            <FontAwesomeIcon icon={faShieldHalved} />
-          </button>
-        )}
-        {showSupportButtons && (
+        {showOptionalButtons && (
           <>
+            <button
+              aria-label="Spotify update protection help"
+              className={`${styles.pillButton} ${styles.updateProtectionButton}`}
+              onClick={() => setShowSpotifyUpdateHelp(true)}
+              title="Keep Tagify working after Spotify updates"
+            >
+              <FontAwesomeIcon icon={faShieldHalved} />
+            </button>
             <button
               className={`${styles.pillButton} ${styles.surveyButton}`}
               onClick={() => {
@@ -216,32 +227,32 @@ const DataManager: React.FC<DataManagerProps> = ({
             >
               <FontAwesomeIcon icon={faCoffee} />
             </button>
+            <button
+              ref={inviteButtonRef}
+              className={`${styles.pillButton} ${styles.inviteButton}`}
+              onClick={() => setShowInvite((open) => !open)}
+              title="Invite a friend to Tagify"
+              aria-label="Invite a friend to Tagify"
+              aria-haspopup="dialog"
+              aria-expanded={showInvite}
+            >
+              <FontAwesomeIcon icon={faUserPlus} />
+            </button>
+            <button
+              className={`${styles.pillButton} ${styles.discordButton}`}
+              onClick={() => {
+                const discordUrl = "https://discord.gg/C4qbPUbBKV";
+                window.open(discordUrl, "_blank", "noopener,noreferrer");
+              }}
+              title="Join the Discord!"
+            >
+              <FontAwesomeIcon icon={faDiscord} />
+            </button>
           </>
         )}
-        <button
-          ref={inviteButtonRef}
-          className={`${styles.pillButton} ${styles.inviteButton}`}
-          onClick={() => setShowInvite((open) => !open)}
-          title="Invite a friend to Tagify"
-          aria-label="Invite a friend to Tagify"
-          aria-haspopup="dialog"
-          aria-expanded={showInvite}
-        >
-          <FontAwesomeIcon icon={faUserPlus} />
-        </button>
-        <button
-          className={`${styles.pillButton} ${styles.discordButton}`}
-          onClick={() => {
-            const discordUrl = "https://discord.gg/C4qbPUbBKV";
-            window.open(discordUrl, "_blank", "noopener,noreferrer");
-          }}
-          title="Join the Discord!"
-        >
-          <FontAwesomeIcon icon={faDiscord} />
-        </button>
       </div>
 
-      {showInvite && (
+      {showInvite && showOptionalButtons && (
         <InviteFriendsPopover
           anchor={inviteButtonRef.current}
           onClose={closeInvite}
@@ -269,10 +280,8 @@ const DataManager: React.FC<DataManagerProps> = ({
       {showMainSettings && (
         <MainSettingsModal
           onClose={() => setShowMainSettings(false)}
-          showSupportButtons={showSupportButtons}
-          onToggleSupportButtons={setShowSupportButtons}
-          showUpdateProtectionButton={showUpdateProtectionButton}
-          onToggleUpdateProtectionButton={setShowUpdateProtectionButton}
+          showOptionalButtons={showOptionalButtons}
+          onToggleOptionalButtons={setShowOptionalButtons}
           onOpenInfoModal={handleOpenInfoModal}
           onResetTagifyData={onResetTagifyData}
           onRetryMigration={onRetryMigration}

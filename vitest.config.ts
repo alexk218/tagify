@@ -4,8 +4,9 @@ import path from "path";
 export default defineConfig({
   test: {
     globals: true,
-    // Keep concurrent local chats from starting one test worker per CPU core.
-    maxWorkers: 2,
+    // Keep concurrent local chats from starting one test worker per CPU core. CI runners use
+    // every core; a solo local run can too with `npm test -- --maxWorkers=4`.
+    maxWorkers: process.env.CI ? undefined : 2,
     minWorkers: 1,
     // Installer analytics and the landing page use node:test, run by their own test scripts.
     exclude: [...configDefaults.exclude, "scripts/install/.build/**", "scripts/install/analytics/*.test.mjs", "landing-page/tests/**", "scripts/rym/*.test.mjs", "scripts/release/*.test.mjs", "scripts/build/*.test.mjs"],

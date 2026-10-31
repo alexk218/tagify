@@ -114,3 +114,15 @@ it("promotes an existing background lookup without launching another request", a
   await expect(pending).resolves.toBe("ready");
   expect(lookup).toHaveBeenCalledTimes(1);
 });
+it("lets one request take longer than the usual limit when it asks to", async () => {
+  const limiter = new RateLimiter();
+  let finish!: (value: string) => void;
+  const slow = limiter.execute("desktop-slow", () => new Promise<string>(resolve => { finish = resolve; }), { timeoutMs: 60_000 });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(limiter.getStats()).toMatchObject({ activeRequests: 1, stalledRequests: 0 });
+  finish("read");
+  await expect(slow).resolves.toBe("read");
+  const stuck = limiter.execute("desktop-stuck", () => new Promise<void>(() => {}), { timeoutMs: 60_000 }).catch(error => error);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(await stuck).toMatchObject({ recoveryRequired: true });
+});

@@ -1,6 +1,9 @@
 import type { SpotifyTrack } from "@/types/SpotifyTypes";
 import type { DesktopSyncConfiguration } from "./SyncLocalState";
 import { syncClientHeaders } from "./SyncClientHeaders";
+import { getSpotifyRetryAfterMs } from "@/utils/spotifyRateLimit";
+import { classifySpotifyFailure } from "@/utils/spotifyRequestFailure";
+import { assertSpotifyListSelection, type SpotifyListSelectionV1 } from "@tagify/sync-contracts";
 
 // Sends the member's Liked Songs and playlists to Tagify Community when they ask for them on the
 // website (Community migration 0233, docs/SPOTIFY_LIBRARY_IMPORT_2026-10.md). Lists are read
@@ -40,13 +43,13 @@ export interface CommunitySpotifyList {
 export interface LibraryReader {
   getTaggingQueuePage(playlistId: string | null, offset?: number, signal?: AbortSignal): Promise<{ tracks: SpotifyTrack[]; nextOffset: number | null }>;
   getAllUserPlaylistReferencesStrict(signal?: AbortSignal): Promise<Array<{ playlistId: string; playlistName: string; folders?: CommunitySpotifyFolder[] }>>;
-  readPlaylistTracks(playlistId: string, options?: { signal?: AbortSignal }): Promise<SpotifyTrack[]>;
+  readPlaylistTracks(playlistId: string, options?: { signal?: AbortSignal; pageSize?: number; timeoutMs?: number }): Promise<SpotifyTrack[]>;
 }
 
 const SPOTIFY_ID = /^[0-9A-Za-z]{22}$/;
 const FOLDER_ID = /^[A-Za-z0-9_-]{1,64}$/;
 /** Text Community can keep: no control characters, at most `max` characters, never half an emoji. */
-const clean = (value: string | null | undefined, max = 300) => {
+export const clean = (value: string | null | undefined, max = 300) => {
   const text = (value ?? "").replace(/\p{Cc}/gu, " ").trim();
   return text ? Array.from(text).slice(0, max).join("").trim() : null;
 };
@@ -213,7 +216,8 @@ export interface SpotifySendProgress {
 }
 
 export type SpotifySendOutcome =
-  | { status: "done"; lists: number; songs: number; unchanged: number }
+  /** `skipped` names the playlists Spotify couldn't read even after waiting; the rest arrived. */
+  | { status: "done"; lists: number; songs: number; unchanged: number; skipped: string[] }
   /** Sent the one-shot way, to a Community without sends. */
   | { status: "sent"; lists: number; songs: number }
   /** Nothing was waiting, another computer is sending, the member cancelled, or another send replaced this one. */
@@ -244,10 +248,10 @@ export async function reportDesktopFeatures(session: SendSession, request: typeo
   }
 }
 
-/** Reading from Spotify failed; `busy` when Spotify asked Tagify to wait. */
+/** Reading from Spotify failed; `busy` when Spotify asked Tagify to wait. Keeps what actually went wrong. */
 export class SpotifyReadFailure extends Error {
-  constructor(readonly busy: boolean, message = busy ? "Spotify asked Tagify to wait" : "Spotify couldn't read the library") {
-    super(message);
+  constructor(readonly busy: boolean, message = busy ? "Spotify asked Tagify to wait" : "Spotify couldn't read the library", options?: { cause?: unknown }) {
+    super(message, options);
     this.name = "SpotifyReadFailure";
   }
 }
@@ -273,11 +277,32 @@ export function sendFailure(error: unknown): SpotifySendFailure {
   return "unknown";
 }
 
-/** Whether Spotify asked Tagify to wait (rate limited, or Tagify's own request guard stopped it). */
-export const isSpotifyBusy = (error: unknown) => {
-  const value = error as { status?: number; spotifyRequestStopped?: boolean; message?: string } | null;
-  return value?.status === 429 || Boolean(value?.spotifyRequestStopped) || /short break|slow down|wait/i.test(value?.message ?? "");
-};
+/**
+ * How long Spotify asked Tagify to wait, when it did: a 429, or the pause one left behind (the
+ * tagging queue words its own 429 pause as "a short break"). Null for every other failure,
+ * including Tagify giving up on a slow read, which is not Spotify asking for anything.
+ */
+export function spotifyWaitMs(error: unknown): number | null {
+  const waited = getSpotifyRetryAfterMs(error);
+  if (waited !== null) return waited;
+  return /needs a short break/i.test(String((error as { message?: unknown } | null)?.message ?? "")) ? 60_000 : null;
+}
+
+/** Whether Spotify asked Tagify to wait (a 429, or its pause), as opposed to being slow or unreachable. */
+export const isSpotifyBusy = (error: unknown) => spotifyWaitMs(error) !== null;
+
+/** What went wrong, for the console: the error's own words and Tagify's classification, no tokens or IDs. */
+export function describeSendError(error: unknown): string {
+  const parts: string[] = [];
+  for (let current: unknown = error, depth = 0; current && depth < 4; current = (current as { cause?: unknown }).cause, depth++) {
+    const value = current as { name?: unknown; message?: unknown; spotifyFailure?: unknown; status?: unknown };
+    const failure = classifySpotifyFailure(current);
+    parts.push([typeof value.name === "string" ? value.name : "Error", typeof value.message === "string" ? value.message : String(current),
+      failure ? `(${failure.kind}${failure.endpoint ? ` ${failure.endpoint}` : ""}${failure.retryAfterSeconds !== undefined ? `, retry after ${Math.round(failure.retryAfterSeconds)} s` : ""})` : ""]
+      .filter(Boolean).join(": "));
+  }
+  return parts.join(" <- ");
+}
 
 /** Reads from Spotify, turning its failures (and a read that never ends) into SpotifyReadFailure. */
 async function readFromSpotify<T>(read: () => Promise<T>, timeoutMs: number): Promise<T> {
@@ -290,7 +315,7 @@ async function readFromSpotify<T>(read: () => Promise<T>, timeoutMs: number): Pr
   } catch (error) {
     if (error instanceof SpotifyReadFailure) throw error;
     if ((error as { name?: string } | null)?.name === "AbortError") throw error;
-    throw new SpotifyReadFailure(isSpotifyBusy(error));
+    throw new SpotifyReadFailure(isSpotifyBusy(error), undefined, { cause: error });
   } finally {
     clearTimeout(timer);
   }
@@ -315,7 +340,20 @@ const REQUEST_LISTS = 200;
 const REQUEST_BUDGET_BYTES = 1_500_000;
 const PROGRESS_EVERY_MS = 1_500;
 const HEARTBEAT_MS = 15_000;
-const LIST_TIMEOUT_MS = 3 * 60_000;
+/** The longest one list may take to read, across all its pages (a 50,000-song playlist reads in about 7 minutes). */
+const LIST_TIMEOUT_MS = 15 * 60_000;
+/** Songs per playlist read, so no single request grows with the playlist. */
+export const READ_PAGE_SONGS = 100;
+/** How long one page may take before Tagify treats Spotify as stuck (Tagify's usual limit is 10 seconds). */
+export const READ_PAGE_TIMEOUT_MS = 60_000;
+/** Pauses before reading a list again after Spotify was slow or failed; then the list is skipped. */
+export const READ_RETRY_DELAYS_MS = [5_000, 20_000, 60_000];
+/** The longest Spotify may ask Tagify to wait before the send stops instead (a quota pause is an hour). */
+const SPOTIFY_WAIT_MAX_MS = 5 * 60_000;
+/** How many times one send waits for Spotify before stopping. */
+const SPOTIFY_WAITS_MAX = 6;
+/** Playlists skipped in a row that mean Spotify itself isn't answering, so the send stops instead. */
+const SKIPS_IN_A_ROW_MAX = 5;
 
 type Part = ReturnType<typeof listParts>[number] & { fingerprint: string };
 /** A list Community already has: kept without its songs, with its current name, place and folders. */
@@ -337,8 +375,11 @@ function publish(snapshot: SpotifySendSnapshot) {
  */
 export async function runSpotifyLibrarySend(session: SendSession, reader: LibraryReader, options: {
   request?: typeof fetch; heartbeatMs?: number; listTimeoutMs?: number; onStarted?: () => void;
+  /** Waits between reads; tests pass one that doesn't. */
+  sleep?: (ms: number) => Promise<void>;
 } = {}): Promise<SpotifySendOutcome> {
   const request = options.request ?? fetch;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const call = async (method: "POST" | "PATCH" | "PUT", path: string, body: Record<string, unknown>) => {
     const current = await session();
     let response: Response;
@@ -375,6 +416,15 @@ export async function runSpotifyLibrarySend(session: SendSession, reader: Librar
   }
   if (started.status !== "started" || typeof started.sendId !== "string") return { status: started.status === "taken" ? "taken" : "none" };
   const sendId = started.sendId;
+  // What the member chose on Community (the spotify_list_choice migration); none means everything, as before.
+  let selection: SpotifyListSelectionV1 | null = null;
+  if (started.selection != null) {
+    try { assertSpotifyListSelection(started.selection); selection = started.selection; } catch {
+      await call("PATCH", "/send", { sendId, failure: "unknown" }).catch(() => { /* Community shows that the send stopped */ });
+      return { status: "failed", failure: "unknown" };
+    }
+  }
+  const chosen = selection ? new Set(selection.playlistIds) : null;
   const known = new Map((Array.isArray(started.lists) ? started.lists : []).map((list: { id?: unknown; fingerprint?: unknown }) => [String(list.id), String(list.fingerprint)]));
   options.onStarted?.();
 
@@ -434,15 +484,17 @@ export async function runSpotifyLibrarySend(session: SendSession, reader: Librar
     for (const item of sending) if ("keep" in item) keptLists.delete(item.id);
     await report();
   };
+  const queueKept = async (kept: Kept) => {
+    const bytes = JSON.stringify(kept).length;
+    if (batch.length && (batch.length >= REQUEST_LISTS || batchBytes + bytes > REQUEST_BUDGET_BYTES)) await flush();
+    batch.push(kept);
+    batchBytes += bytes;
+  };
   const add = async (list: CommunitySpotifyList) => {
     checkpoint();
     const fingerprint = await listFingerprint(list);
     if (known.get(list.id) === fingerprint) {
-      const kept: Kept = { id: list.id, keep: true, fingerprint, name: list.name, position: list.position, folders: list.folders };
-      const bytes = JSON.stringify(kept).length;
-      if (batch.length && (batch.length >= REQUEST_LISTS || batchBytes + bytes > REQUEST_BUDGET_BYTES)) await flush();
-      batch.push(kept);
-      batchBytes += bytes;
+      await queueKept({ id: list.id, keep: true, fingerprint, name: list.name, position: list.position, folders: list.folders });
       keptLists.set(list.id, { ...list, fingerprint });
       progress.listsUnchanged += 1;
     } else {
@@ -453,32 +505,93 @@ export async function runSpotifyLibrarySend(session: SendSession, reader: Librar
     await report();
   };
 
+  // One read from Spotify, tried again after a pause when Spotify was slow or failed, and after the
+  // wait it asked for when it asked Tagify to wait. Throws the last failure once the tries run out.
+  let spotifyWaits = 0;
+  const pause = async (ms: number) => {
+    // Short steps, so cancelling on Community stops the wait too.
+    for (let left = ms; left > 0; left -= 1_000) { checkpoint(); await sleep(Math.min(1_000, left)); }
+    checkpoint();
+  };
+  const readWithRetries = async <T>(what: string, read: () => Promise<T>, timeout: number): Promise<T> => {
+    for (let attempt = 0; ; attempt++) {
+      checkpoint();
+      try {
+        return await readFromSpotify(read, timeout);
+      } catch (error) {
+        if (error instanceof SendStopped || (error as { name?: string } | null)?.name === "AbortError") throw error;
+        const wait = spotifyWaitMs((error as { cause?: unknown }).cause ?? error);
+        if (wait !== null) {
+          // Spotify asked Tagify to wait: wait as long as it asked, unless that's longer than a send can.
+          if (wait > SPOTIFY_WAIT_MAX_MS || ++spotifyWaits > SPOTIFY_WAITS_MAX) throw error;
+          console.info(`Tagify sync: Spotify asked Tagify to wait ${Math.ceil(wait / 1000)} s while reading ${what}`);
+          await pause(wait + 1_000);
+          attempt--;
+          continue;
+        }
+        if (attempt >= READ_RETRY_DELAYS_MS.length) throw error;
+        console.info(`Tagify sync: reading ${what} failed, trying again: ${describeSendError(error)}`);
+        await pause(READ_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  };
+
+  const skipped: string[] = [];
   try {
     const timeout = options.listTimeoutMs ?? LIST_TIMEOUT_MS;
-    const playlists = (await readFromSpotify(() => reader.getAllUserPlaylistReferencesStrict(), timeout)).filter((playlist) => SPOTIFY_ID.test(playlist.playlistId));
-    progress.listsTotal = Math.min(LISTS_MAX, 1 + playlists.length);
+    // Every playlist keeps its place in Spotify's order, chosen or not, so Community sorts them as Spotify does.
+    const playlists = (await readWithRetries("your playlists", () => reader.getAllUserPlaylistReferencesStrict(), timeout))
+      .filter((playlist) => SPOTIFY_ID.test(playlist.playlistId))
+      .map((playlist, index) => ({ ...playlist, position: index + 1 }))
+      .filter((playlist) => !chosen || chosen.has(playlist.playlistId));
+    const sendLiked = !selection || selection.liked;
+    progress.listsTotal = Math.min(LISTS_MAX, (sendLiked ? 1 : 0) + playlists.length);
     await report(true);
     checkpoint();
 
-    const liked: SpotifyTrack[] = [];
-    for (let offset: number | null = 0; offset !== null;) {
-      checkpoint();
-      const page = await readFromSpotify(() => reader.getTaggingQueuePage(null, offset ?? 0), timeout);
-      liked.push(...page.tracks);
-      offset = page.nextOffset;
-      progress.currentSongs = liked.length;
-      await report();
-    }
-    const likedList = toList("liked", "liked", "Liked Songs", 0, liked.reverse());
     const folderIds = new Set<string>();
-    let total = likedList.songs.length;
-    await add(likedList);
+    let total = 0;
+    if (sendLiked) {
+      const liked: SpotifyTrack[] = [];
+      for (let offset: number | null = 0; offset !== null;) {
+        checkpoint();
+        const page = await readWithRetries("Liked Songs", () => reader.getTaggingQueuePage(null, offset ?? 0), timeout);
+        liked.push(...page.tracks);
+        offset = page.nextOffset;
+        progress.currentSongs = liked.length;
+        await report();
+      }
+      const likedList = toList("liked", "liked", "Liked Songs", 0, liked.reverse());
+      total = likedList.songs.length;
+      await add(likedList);
+    }
 
+    let skippedInARow = 0;
     for (const [index, playlist] of playlists.entries()) {
       if (1 + index >= LISTS_MAX || total >= LISTS_MAX_SONGS) break;
       checkpoint();
-      const list = toList(playlist.playlistId, "playlist", playlist.playlistName, index + 1, await readFromSpotify(() => reader.readPlaylistTracks(playlist.playlistId), timeout),
-        communityFolders(playlist.folders, folderIds));
+      const folders = communityFolders(playlist.folders, folderIds);
+      let tracks: SpotifyTrack[];
+      try {
+        tracks = await readWithRetries(`a playlist (${index + 1} of ${playlists.length})`,
+          () => reader.readPlaylistTracks(playlist.playlistId, { pageSize: READ_PAGE_SONGS, timeoutMs: READ_PAGE_TIMEOUT_MS }), timeout);
+      } catch (error) {
+        // Spotify asked for longer than a send can wait, or the member stopped it: the send stops.
+        if (!(error instanceof SpotifyReadFailure) || error.busy) throw error;
+        // Spotify couldn't read this one playlist even after waiting: send the rest and name it.
+        // Several in a row mean Spotify itself isn't answering.
+        if (++skippedInARow >= SKIPS_IN_A_ROW_MAX) throw error;
+        console.warn(`Tagify sync: skipped a playlist Spotify couldn't read (${index + 1} of ${playlists.length}): ${describeSendError(error)}`);
+        skipped.push(clean(playlist.playlistName, 200) ?? "Untitled playlist");
+        // A copy Community already has stays, in its current place, rather than disappearing.
+        const fingerprint = known.get(playlist.playlistId);
+        if (fingerprint) await queueKept({ id: playlist.playlistId, keep: true, fingerprint, name: clean(playlist.playlistName, 200) ?? "Untitled playlist", position: playlist.position, folders });
+        progress.listsDone += 1;
+        await report();
+        continue;
+      }
+      skippedInARow = 0;
+      const list = toList(playlist.playlistId, "playlist", playlist.playlistName, playlist.position, tracks, folders);
       const room = LISTS_MAX_SONGS - total;
       if (list.songs.length > room) { list.songs = list.songs.slice(0, room); list.names = list.names.slice(0, room); }
       total += list.songs.length;
@@ -491,12 +604,16 @@ export async function runSpotifyLibrarySend(session: SendSession, reader: Librar
     checkpoint();
     const finished = await call("POST", "", { sendId, revision });
     if (finished.status !== "done") return { status: finished.status === "cancelled" ? "cancelled" : "gone" };
-    return { status: "done", lists: Number(finished.lists ?? progress.listsDone), songs: Number(finished.songs ?? total), unchanged: progress.listsUnchanged };
+    if (skipped.length) console.warn(`Tagify sync: sent your Spotify lists except ${skipped.length} playlist(s) Spotify couldn't read`);
+    return { status: "done", lists: Number(finished.lists ?? progress.listsDone), songs: Number(finished.songs ?? total), unchanged: progress.listsUnchanged, skipped };
   } catch (error) {
     if (error instanceof SendStopped) return { status: error.reason };
+    // Lists already read still go to Community, so trying again sends only the rest. Not when
+    // Community or the connection is what failed.
+    if (!(error instanceof SpotifyLibrarySendError) && !(error instanceof TypeError)) await flush().catch(() => { /* the next send reads them again */ });
     const failure = sendFailure(error);
     await call("PATCH", "/send", { sendId, failure }).catch(() => { /* Community shows that the send stopped */ });
-    console.warn("Tagify sync: Spotify lists were not sent to Community", failure, error instanceof Error ? error.message : error);
+    console.warn("Tagify sync: Spotify lists were not sent to Community", failure, describeSendError(error));
     return { status: "failed", failure };
   } finally {
     clearInterval(heartbeat);

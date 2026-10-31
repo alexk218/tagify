@@ -13,7 +13,7 @@ interface PowerUserModalProps {
 }
 
 const GITHUB_URL = "https://github.com/alexk218/tagify";
-const WEBSITE_URL = "https://www.tagify.fm";
+const WEBSITE_URL = "https://tagify.fm";
 const PROMO_VIDEO_URL = "https://www.youtube.com/watch?v=iDsSasHFOJQ";
 
 const PowerUserModal: React.FC<PowerUserModalProps> = ({

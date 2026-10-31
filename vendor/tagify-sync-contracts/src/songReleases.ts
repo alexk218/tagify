@@ -1,7 +1,7 @@
 // Song releases Tagify desktop reads from Spotify's desktop app and sends Community: each song's
 // ISRC and the release (album, single or compilation) Spotify files it under. Community names the
 // album on song pages and gives every Spotify version of the same recording (an exact ISRC match)
-// one page, without spending its development-mode Web API quota (migration 0261).
+// one page, without spending its development-mode Web API quota (migration 0263).
 // A side document next to sync: GET /api/v2/sync/song-releases lists what Community still needs
 // from this member's library, POST sends what the desktop found.
 export const SONG_RELEASES_PROTOCOL_VERSION = 1 as const;

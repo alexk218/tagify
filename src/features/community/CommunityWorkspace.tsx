@@ -3,7 +3,7 @@ import { ExternalLink, GitMerge, Globe, Link2, RefreshCw, ShieldAlert, Unplug, U
 import type { SyncStatus } from "@/services/sync/SyncRuntime";
 import type { TagTaxonomy, TrackData } from "@/types/tagData";
 import {
-  COMMUNITY_ORIGIN,
+  COMMUNITY_PAGES_ORIGIN,
   getCommunityDisconnectUrl,
   openCommunityUrl,
 } from "./communityLinks";
@@ -90,7 +90,7 @@ export function CommunityWorkspace({
     }
   };
 
-  const visit: Action = { label: "Visit Community", icon: <ExternalLink size={16} />, onClick: () => openCommunityUrl(COMMUNITY_ORIGIN) };
+  const visit: Action = { label: "Visit Community", icon: <ExternalLink size={16} />, onClick: () => openCommunityUrl(COMMUNITY_PAGES_ORIGIN) };
   let lead: React.ReactNode;
   let primary: Action;
   let secondary: Action | null = visit;

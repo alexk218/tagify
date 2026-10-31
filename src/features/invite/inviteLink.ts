@@ -1,9 +1,9 @@
-import { COMMUNITY_ORIGIN } from "@/features/community/communityLinks";
+import { COMMUNITY_PAGES_ORIGIN } from "@/features/community/communityLinks";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
 
 /** The link anyone can share: Community's general invite, where friends join or download Tagify. */
-export const GENERAL_INVITE_URL = `${COMMUNITY_ORIGIN}/join`;
+export const GENERAL_INVITE_URL = `${COMMUNITY_PAGES_ORIGIN}/join`;
 export const GENERAL_INVITE_PREVIEW = `${GENERAL_INVITE_URL}/opengraph-image`;
 
 /** What would put the member's name on the invite, when it doesn't have it yet. */
@@ -18,8 +18,8 @@ const general = (nameStep: InviteNameStep | null): InviteLink => ({ kind: "gener
 interface ProfileAnswer { profile?: { handle?: unknown; invitable?: unknown } }
 
 /**
- * The member's personal invite (community.tagify.fm/join/<handle>) when Community says it opens for
- * other people, and Community's general invite (community.tagify.fm/join) otherwise. Without an answer from Community (offline, or a Community
+ * The member's personal invite (tagify.fm/join/<handle>) when Community says it opens for
+ * other people, and Community's general invite (tagify.fm/join) otherwise. Without an answer from Community (offline, or a Community
  * that doesn't report it yet) the general link goes out with no suggestion, so a member whose
  * profile is already public is never told to publish it.
  *
@@ -39,7 +39,7 @@ export async function resolveInviteLink(
   const handle = body.profile?.handle;
   if (typeof handle !== "string" || !handle) return general(null);
   if (body.profile?.invitable === true) {
-    const url = `${COMMUNITY_ORIGIN}/join/${encodeURIComponent(handle)}`;
+    const url = `${COMMUNITY_PAGES_ORIGIN}/join/${encodeURIComponent(handle)}`;
     return { kind: "personal", url, preview: `${url}/opengraph-image` };
   }
   return general(body.profile?.invitable === false ? "publish" : null);

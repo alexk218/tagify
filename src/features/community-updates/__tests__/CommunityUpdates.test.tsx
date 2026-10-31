@@ -104,7 +104,7 @@ describe("Community update popup", () => {
     await advance(3000);
     await advance(1100);
     fireEvent.click(screen.getByRole("button", { name: "Open Community" }));
-    expect(open).toHaveBeenCalledWith("https://community.tagify.fm", "_blank", "noopener,noreferrer");
+    expect(open).toHaveBeenCalledWith("https://tagify.fm", "_blank", "noopener,noreferrer");
     expect(communityUpdateService.dismiss).toHaveBeenCalledWith(updates);
   });
 });

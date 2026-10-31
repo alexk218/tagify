@@ -8,7 +8,7 @@ const MAX_AGE = 7 * 86400000;
 const MAX_EVENTS = 200;
 const HOSTS = ["https://us.i.posthog.com", "https://eu.i.posthog.com"];
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
-const EVENTS = ["tagify_opened", "tagify_present", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened", "update_banner_shown", "update_instructions_opened", "update_download_clicked", "update_banner_dismissed", "community_publish_prompt_shown", "community_publish_prompt_reminder_shown", "community_publish_prompt_snoozed", "community_publish_prompt_published", "community_profile_published", "community_publish_kept_private", "community_share_opened", "community_sharing_stopped", "community_sharing_resumed", "community_connect_prompt_shown", "community_connect_prompt_dismissed", "community_setup_opened", "community_connect_started", "community_connect_completed", "community_connect_failed", "invite_opened", "invite_link_copied", "start_reason_shown", "start_reason_answered", "start_reason_dismissed"] as const;
+const EVENTS = ["tagify_opened", "tagify_present", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened", "update_banner_shown", "update_instructions_opened", "update_download_clicked", "update_banner_dismissed", "community_publish_prompt_shown", "community_publish_prompt_reminder_shown", "community_publish_prompt_snoozed", "community_publish_prompt_published", "community_profile_published", "community_publish_kept_private", "community_share_opened", "community_sharing_stopped", "community_sharing_resumed", "community_connect_prompt_shown", "community_connect_prompt_dismissed", "community_setup_opened", "community_connect_started", "community_connect_completed", "community_connect_failed", "invite_opened", "invite_link_copied", "first_run_shown", "first_run_song_picked", "first_run_payoff_shown", "first_run_payoff_reached", "welcome_popup_shown"] as const;
 export type ProductEventName = typeof EVENTS[number];
 // Details are fixed, coarse values so an event never carries content, versions or links.
 const DETAILS = {
@@ -24,7 +24,9 @@ const DETAILS = {
   sharing_state: ["review", "private", "paused", "public"],
   saved_songs: ["0", "1-9", "10-99", "100-999", "1000+"],
   edit_surface: ["tagify_page", "spotify_views", "keyboard"],
-  start_reason: ["not_sure_where_to_start", "library_too_big", "just_looking", "something_broke", "other"],
+  liked_songs: ["0", "1+"],
+  first_run_source: ["liked", "playing"],
+  payoff_action: ["filter", "playlist"],
 } as const;
 type DetailKey = keyof typeof DETAILS;
 export type ProductEventDetails = { [K in DetailKey]?: typeof DETAILS[K][number] };
@@ -35,7 +37,9 @@ const EVENT_DETAILS: Partial<Record<ProductEventName, readonly DetailKey[]>> = {
   tagify_present: ["saved_songs"],
   tagging_completed: ["edit_surface"],
   rating_completed: ["edit_surface"],
-  start_reason_answered: ["start_reason"],
+  first_run_shown: ["liked_songs"],
+  first_run_song_picked: ["first_run_source"],
+  first_run_payoff_reached: ["payoff_action"],
   community_setup_opened: ["entry"],
   community_connect_started: ["entry"],
   community_connect_completed: ["entry", "relationship"],

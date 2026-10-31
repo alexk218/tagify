@@ -68,6 +68,13 @@ import {
 import { graphqlRateLimiter } from "./utils/RateLimiter";
 import { spotifyApiService } from "./services/SpotifyApiService";
 import { revealElement } from "@/utils/revealElement";
+import { FirstSongCard } from "@/features/onboarding/components/FirstSongCard";
+import { FirstRunPayoffCard } from "@/features/onboarding/components/FirstRunPayoffCard";
+import { isFirstRunInProgress, markFirstRunDone, markFirstRunStarted, mostUsedTag, PAYOFF_MIN_TAGGED } from "@/features/onboarding/services/firstRun";
+import { TAG_FILTER_LANES } from "@/features/filter-state/hooks/useFilterState";
+
+// Invite to Community once a first tagging session has shown what tags are for.
+const COMMUNITY_INVITE_MIN_TAGGED = 5;
 import { pruneTagFilterFormula } from "@/utils/tagFilterGroups";
 import { buildCategoryTree, buildValidTagIdSet } from "@/utils/tagTaxonomy";
 import {
@@ -348,6 +355,48 @@ function App() {
     () => Object.keys(tagData.tracks).length,
     [tagData.tracks],
   );
+  // A library with nothing tagged starts from its own Liked Songs instead of an empty page.
+  const [firstSongPicked, setFirstSongPicked] = useState(false);
+  const showFirstSongCard = taggedTrackCount === 0 && !firstSongPicked && !isMultiTagging;
+  const pickFirstSong = useCallback((uri: string) => {
+    setFirstSongPicked(true);
+    void handleSelectTrackForTagging(uri);
+    // The song's details load after the switch and push the picker down, so reveal it again once they settle.
+    for (const delay of [300, 1200]) {
+      setTimeout(() => revealElement(document.querySelector("[data-tagify-tag-selector]")), delay);
+    }
+  }, [handleSelectTrackForTagging]);
+  // After a few tagged songs, people who started here are shown what tags are for: a filter, then a playlist.
+  const [firstRunInProgress, setFirstRunInProgress] = useState(isFirstRunInProgress);
+  const [createPlaylistRequest, setCreatePlaylistRequest] = useState(0);
+  useEffect(() => {
+    if (!showFirstSongCard) return;
+    markFirstRunStarted();
+    setFirstRunInProgress(isFirstRunInProgress());
+  }, [showFirstSongCard]);
+  const payoffTag = useMemo(
+    () => firstRunInProgress && taggedTrackCount >= PAYOFF_MIN_TAGGED ? mostUsedTag(tagData) : null,
+    [firstRunInProgress, taggedTrackCount, tagData],
+  );
+  const payoffFiltered = !!payoffTag && activeTagFilters.length === 1 && activeTagFilters[0] === payoffTag.id;
+  const showPayoffSongs = () => {
+    if (!payoffTag) return;
+    clearTagFilters();
+    moveTagToClauseLane(payoffTag.id, TAG_FILTER_LANES.INCLUDE);
+    setActiveView("tracks");
+    setTimeout(() => revealElement(document.querySelector("[data-tagify-track-list]")), 300);
+  };
+  const makePayoffPlaylist = () => {
+    if (!payoffFiltered) showPayoffSongs();
+    setCreatePlaylistRequest((request) => request + 1);
+    // Reaching Create Playlist completes the first run, whether or not they save it.
+    markFirstRunDone();
+    setFirstRunInProgress(false);
+  };
+  const dismissPayoff = () => {
+    markFirstRunDone();
+    setFirstRunInProgress(false);
+  };
   const categoryTree = useMemo(
     () => buildCategoryTree(tagData.taxonomy),
     [tagData.taxonomy],
@@ -1328,7 +1377,7 @@ function App() {
 
       {/* The Community workspace already offers its own Connect button. */}
       <CommunityConnectPrompt
-        enabled={canShowOptionalPrompts && !showCommunityWorkspace}
+        enabled={canShowOptionalPrompts && !showCommunityWorkspace && taggedTrackCount >= COMMUNITY_INVITE_MIN_TAGGED}
         connected={syncConnected}
         onConnect={() => connectCommunity("prompt")}
       />
@@ -1433,6 +1482,19 @@ function App() {
         <div className={styles.content}>
           {activeView === "tracks" ? (
             <>
+              {showFirstSongCard && (
+                <FirstSongCard currentTrack={currentlyPlayingTrack} onPick={pickFirstSong} />
+              )}
+              {payoffTag && !isMultiTagging && (
+                <FirstRunPayoffCard
+                  taggedSongs={taggedTrackCount}
+                  tag={payoffTag}
+                  filtered={payoffFiltered}
+                  onShowSongs={showPayoffSongs}
+                  onMakePlaylist={makePayoffPlaylist}
+                  onDismiss={dismissPayoff}
+                />
+              )}
               {isMultiTagging &&
               multiTagTracks.length > 0 &&
               multiTrackDraftTags ? (
@@ -1495,6 +1557,7 @@ function App() {
                     targetType={isMultiTagging ? "tracks" : "track"}
                     isMultiTagging={isMultiTagging}
                     isLockedTrack={!!lockedMultiTrackUri}
+                    expandForFirstRun={taggedTrackCount === 0}
                   />
                 )}
               {!isMultiTagging && <RecordingConflicts key={getTagifyDatabaseName()} groups={recordingConflicts} taxonomy={tagData.taxonomy} onSave={async (group, choices) => {
@@ -1531,6 +1594,7 @@ function App() {
                 onClearStatsTrackSet={() => setStatsTrackSet(null)}
                 onReturnToStats={returnToStats}
                 onCreatePlaylist={createPlaylistFromFilters}
+                createPlaylistRequest={createPlaylistRequest}
                 onCreateSmartPlaylist={createSmartPlaylist}
                 smartPlaylists={smartPlaylists}
                 onSetSmartPlaylists={setSmartPlaylists}

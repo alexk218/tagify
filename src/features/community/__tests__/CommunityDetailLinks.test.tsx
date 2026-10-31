@@ -68,7 +68,7 @@ for (const kind of ["album", "artist"] as const) {
       await openLens();
       expect(screen.queryByRole("link", { name })).not.toBeInTheDocument();
       await act(async () => { resolve(withPerspectives()); });
-      expect(await screen.findByRole("link", { name })).toHaveAttribute("href", `https://community.tagify.fm/entity/${kind}/1234567890123456789012`);
+      expect(await screen.findByRole("link", { name })).toHaveAttribute("href", `https://tagify.fm/entity/${kind}/1234567890123456789012`);
       expect(screen.getByText("Mira")).toBeInTheDocument();
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });

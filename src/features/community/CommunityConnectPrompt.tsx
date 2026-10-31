@@ -82,7 +82,7 @@ export function CommunityConnectPrompt({ enabled, connected, onConnect }: Commun
   };
 
   return (
-    <section className={styles.prompt} aria-labelledby="community-connect-prompt-title" aria-describedby="community-connect-prompt-description">
+    <section className={`${styles.prompt} ${styles.connect}`} aria-labelledby="community-connect-prompt-title" aria-describedby="community-connect-prompt-description">
       <span className={styles.icon} aria-hidden="true"><Users size={18} /></span>
       <div className={styles.text}>
         <h2 id="community-connect-prompt-title" className={styles.title}>Share your tags on Community</h2>

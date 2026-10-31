@@ -3,6 +3,8 @@ import {
   MAX_ARTIST_CREDITS_PER_ITEM, normalizeArtistName,
   type ArtistCreditEntityV1, type ArtistCreditReportItemV1, type ArtistCreditV1,
 } from "@tagify/sync-contracts";
+import { CatalogFillFailures, type CatalogFillCause } from "./CatalogFillFailures";
+import { splitOutsideLibrary, type CatalogFillAllowance } from "./CommunityCatalogFill";
 import type { SendSession } from "./SpotifyLibrarySender";
 import { syncClientHeaders } from "./SyncClientHeaders";
 
@@ -10,7 +12,9 @@ import { syncClientHeaders } from "./SyncClientHeaders";
 // look up every one (Community docs/SPOTIFY_COMPLIANCE.md), so Tagify reads them here, through
 // Spotify's desktop app, and sends them (Community migration 0252). Community asks only for music in
 // this member's library that nobody has sent yet, so each song is read once for everyone. Requests
-// are paced in the background and stop at Spotify's first refusal.
+// are paced in the background and stop at Spotify's first refusal. On a catalog filler desktop
+// (Alex's; Community migrations 0326 and 0335) the list continues with songs from anywhere on Community, which
+// are read one at a time under the filler's slower allowance (CommunityCatalogFill.ts).
 
 /** Background Spotify reads this feature may make in an hour (SpotifyBackgroundPolicy keeps at most 200). */
 export const ARTIST_CREDIT_HOURLY_READS = 150;
@@ -37,6 +41,8 @@ export interface ArtistCreditSources {
   reserve(identity: string): boolean;
   /** Waits between reads so they never come in a burst. */
   pace?(): Promise<void>;
+  /** Songs Community asks about that aren't in this library: GraphQL getTrack only, under this allowance. */
+  outsideLibrary?: CatalogFillAllowance;
 }
 
 export interface ArtistCreditRun {
@@ -44,6 +50,10 @@ export interface ArtistCreditRun {
   /** Spotify reads made. */
   reads: number;
   stopped?: "unsupported" | "paused" | "signed_out" | "network" | "spotify" | "budget";
+  /** Why it stopped when Spotify did it, and the items Spotify failed to read that it went past. */
+  cause?: CatalogFillCause;
+  skipped?: number;
+  lastSkip?: CatalogFillCause;
 }
 
 class Stop extends Error {
@@ -95,6 +105,7 @@ function saveUnavailable(storage: Storage | null, entries: Map<string, number>) 
  */
 export async function resolveArtistCredits(
   items: ArtistCreditEntityV1[], sources: ArtistCreditSources, unavailable: Map<string, number>, now = Date.now(),
+  failures = new CatalogFillFailures(),
 ): Promise<{ found: ArtistCreditReportItemV1[]; reads: number; halted: "budget" | "spotify" | null }> {
   const found = new Map<string, ArtistCreditReportItemV1>();
   let reads = 0;
@@ -109,8 +120,9 @@ export async function resolveArtistCredits(
     if (!sources.reserve(identity)) { halted = "budget"; return null; }
     reads += 1;
     await sources.pace?.();
-    // A failure is Spotify refusing or being unreachable: stop, never retry around it.
-    try { return await request(); } catch { halted = "spotify"; return null; }
+    // Spotify asking Tagify to wait stops the run, never retried around; any other failure skips
+    // this item (remembered as unavailable), unless too many fail in a row (CatalogFillFailures.ts).
+    try { const answer = await request(); failures.succeeded(); return answer; } catch (error) { if (failures.failed(error)) halted = "spotify"; return null; }
   };
 
   const pending = items.filter((entity) => !unavailable.has(uriOf(entity)));
@@ -147,6 +159,20 @@ export async function resolveArtistCredits(
 }
 
 /**
+ * Songs outside this library are read one at a time with GraphQL getTrack only (after the artists
+ * Tagify already saw, which cost nothing), under the catalog filler's hourly and daily allowance.
+ */
+function outsideLibrarySources(sources: ArtistCreditSources, fill: CatalogFillAllowance): ArtistCreditSources {
+  return {
+    ...sources,
+    trackAlbums: async () => new Map(),
+    albumTrackArtists: async () => null,
+    reserve: (identity) => fill.reserve(identity),
+    pace: () => fill.pace(),
+  };
+}
+
+/**
  * Sends Community the artists it asked for, page by page, until nothing is left, the hour's reads
  * are used up, or Spotify or Community asks Tagify to stop. Never throws.
  */
@@ -158,6 +184,7 @@ export async function runArtistCreditReports(
   const storage = options.storage === undefined ? defaultStorage() : options.storage;
   const now = options.now ?? Date.now;
   const run: ArtistCreditRun = { sent: 0, reads: 0 };
+  const failures = new CatalogFillFailures();
   const unavailable = readUnavailable(storage, now());
   const call = async (path: string, init: RequestInit = {}) => {
     const current = await session();
@@ -183,17 +210,26 @@ export async function runArtistCreditReports(
       const { body } = await call(`?deviceId={device}&limit=${MAX_ARTIST_CREDITS_NEEDED}&offset=${offset}`);
       assertArtistCreditsNeeded(body);
       if (!body.items.length) break;
-      // What a page found is sent even when Spotify stopped answering partway.
-      const resolved = await resolveArtistCredits(body.items, sources, unavailable, now());
+      const { library, outside } = await splitOutsideLibrary(body.items, sources.outsideLibrary);
+      const resolved = await resolveArtistCredits(library, sources, unavailable, now(), failures);
       run.reads += resolved.reads;
-      for (let start = 0; start < resolved.found.length; start += MAX_ARTIST_CREDIT_REPORT_ITEMS) {
-        const items = resolved.found.slice(start, start + MAX_ARTIST_CREDIT_REPORT_ITEMS);
+      const found = [...resolved.found];
+      let halted = resolved.halted;
+      if (!halted && outside.length && sources.outsideLibrary) {
+        const filled = await resolveArtistCredits(outside, outsideLibrarySources(sources, sources.outsideLibrary), unavailable, now(), failures);
+        run.reads += filled.reads;
+        found.push(...filled.found);
+        halted = filled.halted;
+      }
+      // What a page found is sent even when Spotify stopped answering partway.
+      for (let start = 0; start < found.length; start += MAX_ARTIST_CREDIT_REPORT_ITEMS) {
+        const items = found.slice(start, start + MAX_ARTIST_CREDIT_REPORT_ITEMS);
         const current = await session();
         await call("", { method: "POST", body: JSON.stringify({ protocolVersion: ARTIST_CREDITS_PROTOCOL_VERSION, deviceId: current.deviceId, items }) });
         run.sent += items.length;
       }
-      if (resolved.halted) { run.stopped = resolved.halted; break; }
-      offset += body.items.length - resolved.found.length;
+      if (halted) { run.stopped = halted; break; }
+      offset += body.items.length - found.length;
       if (!body.hasMore) break;
     }
   } catch (error) {
@@ -201,5 +237,5 @@ export async function runArtistCreditReports(
   } finally {
     saveUnavailable(storage, unavailable);
   }
-  return run;
+  return { ...run, ...failures.summary() };
 }

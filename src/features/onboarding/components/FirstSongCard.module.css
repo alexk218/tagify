@@ -1,0 +1,211 @@
+.card {
+  background: rgb(255 255 255 / 4%);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 8px;
+  color: var(--spice-text);
+  display: grid;
+  gap: 14px;
+  margin: 8px 16px;
+  padding: 18px 20px;
+}
+
+.header {
+  display: grid;
+  gap: 4px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.description,
+.footer,
+.listLabel {
+  color: var(--spice-subtext);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.list {
+  display: grid;
+  gap: 4px;
+}
+
+.row,
+.playing {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.row {
+  align-items: center;
+  border-radius: 6px;
+  display: flex;
+  gap: 12px;
+  padding: 6px 8px;
+}
+
+.row:hover,
+.row:focus-visible {
+  background: rgb(255 255 255 / 8%);
+}
+
+.rowCover {
+  background: rgb(255 255 255 / 8%);
+  border-radius: 4px;
+  flex: 0 0 auto;
+  height: 40px;
+  object-fit: cover;
+  width: 40px;
+}
+
+.songText {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.songName,
+.songArtist,
+.eyebrow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.songName {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.songArtist {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.eyebrow {
+  color: var(--spice-subtext);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.primary,
+.secondary {
+  border-radius: 500px;
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 14px;
+}
+
+.primary {
+  background: var(--spice-text);
+  color: var(--spice-main);
+}
+
+.secondary {
+  border: 1px solid rgb(255 255 255 / 18%);
+}
+
+.row:hover .secondary {
+  border-color: rgb(255 255 255 / 40%);
+}
+
+.playing {
+  align-items: center;
+  background: rgb(255 255 255 / 6%);
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  padding: 10px 14px 10px 10px;
+}
+
+.playing:hover,
+.playing:focus-visible {
+  background: rgb(255 255 255 / 10%);
+}
+
+.playingCover {
+  background: rgb(255 255 255 / 8%);
+  border-radius: 4px;
+  flex: 0 0 auto;
+  height: 56px;
+  object-fit: cover;
+  width: 56px;
+}
+
+.skeleton {
+  background: rgb(255 255 255 / 6%);
+  border-radius: 6px;
+  height: 52px;
+}
+
+.headerRow {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.dismiss {
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 20px;
+  height: 28px;
+  line-height: 1;
+  width: 28px;
+}
+
+.dismiss:hover,
+.dismiss:focus-visible {
+  background: rgb(255 255 255 / 8%);
+  color: var(--spice-text);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.primaryButton,
+.secondaryButton {
+  border-radius: 500px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 16px;
+}
+
+.primaryButton {
+  background: var(--spice-text);
+  border: 1px solid var(--spice-text);
+  color: var(--spice-main);
+}
+
+.secondaryButton {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 18%);
+  color: var(--spice-text);
+}
+
+.secondaryButton:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

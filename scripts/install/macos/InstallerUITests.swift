@@ -65,7 +65,15 @@ extension InstallerApp {
         try expect(blockUpdates.state == .on && !apply.isEnabled, "Applied update setting should have no pending changes")
         try expect(componentIcons.count == 3 && componentIcons.allSatisfy { $0.image != nil }, "Product logos did not load for the setup cards")
         try expect(spotifyRequirement.stringValue.contains("desktop app") && spotifyRequirement.stringValue.contains("spotify.com"), "The main setup screen omitted Spotify's required desktop download")
-        try expect(window.title == "Tagify Manager" && discordHelp.title == "Get help on Discord" && discordHelp.isEnabled && Self.discordHelpURL.absoluteString == "https://discord.gg/C4qbPUbBKV", "Manager branding or Discord help is missing")
+        try expect(window.title == "Tagify Manager" && community.title == "Join the Discord" && community.isEnabled && DiscordCommunity.inviteURL.absoluteString == "https://discord.gg/C4qbPUbBKV", "Manager branding or the Discord invitation is missing")
+        try expect((community as? InstallerButton)?.badge == "38 online" && communityInvite.isHidden, "The Discord button doesn't show who's online, or the invitation shows before setup")
+        var openedLinks: [URL] = []
+        openLinkOverride = { openedLinks.append($0); return true }
+        community.performClick(nil)
+        try expect(openedLinks == [DiscordCommunity.inviteURL], "The footer button didn't open the Discord invite")
+        communityCounts = DiscordCommunity.Counts(members: 60, online: 4); renderCommunity()
+        try expect((community as? InstallerButton)?.badge == nil && communityInvite.stringValue.contains("other Tagify users"), "Small Discord counts were shown")
+        communityCounts = DiscordCommunity.Counts(members: 128, online: 38); renderCommunity()
         try expect(refresh.title == "Check again" && logs.title == "Logs" && logs.isEnabled, "Windows-style setup controls are missing")
         logs.performClick(nil); settle()
         try expect(detailsPanel?.isVisible == true && detailsPanel?.title == "Installer logs" && detailsText.string.contains("No setup activity yet") && !copyButton.isEnabled, "Logs cannot open before installation")
@@ -144,6 +152,11 @@ extension InstallerApp {
         retry.performClick(nil)
         try expect(retries == 1 && !errorCard.isHidden && !busy, "Inline failure couldn't retry the failed action")
         try capture("installer-recovery")
+        var copied = ""
+        copyOverride = { copied = $0 }
+        askDiscord.performClick(nil)
+        try expect(copied == diagnostics && !copied.isEmpty && openedLinks.last == DiscordCommunity.inviteURL && askDiscord.title == "Copied. Paste it in #support", "Ask on Discord didn't copy diagnostics before opening Discord")
+        try capture("installer-ask-discord")
         showFailure(TagifyInstaller.spotifyReinstallMessage, retry: {})
         try capture("installer-spotify-reinstall")
         appendDiagnostic("Tagify Installer 1.0.1 | Test diagnostics\nDownload couldn't be verified.")
@@ -222,6 +235,7 @@ extension InstallerApp {
         try waitForOperation()
         try expect(setup.ready && action.title == "Open Spotify" && repair.isEnabled && errorCard.isHidden, "Native install didn't finish in a verified ready state")
         try expect(preferences.blockSpotifyUpdates == true && fixture.closed, "Native install didn't save its verified setting or close the isolated Spotify copy")
+        try expect(!communityInvite.isHidden && communityInvite.stringValue.contains("128 Tagify users") && communityInvite.stringValue.contains("Join\u{00A0}on\u{00A0}Discord"), "A successful setup didn't invite people to the Discord community")
         try capture("installer-installed")
         let before = fixture.spiceCommands.count
         action.performClick(nil)

@@ -353,7 +353,7 @@ describe("TagManager", () => {
     await user.click(tagLink);
 
     expect(openSpy).toHaveBeenCalledWith(
-      "https://community.tagify.fm/search?tag=label%3ANight%2520Drive",
+      "https://tagify.fm/search?tag=label%3ANight%2520Drive",
       "_blank",
       "noopener,noreferrer",
     );

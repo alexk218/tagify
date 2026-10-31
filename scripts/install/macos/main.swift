@@ -31,6 +31,8 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var preferenceSaveFailed = false
     var isPreview = false
     var openSpotifyOverride: (() -> Void)?
+    var openLinkOverride: ((URL) -> Bool)?
+    var copyOverride: ((String) -> Void)?
     #if INSTALLER_UI_TESTS
     var installerFactoryOverride: ((URL) throws -> TagifyInstaller)?
     #endif
@@ -45,8 +47,9 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let spiceHelp = installerButton("Update help", target: nil, action: nil)
     let logs = installerButton("Logs", target: nil, action: nil)
     let tutorialButton = installerButton("Tutorial", target: nil, action: nil)
-    let discordHelp = installerButton("Get help on Discord", target: nil, action: nil)
-    static let discordHelpURL = URL(string: "https://discord.gg/C4qbPUbBKV")!
+    let community = installerButton("Join the Discord", target: nil, action: nil)
+    let communityInvite = installerLabel("", size: 13, color: .secondaryLabelColor)
+    var communityCounts: DiscordCommunity.Counts?
     let blockUpdates = NSButton(checkboxWithTitle: "Block Spotify updates", target: nil, action: nil)
     let protectionStatus = installerLabel("", size: 13, weight: .medium)
     let pendingStatus = installerLabel("", size: 12, color: .secondaryLabelColor)
@@ -56,6 +59,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let errorTitle = installerLabel("Setup needs attention", size: 16, weight: .semibold)
     let errorMessage = installerLabel("", size: 13)
     let retry = installerButton("Try again", target: nil, action: nil)
+    let askDiscord = installerButton("Ask on Discord", target: nil, action: nil)
     let details = installerButton("View details", target: nil, action: nil)
     let logButton = installerButton("Open Log", target: nil, action: nil)
     let backupButton = installerButton("Show Backup", target: nil, action: nil)
@@ -98,6 +102,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             blockUpdates.state = (preferences.blockSpotifyUpdates ?? true) ? .on : .off
             spotify = findSpotify()
             refreshSetup()
+            DiscordCommunity.fetch { counts in DispatchQueue.main.async { self.communityCounts = counts; self.renderCommunity() } }
             configureManagerUpdater()
             checkUpdates(prompt: true)
         }
@@ -213,12 +218,15 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let errorDetails = installerButton("View details", target: self, action: #selector(showDetails))
         let errorCopy = installerButton("Copy diagnostics", target: self, action: #selector(copyDiagnostics))
         errorTitle.textColor = .systemOrange
-        let errorStack = installerStack([errorTitle, errorMessage, installerStack([retry, errorDetails, errorCopy], vertical: false, spacing: 8)])
+        connect(askDiscord, #selector(askOnDiscord))
+        askDiscord.toolTip = "Copies your diagnostics, then opens Discord so you can paste them in #support."
+        let errorStack = installerStack([errorTitle, errorMessage, installerStack([retry, askDiscord, errorDetails, errorCopy], vertical: false, spacing: 8)])
         errorMessage.widthAnchor.constraint(equalTo: errorStack.widthAnchor).isActive = true
         errorCard = installerCard(errorStack)
         errorCard.isHidden = true
 
-        let content = installerStack([brand, heading, intro, errorCard, components, sourceGuidance, progressCard, protectionCard, updateCard], spacing: 14)
+        communityInvite.isHidden = true
+        let content = installerStack([brand, heading, intro, communityInvite, errorCard, components, sourceGuidance, progressCard, protectionCard, updateCard], spacing: 14)
         content.setCustomSpacing(8, after: heading)
         let document = InstallerDocumentView()
         scroll.hasVerticalScroller = true
@@ -237,7 +245,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             content.topAnchor.constraint(equalTo: document.topAnchor, constant: 14),
             content.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -18)
         ])
-        for view in [brand, heading, intro, errorCard!, components, sourceGuidance, progressCard!, protectionCard, updateCard!] {
+        for view in [brand, heading, intro, communityInvite, errorCard!, components, sourceGuidance, progressCard!, protectionCard, updateCard!] {
             view.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
         }
         connect(action, #selector(primaryAction))
@@ -247,8 +255,11 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         action.heightAnchor.constraint(equalToConstant: 50).isActive = true
         action.keyEquivalent = "\r"
         connect(tutorialButton, #selector(showTutorial))
-        connect(discordHelp, #selector(openDiscordHelp))
-        let footerLinks = installerStack([tutorialButton, NSView(), discordHelp], vertical: false, spacing: 8)
+        connect(community, #selector(openCommunity))
+        community.toolTip = "Chat with other Tagify users, get betas first and get help."
+        community.setAccessibilityLabel("Join the Tagify Discord")
+        renderCommunity()
+        let footerLinks = installerStack([tutorialButton, NSView(), community], vertical: false, spacing: 8)
         let footer = installerStack([action, repair, footerLinks], spacing: 8)
         for view in [action, repair, footerLinks] { view.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true }
         footer.translatesAutoresizingMaskIntoConstraints = false
@@ -438,7 +449,8 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func retryLastOperation() { retryOperation?() }
 
     private func beginOperation(_ title: String, stages: Bool) {
-        busy = true; retryOperation = nil; errorCard.isHidden = true
+        busy = true; retryOperation = nil; errorCard.isHidden = true; communityInvite.isHidden = true
+        askDiscord.title = "Ask on Discord"
         heading.stringValue = title
         intro.stringValue = "Your saved tags stay safe. You can minimize this window while we finish."
         action.title = "Working…"
@@ -552,6 +564,7 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self.rememberProtection(chosen)
                     self.updateStep(6, "Tagify is ready")
                     self.progressCard.isHidden = true
+                    self.communityInvite.isHidden = !state.ready
                     if !state.ready { self.showFailure("Setup finished, but Tagify couldn't be confirmed. Choose Repair Tagify to try again.", retry: { self.installTagify(intent: intent) }) }
                 case .failure(let error):
                     self.recoveryNeeded = (try? InstallJournal.pending(in: engine.paths.backups).isEmpty) != true
@@ -630,7 +643,19 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         refreshSetup()
     }
 
-    @objc func openDiscordHelp() { NSWorkspace.shared.open(Self.discordHelpURL) }
+    func renderCommunity() {
+        (community as? InstallerButton)?.badge = DiscordCommunity.onlineLabel(communityCounts)
+        let text = NSMutableAttributedString(string: DiscordCommunity.invitation(communityCounts) + " ", attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor])
+        text.append(NSAttributedString(string: "Join\u{00A0}on\u{00A0}Discord", attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .link: DiscordCommunity.inviteURL]))
+        communityInvite.attributedStringValue = text
+    }
+    @discardableResult func openLink(_ url: URL) -> Bool { openLinkOverride?(url) ?? NSWorkspace.shared.open(url) }
+    @objc func openCommunity() { openLink(DiscordCommunity.inviteURL) }
+    // Copy first: #support asks for diagnostics, and the browser takes focus once Discord opens.
+    @objc func askOnDiscord() {
+        copyDiagnostics()
+        askDiscord.title = openLink(DiscordCommunity.inviteURL) ? "Copied. Paste it in #support" : "Open discord.gg/C4qbPUbBKV"
+    }
 
     @objc func showTutorial() {
         guard !busy, window.attachedSheet == nil else { return }
@@ -792,7 +817,11 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         logScroll.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         detailsPanel = panel; panel.center(); panel.makeKeyAndOrderFront(nil)
     }
-    @objc func copyDiagnostics() { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(diagnostics, forType: .string); copyButton.title = "Copied" }
+    @objc func copyDiagnostics() {
+        if let copy = copyOverride { copy(diagnostics) }
+        else { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(diagnostics, forType: .string) }
+        copyButton.title = "Copied"
+    }
     @objc func openLog() { if let url = installer?.logURL { NSWorkspace.shared.open(url) } }
     @objc func openBackup() { if let url = installer?.backupURL { NSWorkspace.shared.activateFileViewerSelecting([url]) } }
 
@@ -809,10 +838,12 @@ final class InstallerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         recoveryNeeded = false
         preferences = InstallerPreferences(); preferences.blockSpotifyUpdates = true
         blockUpdates.state = .on; busy = false; errorCard.isHidden = true; progressCard.isHidden = true; updateCard.isHidden = true; latestTagify = nil; latestSpicetify = nil
+        communityCounts = DiscordCommunity.Counts(members: 128, online: 38); renderCommunity(); communityInvite.isHidden = true
         render()
         if state == "progress" { beginOperation("Setting up Tagify…", stages: true); updateStep(4, "Installing Tagify") }
         else if state == "failure" { showFailure("Spotify is still open. Quit Spotify completely, then try again.", retry: {}) }
         else if state == "missing" { spotify = nil; setup = SetupStatus(); render() }
+        else if state == "success" { communityInvite.isHidden = false }
         else if state == "interrupted" { recoveryNeeded = true; render() }
         else if state == "repair" { setup.tagifyApplied = false; render() }
         else if state == "tagify-update" { latestTagify = "3.0.1"; render() }

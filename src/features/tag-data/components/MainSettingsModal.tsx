@@ -18,10 +18,8 @@ import { syncRuntime } from "@/services/sync/SyncRuntime";
 
 interface MainSettingsModalProps {
   onClose: () => void;
-  showSupportButtons: boolean;
-  onToggleSupportButtons: (showSupportButtons: boolean) => void;
-  showUpdateProtectionButton: boolean;
-  onToggleUpdateProtectionButton: (showUpdateProtectionButton: boolean) => void;
+  showOptionalButtons: boolean;
+  onToggleOptionalButtons: (showOptionalButtons: boolean) => void;
   onOpenInfoModal?: (section: string) => void;
   onRetryMigration?: () => Promise<OrchestratorResult>;
   onResetTagifyData?: () => Promise<void>;
@@ -60,10 +58,8 @@ const resolveDisplayMode = (
 
 const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
   onClose,
-  showSupportButtons,
-  onToggleSupportButtons,
-  showUpdateProtectionButton,
-  onToggleUpdateProtectionButton,
+  showOptionalButtons,
+  onToggleOptionalButtons,
   onOpenInfoModal,
   onRetryMigration,
   onResetTagifyData,
@@ -364,39 +360,18 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
 
               <div className={styles.toggleItem}>
                 <div className={styles.toggleInfo}>
-                  <label className={styles.toggleLabel}>Support Buttons</label>
+                  <label className={styles.toggleLabel}>Optional Buttons</label>
                   <span className={styles.toggleDescription}>
-                    Show Feedback and Support buttons in the top menu
+                    Show Update protection, Feedback, Support, Invite a friend
+                    and Discord buttons in the top menu
                   </span>
                 </div>
                 <label className={styles.toggleSwitch}>
                   <input
-                    aria-label="Show support buttons"
+                    aria-label="Show optional buttons"
                     type="checkbox"
-                    checked={showSupportButtons}
-                    onChange={(e) => onToggleSupportButtons(e.target.checked)}
-                  />
-                  <span className={styles.slider}></span>
-                </label>
-              </div>
-
-              <div className={styles.toggleItem}>
-                <div className={styles.toggleInfo}>
-                  <label className={styles.toggleLabel}>
-                    Update Protection Button
-                  </label>
-                  <span className={styles.toggleDescription}>
-                    Show Spotify update-protection help in the top menu
-                  </span>
-                </div>
-                <label className={styles.toggleSwitch}>
-                  <input
-                    aria-label="Show update protection button"
-                    type="checkbox"
-                    checked={showUpdateProtectionButton}
-                    onChange={(e) =>
-                      onToggleUpdateProtectionButton(e.target.checked)
-                    }
+                    checked={showOptionalButtons}
+                    onChange={(e) => onToggleOptionalButtons(e.target.checked)}
                   />
                   <span className={styles.slider}></span>
                 </label>

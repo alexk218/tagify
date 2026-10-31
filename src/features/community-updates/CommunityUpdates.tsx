@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Megaphone, X } from "lucide-react";
 import Portal from "@/components/ui/Portal";
-import { COMMUNITY_ORIGIN, openCommunityUrl } from "@/features/community/communityLinks";
+import { COMMUNITY_PAGES_ORIGIN, openCommunityUrl } from "@/features/community/communityLinks";
 import { COMMUNITY_UPDATE_INTERVAL_MS, communityUpdateService, type CommunityUpdate } from "./communityUpdateService";
 import { isAnotherDialogOpen } from "@/utils/openDialogs";
 import styles from "./CommunityUpdates.module.css";
@@ -115,7 +115,7 @@ function CommunityUpdateDialog({ updates, onClose }: { updates: CommunityUpdate[
         </article>)}
       </div>
       <footer className={styles.footer}>
-        <button type="button" className={styles.secondary} onClick={() => { openCommunityUrl(COMMUNITY_ORIGIN); onClose(); }}>Open Community <ExternalLink size={15} aria-hidden="true" /></button>
+        <button type="button" className={styles.secondary} onClick={() => { openCommunityUrl(COMMUNITY_PAGES_ORIGIN); onClose(); }}>Open Community <ExternalLink size={15} aria-hidden="true" /></button>
         <button type="button" className={styles.primary} onClick={onClose}>Got it</button>
       </footer>
     </section>

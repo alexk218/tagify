@@ -52,7 +52,7 @@ describe("Saving songs from Community to Liked Songs", () => {
     expect(desktopFeatures({
       LibraryAPI: { add: () => undefined, contains: () => undefined, getTracks: () => undefined },
       RootlistAPI: { getContents: () => undefined }, PlaylistAPI: { getContents: () => undefined },
-    }, noPlayer)).toEqual(["spotifyLists", "spotifySaves"]);
+    }, noPlayer)).toEqual(["spotifyLists", "spotifyListChoice", "spotifySaves"]);
   });
 
   it("hears from a pull when songs are waiting", () => {

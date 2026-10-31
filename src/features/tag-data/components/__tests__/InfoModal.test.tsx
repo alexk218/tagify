@@ -4,9 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 import InfoModal from "../InfoModal";
 
 describe("InfoModal", () => {
-  it("summarizes Tagify 3.3.2 and keeps prior releases available", async () => {
+  it("summarizes Tagify 3.3.3 and keeps prior releases available", async () => {
     render(<InfoModal initialSection="whats-new" onClose={vi.fn()} />);
 
+    expect(screen.getByRole("link", { name: "What's new in Tagify 3.3.3" })).toHaveAttribute("href", "https://github.com/alexk218/tagify/releases/tag/v3.3.3");
+    for (const name of ["Community tags in Now Playing", "Pick your playlists", "Smart Playlists fixes"]) {
+      expect(screen.getByRole("heading", { name })).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByText("What's New in Tagify 3.3.2", { selector: "span" }));
     expect(screen.getByRole("link", { name: "What's new in Tagify 3.3.2" })).toHaveAttribute("href", "https://github.com/alexk218/tagify/releases/tag/v3.3.2");
     expect(screen.getByText("Community <-> Spotify on steroids")).toBeInTheDocument();
     for (const name of ["Send your Spotify library", "Save songs from Community", "Play in your Spotify", "Artist names are back"]) {
@@ -19,7 +24,7 @@ describe("InfoModal", () => {
     }
     fireEvent.click(screen.getByText("What's New in Tagify 3.3.0", { selector: "span" }));
     expect(screen.getByRole("link", { name: "What's new in Tagify 3.3.0" })).toHaveAttribute("href", "https://github.com/alexk218/tagify/releases/tag/v3.3.0");
-    expect(screen.getByRole("link", { name: "Tagify Community" })).toHaveAttribute("href", "https://community.tagify.fm");
+    expect(screen.getByRole("link", { name: "Tagify Community" })).toHaveAttribute("href", "https://tagify.fm");
     for (const name of ["Tag names other people use", "Share your tags from Sync", "Every Community tag", "Lighter sync"]) {
       expect(screen.getByRole("heading", { name })).toBeInTheDocument();
     }
@@ -48,7 +53,7 @@ describe("InfoModal", () => {
     ).toBeTruthy();
     expect(
       screen.getByRole("link", { name: /visit tagify community/i }),
-    ).toHaveAttribute("href", "https://community.tagify.fm");
+    ).toHaveAttribute("href", "https://tagify.fm");
     expect(
       screen.getByText(/if Spotify ever clears your Tagify data/i),
     ).toBeInTheDocument();

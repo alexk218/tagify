@@ -51,7 +51,12 @@ export interface SpotifyAlbumTrack {
   artistsData?: Array<{ uri: string; name: string }>;
   discNumber: number;
   trackNumber: number;
+  /** Spotify's length for the track, when its answer gave one. */
+  durationMs?: number;
 }
+
+/** A release in an artist's discography as Spotify's desktop app lists it, unchecked. */
+export interface SpotifyArtistRelease { uri: string; name: unknown; type: unknown; date: unknown }
 
 export interface SpotifyArtistMetadata {
   uri: string;
@@ -507,6 +512,7 @@ class SpotifyApiService {
           discNumber: typeof track.discNumber === "number" ? track.discNumber : 1,
           trackNumber:
             typeof track.trackNumber === "number" ? track.trackNumber : offset + index + 1,
+          ...(typeof track.duration?.totalMilliseconds === "number" ? { durationMs: track.duration.totalMilliseconds } : {}),
         });
       });
 
@@ -517,6 +523,47 @@ class SpotifyApiService {
       if (items.length < ALBUM_GRAPHQL_PAGE_SIZE) return null;
     }
     return null;
+  };
+
+  /**
+   * An artist's releases (albums, singles, EPs, compilations), newest first, from Spotify's own
+   * client API (GraphQL queryArtistDiscographyAll), 100 a page, at most `maxPages` pages.
+   * `beforePage` runs before every request and may stop the read (false). Null when Spotify can't
+   * list them here (no such operation, or an answer about another artist) or the read was stopped
+   * before the list was complete; never a partial list. No Web API fallback.
+   */
+  getArtistDiscography = async (
+    artistUri: string,
+    options: RequestOptions & { beforePage?: () => Promise<boolean>; maxPages?: number } = {},
+  ): Promise<SpotifyArtistRelease[] | null> => {
+    const definition = Spicetify.GraphQL?.Definitions?.queryArtistDiscographyAll;
+    if (!definition || !/^spotify:artist:[A-Za-z0-9]{22}$/.test(artistUri)) return null;
+    const { beforePage, maxPages = 10, ...requestOptions } = options;
+    const pageSize = 100;
+    const releases: SpotifyArtistRelease[] = [];
+    for (let page = 0; page < maxPages; page += 1) {
+      if (beforePage && !(await beforePage())) return null;
+      const response = await requestSpicetifyGraphQL<{ data?: any }>(definition, {
+        uri: artistUri, offset: page * pageSize, limit: pageSize, order: "DATE_DESC",
+      }, undefined, requestOptions);
+      const artist = response?.data?.artistUnion;
+      const all = artist?.discography?.all;
+      // Never describe one artist with another's releases.
+      if (!all || (typeof artist.uri === "string" && artist.uri !== artistUri)) return null;
+      const items: unknown[] = Array.isArray(all.items) ? all.items : [];
+      for (const item of items as Array<{ releases?: { items?: unknown } } | null>) {
+        // Each entry groups a release with its other versions; the first is the one Spotify shows.
+        const versions = Array.isArray(item?.releases?.items) ? item.releases.items : [item];
+        const release = versions[0] as { uri?: unknown; name?: unknown; type?: unknown; date?: unknown } | null;
+        if (typeof release?.uri === "string" && /^spotify:album:[A-Za-z0-9]{22}$/.test(release.uri)) {
+          releases.push({ uri: release.uri, name: release.name, type: release.type, date: release.date });
+        }
+      }
+      const total = typeof all.totalCount === "number" ? all.totalCount : null;
+      if (items.length < pageSize || (total !== null && (page + 1) * pageSize >= total)) return releases;
+    }
+    // More than maxPages pages: what was read is the newest part, which artist pages show first.
+    return releases;
   };
 
   /** Batch Web API reads are unavailable; the caller retains bounded cached single lookups. */
@@ -1055,6 +1102,21 @@ class SpotifyApiService {
   };
 
   /**
+   * The member's playlists with folders, ownership and sizes, and Liked Songs' size: two desktop
+   * reads, no songs. Community shows them so the member can choose what Tagify sends.
+   */
+  readSpotifyListCatalog = async (signal?: AbortSignal): Promise<{ likedCount: number | null; playlists: RootlistCatalogPlaylist[] }> => {
+    const root = await spotifyRead<any>("desktop:rootlist:getContents:[]", () => (Spicetify.Platform.RootlistAPI as any).getContents(), { signal });
+    if (!Array.isArray(root?.items)) throw new Error("Spotify did not return your playlists");
+    let likedCount: number | null = null;
+    try {
+      const liked = await spotifyRead<any>(`desktop:library:getTracks:${JSON.stringify([{ offset: 0, limit: 1 }])}`, () => (Spicetify.Platform.LibraryAPI as any).getTracks({ offset: 0, limit: 1 }), { signal });
+      if (Number.isSafeInteger(liked?.totalLength) && liked.totalLength >= 0) likedCount = liked.totalLength;
+    } catch (error) { throwIfSpotifyRequestStopped(error); }
+    return { likedCount, playlists: rootlistCatalog(root.items) };
+  };
+
+  /**
    * Get track count for a playlist using Platform API
    */
   getPlaylistTrackCount = async (playlistId: string): Promise<number> => {
@@ -1240,7 +1302,11 @@ class SpotifyApiService {
     return result.success && result.removed.includes(trackUri);
   };
 
-  private readPlaylistItems = async (playlistId: string, options?: RequestOptions): Promise<any[]> => {
+  /**
+   * Every occurrence in a playlist. By default the first request asks for the whole playlist; with
+   * `pageSize` every request asks for one page, so no single read grows with the playlist.
+   */
+  private readPlaylistItems = async (playlistId: string, options?: RequestOptions & { pageSize?: number }): Promise<any[]> => {
     const uri = `spotify:playlist:${playlistId}`;
     assertSpotifyWriteSettled(uri);
     const api = Spicetify.Platform.PlaylistAPI as any;
@@ -1253,12 +1319,17 @@ class SpotifyApiService {
       if (account !== spotifyAccountKey()) throw new DOMException("Spotify account changed", "AbortError");
       options?.assertCurrent?.();
       const offset = items.length;
-      const args = page === 0 ? [uri] : [uri, { offset, limit: 100 }];
+      const limit = options?.pageSize ?? 100;
+      const args = page === 0 && !options?.pageSize ? [uri] : [uri, { offset, limit }];
       const result = await spotifyRead<any>(`desktop:playlist:getContents:${JSON.stringify(args)}`, () => api.getContents(...args), options);
       if (!Array.isArray(result?.items) || result.items.some((item: any) => typeof (item?.uri ?? item?.link) !== "string"))
         throw new Error("Spotify returned incomplete playlist occurrences");
-      if (result.offset !== undefined && result.offset !== offset) throw new Error("Spotify repeated a playlist page");
+      if (args.length > 1 && result.items.length > limit) throw new Error("Spotify returned more than a page of playlist occurrences");
+      // A paged read always reports offset 0 (Spotify 1.2.92), so only a different non-zero offset
+      // is evidence of a wrong page; a repeated page is caught below.
+      if (result.offset !== undefined && result.offset !== offset && !(args.length > 1 && result.offset === 0)) throw new Error("Spotify repeated a playlist page");
       const currentTotal = typeof result.totalLength === "number" ? result.totalLength : undefined;
+      if (options?.pageSize && currentTotal === undefined) throw new Error("Spotify didn't say how many songs the playlist has");
       if (total !== undefined && currentTotal !== undefined && currentTotal !== total) throw new Error("Spotify playlist changed during pagination");
       if (currentTotal !== undefined && (!Number.isSafeInteger(currentTotal) || currentTotal < 0)) throw new Error("Spotify returned an invalid playlist size");
       total ??= currentTotal;
@@ -1276,7 +1347,7 @@ class SpotifyApiService {
   };
 
   /** Every song in a playlist through the desktop API (strict pagination), for Tagify Community's lists. */
-  readPlaylistTracks = async (playlistId: string, options?: RequestOptions): Promise<SpotifyTrack[]> => {
+  readPlaylistTracks = async (playlistId: string, options?: RequestOptions & { pageSize?: number }): Promise<SpotifyTrack[]> => {
     const items = await this.readPlaylistItems(playlistId, { feature: "playlist-contents", priority: "background", ...options });
     return normalizeQueuePage({ items, totalLength: items.length }, 0).tracks;
   };
@@ -1322,14 +1393,19 @@ function rootlistFolderId(item: { hash?: unknown; uri?: unknown }): string | nul
  * Tagify can't identify is left out, and its playlists sit in the folder around it.
  */
 export function rootlistPlaylists(items: unknown[]): Array<Required<RootlistPlaylist>> {
-  const found = new Map<string, Required<RootlistPlaylist>>();
+  return walkRootlist(items, (_item, playlistId, playlistName, folders) => ({ playlistId, playlistName, folders }));
+}
+
+/** Visits each playlist in Spotify's library tree once, in Spotify's order, with the folders it sits in. */
+function walkRootlist<T>(items: unknown[], read: (item: Record<string, unknown>, playlistId: string, playlistName: string, folders: RootlistFolder[]) => T): T[] {
+  const found = new Map<string, T>();
   const visit = (nodes: unknown[], folders: RootlistFolder[]) => {
     for (const node of nodes) {
       const item = node as { type?: unknown; uri?: unknown; name?: unknown; items?: unknown; hash?: unknown } | null;
       if (!item) continue;
       if (item.type === "playlist" && typeof item.uri === "string") {
         const playlistId = item.uri.split(":").pop()!;
-        if (!found.has(playlistId)) found.set(playlistId, { playlistId, playlistName: typeof item.name === "string" ? item.name : "", folders });
+        if (!found.has(playlistId)) found.set(playlistId, read(item as Record<string, unknown>, playlistId, typeof item.name === "string" ? item.name : "", folders));
       } else if (item.type === "folder" && Array.isArray(item.items)) {
         const id = rootlistFolderId(item);
         const inside = id && !folders.some((folder) => folder.id === id) ? [...folders, { id, name: typeof item.name === "string" ? item.name : "" }] : folders;
@@ -1339,4 +1415,28 @@ export function rootlistPlaylists(items: unknown[]): Array<Required<RootlistPlay
   };
   visit(items, []);
   return [...found.values()];
+}
+
+/** A playlist in Spotify's library tree with who made it and its size, for Community's playlist picker. */
+export interface RootlistCatalogPlaylist extends Required<RootlistPlaylist> {
+  /** The member made it or can edit it; false when Spotify didn't say. */
+  owned: boolean;
+  /** The owner's display name for someone else's playlist, when Spotify gave one. */
+  ownerName: string | null;
+  songCount: number | null;
+}
+
+/**
+ * Every playlist in the tree with Spotify's own ownership flags. Spotify 1.2.92's rootlist items carry
+ * `isOwnedBySelf`, `canEditItems`, `owner.displayName` and `totalLength` (seen 2026-10-21). A
+ * collaborative playlist the member can edit counts as theirs; unknown ownership counts as not.
+ */
+export function rootlistCatalog(items: unknown[]): RootlistCatalogPlaylist[] {
+  return walkRootlist(items, (item, playlistId, playlistName, folders) => {
+    const owner = item.owner as { displayName?: unknown } | null | undefined;
+    const owned = item.isOwnedBySelf === true || item.canEditItems === true;
+    const ownerName = !owned && typeof owner?.displayName === "string" && owner.displayName.trim() ? owner.displayName.trim() : null;
+    const songCount = Number.isSafeInteger(item.totalLength) && Number(item.totalLength) >= 0 ? Number(item.totalLength) : null;
+    return { playlistId, playlistName, folders, owned, ownerName, songCount };
+  });
 }

@@ -12,6 +12,8 @@ const otherFetchFiles = new Set([
   'src/features/community/communityEntityCache.ts', 'src/features/community-updates/communityUpdateService.ts',
   'src/features/update-check/components/UpdateBanner.tsx',
   'src/features/product-analytics/productAnalytics.ts', 'src/features/tag-data/utils/communityPopularTags.ts',
+  // Reads Spotify's search page script bundled in the app (xpui-routes-search.js), not a Spotify server.
+  'src/services/SpotifyTrackSearch.ts',
 ]);
 const sdk = /\b(?:PlaylistAPI|RootlistAPI|LibraryAPI|CosmosAsync|GraphQL)\b/;
 const wrappers = new Set(['spotifyRead', 'spotifyWrite']);

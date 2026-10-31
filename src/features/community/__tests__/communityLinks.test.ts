@@ -4,7 +4,7 @@ import { getCommunityDisconnectUrl, getCommunityEntityUrl } from "../communityLi
 
 describe("Community links", () => {
   it("links supported exact Spotify entities", () => {
-    expect(getCommunityEntityUrl("spotify:track:4uLU6hMCjMI75M1A2tKUQC")).toBe("https://community.tagify.fm/entity/track/4uLU6hMCjMI75M1A2tKUQC");
+    expect(getCommunityEntityUrl("spotify:track:4uLU6hMCjMI75M1A2tKUQC")).toBe("https://tagify.fm/entity/track/4uLU6hMCjMI75M1A2tKUQC");
   });
 
   it("does not expose playlists or local files", () => {
@@ -14,7 +14,7 @@ describe("Community links", () => {
 
   it("targets the matching account when finishing a disconnect", () => {
     expect(getCommunityDisconnectUrl("account/id", "device/id")).toBe(
-      "https://community.tagify.fm/auth/disconnect?account=account%2Fid&device=device%2Fid",
+      "https://tagify.fm/auth/disconnect?account=account%2Fid&device=device%2Fid",
     );
   });
 });

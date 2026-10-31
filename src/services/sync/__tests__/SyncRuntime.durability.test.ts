@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnnotationSnapshotV1 } from "@tagify/sync-contracts";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { storageService } from "@/services/storage/StorageService";
+import { smartPlaylistSyncService } from "@/services/SmartPlaylistSyncService";
 import type { TrackData } from "@/types/tagData";
 import { syncRuntime, type BackupHealth } from "../SyncRuntime";
 import { FakeCommunity, FakeDevice, putStateRecord, readStore, resetDevices, runtime, useDevice } from "./fakeCommunity";
@@ -100,6 +101,39 @@ describe.each([
     await sync(desktop);
     expect([...(await indexedDBStorage.getTrack(SONG_URI))!.tagIds].sort()).toEqual(["tag_deep", "tag_house", "tag_vocal"]);
     expect(community.conflictCount).toBe(0);
+  });
+
+  it("updates Smart Playlists with songs tagged on the website or another device", async () => {
+    const website = new FakeDevice("website");
+    const desktop = new FakeDevice("desktop-smart");
+    const synced = vi.spyOn(smartPlaylistSyncService, "syncTracks").mockResolvedValue();
+    const smartPlaylistsDone = () => (runtime as unknown as { smartPlaylistUpdates: Promise<void> }).smartPlaylistUpdates;
+    await sync(desktop);
+    await useDevice(website);
+    await edit(SONG_URI, () => track({ tagIds: ["tag_house"] }));
+    await sync(website);
+    await smartPlaylistsDone();
+    synced.mockClear();
+
+    await sync(desktop);
+    await smartPlaylistsDone();
+    expect(synced).toHaveBeenCalledTimes(1);
+    expect(synced).toHaveBeenCalledWith({ [SONG_URI]: expect.objectContaining({ tagIds: ["tag_house"] }) });
+
+    // A tag taken off elsewhere takes the song out, and this device's own edits stay with the editor.
+    await useDevice(website);
+    await edit(SONG_URI, (current) => ({ ...current, tagIds: [] }));
+    await sync(website);
+    await smartPlaylistsDone();
+    synced.mockClear();
+    await sync(desktop);
+    await smartPlaylistsDone();
+    expect(synced).toHaveBeenCalledWith({ [SONG_URI]: expect.objectContaining({ tagIds: [] }) });
+    synced.mockClear();
+    await edit(SONG_URI, (current) => ({ ...current, tagIds: ["tag_deep"] }));
+    await sync(desktop);
+    await smartPlaylistsDone();
+    expect(synced).not.toHaveBeenCalled();
   });
 
   it("does not reload the library for changes this device sent itself", async () => {

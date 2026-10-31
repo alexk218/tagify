@@ -124,7 +124,7 @@ describe("reading songs' releases", () => {
     expect(refused.found).toHaveLength(1);
     expect(trackRelease).toHaveBeenCalledTimes(2);
 
-    const albumRelease = vi.fn().mockRejectedValueOnce(new Error("Spotify paused"));
+    const albumRelease = vi.fn().mockRejectedValueOnce(Object.assign(new Error("Spotify paused"), { status: 429, retryAfterSeconds: 60 }));
     const albumRefused = await resolveSongReleases([track(1)], sources({ albumRelease }), new Map());
     expect(albumRefused).toMatchObject({ reads: 2, halted: "spotify", found: [] });
   });
@@ -208,9 +208,9 @@ describe("sending song releases", () => {
       if (init?.method === "POST") { posted.push(JSON.parse(String(init.body))); return Response.json({ accepted: 1, ignored: 0 }); }
       return Response.json({ items: [track(1), track(2)], hasMore: true });
     });
-    const trackRelease = vi.fn().mockResolvedValueOnce({ isrc: "GBDUW0000059", albumUri: albumUri(1) }).mockRejectedValueOnce(new Error("Spotify paused"));
+    const trackRelease = vi.fn().mockResolvedValueOnce({ isrc: "GBDUW0000059", albumUri: albumUri(1) }).mockRejectedValueOnce(Object.assign(new Error("Spotify paused"), { status: 429, retryAfterSeconds: 60 }));
     const run = await runSongReleaseReports(session, sources({ trackRelease }), { request: request as typeof fetch, storage: memory() });
-    expect(run).toEqual({ sent: 1, reads: 3, stopped: "spotify" });
+    expect(run).toEqual({ sent: 1, reads: 3, stopped: "spotify", cause: { kind: "rate-limit", status: 429, retryAfterSeconds: 60 } });
     expect(posted).toHaveLength(1);
     expect(request).toHaveBeenCalledTimes(2);
   });

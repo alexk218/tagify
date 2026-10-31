@@ -794,3 +794,42 @@ final class TagifyInstaller {
         return nil
     }
 }
+
+// Reads the public counts Discord shows on an invite; no account or token is involved.
+enum DiscordCommunity {
+    static let inviteURL = URL(string: "https://discord.gg/C4qbPUbBKV")!
+    static let countsURL = URL(string: "https://discord.com/api/v10/invites/C4qbPUbBKV?with_counts=true")!
+    // Small numbers make the server look empty, so show them only once they signal activity.
+    static let minimumOnlineShown = 10
+    static let minimumMembersShown = 100
+
+    struct Counts: Equatable { let members: Int; let online: Int }
+
+    static func parse(_ data: Data) -> Counts? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let members = object["approximate_member_count"] as? Int,
+              let online = object["approximate_presence_count"] as? Int else { return nil }
+        return Counts(members: members, online: online)
+    }
+
+    static func fetch(completion: @escaping (Counts?) -> Void) {
+        var request = URLRequest(url: countsURL, timeoutInterval: 5)
+        request.setValue("TagifyManager", forHTTPHeaderField: "User-Agent")
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            // Counts are decoration; the invite works without them.
+            completion((response as? HTTPURLResponse)?.statusCode == 200 ? data.flatMap(parse) : nil)
+        }.resume()
+    }
+
+    static func onlineLabel(_ counts: Counts?) -> String? {
+        guard let counts = counts, counts.online >= minimumOnlineShown else { return nil }
+        return "\(formatted(counts.online)) online"
+    }
+
+    static func invitation(_ counts: Counts?) -> String {
+        let audience = counts.map { $0.members >= minimumMembersShown ? "\(formatted($0.members)) Tagify users" : "other Tagify users" } ?? "other Tagify users"
+        return "Get betas first, share tagging ideas and suggest features with \(audience)."
+    }
+
+    private static func formatted(_ value: Int) -> String { NumberFormatter.localizedString(from: NSNumber(value: value), number: .decimal) }
+}

@@ -60,6 +60,7 @@ interface TrackListHarnessProps {
   statsTrackSet?: { id: number; label: string; trackUris: string[]; reveal?: "list" | "track" } | null;
   onClearStatsTrackSet?: () => void;
   onReturnToStats?: () => void;
+  createPlaylistRequest?: number;
 }
 
 function TrackListHarness({
@@ -75,6 +76,7 @@ function TrackListHarness({
   statsTrackSet = null,
   onClearStatsTrackSet = vi.fn(),
   onReturnToStats = vi.fn(),
+  createPlaylistRequest,
 }: TrackListHarnessProps = {}) {
   const filters = useFilterState("tracks");
   const { createPlaylistFromFilters } = usePlaylistState();
@@ -130,6 +132,7 @@ function TrackListHarness({
       statsTrackSet={statsTrackSet}
       onClearStatsTrackSet={onClearStatsTrackSet}
       onReturnToStats={onReturnToStats}
+      createPlaylistRequest={createPlaylistRequest}
     />
   );
 }
@@ -226,6 +229,19 @@ describe("TrackList tag filtering", () => {
     }
 
     vi.stubGlobal("IntersectionObserver", IntersectionObserverMock);
+  });
+
+  it("opens Create Playlist when the first-run card asks for it, once per request", async () => {
+    const { rerender } = render(<TrackListHarness createPlaylistRequest={0} />);
+    expect(screen.queryByRole("heading", { name: "Create Playlist" })).toBeNull();
+
+    rerender(<TrackListHarness createPlaylistRequest={1} />);
+    expect(await screen.findByRole("heading", { name: "Create Playlist" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Create Playlist" })).toBeNull());
+
+    rerender(<TrackListHarness createPlaylistRequest={1} />);
+    expect(screen.queryByRole("heading", { name: "Create Playlist" })).toBeNull();
   });
 
   it("saves a new smart-playlist rule before opening its Spotify playlist", async () => {

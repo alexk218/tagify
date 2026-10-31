@@ -73,7 +73,7 @@ describe("playing songs pressed on Community", () => {
 
   it("tells Community it can play songs only when this Spotify can play by URI", () => {
     const library = { LibraryAPI: { add: () => undefined, contains: () => undefined, getTracks: () => undefined }, RootlistAPI: { getContents: () => undefined }, PlaylistAPI: { getContents: () => undefined } };
-    expect(desktopFeatures(library, { playUri: () => undefined })).toEqual(["spotifyLists", "spotifySaves", "desktopPlay"]);
+    expect(desktopFeatures(library, { playUri: () => undefined })).toEqual(["spotifyLists", "spotifyListChoice", "spotifySaves", "desktopPlay"]);
     expect(desktopFeatures({}, { playUri: () => undefined })).toEqual(["desktopPlay"]);
     expect(desktopFeatures({}, {})).toEqual([]);
   });

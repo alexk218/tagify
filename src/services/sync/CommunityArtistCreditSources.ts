@@ -3,7 +3,9 @@ import { spotifyBackgroundPolicy } from "@/services/SpotifyBackgroundPolicy";
 import { spotifyService } from "@/services/SpotifyService";
 import { storageService } from "@/services/storage/StorageService";
 import { trackArtistIdentitiesStore } from "@/services/trackArtistIdentities";
+import { watchedReserve } from "./CatalogFillLive";
 import { ARTIST_CREDIT_FEATURE, ARTIST_CREDIT_HOURLY_READS, type ArtistCreditSources } from "./CommunityArtistCredits";
+import { communityCatalogFillAllowance } from "./CommunityCatalogFillSources";
 
 const READ_INTERVAL_MS = 1_000;
 const background = { priority: "background", feature: "artist-identities" } as const;
@@ -25,7 +27,8 @@ export function communityArtistCreditSources(): ArtistCreditSources {
     },
     trackArtists: (uri) => spotifyService.getTrackArtists(uri, "background"),
     albumArtists: (albumUri) => spotifyApiService.getAlbumArtists(albumUri, background),
-    reserve: (identity) => spotifyBackgroundPolicy.reserve(ARTIST_CREDIT_FEATURE, identity, ARTIST_CREDIT_HOURLY_READS),
+    reserve: watchedReserve((identity) => spotifyBackgroundPolicy.reserve(ARTIST_CREDIT_FEATURE, identity, ARTIST_CREDIT_HOURLY_READS)),
     pace: () => new Promise((resolve) => setTimeout(resolve, READ_INTERVAL_MS)),
+    outsideLibrary: communityCatalogFillAllowance(),
   };
 }

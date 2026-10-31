@@ -7,7 +7,7 @@ import { syncRuntime } from "@/services/sync/SyncRuntime";
 import type { TagTaxonomy, TrackData } from "@/types/tagData";
 // eslint-disable-next-line css-modules/no-unused-class -- shared with the Cloud Sync and setup dialogs
 import styles from "./CloudSyncModal.module.css";
-import { COMMUNITY_ORIGIN, openCommunityUrl } from "./communityLinks";
+import { COMMUNITY_PAGES_ORIGIN, openCommunityUrl } from "./communityLinks";
 import {
   changePublication,
   hiddenBranchNames,
@@ -33,7 +33,7 @@ const LEADS = {
 } as const;
 
 export function communityProfileUrl(handle: string | null): string {
-  return handle ? `${COMMUNITY_ORIGIN}/@${handle}` : COMMUNITY_ORIGIN;
+  return handle ? `${COMMUNITY_PAGES_ORIGIN}/@${handle}` : COMMUNITY_PAGES_ORIGIN;
 }
 
 /**

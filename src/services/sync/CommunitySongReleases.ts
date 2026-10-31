@@ -3,6 +3,8 @@ import {
   normalizeIsrc, normalizeReleaseKind, normalizeReleaseName, SONG_RELEASES_PROTOCOL_VERSION,
   type SongReleaseAlbumV1, type SongReleaseEntityV1, type SongReleaseReportItemV1,
 } from "@tagify/sync-contracts";
+import { CatalogFillFailures, type CatalogFillCause } from "./CatalogFillFailures";
+import { splitOutsideLibrary, type CatalogFillAllowance } from "./CommunityCatalogFill";
 import type { SendSession } from "./SpotifyLibrarySender";
 import { syncClientHeaders } from "./SyncClientHeaders";
 
@@ -11,6 +13,8 @@ import { syncClientHeaders } from "./SyncClientHeaders";
 // song, so Tagify reads each song's ISRC and release here, through Spotify's desktop app, and sends
 // them (Community migration 0261). Community asks only for songs in this member's library that it
 // knows no release for. Reads are paced in the background and stop at Spotify's first refusal.
+// On a catalog filler desktop (Alex's; Community migrations 0326 and 0335) the list continues with songs from
+// anywhere on Community, read one at a time under the filler's slower allowance (CommunityCatalogFill.ts).
 
 /** Background Spotify reads this feature may make in an hour (SpotifyBackgroundPolicy keeps at most 200). */
 export const SONG_RELEASE_HOURLY_READS = 150;
@@ -36,6 +40,8 @@ export interface SongReleaseSources {
   reserve(identity: string): boolean;
   /** Waits between reads so they never come in a burst. */
   pace?(): Promise<void>;
+  /** Songs Community asks about that aren't in this library: the same reads, under this allowance. */
+  outsideLibrary?: CatalogFillAllowance;
 }
 
 export interface SongReleaseRun {
@@ -43,6 +49,10 @@ export interface SongReleaseRun {
   /** Spotify reads made. */
   reads: number;
   stopped?: "unsupported" | "paused" | "signed_out" | "network" | "spotify" | "budget";
+  /** Why it stopped when Spotify did it, and the items Spotify failed to read that it went past. */
+  cause?: CatalogFillCause;
+  skipped?: number;
+  lastSkip?: CatalogFillCause;
 }
 
 class Stop extends Error {
@@ -113,7 +123,7 @@ function saveUnavailable(storage: Storage | null, entries: Map<string, number>) 
  */
 export async function resolveSongReleases(
   items: SongReleaseEntityV1[], sources: SongReleaseSources, unavailable: Map<string, number>,
-  albums = new Map<string, SongReleaseAlbumV1 | null>(), now = Date.now(),
+  albums = new Map<string, SongReleaseAlbumV1 | null>(), now = Date.now(), failures = new CatalogFillFailures(),
 ): Promise<{ found: SongReleaseReportItemV1[]; reads: number; halted: "budget" | "spotify" | null }> {
   const found: SongReleaseReportItemV1[] = [];
   let reads = 0;
@@ -122,8 +132,9 @@ export async function resolveSongReleases(
     if (!sources.reserve(identity)) { halted = "budget"; return null; }
     reads += 1;
     await sources.pace?.();
-    // A failure is Spotify refusing or being unreachable: stop, never retry around it.
-    try { return await request(); } catch { halted = "spotify"; return null; }
+    // Spotify asking Tagify to wait stops the run, never retried around; any other failure skips
+    // this item (remembered as unavailable), unless too many fail in a row (CatalogFillFailures.ts).
+    try { const answer = await request(); failures.succeeded(); return answer; } catch (error) { if (failures.failed(error)) halted = "spotify"; return null; }
   };
   const remember = (entity: SongReleaseEntityV1) => unavailable.set(uriOf(entity), now + UNAVAILABLE_MS);
 
@@ -167,6 +178,7 @@ export async function runSongReleaseReports(
   const storage = options.storage === undefined ? defaultStorage() : options.storage;
   const now = options.now ?? Date.now;
   const run: SongReleaseRun = { sent: 0, reads: 0 };
+  const failures = new CatalogFillFailures();
   const unavailable = readUnavailable(storage, now());
   const albums = new Map<string, SongReleaseAlbumV1 | null>();
   const call = async (path: string, init: RequestInit = {}) => {
@@ -193,17 +205,29 @@ export async function runSongReleaseReports(
       const body = await call(`?deviceId={device}&limit=${MAX_SONG_RELEASES_NEEDED}&offset=${offset}`);
       assertSongReleasesNeeded(body);
       if (!body.items.length) break;
-      // What a page found is sent even when Spotify stopped answering partway.
-      const resolved = await resolveSongReleases(body.items, sources, unavailable, albums, now());
+      const { library, outside } = await splitOutsideLibrary(body.items, sources.outsideLibrary);
+      const resolved = await resolveSongReleases(library, sources, unavailable, albums, now(), failures);
       run.reads += resolved.reads;
-      for (let start = 0; start < resolved.found.length; start += MAX_SONG_RELEASE_REPORT_ITEMS) {
-        const items = resolved.found.slice(start, start + MAX_SONG_RELEASE_REPORT_ITEMS);
+      const found = [...resolved.found];
+      let halted = resolved.halted;
+      if (!halted && outside.length && sources.outsideLibrary) {
+        // One song at a time, a few seconds apart, under the filler's hourly and daily allowance.
+        const fill = sources.outsideLibrary;
+        const filled = await resolveSongReleases(outside, { ...sources, reserve: (identity) => fill.reserve(identity), pace: () => fill.pace() },
+          unavailable, albums, now(), failures);
+        run.reads += filled.reads;
+        found.push(...filled.found);
+        halted = filled.halted;
+      }
+      // What a page found is sent even when Spotify stopped answering partway.
+      for (let start = 0; start < found.length; start += MAX_SONG_RELEASE_REPORT_ITEMS) {
+        const items = found.slice(start, start + MAX_SONG_RELEASE_REPORT_ITEMS);
         const current = await session();
         await call("", { method: "POST", body: JSON.stringify({ protocolVersion: SONG_RELEASES_PROTOCOL_VERSION, deviceId: current.deviceId, items }) });
         run.sent += items.length;
       }
-      if (resolved.halted) { run.stopped = resolved.halted; break; }
-      offset += body.items.length - resolved.found.length;
+      if (halted) { run.stopped = halted; break; }
+      offset += body.items.length - found.length;
       if (!body.hasMore) break;
     }
   } catch (error) {
@@ -211,5 +235,5 @@ export async function runSongReleaseReports(
   } finally {
     saveUnavailable(storage, unavailable);
   }
-  return run;
+  return { ...run, ...failures.summary() };
 }

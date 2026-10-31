@@ -147,3 +147,31 @@
     width: 100%;
   }
 }
+
+/* The Community invitation follows the card's own width, not the window's: Spotify's side panels can leave it narrow in a wide window. */
+.connect {
+  container-type: inline-size;
+  flex-wrap: wrap;
+}
+
+/* With room, everything stays on one row as before. */
+.connect .text {
+  flex: 1 1 0;
+}
+
+/* When narrow, the buttons move under the text. */
+@container (max-width: 560px) {
+  /* A container query can't style the container itself, so the items align themselves. */
+  .connect > * {
+    align-self: flex-start;
+  }
+
+  .connect .text {
+    flex-basis: calc(100% - 44px);
+  }
+
+  .connect .actions {
+    justify-content: flex-end;
+    width: 100%;
+  }
+}

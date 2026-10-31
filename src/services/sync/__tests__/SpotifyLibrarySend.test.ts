@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SpotifyTrack } from "@/types/SpotifyTypes";
+import { spotifyLocalPause } from "@/utils/spotifyRequestFailure";
 import { spotifySendNotice } from "../SyncRuntime";
 import {
-  canReadSpotifyLibrary, currentSpotifyLibrarySend, listFingerprint, partSongs, reportDesktopFeatures, runSpotifyLibrarySend, sendFailure,
+  canReadSpotifyLibrary, currentSpotifyLibrarySend, isSpotifyBusy, listFingerprint, partSongs, reportDesktopFeatures, runSpotifyLibrarySend, sendFailure,
   SpotifyLibrarySendError, SpotifyReadFailure, SPOTIFY_LIBRARY_SEND_EVENT, type LibraryReader,
 } from "../SpotifyLibrarySender";
 
@@ -22,7 +23,7 @@ function reader(liked: SpotifyTrack[], playlists: Record<string, SpotifyTrack[]>
 }
 
 /** A Community that answers like the real routes and records what it got. */
-function community(options: { known?: Array<{ id: string; fingerprint: string }>; missing?: string[]; startStatus?: number; cancelAfterPuts?: number; failPut?: number } = {}) {
+function community(options: { known?: Array<{ id: string; fingerprint: string }>; missing?: string[]; startStatus?: number; cancelAfterPuts?: number; failPut?: number; selection?: unknown } = {}) {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
   let puts = 0;
   const request = vi.fn(async (url: string, init: RequestInit) => {
@@ -30,7 +31,7 @@ function community(options: { known?: Array<{ id: string; fingerprint: string }>
     calls.push({ method, path, body });
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
     if (path.endsWith("/device-features")) return json({ features: body.features });
-    if (path.endsWith("/send") && method === "POST") return options.startStatus ? new Response("<html>", { status: options.startStatus }) : json({ status: "started", sendId: "33333333-3333-4333-8333-333333333333", lists: options.known ?? [] });
+    if (path.endsWith("/send") && method === "POST") return options.startStatus ? new Response("<html>", { status: options.startStatus }) : json({ status: "started", sendId: "33333333-3333-4333-8333-333333333333", lists: options.known ?? [], ...(options.selection !== undefined ? { selection: options.selection } : {}) });
     if (path.endsWith("/send") && method === "PATCH") return json({ status: options.cancelAfterPuts !== undefined && puts >= options.cancelAfterPuts ? "cancelled" : body.failure ? "failed" : "active" });
     if (method === "PUT") {
       puts += 1;
@@ -47,6 +48,10 @@ function community(options: { known?: Array<{ id: string; fingerprint: string }>
 }
 
 beforeEach(() => { vi.useRealTimers(); });
+/** Records each wait instead of waiting. */
+const waits = () => { const slept: number[] = []; return { slept, sleep: async (ms: number) => { slept.push(ms); } }; };
+/** Tagify giving up on a read Spotify took too long to answer (RateLimiter's stalled transport). */
+const tooSlow = () => Object.assign(new Error("Spotify is taking too long to respond. Your edits are saved. Wait for it to recover, or restart Spotify if updates remain paused."), { spotifyRequestStopped: true, recoveryRequired: true });
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("sending Spotify lists as a send the member watches", () => {
@@ -58,7 +63,7 @@ describe("sending Spotify lists as a send the member watches", () => {
     const outcome = await runSpotifyLibrarySend(session, reader([track(1), track(2)], { [id(900)]: [track(3)], [id(901)]: [track(4), track(5)] }), { request: server.request });
     window.removeEventListener(SPOTIFY_LIBRARY_SEND_EVENT, listen);
 
-    expect(outcome).toEqual({ status: "done", lists: 3, songs: 7, unchanged: 0 });
+    expect(outcome).toEqual({ status: "done", lists: 3, songs: 7, unchanged: 0, skipped: [] });
     const puts = server.calls.filter((call) => call.method === "PUT");
     expect(puts).toHaveLength(1);
     expect((puts[0].body.lists as Array<{ id: string }>).map((list) => list.id)).toEqual(["liked", id(900), id(901)]);
@@ -122,11 +127,115 @@ describe("sending Spotify lists as a send the member watches", () => {
     expect(server.calls.some((call) => call.method === "POST" && !call.path.endsWith("/send"))).toBe(false);
   });
 
-  it("reports why it stopped when Spotify asks Tagify to wait", async () => {
+  it("waits as long as Spotify asks, then stops and says so when Spotify keeps asking", async () => {
     const server = community();
-    const outcome = await runSpotifyLibrarySend(session, reader([track(1)], { [id(900)]: [track(2)] }, id(900)), { request: server.request });
+    const { slept, sleep } = waits();
+    const outcome = await runSpotifyLibrarySend(session, reader([track(1)], { [id(900)]: [track(2)] }, id(900)), { request: server.request, sleep });
     expect(outcome).toEqual({ status: "failed", failure: "spotify_busy" });
+    // Six one-minute waits (a 429 without Retry-After), each in one-second steps.
+    expect(slept.reduce((sum, ms) => sum + ms, 0)).toBe(6 * 61_000);
     expect(server.calls.at(-1)).toMatchObject({ method: "PATCH", body: { failure: "spotify_busy" } });
+    // Liked Songs, read before Spotify asked, still reached Community.
+    expect(server.calls.filter((call) => call.method === "PUT").flatMap((call) => (call.body.lists as Array<{ id: string }>).map((list) => list.id))).toEqual(["liked"]);
+  });
+
+  it("reads each playlist in pages with a longer limit per page", async () => {
+    const server = community();
+    const asked: unknown[] = [];
+    const source = reader([], { [id(900)]: [track(2)] });
+    source.readPlaylistTracks = async (_playlist, options) => { asked.push(options); return [track(2)]; };
+    await runSpotifyLibrarySend(session, source, { request: server.request });
+    expect(asked).toEqual([{ pageSize: 100, timeoutMs: 60_000 }]);
+  });
+
+  it("tries a slow playlist again after a pause instead of stopping", async () => {
+    const server = community();
+    const { slept, sleep } = waits();
+    let tries = 0;
+    const source = reader([track(1)], { [id(900)]: [track(2)], [id(901)]: [track(3)] });
+    source.readPlaylistTracks = async (playlistId) => { if (playlistId === id(900) && tries++ < 2) throw tooSlow(); return playlistId === id(900) ? [track(2)] : [track(3)]; };
+    const outcome = await runSpotifyLibrarySend(session, source, { request: server.request, sleep });
+    expect(outcome).toEqual({ status: "done", lists: 3, songs: 7, unchanged: 0, skipped: [] });
+    expect(slept.reduce((sum, ms) => sum + ms, 0)).toBe(5_000 + 20_000);
+  });
+
+  it("waits out Spotify's Retry-After and carries on", async () => {
+    const server = community();
+    const { slept, sleep } = waits();
+    let asked = false;
+    const source = reader([track(1)], { [id(900)]: [track(2)] });
+    source.readPlaylistTracks = async () => { if (!asked) { asked = true; throw spotifyLocalPause(30, { kind: "rate-limit", dispatched: true, status: 429, retryAfterSeconds: 30 }); } return [track(2)]; };
+    expect(await runSpotifyLibrarySend(session, source, { request: server.request, sleep })).toMatchObject({ status: "done", skipped: [] });
+    expect(slept.reduce((sum, ms) => sum + ms, 0)).toBe(31_000);
+  });
+
+  it("stops at once when Spotify asks for longer than a send can wait", async () => {
+    const server = community();
+    const { slept, sleep } = waits();
+    const source = reader([track(1)], { [id(900)]: [track(2)] });
+    source.readPlaylistTracks = async () => { throw spotifyLocalPause(3600, { kind: "quota-exceeded", dispatched: true, status: 429 }); };
+    expect(await runSpotifyLibrarySend(session, source, { request: server.request, sleep })).toEqual({ status: "failed", failure: "spotify_busy" });
+    expect(slept).toEqual([]);
+  });
+
+  it("skips and names a playlist Spotify can't read, keeping Community's copy, and sends the rest", async () => {
+    const gymPrint = await listFingerprint({ kind: "playlist", songs: [id(3)], names: [["Song 3", "Band", "LP", null]] });
+    const server = community({ known: [{ id: id(900), fingerprint: gymPrint }] });
+    const { sleep } = waits();
+    const source = reader([track(1)], { [id(900)]: [track(3)], [id(901)]: [track(4)], [id(902)]: [track(5)] });
+    source.getAllUserPlaylistReferencesStrict = async () => [
+      { playlistId: id(900), playlistName: "Gym", folders: [{ id: "f1", name: "Workout" }] },
+      { playlistId: id(901), playlistName: "Broken mix" },
+      { playlistId: id(902), playlistName: "Road" },
+    ];
+    source.readPlaylistTracks = async (playlistId) => { if (playlistId !== id(902)) throw tooSlow(); return [track(5)]; };
+    const outcome = await runSpotifyLibrarySend(session, source, { request: server.request, sleep });
+    expect(outcome).toMatchObject({ status: "done", skipped: ["Gym", "Broken mix"] });
+    const sent = server.calls.filter((call) => call.method === "PUT").flatMap((call) => call.body.lists as Array<Record<string, unknown>>);
+    expect(sent.find((list) => list.id === id(900))).toEqual({ id: id(900), keep: true, fingerprint: gymPrint, name: "Gym", position: 1, folders: [{ id: "f1", name: "Workout" }] });
+    expect(sent.some((list) => list.id === id(901))).toBe(false);
+    expect(sent.find((list) => list.id === id(902))).toMatchObject({ songs: [id(5)] });
+    expect(server.calls.at(-1)).toMatchObject({ method: "POST", body: { sendId: "33333333-3333-4333-8333-333333333333" } });
+  });
+
+  it("stops when Spotify stops answering altogether, after sending what it read", async () => {
+    const server = community();
+    const { sleep } = waits();
+    const playlists = Object.fromEntries(Array.from({ length: 8 }, (_, n) => [id(900 + n), [track(10 + n)]]));
+    const source = reader([track(1)], playlists);
+    source.readPlaylistTracks = async (playlistId) => { if (playlistId >= id(902)) throw tooSlow(); return playlists[playlistId]; };
+    expect(await runSpotifyLibrarySend(session, source, { request: server.request, sleep })).toEqual({ status: "failed", failure: "spotify_unavailable" });
+    const sent = server.calls.filter((call) => call.method === "PUT").flatMap((call) => (call.body.lists as Array<{ id: string }>).map((list) => list.id));
+    expect(sent).toEqual(["liked", id(900), id(901)]);
+    expect(server.calls.at(-1)).toMatchObject({ method: "PATCH", body: { failure: "spotify_unavailable" } });
+  });
+
+  it("sends only the lists the member chose, in their Spotify places", async () => {
+    const server = community({ selection: { liked: false, playlistIds: [id(902), id(900)], includeFollowed: false } });
+    const read: string[] = [];
+    const source = reader([track(1)], { [id(900)]: [track(2)], [id(901)]: [track(3)], [id(902)]: [track(4)] });
+    const readTracks = source.readPlaylistTracks;
+    source.readPlaylistTracks = async (playlistId, options) => { read.push(playlistId); return readTracks(playlistId, options); };
+    source.getTaggingQueuePage = async () => { throw new Error("Liked Songs weren't chosen"); };
+    expect(await runSpotifyLibrarySend(session, source, { request: server.request })).toMatchObject({ status: "done", skipped: [] });
+    expect(read).toEqual([id(900), id(902)]);
+    const sent = server.calls.filter((call) => call.method === "PUT").flatMap((call) => call.body.lists as Array<{ id: string; position: number }>);
+    expect(sent.map((list) => [list.id, list.position])).toEqual([[id(900), 1], [id(902), 3]]);
+    expect(server.calls.filter((call) => call.method === "PATCH")[0].body).toMatchObject({ listsTotal: 2 });
+  });
+
+  it("includes Liked Songs when chosen", async () => {
+    const server = community({ selection: { liked: true, playlistIds: [], includeFollowed: false } });
+    await runSpotifyLibrarySend(session, reader([track(1)], { [id(900)]: [track(2)] }), { request: server.request });
+    const sent = server.calls.filter((call) => call.method === "PUT").flatMap((call) => (call.body.lists as Array<{ id: string }>).map((list) => list.id));
+    expect(sent).toEqual(["liked"]);
+  });
+
+  it("stops on a choice it can't read, without reading Spotify", async () => {
+    const server = community({ selection: { liked: false, playlistIds: [], includeFollowed: false } });
+    const source = reader([track(1)], {});
+    source.getAllUserPlaylistReferencesStrict = async () => { throw new Error("should not read"); };
+    expect(await runSpotifyLibrarySend(session, source, { request: server.request })).toEqual({ status: "failed", failure: "unknown" });
   });
 
   it("reports Community's daily limit", async () => {
@@ -153,10 +262,16 @@ describe("sending Spotify lists as a send the member watches", () => {
     expect(await running).toMatchObject({ status: "done" });
   });
 
-  it("gives up on a list Spotify never finishes reading", async () => {
+  it("skips a list Spotify never finishes reading", async () => {
     const server = community();
     const stuck: LibraryReader = { ...reader([], { [id(900)]: [] }), readPlaylistTracks: () => new Promise(() => {}) };
-    expect(await runSpotifyLibrarySend(session, stuck, { request: server.request, listTimeoutMs: 30 })).toEqual({ status: "failed", failure: "spotify_unavailable" });
+    expect(await runSpotifyLibrarySend(session, stuck, { request: server.request, listTimeoutMs: 30, sleep: waits().sleep })).toMatchObject({ status: "done", skipped: ["List 900"] });
+  });
+
+  it("stops when Spotify never finishes reading Liked Songs", async () => {
+    const server = community();
+    const stuck: LibraryReader = { ...reader([], {}), getTaggingQueuePage: () => new Promise(() => {}) };
+    expect(await runSpotifyLibrarySend(session, stuck, { request: server.request, listTimeoutMs: 30, sleep: waits().sleep })).toEqual({ status: "failed", failure: "spotify_unavailable" });
   });
 });
 
@@ -174,6 +289,16 @@ describe("what Tagify tells Community and the member", () => {
     expect(canReadSpotifyLibrary({ RootlistAPI: api(), LibraryAPI: { getTracks: () => null }, PlaylistAPI: api() })).toBe(true);
     expect(canReadSpotifyLibrary({ RootlistAPI: api(), PlaylistAPI: api() })).toBe(false);
     expect(canReadSpotifyLibrary(undefined)).toBe(false);
+  });
+
+  it("calls Spotify busy only when Spotify asked Tagify to wait", () => {
+    expect(isSpotifyBusy(Object.assign(new Error("Spotify needs a short break."), { status: 429 }))).toBe(true);
+    expect(isSpotifyBusy(spotifyLocalPause(30))).toBe(true);
+    expect(isSpotifyBusy(new Error("Spotify needs a short break. Wait a moment, then check more tracks."))).toBe(true);
+    // Tagify giving up on a slow read, or its own queue, is not Spotify asking for anything.
+    expect(isSpotifyBusy(tooSlow())).toBe(false);
+    expect(isSpotifyBusy(Object.assign(new Error("Spotify request expired while waiting"), { spotifyRequestStopped: true }))).toBe(false);
+    expect(isSpotifyBusy(new Error("Spotify couldn't read the library"))).toBe(false);
   });
 
   it("names each failure the way Community explains it", () => {
@@ -196,7 +321,11 @@ describe("what Tagify tells Community and the member", () => {
   });
 
   it("tells the member in Spotify how it ended", () => {
-    expect(spotifySendNotice({ status: "done", lists: 3, songs: 1234, unchanged: 1 })).toEqual({ text: "Sent 1,234 songs in 3 lists to Tagify Community.", error: false });
+    expect(spotifySendNotice({ status: "done", lists: 3, songs: 1234, unchanged: 1, skipped: [] })).toEqual({ text: "Sent 1,234 songs in 3 lists to Tagify Community.", error: false });
+    expect(spotifySendNotice({ status: "done", lists: 3, songs: 12, unchanged: 0, skipped: ["Gym"] })?.text)
+      .toBe("Sent 12 songs in 3 lists to Tagify Community. Spotify couldn't open one playlist (“Gym”). Ask for your lists again on Community later to add it.");
+    expect(spotifySendNotice({ status: "done", lists: 9, songs: 12, unchanged: 0, skipped: ["A", "B", "C", "D", "E"] })?.text)
+      .toContain("Spotify couldn't open 5 playlists (“A”, “B”, “C” and 2 more). Ask for your lists again on Community later to add them.");
     expect(spotifySendNotice({ status: "failed", failure: "spotify_busy" })?.error).toBe(true);
     expect(spotifySendNotice({ status: "taken" })).toBeNull();
     expect(spotifySendNotice({ status: "none" })).toBeNull();

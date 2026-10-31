@@ -39,8 +39,8 @@ describe("resolveInviteLink", () => {
     const request = vi.fn().mockResolvedValue({ profile: { handle: "alex", invitable: true } });
     expect(await resolveInviteLink(request)).toEqual({
       kind: "personal",
-      url: "https://community.tagify.fm/join/alex",
-      preview: "https://community.tagify.fm/join/alex/opengraph-image",
+      url: "https://tagify.fm/join/alex",
+      preview: "https://tagify.fm/join/alex/opengraph-image",
     });
     expect(request).toHaveBeenCalledWith("/api/v2/device/profile");
   });
@@ -61,7 +61,7 @@ describe("resolveInviteLink", () => {
     connect();
     const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ profile: { handle: "alex", invitable: true } }));
 
-    expect(await resolveInviteLink()).toMatchObject({ kind: "personal", url: "https://community.tagify.fm/join/alex" });
+    expect(await resolveInviteLink()).toMatchObject({ kind: "personal", url: "https://tagify.fm/join/alex" });
     const headers = profileHeaders(request);
     expect(headers.authorization).toBe("Bearer access");
     // Before: sync's x-tagify-* headers went along, Spotify refused the request, and the general link appeared.

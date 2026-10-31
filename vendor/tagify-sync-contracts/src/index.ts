@@ -8,9 +8,16 @@ export const MAX_APP_STATE_DOCUMENT_BYTES = 512_000;
 
 export * from "./initialMerge";
 export * from "./privateNotes";
+export * from "./webEdits";
 export * from "./artistCredits";
 export * from "./songReleases";
+export * from "./songNames";
 export * from "./playlistWrites";
+export * from "./spotifyListChoice";
+export * from "./catalogFill";
+export * from "./catalogFillRuns";
+export * from "./nowPlayingLookups";
+export * from "./spotifySearchLookups";
 
 export const DURABLE_APP_STATE_DOMAINS = [
   "smart-playlists",

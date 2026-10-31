@@ -1,4 +1,5 @@
 import { isRecord } from "./validation";
+import type { MusicServiceId, ServiceAvailabilityV1 } from "./music-services";
 
 export const PUBLIC_PROJECTION_VERSION = 1 as const;
 export const CATALOG_REFERENCE_VERSION = 2 as const;
@@ -8,6 +9,7 @@ export * from "./taxonomy-artifact";
 export * from "./comments";
 export * from "./artifact-projector";
 export * from "./tagNames";
+export * from "./music-services";
 
 export type MusicEntityKind = "track" | "album" | "artist";
 export type CatalogEntityType = "artist" | "recording" | "releaseGroup" | "release" | "work";
@@ -114,6 +116,11 @@ export interface PublicContributorV1 {
   tags: Array<{ label: string; path: string }>;
   isFollowing: boolean;
   isOwn?: boolean;
+  /**
+   * On a song page that shares every Spotify version of the song: the version this person's tags
+   * are saved on, when it isn't the page's own. Votes, comments and reports on their tags go there.
+   */
+  versionEntityId?: string;
 }
 
 export interface PublicTagPathV1 {
@@ -135,6 +142,31 @@ export interface PublicTagInspirationV1 {
 export interface TaggingInspirationV1 {
   contributorCount: number;
   tags: PublicTagInspirationV1[];
+}
+
+/** One tag name worth leading with on a music page. */
+export interface PublicTagAgreementTagV1 {
+  /** The spelling most people used. */
+  label: string;
+  /** Every spelling of the name on the item, to find it among each person's tags. */
+  spellings: string[];
+  /** People who put it on the item. */
+  people: number;
+  /** Members who use the name anywhere on Community. */
+  members: number;
+  /** Two or more people put it on the item. */
+  agreed: boolean;
+}
+
+/**
+ * The tags people agree on for one item, best first: names two or more people
+ * put on it, then names many members use. Placeholders and names only one member
+ * uses anywhere are left out, so each person's own organizing tags never lead.
+ */
+export interface TagAgreementV1 {
+  /** People whose tags show on the item. */
+  taggers: number;
+  tags: PublicTagAgreementTagV1[];
 }
 
 export interface InspirationPreferencesV1 {
@@ -159,6 +191,78 @@ export interface PublicEntityArtistV1 {
   providerId: string;
   name: string;
   spotifyUrl: string;
+  /** The artist's Community page (`/artist/<catalog id>`), present only while anyone can open it. */
+  canonicalPath?: string;
+}
+
+/** How Spotify files a release: an album, a single (EPs included) or a compilation. */
+export type ReleaseKindV1 = "album" | "single" | "compilation";
+
+/** A release a song is on, with that release's Community page. */
+export interface RecordingReleaseV1 {
+  catalogEntityId: string;
+  canonicalPath: string;
+  title: string;
+  kind: ReleaseKindV1;
+  /** "2024", "2024-06" or "2024-06-01", as Spotify gives it. */
+  releaseDate: string | null;
+  thumbnailUrl: string | null;
+}
+
+/** One Spotify version of a song: the same recording (an exact ISRC match) on one release. */
+export interface RecordingVersionV1 {
+  catalogEntityId: string;
+  providerId: string;
+  spotifyUrl: string;
+  /** People with something public on this version. */
+  people: number;
+  release: RecordingReleaseV1 | null;
+}
+
+/**
+ * Where a song was released, and every Spotify version of it the reader may see. All versions
+ * share one page; each keeps its own tags.
+ */
+export interface RecordingReleasesV1 {
+  /** The page every version opens. */
+  pageEntityId: string;
+  /** "From the album …": the earliest album, else the earliest single, else a compilation. */
+  release: RecordingReleaseV1 | null;
+  /** The other releases, albums first. */
+  alsoOn: RecordingReleaseV1[];
+  /** What Play and "Open in Spotify" use: the album version, else the most-tagged version. */
+  playVersion: RecordingVersionV1 | null;
+  versions: RecordingVersionV1[];
+}
+
+/**
+ * One version of a song on any service: the same recording (an exact ISRC match), each with its
+ * own Community entry. Spotify versions are named by their release; other services' versions carry
+ * no names from the server (the viewer's own service names them in the browser).
+ */
+export interface RecordingVersionV2 {
+  catalogEntityId: string;
+  service: MusicServiceId;
+  providerId: string;
+  /** People with something public on this version. */
+  people: number;
+  /** Spotify versions only. */
+  release: RecordingReleaseV1 | null;
+}
+
+/**
+ * RecordingReleasesV1 across services: every version of a song the reader may see, Spotify versions
+ * first, so the page every version opens is the one it always was.
+ */
+export interface RecordingReleasesV2 {
+  /** The page every version opens. */
+  pageEntityId: string;
+  /** "From the album …", from the Spotify versions: as in RecordingReleasesV1. */
+  release: RecordingReleaseV1 | null;
+  alsoOn: RecordingReleaseV1[];
+  /** What Play uses on each service that has a version. */
+  playVersions: Partial<Record<MusicServiceId, RecordingVersionV2>>;
+  versions: RecordingVersionV2[];
 }
 
 export interface PublicEntityViewV1 {
@@ -195,12 +299,23 @@ export interface PublicEntityViewV2 {
   };
   contributors: PublicContributorV1[];
   tagInspiration?: TaggingInspirationV1;
+  tagAgreement?: TagAgreementV1;
+  /** Songs only, while the song_releases switch is on: where it was released and its versions. */
+  recording?: RecordingReleasesV1;
   metadataProvenance: Array<{
     field: "title" | "subtitle" | "thumbnailUrl";
     source: string;
     sourceUrl: string | null;
     license: string | null;
   }>;
+  /**
+   * Set only on the website, for viewers who listen on another service than Spotify (or for music
+   * that isn't on Spotify): which service the view was prepared for and whether the music is on it.
+   * Absent everywhere Tagify desktops and public APIs read, which always get Spotify's view.
+   */
+  viewerService?: ServiceAvailabilityV1;
+  /** With `viewerService`: the MusicBrainz (CC0) name shown in place of the service's own. */
+  neutralName?: boolean;
 }
 
 /**

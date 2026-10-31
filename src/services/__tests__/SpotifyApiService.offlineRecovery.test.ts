@@ -25,6 +25,16 @@ it.each(["repeat", "shrink", "empty", "snapshot"])("rejects %s pages rather than
   expect(contents).toHaveBeenCalledTimes(2);
   expect(globalThis.fetch).not.toHaveBeenCalled();
 });
+it("reads a playlist for Community one page at a time, accepting the offset Spotify misreports", async () => {
+  const contents = vi.fn(async (_uri: string, page?: { offset: number; limit: number }) => ({ totalLength: 250, offset: 0,
+    items: Array.from({ length: Math.min(page?.limit ?? 250, 250 - (page?.offset ?? 0)) }, (_, i) => ({ uri: `spotify:track:${String((page?.offset ?? 0) + i).padStart(22, "0")}`, uid: `u${(page?.offset ?? 0) + i}`, name: "Song", artists: [{ name: "Band" }], album: { name: "LP", images: [] } })),
+  }));
+  (Spicetify.Platform.PlaylistAPI as any).getContents = contents;
+  const tracks = await spotifyApiService.readPlaylistTracks("paged", { pageSize: 100, timeoutMs: 60_000 });
+  expect(tracks).toHaveLength(250);
+  expect(contents.mock.calls.map(call => call[1])).toEqual([{ offset: 0, limit: 100 }, { offset: 100, limit: 100 }, { offset: 200, limit: 100 }]);
+  expect(globalThis.fetch).not.toHaveBeenCalled();
+});
 it("recovers through desktop after a cooldown without consuming a failed partial baseline", async () => {
   vi.useFakeTimers();
   const contents = vi.fn().mockRejectedValueOnce({ status: 429, retryAfterSeconds: 60 })

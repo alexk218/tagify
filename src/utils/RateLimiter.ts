@@ -14,7 +14,9 @@ interface RateLimiterConfig {
 }
 export type SpotifyTransport = "desktop" | "graphql" | "fetch";
 export interface RequestPriority { current: "foreground" | "background" }
-export interface RequestOptions { assertCurrent?: () => void; accountingAtTransport?: boolean; feature?: SpotifyRequestFeature; resource?: string; priorityToken?: RequestPriority; signal?: AbortSignal; priority?: "foreground" | "background"; transport?: SpotifyTransport }
+export interface RequestOptions { assertCurrent?: () => void;
+  /** How long one dispatched request may take before its transport is treated as stalled; the limiter's own limit by default. */
+  timeoutMs?: number; accountingAtTransport?: boolean; feature?: SpotifyRequestFeature; resource?: string; priorityToken?: RequestPriority; signal?: AbortSignal; priority?: "foreground" | "background"; transport?: SpotifyTransport }
 interface Job {
   feature: SpotifyRequestFeature;
   accountingAtTransport?: boolean;
@@ -22,6 +24,7 @@ interface Job {
   transport: SpotifyTransport;
   priorityToken?: RequestPriority;
   stalled?: boolean;
+  timeoutMs?: number;
   run: (signal: AbortSignal) => Promise<unknown>;
   controller: AbortController;
   promise: Promise<unknown>;
@@ -96,7 +99,7 @@ export class RateLimiter {
       let resolve!: Job["resolve"], reject!: Job["reject"];
       const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
       job = { key, feature, accountingAtTransport: options.accountingAtTransport, priorityToken: options.priorityToken, transport: options.transport ?? "desktop", run, promise, resolve, reject, controller: new AbortController(), consumers: 0,
-        started: false, priority };
+        started: false, priority, timeoutMs: options.timeoutMs };
       const queued = job;
       job.timer = setTimeout(() => {
         queued.reject(stopped("Spotify request expired while waiting"));
@@ -182,7 +185,7 @@ export class RateLimiter {
         this.stalled.set(job.transport, (this.stalled.get(job.transport) ?? 0) + 1);
         job.reject(this.transportError(job.transport));
         this.drain();
-      }, this.config.requestTimeoutMs);
+      }, job.timeoutMs ?? this.config.requestTimeoutMs);
       let task: Promise<unknown>;
       try { task = job.run(job.controller.signal); } catch (error) { task = Promise.reject(error); }
       const generation = this.generation;

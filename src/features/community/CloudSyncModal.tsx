@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Cloud, ExternalLink, Link2, RefreshCw, ShieldAlert, UserCircle2, X } from "lucide-react";
-import { openCommunityUrl } from "./communityLinks";
+import { COMMUNITY_ORIGIN, COMMUNITY_PAGES_ORIGIN, openCommunityUrl } from "./communityLinks";
 import { fetchCommunityProfile, hydrateSyncProfile } from "./communityDevice";
 import { getDesktopSyncConfiguration, type DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncPairingService, type ApprovedPairing } from "@/services/sync/SyncPairingService";
@@ -23,7 +23,6 @@ import {
 // eslint-disable-next-line css-modules/no-unused-class -- shared with the onboarding and library-review dialogs
 import styles from "./CloudSyncModal.module.css";
 
-const COMMUNITY_URL = "https://community.tagify.fm";
 
 export function CloudSyncModal({ sharing, onOpenSharing, onClose }: { sharing: CommunitySharing; onOpenSharing: () => void; onClose: () => void }) {
   const [configuration, setConfiguration] = useState(() => getDesktopSyncConfiguration());
@@ -81,7 +80,7 @@ export function CloudSyncModal({ sharing, onOpenSharing, onClose }: { sharing: C
   const begin = async () => {
     setBusy(true); setError("");
     try {
-      const next = await syncPairingService.begin(COMMUNITY_URL, deviceName(), navigator.platform || "Spotify desktop");
+      const next = await syncPairingService.begin(COMMUNITY_ORIGIN, deviceName(), navigator.platform || "Spotify desktop");
       setApprovedPairing(null); setPending(next); recordCommunityConnectStarted("sync"); openCommunityUrl(next.verificationUri);
     } catch (nextError) { recordCommunityConnectStartFailed("sync"); setError(communityErrorMessage(nextError, "Couldn't start connecting. Please try again.")); }
     setBusy(false);
@@ -184,7 +183,7 @@ export function CloudSyncModal({ sharing, onOpenSharing, onClose }: { sharing: C
           <p>Cloud backup stopped on this device. Your local Tagify library is still here.</p>
           <div className={styles.actions}>
             <button type="button" className={styles.primary} disabled={busy} onClick={() => void begin()}><Link2 size={16} /> {busy ? "Creating code…" : "Reconnect device"}</button>
-            <button type="button" onClick={() => openCommunityUrl(`${COMMUNITY_URL}/settings/devices`)}><ExternalLink size={15} /> Linked devices</button>
+            <button type="button" onClick={() => openCommunityUrl(`${COMMUNITY_PAGES_ORIGIN}/settings/devices`)}><ExternalLink size={15} /> Linked devices</button>
             <button type="button" className={styles.secondary} disabled={busy} onClick={() => void keepLocalOnly()}>Keep data on this device only</button>
           </div>
         </> : configuration ? <>
@@ -214,7 +213,7 @@ export function CloudSyncModal({ sharing, onOpenSharing, onClose }: { sharing: C
           {requiresReload ? <div className={styles.warning}><ShieldAlert /><span>Reload Spotify to finish switching accounts. Your library from the previous account will stay on this device.</span></div> : null}
           {status === "snapshot-required" ? <div className={styles.warning}><ShieldAlert /><span>Your changes are still on this device. Try Sync now again. If it keeps stopping, download a Tagify backup and contact support.</span></div> : null}
           {showingMergeReview && mergePreview ? <InitialLibraryMergeReview review={mergePreview} onCommit={(resolutions) => activeSyncRuntime().commitInitialMerge(resolutions)} onDownloadBackup={() => activeSyncRuntime().downloadInitialMergeBackup()} /> : null}
-          {!showingMergeReview ? <div className={styles.actions}><button type="button" onClick={() => void activeSyncRuntime().syncNow()} disabled={busy || requiresReload || syncing || status === "idle" || status === "publishing"}><RefreshCw size={15} /> {syncing ? "Syncing…" : "Sync now"}</button><button type="button" onClick={() => openCommunityUrl(`${COMMUNITY_URL}/settings/devices`)}><ExternalLink size={15} /> Linked devices</button></div> : null}
+          {!showingMergeReview ? <div className={styles.actions}><button type="button" onClick={() => void activeSyncRuntime().syncNow()} disabled={busy || requiresReload || syncing || status === "idle" || status === "publishing"}><RefreshCw size={15} /> {syncing ? "Syncing…" : "Sync now"}</button><button type="button" onClick={() => openCommunityUrl(`${COMMUNITY_PAGES_ORIGIN}/settings/devices`)}><ExternalLink size={15} /> Linked devices</button></div> : null}
         </> : <>
           <p>Back up your tags, ratings, and Smart Playlists. Your Tagify settings stay on this device. You choose what appears on your public profile.</p>
           <label className={styles.consent}><input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} /><span>I understand my Tagify library will be saved to Community and have reviewed the privacy terms.</span></label>

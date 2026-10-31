@@ -1,4 +1,4 @@
-import { COMMUNITY_ORIGIN } from "@/features/community/communityLinks";
+import { COMMUNITY_ORIGIN, COMMUNITY_PAGES_ORIGIN } from "@/features/community/communityLinks";
 
 export interface CommunityCatalogTag {
   key: string;
@@ -103,5 +103,5 @@ export function formatCommunityTagStats(tag: CommunityCatalogTag): string {
 }
 
 export function buildCommunityTagSearchUrl(tag: Pick<CommunityCatalogTag, "name">): string {
-  return `${COMMUNITY_ORIGIN}/search?tag=${encodeURIComponent(`label:${encodeURIComponent(tag.name)}`)}`;
+  return `${COMMUNITY_PAGES_ORIGIN}/search?tag=${encodeURIComponent(`label:${encodeURIComponent(tag.name)}`)}`;
 }
