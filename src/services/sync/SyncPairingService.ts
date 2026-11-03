@@ -224,6 +224,24 @@ export class SyncPairingService {
     }
   }
 
+  /**
+   * Joins a reconnection the member approved on Community to the library
+   * Tagify started with, the same way a new link does. Never switches
+   * accounts: that needs the member's confirmation in Cloud Sync.
+   */
+  async completeReconnection(
+    configuration: DesktopSyncConfiguration,
+  ): Promise<{ configuration: DesktopSyncConfiguration; requiresReload: boolean }> {
+    const previous = getDesktopSyncConfiguration();
+    const provenance = getDisconnectedSyncProvenance();
+    const relationship = getPairingRelationship(previous, provenance, configuration.accountId);
+    if (relationship === "account-switch") {
+      throw new Error("This computer was last connected to another Community account. Connect it from Cloud Sync.");
+    }
+    stagedApproval = { configuration, relationship, previousAccount: provenance };
+    return this.complete(stagedApproval);
+  }
+
   cancelPending(): void {
     stagedApproval = null;
     localStorage.removeItem(PENDING_PAIRING_STORAGE_KEY);

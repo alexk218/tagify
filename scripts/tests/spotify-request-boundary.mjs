@@ -38,7 +38,8 @@ export function findViolations(source, filename) {
   const failures = [];
   let fetchCount = 0;
   // SyncRuntime's 11th: the direct Community pull through Supabase's API (docs in tagify-community DESKTOP_DIRECT_PULL.md).
-  const fetchLimit = filename.endsWith("/SyncRuntime.ts") ? 11 : filename.endsWith("/communityDevice.ts") ? 3 : /\/(?:PrivateNotes|SyncPairingService)\.ts$/.test(filename) ? 2 : 1;
+  // SyncInstallRecovery's 2nd: Community's device-authorization token, when reconnecting after a Spotify update.
+  const fetchLimit = filename.endsWith("/SyncRuntime.ts") ? 11 : filename.endsWith("/communityDevice.ts") ? 3 : /\/(?:PrivateNotes|SyncPairingService|SyncInstallRecovery)\.ts$/.test(filename) ? 2 : 1;
   walk(file, node => {
     if (!ts.isCallExpression(node)) return;
     const callee = node.expression.getText(file);

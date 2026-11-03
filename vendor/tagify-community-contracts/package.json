@@ -12,6 +12,7 @@
     "./taxonomy-artifact": "./src/taxonomy-artifact.ts",
     "./comments": "./src/comments.ts",
     "./tag-names": "./src/tagNames.ts",
+    "./taste-packs": "./src/tastePacks.ts",
     "./fixtures/*": "./fixtures/*"
   }
 }

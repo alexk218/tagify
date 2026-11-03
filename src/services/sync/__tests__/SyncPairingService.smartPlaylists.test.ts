@@ -69,6 +69,33 @@ describe("smart playlists across Community pairing", () => {
     await syncPairingService.complete(approval.approval);
   }
 
+  it("joins an approved reconnection to the library Tagify started with", async () => {
+    const payload = btoa(JSON.stringify({ sub: "account-a", iss: "https://example.supabase.co/auth/v1" })).replace(/=+$/, "");
+    const configuration = {
+      accountId: "account-a", libraryId: "library-a", deviceId: "device-a", apiBaseUrl: "https://community.tagify.fm",
+      supabaseUrl: "https://example.supabase.co", supabasePublishableKey: "key",
+      accessToken: `header.${payload}.signature`, refreshToken: "refresh", expiresAt: Date.now() + 60_000,
+    };
+
+    await syncPairingService.completeReconnection(configuration);
+
+    expect(getTagifyDatabaseName()).toBe("tagify-db:account-a");
+    expect(await indexedDBStorage.getAllSmartPlaylists()).toMatchObject([{ id: "five-stars" }]);
+  });
+
+  it("never switches accounts through an approved reconnection", async () => {
+    await connect();
+    await syncPairingService.unlinkLocal();
+    const payload = btoa(JSON.stringify({ sub: "account-b", iss: "https://example.supabase.co/auth/v1" })).replace(/=+$/, "");
+
+    await expect(syncPairingService.completeReconnection({
+      accountId: "account-b", libraryId: "library-b", deviceId: "device-b", apiBaseUrl: "https://community.tagify.fm",
+      supabaseUrl: "https://example.supabase.co", supabasePublishableKey: "key",
+      accessToken: `header.${payload}.signature`, refreshToken: "refresh", expiresAt: Date.now() + 60_000,
+    })).rejects.toThrow(/another Community account/);
+    expect(getTagifyDatabaseName()).toBe("tagify-db");
+  });
+
   it("keeps a working rule when a local library connects to Community", async () => {
     await connect();
 

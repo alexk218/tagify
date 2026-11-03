@@ -45,6 +45,10 @@ import {
   faHeart,
   faPlay,
   faUser,
+  faBoxOpen,
+  faPeopleGroup,
+  faSeedling,
+  faShieldHalved,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -58,7 +62,7 @@ interface InfoModalProps {
   initialSection?: string;
 }
 
-const LATEST_WHATS_NEW_VERSION = "3.3.3";
+const LATEST_WHATS_NEW_VERSION = "3.3.4";
 const WHATS_NEW_SEEN_VERSION_KEY = "tagify:info-modal:whats-new-seen-version";
 
 const hasSeenLatestWhatsNew = () => {
@@ -239,6 +243,29 @@ const InfoModal: React.FC<InfoModalProps> = ({
               {activeSection === "whats-new" && (
                 <div className={styles.section}>
                   <div className={styles.whatsNewHeader}>
+                    <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.3.4")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.3.4</a></h3>
+                  </div>
+                  <ul className={styles.compactUpdates}>
+                    {[
+                      { title: "Taste packs", description: 'pick tags that fit your music, in "Tag your first song" or Tag Manager.', icon: faBoxOpen },
+                      { title: "Members already tagged", description: "see and add the tags Community members agree on.", icon: faPeopleGroup },
+                      { title: "Fresher starter tags", description: "new libraries start closer to how people really tag.", icon: faSeedling },
+                      { title: "Safer Community reconnect", description: "approve reconnecting on Community with a code.", icon: faShieldHalved },
+                    ].map(({ title, description, icon }) => (
+                      <li key={title} className={styles.compactUpdate}>
+                        <FontAwesomeIcon icon={icon} className={styles.compactUpdateIcon} aria-hidden="true" />
+                        <div className={styles.compactUpdateCopy}>
+                          <h4 className={styles.compactUpdateTitle}>{title}</h4>
+                          <p className={styles.compactUpdateDescription}>{description}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <details className={styles.releaseAccordion}>
+                    <summary className={styles.releaseSummary}><span>What's New in Tagify 3.3.3</span></summary>
+                    <div>
+                  {/* TAGIFY 3.3.3 */}
+                  <div className={styles.whatsNewHeader}>
                     <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.3.3")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.3.3</a></h3>
                   </div>
                   <ul className={styles.compactUpdates}>
@@ -256,6 +283,8 @@ const InfoModal: React.FC<InfoModalProps> = ({
                       </li>
                     ))}
                   </ul>
+                    </div>
+                  </details>
                   <details className={styles.releaseAccordion}>
                     <summary className={styles.releaseSummary}><span>What's New in Tagify 3.3.2</span></summary>
                     <div>
@@ -1247,23 +1276,35 @@ const InfoModal: React.FC<InfoModalProps> = ({
 
                   <div className={styles.subsection}>
                     <h4>How Tags Work</h4>
-                    <p>Tags are organized in a three-level hierarchy:</p>
+                    <p>
+                      Tags live in folders, and folders can hold more folders,
+                      as many levels deep as you like:
+                    </p>
                     <div className={styles.hierarchy}>
                       <div className={styles.hierarchyLevel}>
                         <strong>Category</strong> →{" "}
-                        <span className={styles.example}>Mood & Energy</span>
+                        <span className={styles.example}>Genre & Style</span>
                       </div>
                       <div className={styles.hierarchyLevel}>
-                        <strong>Subcategory</strong> →{" "}
-                        <span className={styles.example}>Emotional Tone</span>
+                        <strong>Folder</strong> →{" "}
+                        <span className={styles.example}>Electronic</span>
+                      </div>
+                      <div className={styles.hierarchyLevel}>
+                        <strong>Folder inside it</strong> →{" "}
+                        <span className={styles.example}>House</span>
                       </div>
                       <div className={styles.hierarchyLevel}>
                         <strong>Tag</strong> →{" "}
                         <span className={styles.example}>
-                          Happy, Sad, Romantic
+                          Deep House, Tech House
                         </span>
                       </div>
                     </div>
+                    <p>
+                      In Manage Tags, use <strong>+ Add Subfolder</strong> on
+                      any folder to add another level. Tags can sit at any
+                      level.
+                    </p>
                   </div>
 
                   <div className={styles.subsection}>
@@ -1290,7 +1331,10 @@ const InfoModal: React.FC<InfoModalProps> = ({
                         <h5>
                           <FontAwesomeIcon icon={faGuitar} /> Musical Elements
                         </h5>
-                        <p>Vocals, instruments, and production styles</p>
+                        <p>
+                          Vocals, instruments, production styles, and
+                          languages
+                        </p>
                       </div>
                       <div className={styles.categoryItem}>
                         <h5>
@@ -1324,10 +1368,11 @@ const InfoModal: React.FC<InfoModalProps> = ({
                       </div>
                       <p>
                         Click <strong>"Manage Tags"</strong> to build your
-                        custom tagging system. Create categories (e.g., "Mood"),
-                        subcategories (e.g., "Happy"), and individual tags
-                        (e.g., "Upbeat"). This forms the foundation of your
-                        music organization.
+                        custom tagging system. Create categories (e.g.,
+                        "Genre"), folders inside them (e.g., "Electronic"),
+                        folders inside those as deep as you like (e.g.,
+                        "House"), and individual tags (e.g., "Deep House").
+                        This forms the foundation of your music organization.
                       </p>
                     </div>
 

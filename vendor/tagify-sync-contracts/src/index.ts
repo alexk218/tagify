@@ -18,6 +18,7 @@ export * from "./catalogFill";
 export * from "./catalogFillRuns";
 export * from "./nowPlayingLookups";
 export * from "./spotifySearchLookups";
+export * from "./starterTags";
 
 export const DURABLE_APP_STATE_DOMAINS = [
   "smart-playlists",

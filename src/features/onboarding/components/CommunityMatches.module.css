@@ -1,0 +1,153 @@
+.section {
+  display: grid;
+  gap: 8px;
+}
+
+.header {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.heading {
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.help {
+  color: var(--spice-subtext);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.rows {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Song and "Add all" on one line, the members' tags under the song. */
+.row {
+  align-items: center;
+  border-radius: 6px;
+  column-gap: 12px;
+  display: grid;
+  grid-template-areas:
+    "cover song action"
+    "cover tags tags";
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  padding: 8px;
+  row-gap: 6px;
+}
+
+.row:hover {
+  background: rgb(255 255 255 / 4%);
+}
+
+.cover {
+  align-self: start;
+  grid-area: cover;
+  background: rgb(255 255 255 / 8%);
+  border-radius: 4px;
+  flex: 0 0 auto;
+  height: 40px;
+  object-fit: cover;
+  width: 40px;
+}
+
+.song {
+  display: grid;
+  grid-area: song;
+  min-width: 0;
+}
+
+.songName,
+.songArtist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.songName {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.songArtist {
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  grid-area: tags;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tag {
+  align-items: center;
+  background: rgb(255 255 255 / 6%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  color: var(--spice-text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 4px;
+  max-width: 180px;
+  padding: 4px 10px 4px 8px;
+}
+
+.tag:hover:not(:disabled),
+.tag:focus-visible {
+  background: rgb(255 255 255 / 12%);
+  border-color: rgb(255 255 255 / 30%);
+}
+
+.tag:disabled {
+  cursor: default;
+}
+
+.tagName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addAll {
+  border-radius: 500px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.addAll {
+  grid-area: action;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 18%);
+  color: var(--spice-text);
+  padding: 5px 12px;
+}
+
+.addAll:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 40%);
+}
+
+.addAll:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.error {
+  color: var(--spice-notification-error, #f15e6c);
+  font-size: 13px;
+  margin: 0;
+}

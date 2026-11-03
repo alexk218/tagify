@@ -13,6 +13,26 @@ import {
   type TagSelectorSortMode,
 } from "@/features/tag-data/utils/tagSelector.sorting";
 import { buildTagAccentCssVars } from "@/features/tag-data/utils/tagAccent";
+import { isTastePackFolderId } from "@/utils/tastePackTaxonomy";
+
+// The taste pack folders a new library's picker has shown. Kept across closing the picker and
+// reloading Spotify, so packs added while the picker was hidden still open when it comes back.
+const SHOWN_PACK_FOLDERS_KEY = "tagify:shownTastePackFolders";
+
+function readShownPackFolders(): Set<string> {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(SHOWN_PACK_FOLDERS_KEY) ?? "[]");
+    return new Set(Array.isArray(stored) ? stored.filter((key): key is string => typeof key === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeShownPackFolders(keys: string[]): void {
+  try {
+    localStorage.setItem(SHOWN_PACK_FOLDERS_KEY, JSON.stringify(keys));
+  } catch { /* The picker may then open these folders again next time. */ }
+}
 
 interface TagSelectorProps {
   categories: TagCategory[];
@@ -123,15 +143,37 @@ const TagSelector: React.FC<TagSelectorProps> = ({
     setAreAllExpanded(false);
   };
 
+  // Set when the effect below opens everything, which taste pack folders included.
+  const openedAllForFirstRun = useRef(false);
   useEffect(() => {
     if (!expandForFirstRun || sortedCategories.length === 0) return;
     try {
       if (localStorage.getItem("tagify:expandedCategories") !== null) return;
     } catch { return; }
     expandAll();
+    openedAllForFirstRun.current = true;
     // Only the first render of a new library decides this.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandForFirstRun, sortedCategories.length]);
+
+  // In a new library, taste packs open the first time the picker shows them, whether they were added
+  // while it was open or hidden. Folders it has already shown keep whatever the person chose.
+  useEffect(() => {
+    if (!expandForFirstRun) return;
+    const openedAll = openedAllForFirstRun.current;
+    openedAllForFirstRun.current = false;
+    const packFolders = sortedCategories.flatMap((category) => category.subcategories
+      .filter((folder) => isTastePackFolderId(folder.id))
+      .map((folder) => ({ categoryId: category.id, key: buildSubcategoryKey(category.id, folder.id) })));
+    const shown = readShownPackFolders();
+    const added = packFolders.filter((folder) => !shown.has(folder.key));
+    if (added.length === 0) return;
+    writeShownPackFolders([...shown, ...added.map((folder) => folder.key)]);
+    // The local storage setters update from this render's value, so they would undo opening everything.
+    if (openedAll) return;
+    setExpandedCategoryIds((prev) => [...new Set([...prev, ...added.map((folder) => folder.categoryId)])]);
+    setExpandedSubcategoryKeys((prev) => [...new Set([...prev, ...added.map((folder) => folder.key)])]);
+    // The setters change identity on every render; the folders decide this.
+  }, [expandForFirstRun, sortedCategories]);
 
   const toggleExpandAll = () => {
     if (areAllExpanded) {

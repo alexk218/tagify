@@ -1,0 +1,104 @@
+/* "What do you listen to?": the same surfaces and pill buttons as "Tag your first song". */
+.picker {
+  display: grid;
+  gap: 12px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  align-items: center;
+  background: rgb(0 0 0 / 22%);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 500px;
+  color: var(--spice-text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 5px;
+  padding: 5px 12px;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.chip:hover:not(:disabled) {
+  background: rgb(255 255 255 / 8%);
+  border-color: rgb(255 255 255 / 22%);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
+}
+
+.chip:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* Chosen packs use the blue of a tag on the current song. */
+.selected,
+.selected:hover:not(:disabled) {
+  background: #1e40af;
+  border-color: #1e40af;
+  color: white;
+}
+
+/* In Tag Manager, packs already in the tags keep their place with a check. */
+.added:disabled {
+  opacity: 0.7;
+}
+
+.addedLabel {
+  color: var(--spice-subtext);
+  font-weight: 500;
+  margin-left: 2px;
+}
+
+.actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.primaryButton,
+.secondaryButton {
+  border-radius: 500px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 16px;
+}
+
+.primaryButton {
+  background: var(--spice-text);
+  border: 1px solid var(--spice-text);
+  color: var(--spice-main);
+}
+
+.secondaryButton {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 18%);
+  color: var(--spice-text);
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.problem {
+  color: #f87171;
+  font-size: 13px;
+}

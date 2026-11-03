@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import packageJson from "@/package";
 import { getDesktopSyncConnectionState } from "@/services/sync/SyncLocalState";
-import { ANALYTICS_CHOICE_EVENT, isAnalyticsSharing, presenceRecordedToday, recordProductEvent, savedSongsBucket, trackAggregateRequest, releaseAggregateRequest, type ProductEventDetails } from "@/features/product-analytics/productAnalytics";
+import { ANALYTICS_CHOICE_EVENT, isAnalyticsSharing, presenceRecordedToday, recordProductEvent, savedSongsBucket, songsBucket, trackAggregateRequest, releaseAggregateRequest, type ProductEventDetails } from "@/features/product-analytics/productAnalytics";
 
 const USAGE_URL = "https://community.tagify.fm/api/v1/tagify-usage";
 /** How often a visible Tagify checks, locally, whether today's report is due. */
@@ -126,11 +126,13 @@ function scheduleActivityFlush(accountDigest: string, failures = 0, delay = ACTI
 /**
  * Count one completed manual edit gesture, including a bulk edit, rather than each affected song.
  * `surface` says where it was made: the Tagify page, the controls in Spotify's own views, or a keyboard shortcut.
+ * `songs` is how many songs a tagging gesture changed, sent as a coarse range.
  */
-export async function recordMeaningfulAction(action: "tagging" | "rating", surface: NonNullable<ProductEventDetails["edit_surface"]> = "tagify_page"): Promise<void> {
+export async function recordMeaningfulAction(action: "tagging" | "rating", surface: NonNullable<ProductEventDetails["edit_surface"]> = "tagify_page", songs?: number): Promise<void> {
   const accountDigest = await getUsageAccountDigest();
   if (!accountDigest || !isAnalyticsSharing(accountDigest)) return;
-  recordProductEvent(accountDigest, action === "tagging" ? "tagging_completed" : "rating_completed", { edit_surface: surface });
+  const songRange = action === "tagging" && songs !== undefined ? songsBucket(songs) : undefined;
+  recordProductEvent(accountDigest, action === "tagging" ? "tagging_completed" : "rating_completed", { edit_surface: surface, ...(songRange ? { songs: songRange } : {}) });
   try {
     const days = readActivity(accountDigest);
     let current = days.find(day => day.day === activityDay());

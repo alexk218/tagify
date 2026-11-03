@@ -1,0 +1,382 @@
+{
+  "about": "Install cases for planTastePackInstall (src/tastePacks.ts), shared by its tests and Community's database test supabase/tests/taste_packs.sql, which embeds a copy (lib/my-library/taste-packs.test.ts fails if it drifts). Nodes and upserts are [id, kind, parentId, name, position], nodes with true sixth for deleted; skipped is [id, reason].",
+  "cases": [
+    {
+      "case": "An empty library gets Genre & Style holding only the pack",
+      "nodes": [],
+      "keys": [
+        "metal"
+      ],
+      "upserts": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 0],
+        ["sub_svf6di", "folder", "cat_ntsvi4", "Metal & Heavy", 0],
+        ["tag_1iy4qy4", "tag", "sub_svf6di", "Nu Metal", 0],
+        ["tag_14xtmkc", "tag", "sub_svf6di", "Hard Rock", 1],
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 2],
+        ["tag_znsl23", "tag", "sub_svf6di", "Metalcore", 3],
+        ["tag_ecd", "tag", "sub_svf6di", "Thrash Metal", 4],
+        ["tag_snc052", "tag", "sub_svf6di", "Heavy Metal", 5],
+        ["tag_14x2xlq", "tag", "sub_svf6di", "Industrial Metal", 6],
+        ["tag_10a1tp6", "tag", "sub_svf6di", "Djent", 7],
+        ["tag_1ybtc2v", "tag", "sub_svf6di", "Symphonic Metal", 8],
+        ["tag_1yd36cu", "tag", "sub_svf6di", "Black Metal", 9],
+        ["tag_1hg40bn", "tag", "sub_svf6di", "Death Metal", 10]
+      ]
+    },
+    {
+      "case": "With the starter tags, the pack folder goes at the end of Genre & Style, and Metal doesn't hide Heavy Metal",
+      "nodes": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 0],
+        ["sub_primary", "folder", "cat_ntsvi4", "Primary Genres", 0],
+        ["tag_rock", "tag", "sub_primary", "Rock", 0],
+        ["tag_metal", "tag", "sub_primary", "Metal", 1],
+        ["sub_subgenres", "folder", "cat_ntsvi4", "Sub-genres", 1],
+        ["sub_era", "folder", "cat_ntsvi4", "Era & Decade", 2],
+        ["cat_mood", "category", null, "Mood & Energy", 1]
+      ],
+      "keys": [
+        "metal"
+      ],
+      "upserts": [
+        ["sub_svf6di", "folder", "cat_ntsvi4", "Metal & Heavy", 3],
+        ["tag_1iy4qy4", "tag", "sub_svf6di", "Nu Metal", 0],
+        ["tag_14xtmkc", "tag", "sub_svf6di", "Hard Rock", 1],
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 2],
+        ["tag_znsl23", "tag", "sub_svf6di", "Metalcore", 3],
+        ["tag_ecd", "tag", "sub_svf6di", "Thrash Metal", 4],
+        ["tag_snc052", "tag", "sub_svf6di", "Heavy Metal", 5],
+        ["tag_14x2xlq", "tag", "sub_svf6di", "Industrial Metal", 6],
+        ["tag_10a1tp6", "tag", "sub_svf6di", "Djent", 7],
+        ["tag_1ybtc2v", "tag", "sub_svf6di", "Symphonic Metal", 8],
+        ["tag_1yd36cu", "tag", "sub_svf6di", "Black Metal", 9],
+        ["tag_1hg40bn", "tag", "sub_svf6di", "Death Metal", 10]
+      ]
+    },
+    {
+      "case": "Adding the pack again changes nothing",
+      "nodes": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 0],
+        ["sub_svf6di", "folder", "cat_ntsvi4", "Metal & Heavy", 0],
+        ["tag_1iy4qy4", "tag", "sub_svf6di", "Nu Metal", 0],
+        ["tag_14xtmkc", "tag", "sub_svf6di", "Hard Rock", 1],
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 2],
+        ["tag_znsl23", "tag", "sub_svf6di", "Metalcore", 3],
+        ["tag_ecd", "tag", "sub_svf6di", "Thrash Metal", 4],
+        ["tag_snc052", "tag", "sub_svf6di", "Heavy Metal", 5],
+        ["tag_14x2xlq", "tag", "sub_svf6di", "Industrial Metal", 6],
+        ["tag_10a1tp6", "tag", "sub_svf6di", "Djent", 7],
+        ["tag_1ybtc2v", "tag", "sub_svf6di", "Symphonic Metal", 8],
+        ["tag_1yd36cu", "tag", "sub_svf6di", "Black Metal", 9],
+        ["tag_1hg40bn", "tag", "sub_svf6di", "Death Metal", 10]
+      ],
+      "keys": ["metal", "metal"],
+      "upserts": [],
+      "skipped": [
+        ["tag_1iy4qy4", "has-id"],
+        ["tag_14xtmkc", "has-id"],
+        ["tag_1ktdgcu", "has-id"],
+        ["tag_znsl23", "has-id"],
+        ["tag_ecd", "has-id"],
+        ["tag_snc052", "has-id"],
+        ["tag_14x2xlq", "has-id"],
+        ["tag_10a1tp6", "has-id"],
+        ["tag_1ybtc2v", "has-id"],
+        ["tag_1yd36cu", "has-id"],
+        ["tag_1hg40bn", "has-id"]
+      ]
+    },
+    {
+      "case": "A pack tag the member moved elsewhere stays where it is",
+      "nodes": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 0],
+        ["sub_mine", "folder", "cat_ntsvi4", "Favourites", 0],
+        ["tag_10a1tp6", "tag", "sub_mine", "Djent", 0]
+      ],
+      "keys": [
+        "metal"
+      ],
+      "upserts": [
+        ["sub_svf6di", "folder", "cat_ntsvi4", "Metal & Heavy", 1],
+        ["tag_1iy4qy4", "tag", "sub_svf6di", "Nu Metal", 0],
+        ["tag_14xtmkc", "tag", "sub_svf6di", "Hard Rock", 1],
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 2],
+        ["tag_znsl23", "tag", "sub_svf6di", "Metalcore", 3],
+        ["tag_ecd", "tag", "sub_svf6di", "Thrash Metal", 4],
+        ["tag_snc052", "tag", "sub_svf6di", "Heavy Metal", 5],
+        ["tag_14x2xlq", "tag", "sub_svf6di", "Industrial Metal", 6],
+        ["tag_1ybtc2v", "tag", "sub_svf6di", "Symphonic Metal", 7],
+        ["tag_1yd36cu", "tag", "sub_svf6di", "Black Metal", 8],
+        ["tag_1hg40bn", "tag", "sub_svf6di", "Death Metal", 9]
+      ],
+      "skipped": [
+        ["tag_10a1tp6", "has-id"]
+      ]
+    },
+    {
+      "case": "The member's own spelling of a pack tag is kept, and a folder's name doesn't count",
+      "nodes": [
+        ["cat_mine", "category", null, "My genres", 0],
+        ["sub_heavy", "folder", "cat_mine", "Heavy", 0],
+        ["tag_mine1", "tag", "sub_heavy", "nu-metal", 0],
+        ["tag_mine2", "tag", "sub_heavy", "HEAVY METAL", 1],
+        ["tag_mine3", "tag", "sub_heavy", "Metal", 2],
+        ["sub_death", "folder", "cat_mine", "Death Metal", 1]
+      ],
+      "keys": [
+        "metal"
+      ],
+      "upserts": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 1],
+        ["sub_svf6di", "folder", "cat_ntsvi4", "Metal & Heavy", 0],
+        ["tag_14xtmkc", "tag", "sub_svf6di", "Hard Rock", 0],
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 1],
+        ["tag_znsl23", "tag", "sub_svf6di", "Metalcore", 2],
+        ["tag_ecd", "tag", "sub_svf6di", "Thrash Metal", 3],
+        ["tag_14x2xlq", "tag", "sub_svf6di", "Industrial Metal", 4],
+        ["tag_10a1tp6", "tag", "sub_svf6di", "Djent", 5],
+        ["tag_1ybtc2v", "tag", "sub_svf6di", "Symphonic Metal", 6],
+        ["tag_1yd36cu", "tag", "sub_svf6di", "Black Metal", 7],
+        ["tag_1hg40bn", "tag", "sub_svf6di", "Death Metal", 8]
+      ],
+      "skipped": [
+        ["tag_1iy4qy4", "same-name"],
+        ["tag_snc052", "same-name"]
+      ]
+    },
+    {
+      "case": "A pack tag the member deleted comes back under its old ID at the end of the folder",
+      "nodes": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 0],
+        ["sub_svf6di", "folder", "cat_ntsvi4", "Metal & Heavy", 0],
+        ["tag_1iy4qy4", "tag", "sub_svf6di", "Nu Metal", 0],
+        ["tag_14xtmkc", "tag", "sub_svf6di", "Hard Rock", 1],
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 2, true],
+        ["tag_znsl23", "tag", "sub_svf6di", "Metalcore", 3],
+        ["tag_ecd", "tag", "sub_svf6di", "Thrash Metal", 4],
+        ["tag_snc052", "tag", "sub_svf6di", "Heavy Metal", 5],
+        ["tag_14x2xlq", "tag", "sub_svf6di", "Industrial Metal", 6],
+        ["tag_10a1tp6", "tag", "sub_svf6di", "Djent", 7],
+        ["tag_1ybtc2v", "tag", "sub_svf6di", "Symphonic Metal", 8],
+        ["tag_1yd36cu", "tag", "sub_svf6di", "Black Metal", 9],
+        ["tag_1hg40bn", "tag", "sub_svf6di", "Death Metal", 10]
+      ],
+      "keys": [
+        "metal"
+      ],
+      "upserts": [
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 11]
+      ]
+    },
+    {
+      "case": "A deleted pack folder comes back at the end of Genre & Style with its tags",
+      "nodes": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 0],
+        ["sub_primary", "folder", "cat_ntsvi4", "Primary Genres", 0],
+        ["sub_svf6di", "folder", "cat_ntsvi4", "Metal & Heavy", 1, true],
+        ["tag_1iy4qy4", "tag", "sub_svf6di", "Nu Metal", 0, true],
+        ["tag_14xtmkc", "tag", "sub_svf6di", "Hard Rock", 1, true],
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 2, true],
+        ["tag_znsl23", "tag", "sub_svf6di", "Metalcore", 3, true],
+        ["tag_ecd", "tag", "sub_svf6di", "Thrash Metal", 4, true],
+        ["tag_snc052", "tag", "sub_svf6di", "Heavy Metal", 5, true],
+        ["tag_14x2xlq", "tag", "sub_svf6di", "Industrial Metal", 6, true],
+        ["tag_10a1tp6", "tag", "sub_svf6di", "Djent", 7, true],
+        ["tag_1ybtc2v", "tag", "sub_svf6di", "Symphonic Metal", 8, true],
+        ["tag_1yd36cu", "tag", "sub_svf6di", "Black Metal", 9, true],
+        ["tag_1hg40bn", "tag", "sub_svf6di", "Death Metal", 10, true]
+      ],
+      "keys": [
+        "metal"
+      ],
+      "upserts": [
+        ["sub_svf6di", "folder", "cat_ntsvi4", "Metal & Heavy", 1],
+        ["tag_1iy4qy4", "tag", "sub_svf6di", "Nu Metal", 0],
+        ["tag_14xtmkc", "tag", "sub_svf6di", "Hard Rock", 1],
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 2],
+        ["tag_znsl23", "tag", "sub_svf6di", "Metalcore", 3],
+        ["tag_ecd", "tag", "sub_svf6di", "Thrash Metal", 4],
+        ["tag_snc052", "tag", "sub_svf6di", "Heavy Metal", 5],
+        ["tag_14x2xlq", "tag", "sub_svf6di", "Industrial Metal", 6],
+        ["tag_10a1tp6", "tag", "sub_svf6di", "Djent", 7],
+        ["tag_1ybtc2v", "tag", "sub_svf6di", "Symphonic Metal", 8],
+        ["tag_1yd36cu", "tag", "sub_svf6di", "Black Metal", 9],
+        ["tag_1hg40bn", "tag", "sub_svf6di", "Death Metal", 10]
+      ]
+    },
+    {
+      "case": "Genre & Style the member removed comes back holding only the pack",
+      "nodes": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 0, true],
+        ["sub_primary", "folder", "cat_ntsvi4", "Primary Genres", 0, true],
+        ["tag_rock", "tag", "sub_primary", "Rock", 0, true],
+        ["cat_mood", "category", null, "Mood & Energy", 1]
+      ],
+      "keys": [
+        "metal"
+      ],
+      "upserts": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 2],
+        ["sub_svf6di", "folder", "cat_ntsvi4", "Metal & Heavy", 0],
+        ["tag_1iy4qy4", "tag", "sub_svf6di", "Nu Metal", 0],
+        ["tag_14xtmkc", "tag", "sub_svf6di", "Hard Rock", 1],
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 2],
+        ["tag_znsl23", "tag", "sub_svf6di", "Metalcore", 3],
+        ["tag_ecd", "tag", "sub_svf6di", "Thrash Metal", 4],
+        ["tag_snc052", "tag", "sub_svf6di", "Heavy Metal", 5],
+        ["tag_14x2xlq", "tag", "sub_svf6di", "Industrial Metal", 6],
+        ["tag_10a1tp6", "tag", "sub_svf6di", "Djent", 7],
+        ["tag_1ybtc2v", "tag", "sub_svf6di", "Symphonic Metal", 8],
+        ["tag_1yd36cu", "tag", "sub_svf6di", "Black Metal", 9],
+        ["tag_1hg40bn", "tag", "sub_svf6di", "Death Metal", 10]
+      ]
+    },
+    {
+      "case": "The pack folder the member moved into another category is reused there",
+      "nodes": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 0],
+        ["cat_mine", "category", null, "Mine", 1],
+        ["sub_svf6di", "folder", "cat_mine", "Metal & Heavy", 0],
+        ["tag_1iy4qy4", "tag", "sub_svf6di", "Nu Metal", 0],
+        ["tag_14xtmkc", "tag", "sub_svf6di", "Hard Rock", 1]
+      ],
+      "keys": [
+        "metal"
+      ],
+      "upserts": [
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 2],
+        ["tag_znsl23", "tag", "sub_svf6di", "Metalcore", 3],
+        ["tag_ecd", "tag", "sub_svf6di", "Thrash Metal", 4],
+        ["tag_snc052", "tag", "sub_svf6di", "Heavy Metal", 5],
+        ["tag_14x2xlq", "tag", "sub_svf6di", "Industrial Metal", 6],
+        ["tag_10a1tp6", "tag", "sub_svf6di", "Djent", 7],
+        ["tag_1ybtc2v", "tag", "sub_svf6di", "Symphonic Metal", 8],
+        ["tag_1yd36cu", "tag", "sub_svf6di", "Black Metal", 9],
+        ["tag_1hg40bn", "tag", "sub_svf6di", "Death Metal", 10]
+      ]
+    },
+    {
+      "case": "A pack whose tags the member already has under other names adds no folder",
+      "nodes": [
+        ["cat_mine", "category", null, "Mine", 0],
+        ["sub_mine", "folder", "cat_mine", "Heavy", 0],
+        ["tag_own0", "tag", "sub_mine", "nu metal", 0],
+        ["tag_own1", "tag", "sub_mine", "hard-rock", 1],
+        ["tag_own2", "tag", "sub_mine", "DOOM METAL", 2],
+        ["tag_own3", "tag", "sub_mine", "Metal Core", 3],
+        ["tag_own4", "tag", "sub_mine", "thrash metal", 4],
+        ["tag_own5", "tag", "sub_mine", "Heavy_Metal", 5],
+        ["tag_own6", "tag", "sub_mine", "industrial metal", 6],
+        ["tag_own7", "tag", "sub_mine", "djent", 7],
+        ["tag_own8", "tag", "sub_mine", "Symphonic  Metal", 8],
+        ["tag_own9", "tag", "sub_mine", "black metal", 9],
+        ["tag_own10", "tag", "sub_mine", "Death-Metal", 10]
+      ],
+      "keys": [
+        "metal"
+      ],
+      "upserts": [],
+      "skipped": [
+        ["tag_1iy4qy4", "same-name"],
+        ["tag_14xtmkc", "same-name"],
+        ["tag_1ktdgcu", "same-name"],
+        ["tag_znsl23", "same-name"],
+        ["tag_ecd", "same-name"],
+        ["tag_snc052", "same-name"],
+        ["tag_14x2xlq", "same-name"],
+        ["tag_10a1tp6", "same-name"],
+        ["tag_1ybtc2v", "same-name"],
+        ["tag_1yd36cu", "same-name"],
+        ["tag_1hg40bn", "same-name"]
+      ]
+    },
+    {
+      "case": "Two packs that share a tag: it goes in the first pack's folder only, and Genre & Style comes back holding both",
+      "nodes": [],
+      "keys": [
+        "rock",
+        "metal"
+      ],
+      "upserts": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 0],
+        ["sub_svf6di", "folder", "cat_ntsvi4", "Metal & Heavy", 0],
+        ["tag_1iy4qy4", "tag", "sub_svf6di", "Nu Metal", 0],
+        ["tag_14xtmkc", "tag", "sub_svf6di", "Hard Rock", 1],
+        ["tag_1ktdgcu", "tag", "sub_svf6di", "Doom Metal", 2],
+        ["tag_znsl23", "tag", "sub_svf6di", "Metalcore", 3],
+        ["tag_ecd", "tag", "sub_svf6di", "Thrash Metal", 4],
+        ["tag_snc052", "tag", "sub_svf6di", "Heavy Metal", 5],
+        ["tag_14x2xlq", "tag", "sub_svf6di", "Industrial Metal", 6],
+        ["tag_10a1tp6", "tag", "sub_svf6di", "Djent", 7],
+        ["tag_1ybtc2v", "tag", "sub_svf6di", "Symphonic Metal", 8],
+        ["tag_1yd36cu", "tag", "sub_svf6di", "Black Metal", 9],
+        ["tag_1hg40bn", "tag", "sub_svf6di", "Death Metal", 10],
+        ["sub_gz1b46", "folder", "cat_ntsvi4", "Rock & Punk", 1],
+        ["tag_14kxt7v", "tag", "sub_gz1b46", "Classic Rock", 0],
+        ["tag_1ja21cc", "tag", "sub_gz1b46", "Pop Rock", 1],
+        ["tag_12qoxfp", "tag", "sub_gz1b46", "Punk Rock", 2],
+        ["tag_1ja0w2x", "tag", "sub_gz1b46", "Pop Punk", 3],
+        ["tag_upnez0", "tag", "sub_gz1b46", "Post-Hardcore", 4],
+        ["tag_1oqp6j1", "tag", "sub_gz1b46", "Grunge", 5],
+        ["tag_1eua342", "tag", "sub_gz1b46", "Psychedelic Rock", 6],
+        ["tag_xmr1aq", "tag", "sub_gz1b46", "Progressive Rock", 7],
+        ["tag_nursds", "tag", "sub_gz1b46", "Alternative Rock", 8],
+        ["tag_1wuqkxs", "tag", "sub_gz1b46", "Garage Rock", 9],
+        ["tag_k8ity", "tag", "sub_gz1b46", "Glam Rock", 10]
+      ],
+      "skipped": [
+        ["tag_14xtmkc", "has-id"]
+      ]
+    },
+    {
+      "case": "A library with version 1's Lo-fi keeps it where it is; Chill & Lo-fi adds the rest",
+      "nodes": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 0],
+        ["sub_primary", "folder", "cat_ntsvi4", "Primary Genres", 0],
+        ["cat_1heozhb", "category", null, "Musical Elements", 1],
+        ["sub_69ukuu", "folder", "cat_1heozhb", "Production Style", 0],
+        ["tag_16ncgn9", "tag", "sub_69ukuu", "Lo-fi", 0]
+      ],
+      "keys": [
+        "chill"
+      ],
+      "upserts": [
+        ["sub_spyxib", "folder", "cat_ntsvi4", "Chill & Lo-fi", 1],
+        ["tag_3y8jzi", "tag", "sub_spyxib", "Downtempo", 0],
+        ["tag_1y7tcb0", "tag", "sub_spyxib", "Trip Hop", 1],
+        ["tag_1fpx9jm", "tag", "sub_spyxib", "Chillwave", 2],
+        ["tag_pjnn7a", "tag", "sub_spyxib", "Vaporwave", 3],
+        ["tag_1n0yt1c", "tag", "sub_spyxib", "Lo-fi Hip-hop", 4],
+        ["tag_1lqadnw", "tag", "sub_spyxib", "Dark Ambient", 5],
+        ["tag_10a74zx", "tag", "sub_spyxib", "Drone", 6]
+      ],
+      "skipped": [
+        ["tag_16ncgn9", "has-id"]
+      ]
+    },
+    {
+      "case": "A retired starter tag the member deleted comes back in its pack under its old ID",
+      "nodes": [
+        ["cat_ntsvi4", "category", null, "Genre & Style", 0],
+        ["sub_11rx725", "folder", "cat_ntsvi4", "Sub-genres", 0],
+        ["tag_ert03k", "tag", "sub_11rx725", "Blues", 4, true]
+      ],
+      "keys": [
+        "jazz-soul"
+      ],
+      "upserts": [
+        ["sub_ch6i14", "folder", "cat_ntsvi4", "Jazz, Soul & Blues", 1],
+        ["tag_ert03k", "tag", "sub_ch6i14", "Blues", 0],
+        ["tag_1rh5fxv", "tag", "sub_ch6i14", "Neo-Soul", 1],
+        ["tag_11l6qdr", "tag", "sub_ch6i14", "Jazz Fusion", 2],
+        ["tag_rl4rr8", "tag", "sub_ch6i14", "Blues Rock", 3],
+        ["tag_10ij4dv", "tag", "sub_ch6i14", "Swing", 4],
+        ["tag_1w5nmny", "tag", "sub_ch6i14", "Contemporary R&B", 5],
+        ["tag_x4wxk6", "tag", "sub_ch6i14", "Alternative R&B", 6],
+        ["tag_xnwojg", "tag", "sub_ch6i14", "Acid Jazz", 7],
+        ["tag_3i9rs7", "tag", "sub_ch6i14", "Smooth Soul", 8],
+        ["tag_1op0k7r", "tag", "sub_ch6i14", "Gospel", 9],
+        ["tag_3i3qnf", "tag", "sub_ch6i14", "Smooth Jazz", 10]
+      ]
+    }
+  ]
+}

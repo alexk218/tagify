@@ -67,8 +67,11 @@ import {
 } from "@/features/tag-data/utils/communityTagImportCredits";
 import { useCommunityTagCatalog } from "@/features/tag-data/hooks/useCommunityTagCatalog";
 import { useCommunityPopularTags } from "@/features/tag-data/hooks/useCommunityPopularTags";
-import { findTagSuggestions, findUsualTagName } from "@tagify/community-contracts";
+import { findTagSuggestions, findUsualTagName, TASTE_PACK_HOME, type TastePackInstallResult } from "@tagify/community-contracts";
 import { COMMUNITY_PAGES_ORIGIN } from "@/features/community/communityLinks";
+import { addTastePacksToDraft, recordSavedTastePacks } from "@/features/tag-data/utils/tagManager.tastePacks";
+import { TastePacksPicker } from "@/features/onboarding/components/TastePacksPicker";
+import { tastePackChoices } from "@/utils/tastePackTaxonomy";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
 import {
@@ -1128,6 +1131,13 @@ const TagManager: React.FC<TagManagerProps> = ({
     useState<string>("#7c9cff");
   const [newCustomAccentThemeId, setNewCustomAccentThemeId] = useState("");
   const [activeView, setActiveView] = useState<TagManagerView>("tags");
+  const [showTastePacks, setShowTastePacks] = useState(false);
+  // Packs added since Tag Manager opened; counted only once Save Changes has saved them.
+  const tastePacksAddedRef = useRef<TastePackInstallResult[]>([]);
+  const tastePackChoicesForDraft = useMemo(
+    () => (showTastePacks ? tastePackChoices(localTaxonomy) : []),
+    [showTastePacks, localTaxonomy],
+  );
   const [isAddingCustomAccent, setIsAddingCustomAccent] = useState(false);
   const [editingCustomAccentId, setEditingCustomAccentId] = useState<`custom:${string}` | null>(null);
   const [editingCustomAccentName, setEditingCustomAccentName] = useState("");
@@ -1853,6 +1863,41 @@ const TagManager: React.FC<TagManagerProps> = ({
     }
   };
 
+  const handleAddTastePacks = async (keys: string[]) => {
+    const result = addTastePacksToDraft(localTaxonomy, keys);
+    if (result.taxonomy !== localTaxonomy) commitTaxonomyUpdate(result.taxonomy);
+    tastePacksAddedRef.current.push(...result.packs.filter((pack) => pack.added.length > 0));
+    if (result.reveal && activeView === "tags") selectSubcategory(result.reveal.categoryId, result.reveal.folderId);
+    return result.packs;
+  };
+
+  const handleTastePacksAdded = (message: string) => {
+    showModalNotification(message.startsWith("Added") ? `${message} Save Changes to keep them.` : message);
+  };
+
+  // "Add a pack" sits where packs land: at the end of Genre & Style, under "+ Add Folder" (or under
+  // "+ Add Category" when the person has removed Genre & Style, which adding a pack brings back).
+  const renderTastePackEntry = (buttonClassName: string) =>
+    showTastePacks ? (
+      <div className={styles.tastePackPanel} role="group" aria-labelledby="tag-manager-taste-packs-title">
+        <div>
+          <h4 id="tag-manager-taste-packs-title" className={styles.tastePackTitle}>Add a pack</h4>
+          <p className={styles.paneSubtitle}>Tags for the music you listen to, from how Community members tag their songs.</p>
+        </div>
+        <TastePacksPicker
+          choices={tastePackChoicesForDraft}
+          onAdd={handleAddTastePacks}
+          onAdded={handleTastePacksAdded}
+          onSkip={() => setShowTastePacks(false)}
+          skipLabel="Done"
+        />
+      </div>
+    ) : (
+      <button type="button" className={buttonClassName} onClick={() => setShowTastePacks(true)}>
+        <span className={styles.inlineAddLabel}>+ Add a Pack</span>
+      </button>
+    );
+
   const handleRenameCategory = (categoryId: string) => {
     const category = localTaxonomy.categoriesById[categoryId];
     if (!category) return;
@@ -2423,6 +2468,7 @@ const TagManager: React.FC<TagManagerProps> = ({
       (tagId) => !(tagId in localTaxonomy.tagsById),
     );
     onReplaceTaxonomy(localTaxonomy, removedTagIds, draftBase);
+    void recordSavedTastePacks(tastePacksAddedRef.current);
     // Thank the people who share the community tags this save adds; never delays closing.
     const connection = getDesktopSyncConfiguration();
     if (connection) {
@@ -3341,6 +3387,7 @@ const TagManager: React.FC<TagManagerProps> = ({
                             >
                               <span className={styles.inlineAddLabel}>+ Add Folder</span>
                             </button>
+                            {category.id === TASTE_PACK_HOME.id ? renderTastePackEntry(styles.inlineAddSubcategoryButton) : null}
                           </SortableCategoryCard>
                         );
                       })
@@ -3352,6 +3399,7 @@ const TagManager: React.FC<TagManagerProps> = ({
                     >
                       <span className={styles.inlineAddLabel}>+ Add Category</span>
                     </button>
+                    {localTaxonomy.categoriesById[TASTE_PACK_HOME.id] ? null : renderTastePackEntry(styles.inlineAddCategoryButton)}
                   </SortableContext>
                 </div>
               </div>

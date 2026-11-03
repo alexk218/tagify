@@ -217,7 +217,8 @@ export function useTagDataTrackActions({
       const finalTrackDataMap = await indexedDBStorage.applyBulkTagUpdates(updates, databaseName);
       if (databaseName === getTagifyDatabaseName()) {
         const manual = updates.filter(update => !update.automaticRuleIds?.length && Object.hasOwn(finalTrackDataMap, update.trackUri));
-        if (manual.some(update => JSON.stringify(currentData.tracks[update.trackUri]?.tagIds ?? []) !== JSON.stringify(finalTrackDataMap[update.trackUri]?.tagIds ?? []))) void recordMeaningfulAction("tagging");
+        const tagged = new Set(manual.filter(update => JSON.stringify(currentData.tracks[update.trackUri]?.tagIds ?? []) !== JSON.stringify(finalTrackDataMap[update.trackUri]?.tagIds ?? [])).map(update => update.trackUri));
+        if (tagged.size) void recordMeaningfulAction("tagging", undefined, tagged.size);
         if (manual.some(update => update.newRating !== undefined && update.newRating !== (currentData.tracks[update.trackUri]?.rating ?? 0))) void recordMeaningfulAction("rating");
       }
       if (refreshPersistedTagData) await refreshPersistedTagData();
@@ -343,7 +344,7 @@ export function useTagDataTrackActions({
       );
 
       commitDataSnapshot(nextData, session);
-      void recordMeaningfulAction("tagging");
+      void recordMeaningfulAction("tagging", undefined, 1);
       syncTrackAfterDelay(trackUri);
 
       if (createdTrack && finalTrackData !== null) {

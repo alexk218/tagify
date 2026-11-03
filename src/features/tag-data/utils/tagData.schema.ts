@@ -1,5 +1,6 @@
 import { detachInconsistentRecordingGroups, normalizeRecordingIdentity } from "@/features/recording-reuse/utils/recordingReuse";
-import { defaultTagData } from "@/constants/defaultTagData";
+import { defaultTagData, KNOWN_STARTER_TAXONOMIES } from "@/constants/defaultTagData";
+import { withoutUntouchedTastePacks } from "@/utils/tastePackTaxonomy";
 import type {
   LegacyTagDataStructure,
   LegacyTrackData,
@@ -241,13 +242,21 @@ function normalizeTaxonomy(
   };
 }
 
-let normalizedDefaultTaxonomy: string | null = null;
+let normalizedStarterTaxonomies: Set<string> | null = null;
 
-/** Whether a taxonomy holds anything beyond Tagify's starting tags. */
+/**
+ * Whether a taxonomy holds anything beyond Tagify's starting tags. A library that still has the
+ * starter tags of an earlier Tagify version, untouched, holds nothing of its own either, and
+ * neither do taste packs left as they were added.
+ */
 export function hasCustomTaxonomy(taxonomy: TagDataStructure["taxonomy"] | null | undefined): boolean {
   if (!taxonomy || !Array.isArray(taxonomy.categoryOrder) || taxonomy.categoryOrder.length === 0) return false;
-  normalizedDefaultTaxonomy ??= JSON.stringify(normalizeTaxonomy(defaultTagData.taxonomy));
-  return JSON.stringify(normalizeTaxonomy(taxonomy)) !== normalizedDefaultTaxonomy;
+  const ownTags = withoutUntouchedTastePacks(taxonomy);
+  if (ownTags.categoryOrder.length === 0) return false;
+  normalizedStarterTaxonomies ??= new Set(
+    KNOWN_STARTER_TAXONOMIES.map((starter: TagDataStructure["taxonomy"]) => JSON.stringify(normalizeTaxonomy(starter))),
+  );
+  return !normalizedStarterTaxonomies.has(JSON.stringify(normalizeTaxonomy(ownTags)));
 }
 
 /** Whether a library holds anything the user made: saved records, Smart Playlists, or their own tags. */

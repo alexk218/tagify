@@ -8,6 +8,7 @@ import {
   normalizeTagDataStructure,
 } from "@/features/tag-data/utils/tagData.schema";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
+import { markTastePacksOffered } from "@/features/onboarding/services/tastePackStep";
 
 const TAG_DATA_KEY = "tagify:tagData";
 const MIGRATION_STATUS_KEY = "tagify:idb-migration-status";
@@ -369,6 +370,8 @@ class StorageMigrationService {
       if (!(await indexedDBStorage.saveAll(defaultTagData, "migration", { onlyIfEmpty: true }))) {
         return this.adoptConcurrentLibrary(startedAt, "Tagify could not save its starting tags");
       }
+      // Only a new library is asked "What do you listen to?".
+      markTastePacksOffered();
 
       this.saveMigrationState({
         status: "completed",

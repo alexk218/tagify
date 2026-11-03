@@ -12,6 +12,12 @@ it("is in progress only after the first-song card started it, and stays finished
   expect(isFirstRunInProgress()).toBe(false);
 });
 
+it("ignores and removes first-run markers saved by 3.3.3", () => {
+  localStorage.setItem("tagify:first-run:v1", "started");
+  expect(isFirstRunInProgress()).toBe(false);
+  expect(localStorage.getItem("tagify:first-run:v1")).toBeNull();
+});
+
 it("picks the tag on the most songs and ignores deleted tags", () => {
   const tag = (id: string, name: string) => ({ id, name });
   const tagData = {

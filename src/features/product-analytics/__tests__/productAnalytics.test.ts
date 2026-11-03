@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import { webcrypto } from "node:crypto";
-import { recordProductEvent, setAnalyticsSharing, isAnalyticsSharing, flushProductEvents, canLinkInstallation, presenceRecordedToday, savedSongsBucket, spotifyReleaseVersion } from "../productAnalytics";
+import { recordProductEvent, setAnalyticsSharing, isAnalyticsSharing, flushProductEvents, canLinkInstallation, presenceRecordedToday, savedSongsBucket, songsBucket, spotifyReleaseVersion, recordTastePacksAdded } from "../productAnalytics";
+import { TASTE_PACKS } from "@tagify/community-contracts";
 const account = "0".repeat(64);
 const key = "tagify:product-analytics:v1:" + account;
 const installationId = "ad824ac0-c441-4f56-85a7-ff1434d865bc";
@@ -240,9 +241,17 @@ describe("automatic Tagify product analytics", () => {
     expect(spotifyReleaseVersion("unknown")).toBeUndefined();
     expect(spotifyReleaseVersion(undefined)).toBeUndefined();
   });
+  it("sends songs per tagging edit exactly up to 5, then as ranges", () => {
+    expect([1, 2, 5, 6, 9, 10, 24, 25, 49, 50, 99, 100, 5000].map(songsBucket)).toEqual(["1", "2", "5", "6-9", "6-9", "10-24", "10-24", "25-49", "25-49", "50-99", "50-99", "100+", "100+"]);
+    expect([0, -1, 1.5, Number.NaN].map(songsBucket)).toEqual([undefined, undefined, undefined, undefined]);
+    recordProductEvent(account, "tagging_completed", { edit_surface: "tagify_page", songs: "10-24" });
+    expect(queue().events[0].properties).toMatchObject({ edit_surface: "tagify_page", songs: "10-24" });
+  });
   it.each([
     ["an edit surface outside the fixed list", "tagging_completed", { edit_surface: "context_menu" }],
     ["a library size outside the fixed list", "tagify_opened", { saved_songs: "1234" }],
+    ["an exact song count above 5", "tagging_completed", { songs: "12" }],
+    ["a song count on a rating", "rating_completed", { songs: "1" }],
     ["an edit surface on presence", "tagify_present", { edit_surface: "keyboard" }],
     ["an unknown detail", "update_banner_shown", { update_kind: "minor", latest_version: "3.3.0" }],
     ["a sync state outside the fixed list", "tagify_opened", { sync_state: "paused" }],
@@ -261,4 +270,24 @@ describe("automatic Tagify product analytics", () => {
     recordProductEvent(account, "update_banner_dismissed");
     expect(queue().events.map((event: any) => event.event)).toEqual(["update_banner_dismissed"]);
   });
+  it("accepts every taste pack Community offers, and nothing else", () => {
+    for (const pack of TASTE_PACKS) recordProductEvent(account, "taste_pack_added", { taste_pack: pack.key as any, surface: "first_run" });
+    recordProductEvent(account, "taste_pack_added", { taste_pack: "my-private-tag" as any, surface: "first_run" });
+    recordProductEvent(account, "taste_pack_added", { taste_pack: "metal", surface: "workspace" as any });
+    expect(queue().events.map((event: any) => event.properties.taste_pack)).toEqual(TASTE_PACKS.map(pack => pack.key));
+  });
+  it("keeps sharing and taste pack surfaces apart", () => {
+    recordProductEvent(account, "community_share_opened", { surface: "first_run" });
+    recordProductEvent(account, "community_share_opened", { surface: "workspace" });
+    expect(queue().events.map((event: any) => event.properties.surface)).toEqual(["workspace"]);
+  });
+  it("records one taste_pack_added per pack with the surface it was added from", async () => {
+    recordTastePacksAdded(["metal", "jazz-soul", "metal"], "tag_manager");
+    await vi.waitFor(() => expect(queue().events ?? []).toHaveLength(2));
+    expect(queue().events.map((event: any) => detailsOf(event.properties))).toEqual([
+      { taste_pack: "metal", surface: "tag_manager" },
+      { taste_pack: "jazz-soul", surface: "tag_manager" },
+    ]);
+  });
 });
+const detailsOf = ({ taste_pack, surface }: Record<string, unknown>) => ({ taste_pack, surface });

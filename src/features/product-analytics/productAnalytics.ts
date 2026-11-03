@@ -8,7 +8,7 @@ const MAX_AGE = 7 * 86400000;
 const MAX_EVENTS = 200;
 const HOSTS = ["https://us.i.posthog.com", "https://eu.i.posthog.com"];
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
-const EVENTS = ["tagify_opened", "tagify_present", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened", "update_banner_shown", "update_instructions_opened", "update_download_clicked", "update_banner_dismissed", "community_publish_prompt_shown", "community_publish_prompt_reminder_shown", "community_publish_prompt_snoozed", "community_publish_prompt_published", "community_profile_published", "community_publish_kept_private", "community_share_opened", "community_sharing_stopped", "community_sharing_resumed", "community_connect_prompt_shown", "community_connect_prompt_dismissed", "community_setup_opened", "community_connect_started", "community_connect_completed", "community_connect_failed", "invite_opened", "invite_link_copied", "first_run_shown", "first_run_song_picked", "first_run_payoff_shown", "first_run_payoff_reached", "welcome_popup_shown"] as const;
+const EVENTS = ["tagify_opened", "tagify_present", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened", "update_banner_shown", "update_instructions_opened", "update_download_clicked", "update_banner_dismissed", "community_publish_prompt_shown", "community_publish_prompt_reminder_shown", "community_publish_prompt_snoozed", "community_publish_prompt_published", "community_profile_published", "community_publish_kept_private", "community_share_opened", "community_sharing_stopped", "community_sharing_resumed", "community_connect_prompt_shown", "community_connect_prompt_dismissed", "community_setup_opened", "community_connect_started", "community_connect_completed", "community_connect_failed", "invite_opened", "invite_link_copied", "first_run_shown", "first_run_song_picked", "first_run_members_checked", "first_run_members_tag_added", "first_run_payoff_shown", "first_run_payoff_reached", "welcome_popup_shown", "taste_packs_shown", "taste_pack_added", "taste_packs_skipped"] as const;
 export type ProductEventName = typeof EVENTS[number];
 // Details are fixed, coarse values so an event never carries content, versions or links.
 const DETAILS = {
@@ -20,13 +20,18 @@ const DETAILS = {
   stage: ["start", "finish"],
   invite_entry: ["action_bar", "milestone"],
   invite_link: ["personal", "general"],
-  surface: ["workspace", "sync", "invitation", "onboarding"],
+  surface: ["workspace", "sync", "invitation", "onboarding", "first_run", "tag_manager"],
   sharing_state: ["review", "private", "paused", "public"],
   saved_songs: ["0", "1-9", "10-99", "100-999", "1000+"],
   edit_surface: ["tagify_page", "spotify_views", "keyboard"],
+  songs: ["1", "2", "3", "4", "5", "6-9", "10-24", "25-49", "50-99", "100+"],
   liked_songs: ["0", "1+"],
   first_run_source: ["liked", "playing"],
   payoff_action: ["filter", "playlist"],
+  // Taste pack keys from @tagify/community-contracts. A test fails when a pack is added there but not here.
+  taste_pack: ["metal", "indie", "rock", "pop", "hip-hop", "electronic", "chill", "jazz-soul", "country-folk", "reggae-latin", "k-pop-j-pop"],
+  members_matches: ["0", "1-4", "5-14", "15+"],
+  members_add: ["tag", "all"],
 } as const;
 type DetailKey = keyof typeof DETAILS;
 export type ProductEventDetails = { [K in DetailKey]?: typeof DETAILS[K][number] };
@@ -35,10 +40,12 @@ const EVENT_DETAILS: Partial<Record<ProductEventName, readonly DetailKey[]>> = {
   update_download_clicked: ["method"],
   tagify_opened: ["sync_state", "saved_songs"],
   tagify_present: ["saved_songs"],
-  tagging_completed: ["edit_surface"],
+  tagging_completed: ["edit_surface", "songs"],
   rating_completed: ["edit_surface"],
   first_run_shown: ["liked_songs"],
   first_run_song_picked: ["first_run_source"],
+  first_run_members_checked: ["members_matches"],
+  first_run_members_tag_added: ["members_add"],
   first_run_payoff_reached: ["payoff_action"],
   community_setup_opened: ["entry"],
   community_connect_started: ["entry"],
@@ -48,6 +55,7 @@ const EVENT_DETAILS: Partial<Record<ProductEventName, readonly DetailKey[]>> = {
   invite_link_copied: ["invite_entry", "invite_link"],
   community_share_opened: ["surface", "sharing_state"],
   community_profile_published: ["surface"],
+  taste_pack_added: ["taste_pack", "surface"],
 };
 const BASE_PROPERTIES = ["app_version", "spotify_version", "installation_id", "$process_person_profile", "$geoip_disable", "$ip"];
 const SPOTIFY_VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}(\.\d{1,6})?$/;
@@ -62,10 +70,25 @@ export function savedSongsBucket(count: number): ProductEventDetails["saved_song
   if (!Number.isFinite(count) || count < 0) return undefined;
   return count === 0 ? "0" : count < 10 ? "1-9" : count < 100 ? "10-99" : count < 1000 ? "100-999" : "1000+";
 }
+/** Songs changed by one tagging gesture: exact up to 5, then ranges. */
+export function songsBucket(count: number): ProductEventDetails["songs"] {
+  if (!Number.isInteger(count) || count < 1) return undefined;
+  if (count <= 5) return DETAILS.songs[count - 1];
+  return count < 10 ? "6-9" : count < 25 ? "10-24" : count < 50 ? "25-49" : count < 100 ? "50-99" : "100+";
+}
+// Sharing and taste packs both report a `surface`, from different places.
+const SHARING_SURFACES = ["workspace", "sync", "invitation", "onboarding"] as const;
+const EVENT_VALUES: Partial<Record<ProductEventName, Partial<Record<DetailKey, readonly string[]>>>> = {
+  community_share_opened: { surface: SHARING_SURFACES },
+  community_profile_published: { surface: SHARING_SURFACES },
+  taste_pack_added: { surface: ["first_run", "tag_manager"] },
+};
 function validDetails(event: ProductEventName, details: Record<string, unknown>): boolean {
   const allowed = EVENT_DETAILS[event] ?? [];
-  return Object.entries(details).every(([key, value]) =>
-    allowed.includes(key as DetailKey) && (DETAILS[key as DetailKey] as readonly unknown[]).includes(value));
+  return Object.entries(details).every(([key, value]) => {
+    const values = EVENT_VALUES[event]?.[key as DetailKey] ?? DETAILS[key as DetailKey];
+    return allowed.includes(key as DetailKey) && (values as readonly unknown[]).includes(value);
+  });
 }
 const detailsOf = (properties: Record<string, unknown>) =>
   Object.fromEntries(Object.entries(properties).filter(([key]) => !BASE_PROPERTIES.includes(key)));
@@ -213,6 +236,12 @@ export function recordProductInteraction(event: ProductEventName, details?: Prod
   void getUsageAccountDigest().then(account => {
     if (account) recordProductEvent(account, event, details);
   }).catch(() => { /* Optional reporting never interrupts the user's action. */ });
+}
+
+export type TastePackSurface = "first_run" | "tag_manager";
+/** One `taste_pack_added` per pack. Call only once the packs are saved; unknown keys are dropped. */
+export function recordTastePacksAdded(keys: readonly string[], surface: TastePackSurface): void {
+  for (const key of new Set(keys)) recordProductInteraction("taste_pack_added", { taste_pack: key as ProductEventDetails["taste_pack"], surface });
 }
 
 function schedule(account: string, failures = 0, delay = 1000): void {

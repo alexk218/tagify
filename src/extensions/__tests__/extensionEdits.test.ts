@@ -137,7 +137,7 @@ describe("saving edits to the saved library", () => {
     await saveTrackEdits([first], { addTagIds: [jazz] }, { surface: "spotify_views" });
     await saveTrackEdits([first], { energy: 7 }, { surface: "keyboard" });
     await saveTrackEdits([second], { rating: 2 });
-    expect(counted.mock.calls).toEqual([["tagging", "spotify_views"], ["rating", "keyboard"]]);
+    expect(counted.mock.calls).toEqual([["tagging", "spotify_views", 2], ["rating", "keyboard"]]);
   });
 
   it("reports a library that can't be read instead of an empty one", async () => {

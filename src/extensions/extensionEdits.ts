@@ -141,9 +141,10 @@ export function editSavedEntity<T extends PlaylistData | ArtistData>(
  * Counts a saved manual song change once per gesture, like edits on the Tagify page.
  * Energy-only changes and playlist or artist edits are not counted, matching the Tagify page.
  */
-function countSavedEdit(edit: AnnotationEdit, saved: Record<string, unknown>, surface: EditSurface | undefined): void {
+function countSavedEdit(edit: AnnotationEdit, saved: Record<string, unknown>, surface: EditSurface | undefined, uris: readonly string[]): void {
   if (!surface || !Object.keys(saved).length) return;
-  if (edit.addTagIds?.length || edit.removeTagIds?.length) void recordMeaningfulAction("tagging", surface);
+  // `saved` can also hold linked releases; only the edited songs count.
+  if (edit.addTagIds?.length || edit.removeTagIds?.length) void recordMeaningfulAction("tagging", surface, uris.filter(uri => Object.hasOwn(saved, uri)).length);
   if (edit.rating !== undefined || edit.toggleRating !== undefined) void recordMeaningfulAction("rating", surface);
 }
 
@@ -179,7 +180,7 @@ export async function saveTrackEdits(
       editSavedTrack(current, edit, now, current ? undefined : options.details?.(uri))])),
     { expectedDatabaseName, undoable: options.undoable },
   );
-  countSavedEdit(edit, saved, options.surface);
+  countSavedEdit(edit, saved, options.surface, uris);
   return saved;
 }
 

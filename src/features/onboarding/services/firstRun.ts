@@ -1,12 +1,16 @@
 import type { TagDataStructure } from "@/types/tagData";
 
-// Only people who started from "Tag your first song" on this device see the payoff,
+// Only people who picked a song from "Tag your first song" on this device see the payoff,
 // so existing libraries never get it after an update.
-const FIRST_RUN_KEY = "tagify:first-run:v1";
+const FIRST_RUN_KEY = "tagify:first-run:v2";
+// 3.3.3 marked a first run whenever the card would show, including while an existing library was
+// still loading, so its markers can't tell real first runs apart and are dropped.
+const STALE_FIRST_RUN_KEY = "tagify:first-run:v1";
 type FirstRunState = "started" | "done";
 
 function read(): FirstRunState | null {
   try {
+    localStorage.removeItem(STALE_FIRST_RUN_KEY);
     const value = localStorage.getItem(FIRST_RUN_KEY);
     return value === "started" || value === "done" ? value : null;
   } catch { return null; }

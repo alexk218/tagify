@@ -1,6 +1,7 @@
 import type { SyncEntityRefV1 } from "@tagify/sync-contracts";
 import type { ArtistData, PlaylistData, TagTaxonomy, TrackData } from "@/types/tagData";
 import { normalizeCamelotKey } from "@/utils/camelotKey";
+import { withoutUntouchedTastePacks } from "@/utils/tastePackTaxonomy";
 
 export const TAGIFY_DATABASE_VERSION = 12;
 export const SYNC_STORES = {
@@ -495,18 +496,26 @@ export function ensureSyncStores(db: IDBDatabase): void {
   if (!db.objectStoreNames.contains(SYNC_STORES.RECOVERY_CHECKPOINT)) db.createObjectStore(SYNC_STORES.RECOVERY_CHECKPOINT, { keyPath: "key" });
 }
 
+/**
+ * `starterTaxonomies` lists every starter tag set Tagify has shipped: a library that still holds
+ * any one of them untouched, with nothing saved, is a fresh default whichever version it began with.
+ * Taste packs left as they were added don't count as the library's own tags.
+ */
 export function classifyLocalReplica(
   data: { taxonomy: TagTaxonomy; tracks: Record<string, unknown>; playlists: Record<string, unknown>; artists: Record<string, unknown> },
-  defaultTaxonomy: TagTaxonomy,
+  starterTaxonomies: TagTaxonomy | readonly TagTaxonomy[],
   manifest: ReplicaManifest | null,
 ): LocalReplicaClassification {
   if (manifest) return "initialized-replica";
   const hasAnnotations = Object.keys(data.tracks).length > 0 || Object.keys(data.playlists).length > 0 || Object.keys(data.artists).length > 0;
-  const taxonomyHasNodes = data.taxonomy.categoryOrder.length > 0 ||
-    Object.keys(data.taxonomy.categoriesById).length > 0 ||
-    Object.keys(data.taxonomy.subcategoriesById).length > 0 ||
-    Object.keys(data.taxonomy.tagsById).length > 0;
-  const taxonomyIsFresh = !taxonomyHasNodes || stableJson(data.taxonomy) === stableJson(defaultTaxonomy);
+  const ownTags = withoutUntouchedTastePacks(data.taxonomy);
+  const taxonomyHasNodes = ownTags.categoryOrder.length > 0 ||
+    Object.keys(ownTags.categoriesById).length > 0 ||
+    Object.keys(ownTags.subcategoriesById).length > 0 ||
+    Object.keys(ownTags.tagsById).length > 0;
+  const starters = Array.isArray(starterTaxonomies) ? starterTaxonomies as readonly TagTaxonomy[] : [starterTaxonomies as TagTaxonomy];
+  const taxonomy = taxonomyHasNodes ? stableJson(ownTags) : "";
+  const taxonomyIsFresh = !taxonomyHasNodes || starters.some((starter) => stableJson(starter) === taxonomy);
   return !hasAnnotations && taxonomyIsFresh ? "fresh-default" : "meaningful-unlinked";
 }
 

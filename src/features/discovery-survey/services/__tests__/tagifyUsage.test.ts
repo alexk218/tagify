@@ -77,9 +77,13 @@ describe("private Tagify usage recording", () => {
     const recorded = vi.spyOn(productAnalytics, "recordProductEvent");
     await recordMeaningfulAction("tagging");
     await recordMeaningfulAction("rating", "spotify_views");
+    await recordMeaningfulAction("tagging", "spotify_views", 12);
+    await recordMeaningfulAction("rating", "keyboard", 3);
     expect(recorded.mock.calls.map(([, event, details]) => [event, details])).toEqual([
       ["tagging_completed", { edit_surface: "tagify_page" }],
       ["rating_completed", { edit_surface: "spotify_views" }],
+      ["tagging_completed", { edit_surface: "spotify_views", songs: "10-24" }],
+      ["rating_completed", { edit_surface: "keyboard" }],
     ]);
     recorded.mockRestore();
   });

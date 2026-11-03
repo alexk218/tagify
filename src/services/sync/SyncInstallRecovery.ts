@@ -9,6 +9,8 @@ import {
 import { backoffDelayMs, retryAfterSeconds, type BackoffPolicy } from "./SyncRetryAfter";
 
 const COMMUNITY_ORIGIN = "https://community.tagify.fm";
+/** Where Community's pages live, such as the page that approves a reconnection. */
+const COMMUNITY_PAGES_ORIGIN = "https://tagify.fm";
 /** Set by Tagify 3.0–3.3 once both proofs were enrolled; read once to keep those enrollments. */
 const LEGACY_ENROLLMENT_MARKER_PREFIX = "tagify:sync:account-recovery-v2:";
 /** Per device: which proofs Community holds, and when a failed enrollment may be tried again. */
@@ -32,6 +34,10 @@ export const RECOVERY_RETRY_KEY = "tagify:sync:recovery-retry";
 export const RECOVERY_BACKOFF: BackoffPolicy = { baseMs: 60_000, maxMs: 60 * 60_000, maxRetryAfterMs: 6 * 60 * 60_000 };
 /** Enrollment matters only if this device later loses its link, so failed attempts wait longer. */
 export const ENROLLMENT_BACKOFF: BackoffPolicy = { baseMs: 60 * 60_000, maxMs: 24 * 60 * 60_000, maxRetryAfterMs: 24 * 60 * 60_000 };
+/** Fired whenever a reconnection waiting for the member's approval changes. */
+export const RECONNECTION_EVENT = "tagify:syncReconnection";
+/** Longest wait between checks for the member's approval, whatever Community asks. */
+const RECONNECTION_MAX_INTERVAL_SECONDS = 60;
 
 declare global {
   interface Window {
@@ -41,10 +47,36 @@ declare global {
     __tagifyInstallRecoveryRejected?: boolean;
     /** Enrollments in progress, by device, shared by Tagify's page and background bundles. */
     __tagifyRecoveryEnrollments?: Map<string, Promise<boolean>>;
+    /**
+     * A reconnection Community asked the member to approve on the website,
+     * shared by Tagify's page and background bundles. Kept in memory only:
+     * the verifier never reaches storage, and a new start asks again.
+     */
+    __tagifyReconnection?: PendingReconnection;
   }
 }
 
 interface RetryRecord { until: number; failures: number }
+
+/**
+ * What Tagify shows while a reconnection needs the member's approval:
+ * - `waiting`: approve on Community, checking that it shows `userCode`.
+ * - `declined`: Community refused it ("This wasn't me", or already used).
+ * - `expired`: nobody approved it in time.
+ * - `rate-limited`: too many requests; asking again works after `retryAt`.
+ * - `unavailable`: this computer can't reconnect this way; link it from Cloud Sync.
+ */
+export type ReconnectionState =
+  | { status: "waiting"; userCode: string; approvalUrl: string; expiresAt: number }
+  | { status: "declined" | "expired" | "unavailable" }
+  | { status: "rate-limited"; retryAt: number };
+
+interface PendingReconnection {
+  state: ReconnectionState;
+  /** Present while waiting: the request Community approves and the proof only this desktop holds. */
+  request?: { deviceCode: string; verifier: string; interval: number };
+  timer?: ReturnType<typeof setTimeout>;
+}
 
 interface EnrollmentRecord {
   /** Fingerprint of the installer proof Community holds for this device. */
@@ -292,7 +324,7 @@ function currentSpotifyAccountName(): string | null {
   }
 }
 
-async function restoreOrEnroll(): Promise<DesktopSyncConfiguration | null> {
+async function restoreOrEnroll(options: { askedAgain?: boolean } = {}): Promise<DesktopSyncConfiguration | null> {
   const configuration = getDesktopSyncConfiguration();
   if (configuration) {
     // Existing users can start immediately while their installer-independent
@@ -303,17 +335,30 @@ async function restoreOrEnroll(): Promise<DesktopSyncConfiguration | null> {
 
   // Each Spotify start asks at most once: Community already answered that
   // nothing can be recovered, or asked to wait (Retry-After), or failed and
-  // is backed off. Opening Tagify again, or any timer, never repeats it.
-  if (window.__tagifyInstallRecoveryRejected || recoveryRetryPending()) return null;
+  // is backed off, or the member is approving a request on Community.
+  // Opening Tagify again, or any timer, never repeats it.
+  if (window.__tagifyReconnection?.state.status === "waiting") return null;
+  if (recoveryRetryPending()) {
+    // Asking again before Community's wait is over would only be refused.
+    if (options.askedAgain) showReconnection({ status: "rate-limited", retryAt: readRetry()!.until });
+    return null;
+  }
+  if (!options.askedAgain && window.__tagifyInstallRecoveryRejected) return null;
   const recoverySecret = getInstallRecoverySecret();
   // An installer recovery secret is checked on every start. Without one, a
   // recent definitive "nothing to recover" answer skips the request (and the
   // wait for Spotify's token) on every start for a week.
-  if (!recoverySecret && recoveryRecentlyUnavailable()) return null;
+  if (!options.askedAgain && !recoverySecret && recoveryRecentlyUnavailable()) return null;
   const spotifyAccessToken = recoverySecret
     ? currentSpotifyAccessToken()
     : await waitForSpotifyAccessToken();
-  if ((!recoverySecret && !spotifyAccessToken) || !navigator.onLine) return null;
+  if ((!recoverySecret && !spotifyAccessToken) || !navigator.onLine) {
+    if (options.askedAgain) showReconnection({ status: "unavailable" });
+    return null;
+  }
+  // A Spotify sign-in alone only asks: the member approves on Community, and
+  // only the desktop holding this verifier can then collect the connection.
+  const verifier = spotifyAccessToken ? randomBase64Url(32) : null;
 
   try {
     const response = await fetch(`${COMMUNITY_ORIGIN}/api/v2/device-recovery/token`, {
@@ -322,22 +367,38 @@ async function restoreOrEnroll(): Promise<DesktopSyncConfiguration | null> {
       body: JSON.stringify({
         ...(recoverySecret ? { recoverySecret } : {}),
         ...(spotifyAccessToken ? { spotifyAccessToken } : {}),
+        ...(verifier ? { verifierChallenge: await sha256Hex(verifier) } : {}),
         name: deviceName(),
         platform: navigator.platform || "Spotify desktop",
       }),
     });
+    if (response.status === 202 && verifier) {
+      const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (!awaitApproval(body, verifier)) {
+        noteRecoveryFailure(null);
+        if (options.askedAgain) showReconnection({ status: "unavailable" });
+      }
+      return null;
+    }
     if (!response.ok) {
       // Only an explicit rejection means no approved device exists. Outages,
       // rate limits and malformed requests wait as Community asked, or back off.
       const body = response.status === 401
         ? (await response.json().catch(() => null)) as { error?: { code?: unknown } } | null
         : null;
+      const retryAfter = retryAfterSeconds(response.headers.get("retry-after"));
       if (body?.error?.code === "invalid_grant") {
         rememberRecoveryUnavailable();
         clearRecoveryRetry();
         window.__tagifyInstallRecoveryRejected = true;
+        if (options.askedAgain) showReconnection({ status: "unavailable" });
       } else {
-        noteRecoveryFailure(retryAfterSeconds(response.headers.get("retry-after")));
+        noteRecoveryFailure(retryAfter);
+        if (options.askedAgain) {
+          showReconnection(response.status === 429
+            ? { status: "rate-limited", retryAt: Date.now() + (retryAfter ?? 3_600) * 1_000 }
+            : { status: "unavailable" });
+        }
       }
       return null;
     }
@@ -358,8 +419,164 @@ async function restoreOrEnroll(): Promise<DesktopSyncConfiguration | null> {
     return next;
   } catch {
     noteRecoveryFailure(null);
+    if (options.askedAgain) showReconnection({ status: "unavailable" });
     return null;
   }
+}
+
+/** The reconnection waiting for the member, or how the last one ended; null when there is none. */
+export function getReconnectionState(): ReconnectionState | null {
+  return window.__tagifyReconnection?.state ?? null;
+}
+
+/**
+ * Sends a new reconnection request after the last one was declined or
+ * expired. Community emails the member again, so only the member's own
+ * click asks; starts and timers never do.
+ */
+export async function askToReconnectAgain(): Promise<void> {
+  const current = window.__tagifyReconnection?.state;
+  if (current?.status === "waiting") return;
+  if (current?.status === "rate-limited" && current.retryAt > Date.now()) return;
+  clearRecoveryUnavailable();
+  window.__tagifyInstallRecoveryRejected = false;
+  await (window.__tagifyInstallRecoveryPromise ?? restoreOrEnroll({ askedAgain: true }));
+}
+
+/** Forgets a finished reconnection, so Tagify stops showing how it ended. */
+export function dismissReconnection(): void {
+  if (window.__tagifyReconnection && window.__tagifyReconnection.state.status !== "waiting") {
+    showReconnection(null);
+  }
+}
+
+function showReconnection(state: ReconnectionState | null, pending?: Omit<PendingReconnection, "state">): void {
+  clearTimeout(window.__tagifyReconnection?.timer);
+  if (state) window.__tagifyReconnection = { state, ...pending };
+  else delete window.__tagifyReconnection;
+  window.dispatchEvent(new CustomEvent(RECONNECTION_EVENT, { detail: state }));
+}
+
+/** Starts waiting for the member to approve a 202 answer; false when the answer is unusable. */
+function awaitApproval(body: Record<string, unknown> | null, verifier: string): boolean {
+  const deviceCode = body?.deviceCode;
+  const userCode = body?.userCode;
+  const approvalUrl = body?.verificationUriComplete ?? body?.verificationUri;
+  const expiresIn = Number(body?.expiresIn);
+  const interval = Number(body?.interval);
+  if (
+    body?.status !== "approval_required" ||
+    typeof deviceCode !== "string" || !deviceCode ||
+    typeof userCode !== "string" || !userCode ||
+    typeof approvalUrl !== "string" || !isCommunityUrl(approvalUrl) ||
+    !Number.isFinite(expiresIn) || expiresIn <= 0
+  ) return false;
+  clearRecoveryRetry();
+  showReconnection(
+    { status: "waiting", userCode, approvalUrl, expiresAt: Date.now() + expiresIn * 1_000 },
+    { request: { deviceCode, verifier, interval: Number.isFinite(interval) && interval > 0 ? interval : 10 } },
+  );
+  scheduleApprovalCheck();
+  return true;
+}
+
+function isCommunityUrl(value: string): boolean {
+  try {
+    const { origin } = new URL(value);
+    return origin === COMMUNITY_PAGES_ORIGIN || origin === COMMUNITY_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+function scheduleApprovalCheck(): void {
+  const pending = window.__tagifyReconnection;
+  if (!pending?.request || pending.state.status !== "waiting") return;
+  const delay = Math.min(
+    pending.request.interval * 1_000,
+    Math.max(0, pending.state.expiresAt - Date.now()),
+  );
+  pending.timer = setTimeout(() => void checkApproval(pending), delay);
+}
+
+/** One check with Community; schedules the next until the member answers or the request expires. */
+async function checkApproval(pending: PendingReconnection): Promise<void> {
+  if (window.__tagifyReconnection !== pending || !pending.request || pending.state.status !== "waiting") return;
+  // Connected some other way meanwhile, for example by linking from Cloud Sync.
+  if (getDesktopSyncConfiguration()) {
+    showReconnection(null);
+    return;
+  }
+  if (pending.state.expiresAt <= Date.now()) {
+    finishReconnection({ status: "expired" });
+    return;
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${COMMUNITY_ORIGIN}/api/v2/device-authorizations/token`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ deviceCode: pending.request.deviceCode, verifier: pending.request.verifier }),
+    });
+  } catch {
+    // Offline for a moment: the request stays valid until it expires.
+    scheduleApprovalCheck();
+    return;
+  }
+  if (window.__tagifyReconnection !== pending) return;
+  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+  if (response.status === 410) return finishReconnection({ status: "expired" });
+  if (response.status === 400) return finishReconnection({ status: "declined" });
+  if (response.status === 429) {
+    const asked = retryAfterSeconds(response.headers.get("retry-after")) ?? Number(body?.interval);
+    pending.request.interval = Math.min(
+      RECONNECTION_MAX_INTERVAL_SECONDS,
+      Math.max(pending.request.interval * 2, Number.isFinite(asked) ? asked : 0),
+    );
+  }
+  if (!response.ok) {
+    // 428 (not approved yet), slow down, or a Community that's busy for a moment.
+    scheduleApprovalCheck();
+    return;
+  }
+
+  const next = configurationFromRecovery(body ?? {});
+  if (!next) return finishReconnection({ status: "unavailable" });
+  delete pending.request;
+  try {
+    await connectApprovedDevice(next);
+    clearRecoveryUnavailable();
+    clearRecoveryRetry();
+    showReconnection(null);
+  } catch {
+    finishReconnection({ status: "unavailable" });
+  }
+}
+
+/**
+ * Tagify started without a connection, so the approved one joins the running
+ * library the way a new link from Cloud Sync does. Before sync has started
+ * (it never has without storage), the next start opens the account's library.
+ */
+async function connectApprovedDevice(next: DesktopSyncConfiguration): Promise<void> {
+  const runtime = window.TagifySync;
+  if (runtime?.completeReconnection) {
+    await runtime.completeReconnection(next);
+    return;
+  }
+  setDesktopSyncConfiguration(next);
+  void enrollDesktopRecovery(next);
+  window.dispatchEvent(new CustomEvent("tagify:syncStatus", { detail: { status: "idle" } }));
+}
+
+function finishReconnection(state: ReconnectionState): void {
+  // The member said "This wasn't me": later starts don't ask again for a
+  // week, unless someone asks from Tagify. An expired request asks on the
+  // next start, but not again during this one.
+  if (state.status === "declined") rememberRecoveryUnavailable();
+  window.__tagifyInstallRecoveryRejected = true;
+  showReconnection(state);
 }
 
 function currentSpotifyAccessToken(): string | null {
@@ -456,4 +673,17 @@ function deviceName(): string {
         ? "Windows"
         : "desktop"
   }`;
+}
+
+
+function randomBase64Url(bytes: number): string {
+  const value = crypto.getRandomValues(new Uint8Array(bytes));
+  let binary = "";
+  value.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

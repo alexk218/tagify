@@ -9,6 +9,7 @@ import { applyBatchTagUpdatesToData } from "@/features/tag-data/utils/tagData.ba
 import { defaultTagData } from "@/constants/defaultTagData";
 import type { BatchTagUpdate } from "@/types/tagData";
 import { addQuickTag } from "@/features/tag-data/utils/quickTag";
+import { placeCommunityTag } from "@/features/onboarding/services/communityTagPlacement";
 import { rebaseRecord, type RebaseRecordOptions } from "@/features/tag-data/utils/tagData.rebase";
 import {
   ArtistData,
@@ -997,6 +998,19 @@ export class IndexedDBStorageService implements IStorageService {
       return result.taxonomy;
     });
     if (!saved || !tag) throw new Error("Tagify couldn't create your tag. Please try again.");
+    return tag;
+  }
+
+  /** Another member's tag in this library: the same-named tag, or a new one where people keep it. */
+  async createCommunityTag(name: string, paths: readonly string[], expectedDatabaseName = getTagifyDatabaseName()): Promise<TaxonomyTag> {
+    let tag: TaxonomyTag | undefined;
+    const saved = await this.saveTaxonomy((current) => {
+      if (this.db?.name !== expectedDatabaseName) throw new Error("Your account changed. Reopen the music before adding tags.");
+      const result = placeCommunityTag(current, name, paths);
+      tag = result.tag;
+      return result.taxonomy;
+    });
+    if (!saved || !tag) throw new Error("Tagify couldn't add that tag. Please try again.");
     return tag;
   }
 

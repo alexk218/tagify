@@ -30,7 +30,8 @@ import { isNewCatalogRequest, markCatalogRequestHandled, sendSpotifyListCatalog 
 import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import { storageService } from "@/services/storage/StorageService";
 import { indexedDBStorage, type SyncTransactionContext, type SyncTransactionWrites } from "@/services/storage/IndexedDBStorageService";
-import { defaultTagData } from "@/constants/defaultTagData";
+import { KNOWN_STARTER_TAXONOMIES } from "@/constants/defaultTagData";
+import { settleStarterTagPlacements } from "./SyncStarterTagMerge";
 import type { ArtistData, PlaylistData, TrackData } from "@/types/tagData";
 import type { TagDataStructure, TagTaxonomy } from "@/types/tagData";
 import { createEmptyTaxonomy, normalizeTaxonomyTree, TAG_DATA_SCHEMA_VERSION } from "@/utils/tagTaxonomy";
@@ -113,7 +114,12 @@ import { downloadTagDataBackup } from "@/features/tag-data/utils/tagData.backup"
 import { readCompleteBackupContents } from "@/features/tag-data/utils/tagData.backupContents";
 
 export type SyncStatus = "unlinked" | "idle" | "syncing" | "publishing" | "offline" | "reauthorize" | "snapshot-required" | "merge-required" | "publication-review-required" | "recovery-available" | "restoring" | "restore-failed" | "error";
-export interface InitialMergeReview extends InitialMergePlanV1 { labels: Record<string, string>; supported: boolean }
+export interface InitialMergeReview extends InitialMergePlanV1 {
+  labels: Record<string, string>;
+  supported: boolean;
+  /** Differences Tagify settles itself (starter tags moved by a newer version); not in `conflicts`. */
+  automaticResolutions?: Record<string, InitialMergeSource>;
+}
 export interface RecoveryPreview { annotations: number; taxonomyNodes: number; appStateDocuments: number; smartPlaylists: number | null; lastBackupAt: string | null; protectedDomains: string[] }
 export interface BackupHealth {
   lastBackupAt: string | null; annotations: number; taxonomyNodes: number; appStateDocuments: number; protectedDomains: string[];
@@ -816,7 +822,7 @@ class SyncRuntime extends EventTarget {
         expectedCommunityHeadCursor: review.communityHeadCursor,
         expectedCommunityChecksum: review.communityChecksum,
         deviceSnapshot,
-        resolutions,
+        resolutions: { ...review.automaticResolutions, ...resolutions },
       });
       const canonical = await this.downloadSnapshot(configuration, PRIVATE_SYNC_PROTOCOL_VERSION) as LibrarySnapshotV2;
       assertLibrarySnapshotV2(canonical);
@@ -1172,7 +1178,7 @@ class SyncRuntime extends EventTarget {
     if (!cloudHasData) return true;
     await flushLocalPersistence();
     const local = await storageService.loadAll();
-    const classification = classifyLocalReplica(local, defaultTagData.taxonomy, null);
+    const classification = classifyLocalReplica(local, KNOWN_STARTER_TAXONOMIES, null);
     const meaningfulOutbox = (await readOutbox()).some((intent) => intent.type !== "library.snapshot" || intent.reason !== "migration");
     if (classification === "fresh-default" && !meaningfulOutbox) {
       this.recoveryPreview = {
@@ -1226,9 +1232,11 @@ class SyncRuntime extends EventTarget {
     const communitySnapshot = await this.downloadSnapshot(configuration, PRIVATE_SYNC_PROTOCOL_VERSION) as LibrarySnapshotV2;
     assertLibrarySnapshotV2(communitySnapshot);
     const plan = planInitialLibraryMerge(deviceSnapshot, communitySnapshot);
+    // A library started with other starter tags than Community's needs no review just for that.
+    const { conflicts, automaticResolutions } = settleStarterTagPlacements(plan.conflicts);
     this.initialMergeDeviceSnapshot = deviceSnapshot;
     this.initialMergeOperationId = crypto.randomUUID();
-    this.initialMergePreview = { ...plan, labels: mergeReviewLabels(data, deviceSnapshot, communitySnapshot, plan), supported: this.capabilities?.initialMergeReviewVersion === INITIAL_MERGE_REVIEW_VERSION };
+    this.initialMergePreview = { ...plan, conflicts, automaticResolutions, labels: mergeReviewLabels(data, deviceSnapshot, communitySnapshot, plan), supported: this.capabilities?.initialMergeReviewVersion === INITIAL_MERGE_REVIEW_VERSION };
   }
 
   /**
@@ -2953,6 +2961,11 @@ class SyncRuntime extends EventTarget {
       pollPairing: () => syncPairingService.poll(),
       completePairing: (approval, options) => syncPairingService.complete(approval, options),
       cancelPairing: () => syncPairingService.cancelPending(),
+      completeReconnection: async (configuration) => {
+        const connection = await syncPairingService.completeReconnection(configuration);
+        if (!connection.requiresReload) await this.activateCurrentAccount();
+        return connection;
+      },
       syncNow: () => this.userSyncNow(),
       activateCurrentAccount: () => this.activateCurrentAccount(),
       getStatus: () => this.getStatus(),
@@ -3630,6 +3643,7 @@ declare global {
       pollPairing(): ReturnType<typeof syncPairingService.poll>;
       completePairing(...args: Parameters<typeof syncPairingService.complete>): ReturnType<typeof syncPairingService.complete>;
       cancelPairing(): void;
+      completeReconnection(...args: Parameters<typeof syncPairingService.completeReconnection>): ReturnType<typeof syncPairingService.completeReconnection>;
       syncNow(): Promise<void>;
       activateCurrentAccount(): Promise<void>;
       getStatus(): SyncStatus;

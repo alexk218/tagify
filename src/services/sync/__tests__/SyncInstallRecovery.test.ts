@@ -6,6 +6,10 @@ import {
   RECOVERY_RETRY_KEY,
   RECOVERY_UNAVAILABLE_SKIP_MS,
   RECOVERY_UNAVAILABLE_UNTIL_KEY,
+  askToReconnectAgain,
+  dismissReconnection,
+  getReconnectionState,
+  RECONNECTION_EVENT,
   restoreDesktopSyncConfiguration,
 } from "../SyncInstallRecovery";
 import { syncPairingService } from "../SyncPairingService";
@@ -31,9 +35,12 @@ const configuration: DesktopSyncConfiguration = {
   expiresAt: 1_800_000_000,
 };
 const TOKEN_URL = "https://community.tagify.fm/api/v2/device-recovery/token";
+const APPROVAL_URL = "https://community.tagify.fm/api/v2/device-authorizations/token";
 
 /** What a later Spotify start sees: a new page with the same local storage. */
 function newSpotifyStart() {
+  clearTimeout(window.__tagifyReconnection?.timer);
+  delete window.__tagifyReconnection;
   delete window.__tagifyInstallRecoveryRejected;
   delete window.__tagifyInstallRecoveryPromise;
   delete window.__tagifyRecoveryEnrollments;
@@ -89,30 +96,6 @@ describe("Spotify update Community recovery", () => {
       TOKEN_URL,
       expect.objectContaining({ method: "POST" }),
     );
-  });
-
-  it("restores an existing manual install through the still-signed-in Spotify account", async () => {
-    delete window.__tagifyInstallRecoveryKey;
-    const request = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        Response.json({ status: "recovered", ...configuration }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          enrolled: true,
-          methods: { installation: false, spotify: true },
-        }),
-      );
-
-    await expect(restoreDesktopSyncConfiguration()).resolves.toEqual(
-      configuration,
-    );
-
-    const body = sentBody(request);
-    expect(body).toMatchObject({ spotifyAccessToken });
-    expect(body).not.toHaveProperty("recoverySecret");
-    expect(getTagifyDatabaseName()).toBe("tagify-db:account-a");
   });
 
   it("leaves a revoked installation disconnected", async () => {
@@ -542,6 +525,304 @@ describe("Spotify update Community recovery", () => {
       await expect(first).resolves.toBe(true);
       await expect(second).resolves.toBe(true);
       expect(request).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("reconnection the member approves on Community", () => {
+    const deviceCode = "d".repeat(43);
+    const approvalPage = "https://tagify.fm/settings/devices/reconnect";
+    const approvalRequired = (overrides: Record<string, unknown> = {}) => Response.json({
+      status: "approval_required",
+      deviceCode,
+      userCode: "BCDF-GHJK",
+      verificationUri: approvalPage,
+      verificationUriComplete: `${approvalPage}?code=BCDF-GHJK`,
+      expiresIn: 600,
+      interval: 10,
+      ...overrides,
+    }, { status: 202 });
+    const pending = () => Response.json({ status: "authorization_pending", interval: 10 }, { status: 428 });
+    const approved = () => Response.json({ status: "approved", ...configuration, tokenType: "bearer" });
+    const approvalChecks = (request: { mock: { calls: unknown[][] } }) => request.mock.calls.filter(([url]) => url === APPROVAL_URL);
+    let completeReconnection: ReturnType<typeof vi.fn<[DesktopSyncConfiguration], Promise<{ configuration: DesktopSyncConfiguration; requiresReload: boolean }>>>;
+
+    beforeEach(() => {
+      delete window.__tagifyInstallRecoveryKey;
+      vi.useFakeTimers();
+      vi.setSystemTime(1_800_000_000_000);
+      vi.spyOn(Math, "random").mockReturnValue(0);
+      completeReconnection = vi.fn(async (next: DesktopSyncConfiguration) => {
+        setDesktopSyncConfiguration(next);
+        return { configuration: next, requiresReload: false };
+      });
+      window.TagifySync = { completeReconnection } as unknown as typeof window.TagifySync;
+    });
+
+    afterEach(() => {
+      newSpotifyStart();
+      delete window.TagifySync;
+    });
+
+    it("asks with a verifier challenge, shows the code, and never connects on a Spotify sign-in alone", async () => {
+      const events: unknown[] = [];
+      const listener = (event: Event) => events.push((event as CustomEvent).detail);
+      window.addEventListener(RECONNECTION_EVENT, listener);
+      const request = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(approvalRequired());
+
+      await expect(restoreDesktopSyncConfiguration()).resolves.toBeNull();
+      window.removeEventListener(RECONNECTION_EVENT, listener);
+
+      const body = sentBody(request);
+      expect(body).toMatchObject({ spotifyAccessToken });
+      expect(body.verifierChallenge).toMatch(/^[a-f0-9]{64}$/);
+      expect(body).not.toHaveProperty("verifier");
+      expect(getDesktopSyncConfiguration()).toBeNull();
+      expect(getTagifyDatabaseName()).toBe("tagify-db");
+      const waiting = { status: "waiting", userCode: "BCDF-GHJK", approvalUrl: `${approvalPage}?code=BCDF-GHJK`, expiresAt: Date.now() + 600_000 };
+      expect(getReconnectionState()).toEqual(waiting);
+      expect(events).toEqual([waiting]);
+      // Waiting for the member is not "nothing to recover", and nothing about it is stored.
+      expect(localStorage.getItem(RECOVERY_UNAVAILABLE_UNTIL_KEY)).toBeNull();
+      expect(JSON.stringify({ ...localStorage })).not.toContain(deviceCode);
+    });
+
+    it("waits for the member's approval, then connects with the verifier only this desktop holds", async () => {
+      const request = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(approvalRequired())
+        .mockResolvedValueOnce(pending())
+        .mockResolvedValueOnce(approved());
+      await restoreDesktopSyncConfiguration();
+      const challenge = sentBody(request).verifierChallenge;
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(approvalChecks(request)).toHaveLength(1);
+      expect(getReconnectionState()?.status).toBe("waiting");
+      expect(completeReconnection).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(approvalChecks(request)).toHaveLength(2);
+      const check = JSON.parse(String((approvalChecks(request)[1][1] as RequestInit).body));
+      expect(check.deviceCode).toBe(deviceCode);
+      expect(check.verifier.length).toBeGreaterThanOrEqual(43);
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(check.verifier));
+      expect(Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")).toBe(challenge);
+
+      expect(completeReconnection).toHaveBeenCalledWith(configuration);
+      expect(getDesktopSyncConfiguration()).toEqual(configuration);
+      expect(getReconnectionState()).toBeNull();
+
+      // Nothing more is asked once connected.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(request).toHaveBeenCalledTimes(3);
+    });
+
+    it("saves the approved connection for the next start when sync isn't running", async () => {
+      delete window.TagifySync;
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(approvalRequired())
+        .mockResolvedValueOnce(approved())
+        .mockResolvedValue(Response.json({ enrolled: true, methods: { installation: false, spotify: true } }));
+      await restoreDesktopSyncConfiguration();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(getDesktopSyncConfiguration()).toEqual(configuration);
+      expect(getReconnectionState()).toBeNull();
+    });
+
+    it("stops when the member says it wasn't them, and doesn't ask on starts for a week", async () => {
+      const request = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(approvalRequired())
+        .mockResolvedValueOnce(Response.json({ error: { code: "invalid_grant" } }, { status: 400 }));
+      await restoreDesktopSyncConfiguration();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(getReconnectionState()).toEqual({ status: "declined" });
+      expect(getDesktopSyncConfiguration()).toBeNull();
+      expect(completeReconnection).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(request).toHaveBeenCalledTimes(2);
+      // Opening Tagify during this start, and the next start, ask nothing.
+      await expect(restoreDesktopSyncConfiguration()).resolves.toBeNull();
+      newSpotifyStart();
+      await expect(restoreDesktopSyncConfiguration()).resolves.toBeNull();
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(Number(localStorage.getItem(RECOVERY_UNAVAILABLE_UNTIL_KEY))).toBe(1_800_000_010_000 + RECOVERY_UNAVAILABLE_SKIP_MS);
+    });
+
+    it.each([
+      ["Community says it expired", () => Response.json({ error: { code: "expired_token" } }, { status: 410 })],
+      ["nobody approves it within ten minutes", pending],
+    ])("ends as expired when %s, and asks again only on the next start", async (_label, answer) => {
+      const request = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(approvalRequired())
+        .mockImplementation(async () => answer());
+      await restoreDesktopSyncConfiguration();
+
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(getReconnectionState()).toEqual({ status: "expired" });
+      const checks = approvalChecks(request).length;
+      expect(checks).toBeLessThanOrEqual(60);
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(approvalChecks(request)).toHaveLength(checks);
+
+      await expect(restoreDesktopSyncConfiguration()).resolves.toBeNull();
+      expect(request.mock.calls.filter(([url]) => url === TOKEN_URL)).toHaveLength(1);
+      expect(localStorage.getItem(RECOVERY_UNAVAILABLE_UNTIL_KEY)).toBeNull();
+
+      newSpotifyStart();
+      request.mockResolvedValueOnce(approvalRequired());
+      await restoreDesktopSyncConfiguration();
+      expect(request.mock.calls.filter(([url]) => url === TOKEN_URL)).toHaveLength(2);
+    });
+
+    it("slows down when Community asks, and keeps waiting through a moment offline", async () => {
+      const request = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(approvalRequired())
+        .mockResolvedValueOnce(Response.json({ status: "slow_down", interval: 20 }, { status: 429, headers: { "retry-after": "20" } }))
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce(approved());
+      await restoreDesktopSyncConfiguration();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(approvalChecks(request)).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(19_000);
+      expect(approvalChecks(request)).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(approvalChecks(request)).toHaveLength(2);
+      expect(getReconnectionState()?.status).toBe("waiting");
+
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(completeReconnection).toHaveBeenCalledWith(configuration);
+    });
+
+    it("waits out Community's limit on requests, never reading it as nothing to recover", async () => {
+      const limited = () => Response.json({ error: { code: "rate_limited" } }, { status: 429, headers: { "retry-after": "3600" } });
+      const request = vi.spyOn(globalThis, "fetch").mockImplementation(async () => limited());
+
+      await expect(restoreDesktopSyncConfiguration()).resolves.toBeNull();
+      // A start shows nothing; the person can still link from Cloud Sync.
+      expect(getReconnectionState()).toBeNull();
+      expect(localStorage.getItem(RECOVERY_UNAVAILABLE_UNTIL_KEY)).toBeNull();
+
+      vi.setSystemTime(Date.now() + 3_599_000);
+      newSpotifyStart();
+      await restoreDesktopSyncConfiguration();
+      expect(request).toHaveBeenCalledTimes(1);
+
+      // Asking again by hand says when it can work, without asking Community.
+      await askToReconnectAgain();
+      expect(getReconnectionState()).toEqual({ status: "rate-limited", retryAt: 1_800_003_600_000 });
+      expect(request).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(Date.now() + 1_000);
+      newSpotifyStart();
+      await restoreDesktopSyncConfiguration();
+      expect(request).toHaveBeenCalledTimes(2);
+    });
+
+    it("shows the limit when a request the person asked for is refused", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(approvalRequired())
+        .mockResolvedValueOnce(Response.json({ error: { code: "invalid_grant" } }, { status: 400 }))
+        .mockResolvedValueOnce(Response.json({ error: { code: "rate_limited" } }, { status: 429, headers: { "retry-after": "3600" } }));
+      await restoreDesktopSyncConfiguration();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await askToReconnectAgain();
+
+      expect(getReconnectionState()).toEqual({ status: "rate-limited", retryAt: Date.now() + 3_600_000 });
+    });
+
+    it("asks again when the person chooses to after a declined request", async () => {
+      const request = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(approvalRequired())
+        .mockResolvedValueOnce(Response.json({ error: { code: "invalid_grant" } }, { status: 400 }))
+        .mockResolvedValueOnce(approvalRequired({ userCode: "LMNP-QRST", verificationUriComplete: `${approvalPage}?code=LMNP-QRST` }));
+      await restoreDesktopSyncConfiguration();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(getReconnectionState()?.status).toBe("declined");
+
+      await askToReconnectAgain();
+
+      expect(request.mock.calls.filter(([url]) => url === TOKEN_URL)).toHaveLength(2);
+      expect(getReconnectionState()).toMatchObject({ status: "waiting", userCode: "LMNP-QRST" });
+      expect(localStorage.getItem(RECOVERY_UNAVAILABLE_UNTIL_KEY)).toBeNull();
+    });
+
+    it("tells the person when this computer can't reconnect this way", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(approvalRequired())
+        .mockResolvedValueOnce(Response.json({ error: { code: "expired_token" } }, { status: 410 }))
+        .mockResolvedValueOnce(Response.json({ error: { code: "invalid_grant" } }, { status: 401 }));
+      await restoreDesktopSyncConfiguration();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await askToReconnectAgain();
+
+      expect(getReconnectionState()).toEqual({ status: "unavailable" });
+      dismissReconnection();
+      expect(getReconnectionState()).toBeNull();
+    });
+
+    it("treats an old-style refusal as approve-on-the-website, never a connection", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json({
+        error: { code: "invalid_grant", message: "Approve this computer on Tagify Community", details: { approval: "website" } },
+      }, { status: 401 }));
+
+      await expect(restoreDesktopSyncConfiguration()).resolves.toBeNull();
+
+      expect(getDesktopSyncConfiguration()).toBeNull();
+      expect(getReconnectionState()).toBeNull();
+      expect(Number(localStorage.getItem(RECOVERY_UNAVAILABLE_UNTIL_KEY))).toBe(Date.now() + RECOVERY_UNAVAILABLE_SKIP_MS);
+    });
+
+    it("sends one request while the member is approving, however often Tagify opens", async () => {
+      const request = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(approvalRequired())
+        .mockImplementation(async () => pending());
+      await restoreDesktopSyncConfiguration();
+
+      await restoreDesktopSyncConfiguration();
+      await askToReconnectAgain();
+
+      expect(request.mock.calls.filter(([url]) => url === TOKEN_URL)).toHaveLength(1);
+    });
+
+    it("stops checking once the person links this computer from Cloud Sync instead", async () => {
+      const request = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(approvalRequired())
+        .mockImplementation(async () => pending());
+      await restoreDesktopSyncConfiguration();
+      setDesktopSyncConfiguration(configuration);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(approvalChecks(request)).toHaveLength(0);
+      expect(getReconnectionState()).toBeNull();
+    });
+
+    it.each([
+      ["an approval page outside Community", { verificationUri: "https://example.com/approve", verificationUriComplete: "https://example.com/approve?code=BCDF-GHJK" }],
+      ["no device code", { deviceCode: undefined }],
+    ])("backs off from an answer with %s", async (_label, overrides) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(approvalRequired(overrides));
+
+      await restoreDesktopSyncConfiguration();
+
+      expect(getReconnectionState()).toBeNull();
+      expect(JSON.parse(localStorage.getItem(RECOVERY_RETRY_KEY) || "null")).toMatchObject({ failures: 1 });
+    });
+
+    it("keeps an installer proof reconnecting straight away, and asks with Spotify only when it can't", async () => {
+      window.__tagifyInstallRecoveryKey = recoverySecret;
+      const request = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(approvalRequired());
+
+      await restoreDesktopSyncConfiguration();
+
+      expect(sentBody(request)).toMatchObject({ recoverySecret, spotifyAccessToken, verifierChallenge: expect.stringMatching(/^[a-f0-9]{64}$/) });
+      expect(getReconnectionState()?.status).toBe("waiting");
     });
   });
 });

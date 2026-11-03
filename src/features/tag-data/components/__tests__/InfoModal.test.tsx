@@ -4,9 +4,16 @@ import { describe, expect, it, vi } from "vitest";
 import InfoModal from "../InfoModal";
 
 describe("InfoModal", () => {
-  it("summarizes Tagify 3.3.3 and keeps prior releases available", async () => {
+  it("summarizes Tagify 3.3.4 and keeps prior releases available", async () => {
     render(<InfoModal initialSection="whats-new" onClose={vi.fn()} />);
 
+    expect(screen.getByRole("link", { name: "What's new in Tagify 3.3.4" })).toHaveAttribute("href", "https://github.com/alexk218/tagify/releases/tag/v3.3.4");
+    for (const name of ["Taste packs", "Members already tagged", "Fresher starter tags", "Safer Community reconnect"]) {
+      expect(screen.getByRole("heading", { name })).toBeInTheDocument();
+    }
+    expect(screen.getByText('pick tags that fit your music, in "Tag your first song" or Tag Manager.')).toBeInTheDocument();
+    expect(screen.getByText("approve reconnecting on Community with a code.")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("What's New in Tagify 3.3.3", { selector: "span" }));
     expect(screen.getByRole("link", { name: "What's new in Tagify 3.3.3" })).toHaveAttribute("href", "https://github.com/alexk218/tagify/releases/tag/v3.3.3");
     for (const name of ["Community tags in Now Playing", "Pick your playlists", "Smart Playlists fixes"]) {
       expect(screen.getByRole("heading", { name })).toBeInTheDocument();

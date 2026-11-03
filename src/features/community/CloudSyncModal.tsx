@@ -9,6 +9,7 @@ import { syncRuntime } from "@/services/sync/SyncRuntime";
 import { currentSpotifyLibrarySend, SPOTIFY_LIBRARY_SEND_EVENT, type SpotifySendProgress, type SpotifySendSnapshot } from "@/services/sync/SpotifyLibrarySender";
 import { Portal } from "@/components/ui";
 import { InitialLibraryMergeReview } from "./InitialLibraryMergeReview";
+import { ReconnectionPanel, useReconnectionState } from "./ReconnectionApproval";
 import { backupNotices, communityErrorMessage, communitySyncStatusLabel, savedSettingsLabel } from "./communitySyncCopy";
 import { SHARING_STATE_LABELS } from "./communityPublication";
 import type { CommunitySharing } from "./useCommunitySharing";
@@ -36,6 +37,14 @@ export function CloudSyncModal({ sharing, onOpenSharing, onClose }: { sharing: C
   const polling = useRef(false);
   const [error, setError] = useState("");
   const [requiresReload, setRequiresReload] = useState(false);
+  const reconnection = useReconnectionState();
+  useEffect(() => {
+    // An approved reconnection connected this computer while the dialog was open.
+    if (!reconnection && !configuration) {
+      const stored = getDesktopSyncConfiguration();
+      if (stored) setConfiguration(stored);
+    }
+  }, [reconnection, configuration]);
   const syncing = status === "syncing";
   const settingsChoices = backupHealth?.needsChoice ?? [];
   const smartPlaylistsDeviceOnly = backupHealth?.notBackedUp?.includes("smart-playlists") ?? false;
@@ -171,7 +180,8 @@ export function CloudSyncModal({ sharing, onOpenSharing, onClose }: { sharing: C
         </> : approvedPairing ? <>
           <div className={styles.accountCard} role="status"><UserCircle2 size={18} /><div><strong>{busy ? `Connecting as ${profileLabel(approvedPairing.configuration)}…` : `Ready to connect as ${profileLabel(approvedPairing.configuration)}`}</strong><span>{busy ? "Finishing your Community connection." : "Your browser approval is saved. Try connecting again."}</span></div></div>
           {!busy ? <div className={styles.actions}><button type="button" onClick={cancelPairing} className={styles.secondary}>Cancel</button><button type="button" className={styles.primary} onClick={() => void poll()}><RefreshCw size={16} /> Try again</button></div> : null}
-        </> : configuration && status === "reauthorize" ? <>
+        </> : !configuration && reconnection ? <ReconnectionPanel state={reconnection} busy={busy} onLinkWithNewCode={() => void begin()} />
+        : configuration && status === "reauthorize" ? <>
           <div className={styles.reconnectRequired}><ShieldAlert /><div><strong>Device revoked</strong><span>Reconnect required</span></div></div>
           <div className={styles.accountCard}>
             <UserCircle2 size={18} />

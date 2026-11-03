@@ -98,10 +98,18 @@ function compactKey(key: string): string {
   return compact === "~" ? "" : compact;
 }
 
+/**
+ * The key `isSameTagName` compares, for checking one name against many: equal non-empty keys are
+ * the same tag. A blank name has no key.
+ */
+export function sameTagNameKey(name: string): string {
+  return compactKey(tagMatchKey(name));
+}
+
 /** Whether two names are the same tag: equal keys, also once spaces and hyphens are removed. */
 export function isSameTagName(a: string, b: string): boolean {
-  const key = compactKey(tagMatchKey(a));
-  return key !== "" && key === compactKey(tagMatchKey(b));
+  const key = sameTagNameKey(a);
+  return key !== "" && key === sameTagNameKey(b);
 }
 
 const STEM_ENDINGS = ["ists", "ist", "es", "s"] as const;

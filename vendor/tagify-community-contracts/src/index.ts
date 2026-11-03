@@ -9,6 +9,7 @@ export * from "./taxonomy-artifact";
 export * from "./comments";
 export * from "./artifact-projector";
 export * from "./tagNames";
+export * from "./tastePacks";
 export * from "./music-services";
 
 export type MusicEntityKind = "track" | "album" | "artist";

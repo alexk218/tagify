@@ -1115,6 +1115,23 @@
   min-width: 0;
 }
 
+/* "Add a pack" open at the end of Genre & Style: the dashed add button's frame, holding the pack chips. */
+.tastePackPanel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed color-mix(in srgb, var(--spice-accent) 32%, var(--spice-button-disabled) 68%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.tastePackTitle {
+  margin: 0 0 2px;
+  color: var(--spice-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .renameActions {
   display: flex;
   justify-content: flex-end;

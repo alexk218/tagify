@@ -209,3 +209,23 @@
   cursor: default;
   opacity: 0.6;
 }
+
+/* Taste packs: a row at the bottom of "Tag your first song". */
+.tastePacks {
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+}
+
+.tastePacksLabel {
+  color: var(--spice-subtext);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.tastePacksLabel strong {
+  color: var(--spice-text);
+  font-weight: 700;
+}

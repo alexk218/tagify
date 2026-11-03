@@ -1,6 +1,5 @@
 import { normalizePrivateNotesBackup, type PrivateNotesBackup } from "@/services/sync/PrivateNotes";
 import packageJson from "@/package";
-import { defaultTagData } from "@/constants/defaultTagData";
 import type { TagDataStructure } from "@/types/tagData";
 import type {
   InstalledTaxonomyRecordV1,
@@ -8,7 +7,7 @@ import type {
   PublicationPolicyV1,
   TagifyBackupEnvelopeV2,
 } from "@tagify/community-contracts";
-import { isSupportedTagDataBackup, normalizeTagDataStructure } from "./tagData.schema";
+import { hasCustomTaxonomy, isSupportedTagDataBackup, normalizeTagDataStructure } from "./tagData.schema";
 
 export const TAG_DATA_AUTO_FILE_BACKUP_METADATA_KEY =
   "tagify:autoFileBackupMetadata";
@@ -329,7 +328,8 @@ function hasBackupWorthyData(backupData: TagDataStructure): boolean {
     Object.keys(backupData.playlists || {}).length > 0 ||
     Object.keys(backupData.artists || {}).length > 0 ||
     (backupData.smartPlaylists?.length ?? 0) > 0 ||
-    JSON.stringify(backupData.taxonomy) !== JSON.stringify(defaultTagData.taxonomy)
+    // Untouched starter tags, of any Tagify version, aren't worth a backup on their own.
+    hasCustomTaxonomy(backupData.taxonomy)
   );
 }
 

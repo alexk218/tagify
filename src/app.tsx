@@ -69,8 +69,11 @@ import { graphqlRateLimiter } from "./utils/RateLimiter";
 import { spotifyApiService } from "./services/SpotifyApiService";
 import { revealElement } from "@/utils/revealElement";
 import { FirstSongCard } from "@/features/onboarding/components/FirstSongCard";
+import type { CommunityMatch, CommunityMatchTag } from "@/features/onboarding/services/communityMatches";
 import { FirstRunPayoffCard } from "@/features/onboarding/components/FirstRunPayoffCard";
-import { isFirstRunInProgress, markFirstRunDone, markFirstRunStarted, mostUsedTag, PAYOFF_MIN_TAGGED } from "@/features/onboarding/services/firstRun";
+import { useFirstRun } from "@/features/onboarding/hooks/useFirstRun";
+import { TastePacksPicker } from "@/features/onboarding/components/TastePacksPicker";
+import { useTastePacks } from "@/features/onboarding/hooks/useTastePacks";
 import { TAG_FILTER_LANES } from "@/features/filter-state/hooks/useFilterState";
 
 // Invite to Community once a first tagging session has shown what tags are for.
@@ -90,6 +93,7 @@ import {
   type CommunityConnectEntry,
   type SharingSurface,
 } from "@/features/community";
+import { useReconnectionState } from "@/features/community/ReconnectionApproval";
 import { Users } from "lucide-react";
 import { syncRuntime, type SyncStatus } from "@/services/sync/SyncRuntime";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
@@ -356,28 +360,47 @@ function App() {
     [tagData.tracks],
   );
   // A library with nothing tagged starts from its own Liked Songs instead of an empty page.
-  const [firstSongPicked, setFirstSongPicked] = useState(false);
-  const showFirstSongCard = taggedTrackCount === 0 && !firstSongPicked && !isMultiTagging;
+  // After a few tagged songs, people who started there are shown what tags are for: a filter, then a playlist.
+  const { showFirstSongCard, payoffTag, startFirstRun, startWithMembersTags, finishFirstRun } = useFirstRun({ tagData, isLoading, isMultiTagging });
+  // A fresh install is asked what music it listens to, beside (never instead of) its first song.
+  const { showTastePacks, tastePackChoices, addTastePacks, skipTastePacks } = useTastePacks({
+    taxonomy: tagData.taxonomy,
+    isLoading,
+    taggedTrackCount,
+    restoreOnOffer: cloudRecoveryPending,
+    showSavedTags: refreshPersistedTagData,
+  });
+  const [createPlaylistRequest, setCreatePlaylistRequest] = useState(0);
   const pickFirstSong = useCallback((uri: string) => {
-    setFirstSongPicked(true);
+    startFirstRun();
     void handleSelectTrackForTagging(uri);
     // The song's details load after the switch and push the picker down, so reveal it again once they settle.
     for (const delay of [300, 1200]) {
       setTimeout(() => revealElement(document.querySelector("[data-tagify-tag-selector]")), delay);
     }
-  }, [handleSelectTrackForTagging]);
-  // After a few tagged songs, people who started here are shown what tags are for: a filter, then a playlist.
-  const [firstRunInProgress, setFirstRunInProgress] = useState(isFirstRunInProgress);
-  const [createPlaylistRequest, setCreatePlaylistRequest] = useState(0);
-  useEffect(() => {
-    if (!showFirstSongCard) return;
-    markFirstRunStarted();
-    setFirstRunInProgress(isFirstRunInProgress());
-  }, [showFirstSongCard]);
-  const payoffTag = useMemo(
-    () => firstRunInProgress && taggedTrackCount >= PAYOFF_MIN_TAGGED ? mostUsedTag(tagData) : null,
-    [firstRunInProgress, taggedTrackCount, tagData],
-  );
+  }, [handleSelectTrackForTagging, startFirstRun]);
+  // Members' tags on a Liked Song become the member's own tags (the same-named one when they have it), then go on the song.
+  const addMembersTags = useCallback(async (match: CommunityMatch, tags: CommunityMatchTag[]) => {
+    startWithMembersTags();
+    await flushLocalPersistence();
+    const account = getTagifyDatabaseName();
+    const tagIds: string[] = [];
+    for (const tag of tags) tagIds.push((await indexedDBStorage.createCommunityTag(tag.label, tag.paths, account)).id);
+    await refreshPersistedTagData();
+    if (account !== getTagifyDatabaseName()) throw new Error("Your account changed. Reopen your music before adding tags.");
+    const albumImageUrl = match.track.album?.images?.[0]?.url;
+    await applyBatchTagUpdates([{
+      trackUri: match.track.uri,
+      toAdd: tagIds,
+      toRemove: [],
+      trackDetails: { name: match.track.name, artists: match.track.artists.map((artist) => artist.name).join(", ") },
+      albumDetails: {
+        albumName: match.track.album?.name,
+        albumUri: match.track.album?.uri ?? null,
+        albumImageUrl: albumImageUrl?.startsWith("https://") ? albumImageUrl : null,
+      },
+    }]);
+  }, [applyBatchTagUpdates, refreshPersistedTagData, startWithMembersTags]);
   const payoffFiltered = !!payoffTag && activeTagFilters.length === 1 && activeTagFilters[0] === payoffTag.id;
   const showPayoffSongs = () => {
     if (!payoffTag) return;
@@ -390,13 +413,9 @@ function App() {
     if (!payoffFiltered) showPayoffSongs();
     setCreatePlaylistRequest((request) => request + 1);
     // Reaching Create Playlist completes the first run, whether or not they save it.
-    markFirstRunDone();
-    setFirstRunInProgress(false);
+    finishFirstRun();
   };
-  const dismissPayoff = () => {
-    markFirstRunDone();
-    setFirstRunInProgress(false);
-  };
+  const dismissPayoff = finishFirstRun;
   const categoryTree = useMemo(
     () => buildCategoryTree(tagData.taxonomy),
     [tagData.taxonomy],
@@ -479,6 +498,17 @@ function App() {
     }
     setShowCloudSync(true);
   }, [cloudRecoveryPending]);
+
+  // A Spotify update signed this computer out, and Community is waiting for
+  // the member to approve reconnecting it: Cloud Sync shows the code to check.
+  const reconnection = useReconnectionState();
+  const reconnectionShownFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (reconnection?.status !== "waiting" || isLoading) return;
+    if (reconnectionShownFor.current === reconnection.userCode) return;
+    reconnectionShownFor.current = reconnection.userCode;
+    openCloudSync();
+  }, [reconnection, isLoading, openCloudSync]);
 
   const openCommunitySharing = useCallback((surface: SharingSurface) => {
     if (cloudRecoveryPending) {
@@ -1377,7 +1407,7 @@ function App() {
 
       {/* The Community workspace already offers its own Connect button. */}
       <CommunityConnectPrompt
-        enabled={canShowOptionalPrompts && !showCommunityWorkspace && taggedTrackCount >= COMMUNITY_INVITE_MIN_TAGGED}
+        enabled={canShowOptionalPrompts && !showCommunityWorkspace && !reconnection && taggedTrackCount >= COMMUNITY_INVITE_MIN_TAGGED}
         connected={syncConnected}
         onConnect={() => connectCommunity("prompt")}
       />
@@ -1483,7 +1513,14 @@ function App() {
           {activeView === "tracks" ? (
             <>
               {showFirstSongCard && (
-                <FirstSongCard currentTrack={currentlyPlayingTrack} onPick={pickFirstSong} />
+                <FirstSongCard
+                  currentTrack={currentlyPlayingTrack}
+                  onPick={pickFirstSong}
+                  onAddMembersTags={addMembersTags}
+                  tastePacks={showTastePacks && (
+                    <TastePacksPicker choices={tastePackChoices} onAdd={addTastePacks} onSkip={skipTastePacks} />
+                  )}
+                />
               )}
               {payoffTag && !isMultiTagging && (
                 <FirstRunPayoffCard
