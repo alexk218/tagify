@@ -1,5 +1,5 @@
 // Production track-note previews with an isolated IndexedDB library and Spotify boundary.
-// Run: node scripts/tests/track-notes.mjs [port] [entity-notes]
+// Run: node scripts/tests/track-notes.mjs [port] [entity-notes | song-details-filters]
 import { createRequire } from "node:module";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
@@ -8,7 +8,7 @@ import process from "node:process";
 const require = createRequire(import.meta.url);
 const { build } = createRequire(createRequire(require.resolve("vitest")).resolve("vite"))("esbuild");
 const project = resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const fixture = process.argv[3] === "entity-notes" ? "entity-notes" : "track-notes";
+const fixture = ["entity-notes", "song-details-filters"].includes(process.argv[3]) ? process.argv[3] : "track-notes";
 // Rebuild on each page load so source edits show up after a browser refresh.
 const bundle = () => build({ entryPoints: [resolve(project, `scripts/tests/fixtures/${fixture}.tsx`)], bundle: true, write: false, format: "iife", outfile: "bundle.js", tsconfig: resolve(project, "tsconfig.json"),
   define: { "process.env.NODE_ENV": '"development"' },

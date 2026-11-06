@@ -1,3 +1,4 @@
+import { SONG_DETAIL_FILTER_FIELDS } from "@/utils/songDetails";
 import { normalizeSmartPlaylistCriteriaList } from "@/features/tag-data";
 import { SmartPlaylistCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
 
@@ -125,7 +126,7 @@ export function parsePersonalSmartPlaylistBackup(value: unknown): SmartPlaylistC
   for (const item of items) {
     const criteria = item.criteria;
     const arrayFields = ["includeTagClauses", "includeTagGroups", "activeTagFilters", "excludedTagFilters", "clauseConnectors", "ratingFilters", "camelotKeyFilters"];
-    const numberFields = ["energyMinFilter", "energyMaxFilter", "bpmMinFilter", "bpmMaxFilter"];
+    const numberFields = ["energyMinFilter", "energyMaxFilter", "bpmMinFilter", "bpmMaxFilter", ...SONG_DETAIL_FILTER_FIELDS];
     if (arrayFields.some((field) => criteria[field] !== undefined && !Array.isArray(criteria[field])) ||
         numberFields.some((field) => criteria[field] !== undefined && criteria[field] !== null && !Number.isFinite(criteria[field])) ||
         criteria.includeTagClauses?.some((clause: unknown) => !clause || typeof clause !== "object" ||

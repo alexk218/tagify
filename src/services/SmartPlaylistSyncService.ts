@@ -1,3 +1,4 @@
+import { normalizeReleaseDate, songDurationMs } from "@/utils/songDetails";
 import { spotifyBackgroundPolicy } from "./SpotifyBackgroundPolicy";
 import { getSpotifyRetryAfterMs } from "@/utils/spotifyRateLimit";
 import { sameSmartPlaylistRules } from "@/features/smart-playlists/utils/smartPlaylist.membership";
@@ -10,7 +11,7 @@ import {
   showSmartPlaylistCriteriaAppliedNotifications,
   SmartPlaylistAppliedCriteriaNotification,
 } from "@/features/smart-playlists/utils/smartPlaylist.notifications";
-import { evaluateTrackMatchesCriteria } from "@/features/smart-playlists/utils/smartPlaylist.criteria";
+import { compileTrackCriteria, evaluateTrackMatchesCriteria } from "@/features/smart-playlists/utils/smartPlaylist.criteria";
 import {
   applySmartPlaylistCriteriaToTrack,
   collectMatchingTrackUris,
@@ -118,6 +119,8 @@ interface NewTrackDetails {
   artists?: string;
   bpm: number | null;
   camelotKey?: string;
+  durationMs?: number;
+  releaseDate?: string;
 }
 
 function localFileDetails(trackUri: string): NewTrackDetails {
@@ -139,8 +142,8 @@ function newTrackRecord(
   details: NewTrackDetails | undefined,
   now: number,
 ): TrackData {
-  const { name, artists, bpm, camelotKey } = details ??
-    (trackUri.startsWith("spotify:local:") ? localFileDetails(trackUri) : { bpm: null });
+  const { name, artists, bpm, camelotKey, durationMs, releaseDate } = details ??
+    (trackUri.startsWith("spotify:local:") ? localFileDetails(trackUri) : { bpm: null } as NewTrackDetails);
   return {
     rating: 0,
     energy: 0,
@@ -151,6 +154,8 @@ function newTrackRecord(
     dateModified: now,
     ...(name ? { name } : {}),
     ...(artists ? { artists } : {}),
+    ...(durationMs ? { durationMs } : {}),
+    ...(releaseDate ? { releaseDate } : {}),
   };
 }
 
@@ -166,6 +171,8 @@ function withMissingDetails(track: TrackData, details: NewTrackDetails | undefin
     ...(!track.artists && details.artists ? { artists: details.artists } : {}),
     ...(track.bpm == null && details.bpm != null ? { bpm: details.bpm } : {}),
     ...(!track.camelotKey && details.camelotKey ? { camelotKey: details.camelotKey } : {}),
+    ...(!track.durationMs && details.durationMs ? { durationMs: details.durationMs } : {}),
+    ...(!track.releaseDate && details.releaseDate ? { releaseDate: details.releaseDate } : {}),
   };
   return Object.keys(missing).length > 0 ? { ...track, ...missing } : track;
 }
@@ -286,6 +293,8 @@ export class SmartPlaylistSyncService {
       ...(audioFeatures?.camelotKey ? { camelotKey: audioFeatures.camelotKey } : {}),
       ...(metadata?.name ? { name: metadata.name } : {}),
       ...(metadata?.artists ? { artists: metadata.artists } : {}),
+      ...(songDurationMs(metadata?.duration_ms) !== null ? { durationMs: metadata!.duration_ms } : {}),
+      ...(normalizeReleaseDate(metadata?.releaseDate) ? { releaseDate: metadata!.releaseDate! } : {}),
     };
   }
 
@@ -635,6 +644,7 @@ export class SmartPlaylistSyncService {
     const pendingPlaylists = latestState.playlists;
     playlists = playlists.filter(playlist => sameSmartPlaylistRules(playlist,
       pendingPlaylists.find(item => item.playlistId === playlist.playlistId)));
+    const libraryRecordingKeys = recordingDisplayKeys(allTagData.tracks);
     for (const playlist of playlists) {
       if (!successfullyFetched.has(playlist.playlistId)) {
         continue;
@@ -647,11 +657,13 @@ export class SmartPlaylistSyncService {
         allTagData.tracks,
         playlist.criteria,
         currentMembership,
+        libraryRecordingKeys,
       );
+      const matchesCriteria = compileTrackCriteria(playlist.criteria);
 
       const pending = new Set(pendingPlaylists.find(item => item.playlistId === playlist.playlistId)?.pendingTagChoices ?? []);
       const removals = hasConfirmedMembershipBaseline(playlist) ? currentMembership.filter(uri =>
-        !pending.has(uri) && !deferredInbound.has(uri) && (!allTagData.tracks[uri] || !evaluateTrackMatchesCriteria(allTagData.tracks[uri], playlist.criteria))) : [];
+        !pending.has(uri) && !deferredInbound.has(uri) && (!allTagData.tracks[uri] || !matchesCriteria(allTagData.tracks[uri]))) : [];
       const additions = matchingTrackUris.filter(uri => !currentMembers.has(uri));
       if (!removals.length && !additions.length) continue;
       writtenPlaylistIds.add(playlist.playlistId);
@@ -922,13 +934,14 @@ export class SmartPlaylistSyncService {
       const pendingChoices = new Set(playlist.pendingTagChoices ?? []);
       const confirmedMembership = hasConfirmedMembershipBaseline(playlist);
       const matchingRecordings = new Set<string>();
+      const matchesCriteria = compileTrackCriteria(playlist.criteria);
       if (recordingKeys.size > 0) for (const uri of membership) {
         const recording = recordingKeys.get(uri);
-        if (recording && recordingTracks[uri] && evaluateTrackMatchesCriteria(recordingTracks[uri], playlist.criteria)) matchingRecordings.add(recording);
+        if (recording && recordingTracks[uri] && matchesCriteria(recordingTracks[uri])) matchingRecordings.add(recording);
       }
       const additions: string[] = [], removals: string[] = [];
       for (const [trackUri, data] of updates) {
-        const matches = data !== null && evaluateTrackMatchesCriteria(data, playlist.criteria);
+        const matches = data !== null && matchesCriteria(data);
         if (membership.has(trackUri)) {
           if (!matches && !pendingChoices.has(trackUri) && confirmedMembership) removals.push(trackUri);
           continue;

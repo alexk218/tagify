@@ -1,6 +1,7 @@
 import { detachInconsistentRecordingGroups, normalizeRecordingIdentity } from "@/features/recording-reuse/utils/recordingReuse";
 import { defaultTagData, KNOWN_STARTER_TAXONOMIES } from "@/constants/defaultTagData";
 import { withoutUntouchedTastePacks } from "@/utils/tastePackTaxonomy";
+import { normalizeReleaseDate, normalizeSongDetailFilters, SONG_DETAIL_FILTER_FIELDS, songDurationMs } from "@/utils/songDetails";
 import type {
   LegacyTagDataStructure,
   LegacyTrackData,
@@ -75,6 +76,7 @@ const TRACK_FIELDS = [
   "uri", "tags", "recordingIdentity", "recordingGroupId", "recordingGroupConfirmed", "recordingReuseDisabled", "rating", "energy", "bpm",
   "camelotKey", "tagIds", "dateCreated", "dateModified", "name", "artists", "albumName", "albumUri",
   "albumImageUrl", "backfillAttempts", "audioFeaturesBackfillRevision", "albumBackfillAttempts",
+  "durationMs", "releaseDate", "songDetailsAttempts", "songDetailsCheckedAt",
 ] as const;
 const PLAYLIST_FIELDS = [
   "uri", "rating", "energy", "tagIds", "dateCreated", "dateModified", "name", "ownerName", "imageUrl",
@@ -91,7 +93,7 @@ const SMART_PLAYLIST_SOURCE_FIELDS = ["recipeId", "revision", "authorId"] as con
 const SMART_PLAYLIST_CRITERIA_FIELDS = [
   "includeTagClauses", "clauseConnectors", "includeTagGroups", "activeTagFilters", "excludedTagFilters",
   "isOrFilterMode", "ratingFilters", "energyMinFilter", "energyMaxFilter", "bpmMinFilter", "bpmMaxFilter",
-  "camelotKeyFilters", "camelotMinFilter", "camelotMaxFilter",
+  "camelotKeyFilters", "camelotMinFilter", "camelotMaxFilter", ...SONG_DETAIL_FILTER_FIELDS,
 ] as const;
 
 function unknownFields(value: unknown, knownFields: readonly string[]): Record<string, unknown> {
@@ -151,6 +153,14 @@ function normalizeTrackData(trackData: unknown): TrackData {
       : {}),
     ...(typeof candidate.albumBackfillAttempts === "number"
       ? { albumBackfillAttempts: candidate.albumBackfillAttempts }
+      : {}),
+    ...(songDurationMs(candidate.durationMs) !== null ? { durationMs: candidate.durationMs } : {}),
+    ...(normalizeReleaseDate(candidate.releaseDate) ? { releaseDate: candidate.releaseDate } : {}),
+    ...(typeof candidate.songDetailsAttempts === "number" && Number.isInteger(candidate.songDetailsAttempts) && candidate.songDetailsAttempts > 0
+      ? { songDetailsAttempts: candidate.songDetailsAttempts }
+      : {}),
+    ...(typeof candidate.songDetailsCheckedAt === "number" && Number.isSafeInteger(candidate.songDetailsCheckedAt) && candidate.songDetailsCheckedAt > 0
+      ? { songDetailsCheckedAt: candidate.songDetailsCheckedAt }
       : {}),
   };
 }
@@ -625,6 +635,7 @@ export function normalizeSmartPlaylistCriteriaList(value: unknown): SmartPlaylis
             candidate.criteria.camelotMaxFilter === null
               ? candidate.criteria.camelotMaxFilter
               : null,
+          ...normalizeSongDetailFilters(candidate.criteria),
         },
       },
     ];

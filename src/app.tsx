@@ -64,6 +64,7 @@ import { useGlobalKeyboardShortcuts } from "./hooks/shared/useGlobalKeyboardShor
 import {
   MetadataBackfillProgress,
   useMetadataBackfill,
+  useSongDetailsFill,
 } from "@/features/metadata-backfill";
 import { graphqlRateLimiter } from "./utils/RateLimiter";
 import { spotifyApiService } from "./services/SpotifyApiService";
@@ -235,6 +236,13 @@ function App() {
   } = useTagData({
     onSyncTrack: syncTrackWithSmartPlaylists,
     onSyncMultipleTracks: syncMultipleTracksWithSmartPlaylists,
+  });
+
+  useSongDetailsFill({
+    enabled: !isLoading && !migrationProgress,
+    onUpdated: () => {
+      void refreshPersistedTagData().catch((error) => console.error("Tagify: Could not show updated song details", error));
+    },
   });
 
   useMetadataBackfill({

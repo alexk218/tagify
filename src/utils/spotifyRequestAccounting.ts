@@ -1,5 +1,5 @@
 import type { SpotifyFailureKind } from "./spotifyRequestFailure";
-export type SpotifyRequestFeature = "album-counts" | "album-tracks" | "metadata-backfill" | "smart-playlists" | "recording-matching" | "audio-features" | "artist-identities" | "track-details" | "playlist-contents" | "playlist-details" | "library" | "other";
+export type SpotifyRequestFeature = "album-counts" | "album-tracks" | "metadata-backfill" | "song-details" | "smart-playlists" | "recording-matching" | "audio-features" | "artist-identities" | "track-details" | "playlist-contents" | "playlist-details" | "library" | "other";
 export type RequestEvent = "requested" | "dispatched" | "shared" | "cached" | "succeeded" | "failed" | "stopped" | "cancelled" | "timedOut" | "repeated";
 type Counts = Partial<Record<RequestEvent, number>>;
 

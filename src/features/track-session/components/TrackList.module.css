@@ -155,6 +155,11 @@
   gap: 16px;
 }
 
+/* Range filters keep their From/To pair on one line and wrap as a whole instead of overlapping the next one. */
+.filterSectionsRow > .filterSection {
+  min-width: max-content;
+}
+
 .filterSection {
   display: flex;
   flex-direction: column;

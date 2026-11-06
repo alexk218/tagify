@@ -38,6 +38,24 @@ import {
   faStarHalf,
 } from "@fortawesome/free-solid-svg-icons";
 import { normalizeCamelotKey } from "@/utils/camelotKey";
+import { formatLength, LENGTH_FILTER_OPTIONS } from "@/utils/songDetails";
+
+/** The standard choices, plus a saved value that isn't one of them (from a shared playlist, for example). */
+function lengthOptions(current: number | null): number[] {
+  return current === null || LENGTH_FILTER_OPTIONS.includes(current)
+    ? LENGTH_FILTER_OPTIONS
+    : [...LENGTH_FILTER_OPTIONS, current].sort((a, b) => a - b);
+}
+
+/** Every year from the oldest to the newest release in the list, so a range like 1990–1999 can be picked even with gaps. */
+function yearOptions(years: Set<number>, current: number | null): number[] {
+  const known = current === null ? [...years] : [...years, current];
+  if (!known.length) return [];
+  const oldest = Math.min(...known), newest = Math.max(...known);
+  // An odd date far outside the rest shouldn't turn the list into hundreds of empty years.
+  if (newest - oldest > 150) return [...new Set(known)].sort((a, b) => a - b);
+  return Array.from({ length: newest - oldest + 1 }, (_, index) => oldest + index);
+}
 import {
   TAG_FILTER_OPERATORS,
   TagFilterClause,
@@ -287,6 +305,12 @@ const TrackList: React.FC<TrackListProps> = ({
     handleBpmMinChange,
     handleBpmMaxChange,
     toggleCamelotKeyFilter,
+    songDetailFilters,
+    setSongDetailFilters,
+    handleLengthMinChange,
+    handleLengthMaxChange,
+    handleReleaseYearMinChange,
+    handleReleaseYearMaxChange,
     clearAllFilters,
     activeFilterCount,
   } = useTrackListControls({
@@ -361,6 +385,7 @@ const TrackList: React.FC<TrackListProps> = ({
         bpmMaxFilter,
         normalizedCamelotKeyFilters,
         searchTerm,
+        ...songDetailFilters,
       }),
     [
       listedEntries,
@@ -374,6 +399,7 @@ const TrackList: React.FC<TrackListProps> = ({
       bpmMaxFilter,
       normalizedCamelotKeyFilters,
       searchTerm,
+      songDetailFilters,
     ],
   );
 
@@ -431,6 +457,8 @@ const TrackList: React.FC<TrackListProps> = ({
     allEnergyLevels,
     allBpmValues,
     allCamelotKeys,
+    hasSongLengths,
+    allReleaseYears,
   } = useMemo(
     () => collectTrackFilterData(trackEntries, filterTagDisplayLookup),
     [filterTagDisplayLookup, trackEntries],
@@ -721,6 +749,7 @@ const TrackList: React.FC<TrackListProps> = ({
           bpmMinFilter,
           bpmMaxFilter,
           normalizedCamelotKeyFilters,
+          ...songDetailFilters,
         }).criteria,
       };
       try {
@@ -773,6 +802,7 @@ const TrackList: React.FC<TrackListProps> = ({
           bpmMinFilter,
           bpmMaxFilter,
           normalizedCamelotKeyFilters,
+          ...songDetailFilters,
         });
       try {
         await onCreateSmartPlaylist(smartPlaylistCriteria);
@@ -824,6 +854,7 @@ const TrackList: React.FC<TrackListProps> = ({
       setBpmMinFilter(playlist.criteria.bpmMinFilter);
       setBpmMaxFilter(playlist.criteria.bpmMaxFilter);
       setCamelotKeyFilters(playlist.criteria.camelotKeyFilters ?? []);
+      setSongDetailFilters(playlist.criteria);
       setShowFilterOptions(true);
       setShowAdvancedFilters(
         playlist.criteria.bpmMinFilter !== null ||
@@ -844,6 +875,7 @@ const TrackList: React.FC<TrackListProps> = ({
       setRatingFilters,
       setShowAdvancedFilters,
       setShowFilterOptions,
+      setSongDetailFilters,
     ],
   );
 
@@ -1315,6 +1347,88 @@ const TrackList: React.FC<TrackListProps> = ({
                             {bpm}
                           </option>
                         ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {(hasSongLengths || songDetailFilters.lengthMinFilter !== null || songDetailFilters.lengthMaxFilter !== null) && (
+              <div className={styles.filterSection}>
+                <h3 className={styles.filterSectionTitle}>Length</h3>
+                <div className={styles.rangeFilter}>
+                  <div className={"form-field"}>
+                    <label className={"form-label"}>From:</label>
+                    <select
+                      aria-label="Shortest song length"
+                      value={songDetailFilters.lengthMinFilter ?? ""}
+                      onChange={handleLengthMinChange}
+                      className={"form-select"}
+                    >
+                      <option value="">Any</option>
+                      {lengthOptions(songDetailFilters.lengthMinFilter).map((seconds) => (
+                        <option key={`length-min-${seconds}`} value={seconds}>
+                          {formatLength(seconds)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className={"form-field"}>
+                    <label className={"form-label"}>To:</label>
+                    <select
+                      aria-label="Longest song length"
+                      value={songDetailFilters.lengthMaxFilter ?? ""}
+                      onChange={handleLengthMaxChange}
+                      className={"form-select"}
+                    >
+                      <option value="">Any</option>
+                      {lengthOptions(songDetailFilters.lengthMaxFilter).map((seconds) => (
+                        <option key={`length-max-${seconds}`} value={seconds}>
+                          {formatLength(seconds)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {(allReleaseYears.size > 0 || songDetailFilters.releaseYearMinFilter !== null || songDetailFilters.releaseYearMaxFilter !== null) && (
+              <div className={styles.filterSection}>
+                <h3 className={styles.filterSectionTitle}>Released</h3>
+                <div className={styles.rangeFilter}>
+                  <div className={"form-field"}>
+                    <label className={"form-label"}>From:</label>
+                    <select
+                      aria-label="Earliest release year"
+                      value={songDetailFilters.releaseYearMinFilter ?? ""}
+                      onChange={handleReleaseYearMinChange}
+                      className={"form-select"}
+                    >
+                      <option value="">Any</option>
+                      {yearOptions(allReleaseYears, songDetailFilters.releaseYearMinFilter).map((year) => (
+                        <option key={`year-min-${year}`} value={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className={"form-field"}>
+                    <label className={"form-label"}>To:</label>
+                    <select
+                      aria-label="Latest release year"
+                      value={songDetailFilters.releaseYearMaxFilter ?? ""}
+                      onChange={handleReleaseYearMaxChange}
+                      className={"form-select"}
+                    >
+                      <option value="">Any</option>
+                      {yearOptions(allReleaseYears, songDetailFilters.releaseYearMaxFilter).map((year) => (
+                        <option key={`year-max-${year}`} value={year}>
+                          {year}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -2139,6 +2253,7 @@ const TrackList: React.FC<TrackListProps> = ({
           bpmMinFilter={bpmMinFilter}
           bpmMaxFilter={bpmMaxFilter}
           camelotKeyFilters={normalizedCamelotKeyFilters}
+          songDetailFilters={songDetailFilters}
           editingSmartPlaylistName={editingSmartPlaylist?.playlistName}
           statsListLabel={statsTrackSet?.label}
           onClose={handleCloseCreatePlaylistModal}

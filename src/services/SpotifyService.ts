@@ -1,3 +1,4 @@
+import { releaseDate } from "@/utils/songDetails";
 import { spotifyRequestAccounting, type SpotifyRequestFeature } from "@/utils/spotifyRequestAccounting";
 import { spotifyAccountKey, spotifyRead, throwIfSpotifyRequestStopped } from "./SpotifyRequests";
 import { rememberRuleFacts } from "@/features/automatic-tags/facts";
@@ -9,6 +10,7 @@ interface GraphQLTrackAlbum {
   name: string;
   date?: {
     isoString: string;
+    precision?: string;
   };
   coverArt?: {
     sources: Array<{
@@ -63,6 +65,8 @@ export interface TrackInfo {
   artistsData: Array<{ name: string; uri: string }>;
   duration_ms: number;
   release_date: string;
+  /** The album's release date at the precision Spotify knows it ("2024", "2024-06" or "2024-06-01"). */
+  releaseDate?: string | null;
 }
 
 // Batch track info result
@@ -456,6 +460,7 @@ class SpotifyService {
       artistsData: artists,
       duration_ms: trackUnion.duration?.totalMilliseconds || 0,
       release_date: trackUnion.albumOfTrack?.date?.isoString || "",
+      releaseDate: releaseDate(trackUnion.albumOfTrack?.date),
     };
   }
 

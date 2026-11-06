@@ -5,8 +5,9 @@ import type {
   TagFilterClause,
   TagFilterOperator,
 } from "@/utils/tagFilterGroups";
+import type { SongDetailFilterCriteria } from "@/utils/songDetails";
 
-export interface TrackListTrackData extends Pick<TrackData, "recordingIdentity" | "recordingGroupId" | "recordingGroupConfirmed" | "recordingReuseDisabled"> {
+export interface TrackListTrackData extends Pick<TrackData, "recordingIdentity" | "recordingGroupId" | "recordingGroupConfirmed" | "recordingReuseDisabled" | "durationMs" | "releaseDate"> {
   rating: number;
   energy: number;
   bpm: number | null;
@@ -36,7 +37,7 @@ export interface TagDisplayInfo {
 
 export type TrackListEntry = [uri: string, trackData: TrackListTrackData];
 
-export interface TrackListFilterInputs {
+export interface TrackListFilterInputs extends SongDetailFilterCriteria {
   includeTagClauses: TagFilterClause[];
   clauseConnectors: TagFilterOperator[];
   ratingFilters: number[];
@@ -53,7 +54,7 @@ export interface TrackListSortInputs {
   sortOrder: SortOrder;
 }
 
-export interface BuildSmartPlaylistCriteriaInputs {
+export interface BuildSmartPlaylistCriteriaInputs extends SongDetailFilterCriteria {
   playlistId: string;
   playlistName: string;
   trackUris: string[];

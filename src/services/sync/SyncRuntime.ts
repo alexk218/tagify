@@ -89,6 +89,8 @@ import { communityCatalogFillJobSources } from "./CommunityCatalogFillJobSources
 import { communitySongReleaseSources } from "./CommunitySongReleaseSources";
 import { runSongNameReports } from "./CommunitySongNames";
 import { communitySongNameSources } from "./CommunitySongNameSources";
+import { runSongDetailReports } from "./CommunitySongDetails";
+import { communitySongDetailSources } from "./CommunitySongDetailSources";
 import { canPlayFromCommunity, DESKTOP_PLAY_FEATURE, DesktopPlayer, readDesktopPlayRequest } from "./DesktopPlay";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { spotifyAccountKey } from "@/services/SpotifyRequests";
@@ -392,6 +394,8 @@ const SONG_RELEASES_INTERVAL_MS = 3 * 60 * 60_000;
 const CATALOG_FILL_INTERVAL_MS = 3 * 60 * 60_000;
 /** At most this often Tagify sends Community the names of music it synced. */
 const SONG_NAMES_INTERVAL_MS = 10 * 60_000;
+/** Song lengths and release dates fill in slowly in the background, so a few hours apart is soon enough. */
+const SONG_DETAILS_INTERVAL_MS = 3 * 60 * 60_000;
 
 export function capabilitiesCacheKey(apiBaseUrl: string): string {
   return `tagify:sync-capabilities:${CLIENT_VERSION}:notes-v1:merge-v2:${new URL(apiBaseUrl).origin}`;
@@ -710,6 +714,9 @@ class SyncRuntime extends EventTarget {
   /** Held while sync is sending changes, so one run names everything that sync sent. */
   private songNamesHeld = false;
   private songNamesTimer: ReturnType<typeof setTimeout> | null = null;
+  private songDetails: Promise<void> | null = null;
+  private songDetailsRanAt = 0;
+  private songDetailsUnsupported = false;
   private spotifySavesAgain = false;
 
   start(): void {
@@ -1343,6 +1350,7 @@ class SyncRuntime extends EventTarget {
     if (this.lastSideDocuments?.spotifySavesWaiting) this.handleSpotifySaves();
     this.handleBackgroundReaders(configuration);
     this.handleSongNames(configuration);
+    this.handleSongDetails(configuration);
     this.nowPlayingLookups.poll();
     this.spotifySearchLookups.poll();
     this.pollPlaylistWrites();
@@ -2503,6 +2511,24 @@ class SyncRuntime extends EventTarget {
         // Sync sent more music during the run.
         this.handleSongNames(configuration);
       });
+  }
+
+  /**
+   * Sends Community the length and release date Tagify saved for songs in this library (Community
+   * pending migration 9001), so its Length and Released filters in My library and Smart playlists
+   * cover the whole library. Reads only this computer's saved library, so it needs no turn beside
+   * the Spotify readers above, and never changes track data. Community doesn't advertise it: a
+   * Community without the route answers 404 and is left alone until the next start. Once a start,
+   * then at most every few hours, one run at a time.
+   */
+  private handleSongDetails(configuration: DesktopSyncConfiguration): void {
+    if (!this.started || this.songDetails || this.songDetailsUnsupported) return;
+    if (this.songDetailsRanAt && Date.now() - this.songDetailsRanAt < SONG_DETAILS_INTERVAL_MS) return;
+    this.songDetailsRanAt = Date.now();
+    this.songDetails = runSongDetailReports(this.sideSession(configuration), communitySongDetailSources())
+      .then((run) => { if (run.stopped === "unsupported") this.songDetailsUnsupported = true; })
+      .catch((error) => { console.warn("Tagify sync: song lengths and release dates were not sent", error instanceof Error ? error.message : error); })
+      .finally(() => { this.songDetails = null; });
   }
 
   /**

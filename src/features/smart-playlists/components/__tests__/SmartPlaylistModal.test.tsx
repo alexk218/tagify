@@ -228,6 +228,23 @@ describe("SmartPlaylistModal", () => {
         } finally { vi.useRealTimers(); }
       });
 
+      it("checks the playlists once after a burst of library saves, not once per save", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+          const read = vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict").mockResolvedValue(["spotify:track:matched"]);
+          renderModal({ smartPlaylists: [mockSmartPlaylists[0]] });
+          expect(await screen.findByText("In Sync")).toBeInTheDocument();
+          expect(read).toHaveBeenCalledTimes(1);
+          act(() => {
+            for (let i = 0; i < 5; i += 1) window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+          });
+          await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+          expect(read).toHaveBeenCalledTimes(1);
+          await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
+          await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+        } finally { vi.useRealTimers(); }
+      });
+
       it("suggests restarting Spotify when it stops responding", async () => {
         vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict").mockRejectedValue(
           Object.assign(new Error("Spotify is taking too long to respond."), { spotifyRequestStopped: true, recoveryRequired: true }));

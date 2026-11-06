@@ -1,3 +1,4 @@
+import { compactSongDetailFilters, SONG_DETAIL_FILTER_BOUNDS, SONG_DETAIL_FILTER_FIELDS } from "@/utils/songDetails";
 import type {
   SmartPlaylistCriteria,
   SmartPlaylistFilterCriteria,
@@ -43,6 +44,7 @@ function cloneCriteria(criteria: SmartPlaylistFilterCriteria): SmartPlaylistFilt
     bpmMinFilter: criteria.bpmMinFilter, bpmMaxFilter: criteria.bpmMaxFilter,
     camelotKeyFilters: [...(criteria.camelotKeyFilters ?? [])],
     camelotMinFilter: criteria.camelotMinFilter ?? null, camelotMaxFilter: criteria.camelotMaxFilter ?? null,
+    ...compactSongDetailFilters(criteria),
   };
 }
 
@@ -167,7 +169,9 @@ export function isSmartPlaylistRecipeBundle(value: unknown): value is SmartPlayl
         !c.ratingFilters.every((rating) => typeof rating === "number" && rating >= 0.5 && rating <= 5 && Number.isInteger(rating * 2)) ||
         !nullableNumber(c.energyMinFilter, 0, 10) || !nullableNumber(c.energyMaxFilter, 0, 10) ||
         !nullableNumber(c.bpmMinFilter, 20, 400) || !nullableNumber(c.bpmMaxFilter, 20, 400)) return false;
-    for (const [min, max] of [[c.energyMinFilter, c.energyMaxFilter], [c.bpmMinFilter, c.bpmMaxFilter]]) {
+    if (!SONG_DETAIL_FILTER_FIELDS.every((field) => c[field] === undefined || nullableNumber(c[field], ...SONG_DETAIL_FILTER_BOUNDS[field]))) return false;
+    for (const [min, max] of [[c.energyMinFilter, c.energyMaxFilter], [c.bpmMinFilter, c.bpmMaxFilter],
+      [c.lengthMinFilter, c.lengthMaxFilter], [c.releaseYearMinFilter, c.releaseYearMaxFilter]]) {
       if (typeof min === "number" && typeof max === "number" && min > max) return false;
     }
     const usedKeys = new Set(c.includeTagClauses.flatMap((clause) => [...clause.tagIds, ...clause.excludedTagIds]));

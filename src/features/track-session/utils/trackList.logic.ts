@@ -3,6 +3,7 @@ import { TagTaxonomy } from "@/types/tagData";
 import { parseLocalFileUri } from "@/utils/LocalFileParser";
 import { normalizeCamelotKey, sortCamelotKeys } from "@/utils/camelotKey";
 import { evaluateTagFilterFormula } from "@/utils/tagFilterGroups";
+import { compactSongDetailFilters, matchesSongDetailFilters, releaseYearOf, songDurationMs } from "@/utils/songDetails";
 import {
   buildDuplicateTagNameSet,
   buildResolvedTagLookup,
@@ -200,6 +201,7 @@ export function filterTrackEntries(
     bpmMaxFilter,
     normalizedCamelotKeyFilters,
     searchTerm,
+    ...songDetailFilters
   }: TrackListFilterInputs,
 ): TrackListEntry[] {
   const resolvedIncludeTagClauses = includeTagClauses ?? [];
@@ -244,6 +246,7 @@ export function filterTrackEntries(
       normalizedCamelotKeyFilters.length === 0 ||
       (normalizedTrackCamelotKey !== null &&
         normalizedCamelotKeyFilters.includes(normalizedTrackCamelotKey));
+    const matchesSongDetails = matchesSongDetailFilters(trackData, songDetailFilters);
 
     if (isLocalFile && !hasMetadata) {
       return (
@@ -254,7 +257,8 @@ export function filterTrackEntries(
         matchesEnergyMax &&
         matchesBpmMin &&
         matchesBpmMax &&
-        matchesCamelotKey
+        matchesCamelotKey &&
+        matchesSongDetails
       );
     }
 
@@ -271,7 +275,8 @@ export function filterTrackEntries(
       matchesEnergyMax &&
       matchesBpmMin &&
       matchesBpmMax &&
-      matchesCamelotKey
+      matchesCamelotKey &&
+      matchesSongDetails
     );
   });
 }
@@ -285,14 +290,21 @@ export function collectTrackFilterData(
   allEnergyLevels: Set<number>;
   allBpmValues: Set<number>;
   allCamelotKeys: string[];
+  hasSongLengths: boolean;
+  allReleaseYears: Set<number>;
 } {
   const allUniqueTags = new Map<string, TagDisplayInfo>();
   const ratings = new Set<number>();
   const energies = new Set<number>();
   const bpmValues = new Set<number>();
   const camelotKeys = new Set<string>();
+  const releaseYears = new Set<number>();
+  let hasSongLengths = false;
 
   trackEntries.forEach(([, track]) => {
+    if (!hasSongLengths && songDurationMs(track.durationMs) !== null) hasSongLengths = true;
+    const releaseYear = releaseYearOf(track.releaseDate);
+    if (releaseYear !== null) releaseYears.add(releaseYear);
     if (track.rating > 0) {
       ratings.add(track.rating);
     }
@@ -322,6 +334,8 @@ export function collectTrackFilterData(
     allEnergyLevels: energies,
     allBpmValues: bpmValues,
     allCamelotKeys: sortCamelotKeys(camelotKeys),
+    hasSongLengths,
+    allReleaseYears: releaseYears,
   };
 }
 
@@ -345,6 +359,7 @@ export function buildSmartPlaylistCriteria({
   bpmMinFilter,
   bpmMaxFilter,
   normalizedCamelotKeyFilters,
+  ...songDetailFilters
 }: BuildSmartPlaylistCriteriaInputs): SmartPlaylistCriteria {
   return {
     playlistId,
@@ -358,6 +373,7 @@ export function buildSmartPlaylistCriteria({
       bpmMinFilter,
       bpmMaxFilter,
       camelotKeyFilters: normalizedCamelotKeyFilters,
+      ...compactSongDetailFilters(songDetailFilters),
     },
     isActive: true,
     createdAt: Date.now(),

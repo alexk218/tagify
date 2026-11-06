@@ -2,8 +2,10 @@ import type {
   TagFilterClause,
   TagFilterOperator,
 } from "@/utils/tagFilterGroups";
+import type { SongDetailFilterCriteria } from "@/utils/songDetails";
 
-export interface SmartPlaylistFilterCriteria {
+/** Song length and release year filters are optional so earlier saved playlists stay valid. */
+export interface SmartPlaylistFilterCriteria extends SongDetailFilterCriteria {
   includeTagClauses: TagFilterClause[];
   clauseConnectors: TagFilterOperator[];
   ratingFilters: number[];

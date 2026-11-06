@@ -115,6 +115,14 @@ export interface TrackData {
   backfillAttempts?: number;
   audioFeaturesBackfillRevision?: string;
   albumBackfillAttempts?: number;
+  /** Song length from Spotify, filled in automatically. */
+  durationMs?: number;
+  /** The album's release date from Spotify: "2024", "2024-06" or "2024-06-01". */
+  releaseDate?: string;
+  /** Failed lookups of length and release date, so unavailable songs aren't retried forever. */
+  songDetailsAttempts?: number;
+  /** When length and release date were last looked up and something was still missing (ms), so songs Tagify gave up on are tried again later. */
+  songDetailsCheckedAt?: number;
 }
 
 export interface RecordingIdentity {

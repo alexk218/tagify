@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   PAGINATION_BATCH_SIZE,
   SORT_OPTIONS,
@@ -8,6 +8,7 @@ import {
 } from "@/constants/trackList";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
 import { normalizeCamelotKey, sortCamelotKeys } from "@/utils/camelotKey";
+import type { SongDetailFilterCriteria } from "@/utils/songDetails";
 
 interface UseTrackListControlsOptions {
   includeTagClauses: {
@@ -65,6 +66,20 @@ export function useTrackListControls({
     "tagify:camelotKeyFilters",
     [],
   );
+  const [lengthMinFilter, setLengthMinFilter] = useLocalStorage<number | null>("tagify:lengthMinFilter", null);
+  const [lengthMaxFilter, setLengthMaxFilter] = useLocalStorage<number | null>("tagify:lengthMaxFilter", null);
+  const [releaseYearMinFilter, setReleaseYearMinFilter] = useLocalStorage<number | null>("tagify:releaseYearMinFilter", null);
+  const [releaseYearMaxFilter, setReleaseYearMaxFilter] = useLocalStorage<number | null>("tagify:releaseYearMaxFilter", null);
+  const songDetailFilters = useMemo<Required<SongDetailFilterCriteria>>(
+    () => ({ lengthMinFilter, lengthMaxFilter, releaseYearMinFilter, releaseYearMaxFilter }),
+    [lengthMinFilter, lengthMaxFilter, releaseYearMinFilter, releaseYearMaxFilter],
+  );
+  const setSongDetailFilters = useCallback((filters: SongDetailFilterCriteria) => {
+    setLengthMinFilter(filters.lengthMinFilter ?? null);
+    setLengthMaxFilter(filters.lengthMaxFilter ?? null);
+    setReleaseYearMinFilter(filters.releaseYearMinFilter ?? null);
+    setReleaseYearMaxFilter(filters.releaseYearMaxFilter ?? null);
+  }, [setLengthMaxFilter, setLengthMinFilter, setReleaseYearMaxFilter, setReleaseYearMinFilter]);
   const [showAdvancedFilters, setShowAdvancedFilters] =
     useLocalStorage<boolean>("tagify:showAdvancedFilters", false);
   const [sortBy, setSortBy] = useLocalStorage<SortOption>(
@@ -98,6 +113,7 @@ export function useTrackListControls({
     bpmMinFilter,
     bpmMaxFilter,
     normalizedCamelotKeyFilters,
+    songDetailFilters,
   ]);
 
   const toggleRatingFilter = (rating: number) => {
@@ -144,6 +160,28 @@ export function useTrackListControls({
     }
   };
 
+  /** Keeps From at or below To, like the BPM range. */
+  const handleRangeChange = (
+    value: number | null,
+    edge: "min" | "max",
+    other: number | null,
+    setValue: (next: number | null) => void,
+    setOther: (next: number | null) => void,
+  ) => {
+    setValue(value);
+    if (value !== null && other !== null && (edge === "min" ? value > other : other > value)) setOther(value);
+  };
+  const selectValue = (event: React.ChangeEvent<HTMLSelectElement>) =>
+    event.target.value === "" ? null : parseInt(event.target.value, 10);
+  const handleLengthMinChange = (event: React.ChangeEvent<HTMLSelectElement>) =>
+    handleRangeChange(selectValue(event), "min", lengthMaxFilter, setLengthMinFilter, setLengthMaxFilter);
+  const handleLengthMaxChange = (event: React.ChangeEvent<HTMLSelectElement>) =>
+    handleRangeChange(selectValue(event), "max", lengthMinFilter, setLengthMaxFilter, setLengthMinFilter);
+  const handleReleaseYearMinChange = (event: React.ChangeEvent<HTMLSelectElement>) =>
+    handleRangeChange(selectValue(event), "min", releaseYearMaxFilter, setReleaseYearMinFilter, setReleaseYearMaxFilter);
+  const handleReleaseYearMaxChange = (event: React.ChangeEvent<HTMLSelectElement>) =>
+    handleRangeChange(selectValue(event), "max", releaseYearMinFilter, setReleaseYearMaxFilter, setReleaseYearMinFilter);
+
   const toggleCamelotKeyFilter = (camelotKey: string) => {
     const normalizedCamelotKey = normalizeCamelotKey(camelotKey);
     if (!normalizedCamelotKey) {
@@ -168,6 +206,7 @@ export function useTrackListControls({
     setBpmMinFilter(null);
     setBpmMaxFilter(null);
     setCamelotKeyFilters([]);
+    setSongDetailFilters({});
   };
 
   const activeFilterCount =
@@ -177,6 +216,8 @@ export function useTrackListControls({
     (energyMinFilter !== null || energyMaxFilter !== null ? 1 : 0) +
     (bpmMinFilter !== null || bpmMaxFilter !== null ? 1 : 0) +
     (normalizedCamelotKeyFilters.length > 0 ? 1 : 0) +
+    (lengthMinFilter !== null || lengthMaxFilter !== null ? 1 : 0) +
+    (releaseYearMinFilter !== null || releaseYearMaxFilter !== null ? 1 : 0) +
     (searchTerm.trim() !== "" ? 1 : 0);
 
   return {
@@ -214,6 +255,12 @@ export function useTrackListControls({
     handleBpmMinChange,
     handleBpmMaxChange,
     toggleCamelotKeyFilter,
+    songDetailFilters,
+    setSongDetailFilters,
+    handleLengthMinChange,
+    handleLengthMaxChange,
+    handleReleaseYearMinChange,
+    handleReleaseYearMaxChange,
     clearAllFilters,
     activeFilterCount,
   };

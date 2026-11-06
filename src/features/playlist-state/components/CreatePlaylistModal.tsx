@@ -2,11 +2,14 @@ import React, { useEffect, useState } from "react";
 import styles from "./CreatePlaylistModal.module.css";
 import { Portal } from "@/components/ui";
 import { sortCamelotKeys } from "@/utils/camelotKey";
+import { songDetailFilterParts, type SongDetailFilterCriteria } from "@/utils/songDetails";
 import { Lightbulb } from "lucide-react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faBolt,
+  faCalendar,
   faChartSimple,
+  faClock,
   faMusic,
   faTag,
   faTrophy,
@@ -24,6 +27,7 @@ interface CreatePlaylistModalProps {
   bpmMinFilter: number | null;
   bpmMaxFilter: number | null;
   camelotKeyFilters: string[];
+  songDetailFilters?: SongDetailFilterCriteria;
   editingSmartPlaylistName?: string;
   /** Set when the tracks come from a list opened in Stats rather than from filters. */
   statsListLabel?: string;
@@ -48,6 +52,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   bpmMinFilter,
   bpmMaxFilter,
   camelotKeyFilters,
+  songDetailFilters = {},
   editingSmartPlaylistName,
   statsListLabel,
   onClose,
@@ -56,6 +61,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   const isEditingSmartPlaylist = Boolean(editingSmartPlaylistName);
   const [isSmartPlaylist, setIsSmartPlaylist] = useState(false);
   const normalizedCamelotKeyFilters = sortCamelotKeys(camelotKeyFilters);
+  const songDetailParts = songDetailFilterParts(songDetailFilters);
 
   const getDefaultPlaylistName = () => {
     if (statsListLabel) return `Tagify - ${statsListLabel}`.slice(0, 100);
@@ -99,6 +105,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
       const suffix = remainingCount > 0 ? `+${remainingCount}` : "";
       filterParts.push(`K:${keyPrefix}${suffix}`);
     }
+    filterParts.push(...songDetailParts.map(({ label, value }) => `${label} ${value}`));
 
     const prefix = isSmartPlaylist ? "Smart " : "";
 
@@ -164,6 +171,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
     if (normalizedCamelotKeyFilters.length > 0) {
       filterParts.push(`Key: ${normalizedCamelotKeyFilters.join(", ")}`);
     }
+    filterParts.push(...songDetailParts.map(({ label, value }) => `${label}: ${value}`));
 
     let description =
       filterParts.length > 0
@@ -331,7 +339,8 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
                 energyMaxFilter === null &&
                 bpmMinFilter === null &&
                 bpmMaxFilter === null &&
-                normalizedCamelotKeyFilters.length === 0 ? (
+                normalizedCamelotKeyFilters.length === 0 &&
+                songDetailParts.length === 0 ? (
                   <div className={styles.filterRow}>
                     <span className={styles.filterLabel}>
                       No filters applied
@@ -354,7 +363,8 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
                       energyMaxFilter !== null ||
                       bpmMinFilter !== null ||
                       bpmMaxFilter !== null ||
-                      normalizedCamelotKeyFilters.length > 0) && (
+                      normalizedCamelotKeyFilters.length > 0 ||
+                      songDetailParts.length > 0) && (
                       <div className={styles.compactFilterRow}>
                         {ratingFilters.length > 0 && (
                           <span className={styles.compactFilter}>
@@ -396,6 +406,12 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
                             {normalizedCamelotKeyFilters.join(", ")}
                           </span>
                         )}
+                        {songDetailParts.map(({ label, value }) => (
+                          <span key={label} className={styles.compactFilter}>
+                            <FontAwesomeIcon icon={label === "Length" ? faClock : faCalendar} />
+                            <strong>{label}:</strong> {value}
+                          </span>
+                        ))}
                       </div>
                     )}
                   </>

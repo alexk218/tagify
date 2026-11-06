@@ -1,3 +1,4 @@
+import { songDetailFilterLabels } from "@/utils/songDetails";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Portal } from "@/components/ui";
 import type { TagTaxonomy, TrackData } from "@/types/tagData";
@@ -35,6 +36,7 @@ function describeRules(criteria: SmartPlaylistFilterCriteria, name: (id: string)
   if (criteria.bpmMinFilter !== null || criteria.bpmMaxFilter !== null) parts.push(`BPM ${criteria.bpmMinFilter ?? "any"}–${criteria.bpmMaxFilter ?? "any"}`);
   if (criteria.camelotKeyFilters?.length) parts.push(`Key ${criteria.camelotKeyFilters.join(" or ")}`);
   else if (criteria.camelotMinFilter || criteria.camelotMaxFilter) parts.push(`Key ${criteria.camelotMinFilter ?? "any"}–${criteria.camelotMaxFilter ?? "any"}`);
+  parts.push(...songDetailFilterLabels(criteria));
   return parts.filter(Boolean).join(" · ") || "All songs with saved Tagify details";
 }
 

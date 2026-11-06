@@ -1,3 +1,4 @@
+import { songDetailFilterParts } from "@/utils/songDetails";
 import { spotifyRead, throwIfSpotifyRequestStopped } from "@/services/SpotifyRequests";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./SmartPlaylistModal.module.css";
@@ -8,6 +9,7 @@ import { formatCondensedDate, formatTimestamp } from "@/utils/formatters";
 import { normalizeCamelotKey, sortCamelotKeys } from "@/utils/camelotKey";
 import { storageService } from "@/services/storage/StorageService";
 import { collectMatchingTrackUris } from "../utils/smartPlaylist.syncUtils";
+import { recordingDisplayKeys } from "@/features/recording-reuse/utils/recordingLibrary";
 import { hasConfirmedMembershipBaseline } from "../utils/smartPlaylist.storage";
 import { describeSmartPlaylistCheckFailure, formatCheckRetryWait, mostActionableCheckFailure, type SmartPlaylistCheckFailure } from "../utils/smartPlaylist.checkFailure";
 import { spotifyApiService } from "@/services/SpotifyApiService";
@@ -56,6 +58,8 @@ export const SMART_PLAYLIST_MOBILE_TAGGING_INTRO_KEY = MOBILE_TAGGING_INTRO_KEY;
 type PlaylistSortOption =
   (typeof PLAYLIST_SORT_OPTIONS)[keyof typeof PLAYLIST_SORT_OPTIONS];
 type SortOrder = (typeof SORT_ORDERS)[keyof typeof SORT_ORDERS];
+
+const DATA_UPDATE_RECHECK_DELAY_MS = 2_000;
 
 interface SmartPlaylistModalProps {
   smartPlaylists: SmartPlaylistCriteria[];
@@ -168,6 +172,19 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     reader.readAsText(file);
   };
 
+  // Matching every playlist against a large library takes a while, so do it
+  // only when the songs or playlists change, not on every render.
+  const matchingSongCounts = useMemo(() => {
+    const counts = new Map<SmartPlaylistCriteria, number>();
+    if (!tracks) return counts;
+    const recordingKeys = recordingDisplayKeys(tracks);
+    smartPlaylists.forEach((playlist) => {
+      counts.set(playlist, collectMatchingTrackUris(tracks, playlist.criteria, [], recordingKeys)
+        .filter((uri) => uri.startsWith("spotify:track:")).length);
+    });
+    return counts;
+  }, [tracks, smartPlaylists]);
+
   const filteredAndSortedPlaylists = useMemo(() => {
     const filtered = smartPlaylists.filter((playlist) =>
       playlist.playlistName.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -265,12 +282,13 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
       try {
         const data = await storageService.loadAllStrict();
         if (!active) return;
+        const recordingKeys = recordingDisplayKeys(data.tracks);
         const results = await Promise.all(connected.map(async (playlist) => {
           try {
             const actual = await spotifyApiService.getAllTrackUrisInPlaylistStrict(playlist.playlistId);
             const actualSet = new Set(actual);
             // Matching local files must be added manually, so their absence isn't a sync failure.
-            const expected = new Set(collectMatchingTrackUris(data.tracks, playlist.criteria).filter((uri) => !uri.startsWith("spotify:local:") || actualSet.has(uri)));
+            const expected = new Set(collectMatchingTrackUris(data.tracks, playlist.criteria, [], recordingKeys).filter((uri) => !uri.startsWith("spotify:local:") || actualSet.has(uri)));
             const matches = actual.length === expected.size && new Set(actual).size === actual.length && actual.every((uri) => expected.has(uri));
             return { id: playlist.playlistId, count: actual.length, status: matches ? "synced" as const : "needsSync" as const };
           } catch (error) {
@@ -299,9 +317,15 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
       if (delay !== undefined) recheck = setTimeout(() => { void fetchCounts(); }, Math.min(delay, 2 ** 31 - 1));
     };
     void fetchCounts();
-    const refresh = () => { void fetchCounts(); };
+    // Saves and syncs arrive in bursts; reading every playlist from Spotify
+    // again for each one makes large libraries unusable, so wait for a pause.
+    let pendingRefresh: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => {
+      clearTimeout(pendingRefresh);
+      pendingRefresh = setTimeout(() => { void fetchCounts(); }, DATA_UPDATE_RECHECK_DELAY_MS);
+    };
     window.addEventListener("tagify:dataUpdated", refresh);
-    return () => { active = false; clearTimeout(recheck); window.removeEventListener("tagify:dataUpdated", refresh); };
+    return () => { active = false; clearTimeout(recheck); clearTimeout(pendingRefresh); window.removeEventListener("tagify:dataUpdated", refresh); };
   }, [smartPlaylists]);
   const checkFailure = mostActionableCheckFailure(Object.values(checkFailures));
 
@@ -734,7 +758,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                       ? "..."
                       : (playlistTrackCounts[playlist.playlistId] ?? "—");
 
-                    const matchingCount = tracks ? collectMatchingTrackUris(tracks, playlist.criteria).filter((uri) => uri.startsWith("spotify:track:")).length : null;
+                    const matchingCount = tracks ? matchingSongCounts.get(playlist) ?? null : null;
 
                     // Keep all criteria text compact while preserving exact wording.
                     const criteriaTokens: string[] = [];
@@ -742,6 +766,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                     if (energyText) criteriaTokens.push(energyText);
                     if (bpmText) criteriaTokens.push(bpmText);
                     if (camelotText) criteriaTokens.push(`Key: ${camelotText}`);
+                    criteriaTokens.push(...songDetailFilterParts(playlist.criteria).map(({ label, value }) => `${label}: ${value}`));
 
                     return (
                       <div

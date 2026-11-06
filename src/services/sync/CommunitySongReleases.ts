@@ -1,3 +1,4 @@
+import { releaseDate } from "@/utils/songDetails";
 import {
   assertSongReleasesNeeded, isSpotifyImageUrl, MAX_SONG_RELEASE_REPORT_ITEMS, MAX_SONG_RELEASES_NEEDED,
   normalizeIsrc, normalizeReleaseKind, normalizeReleaseName, SONG_RELEASES_PROTOCOL_VERSION,
@@ -65,19 +66,7 @@ const stopFor = (status: number): NonNullable<SongReleaseRun["stopped"]> =>
 const uriOf = (entity: SongReleaseEntityV1) => `spotify:track:${entity.providerId}`;
 const albumIdOf = (uri: string | null | undefined) => /^spotify:album:([A-Za-z0-9]{22})$/.exec(uri ?? "")?.[1] ?? null;
 
-/** Spotify's release date at the precision Spotify knows it: "2024", "2024-06" or "2024-06-01". */
-export function releaseDate(date: unknown): string | null {
-  if (!date || typeof date !== "object") return null;
-  const { isoString, precision, year } = date as { isoString?: unknown; precision?: unknown; year?: unknown };
-  const iso = typeof isoString === "string" && /^[0-9]{4}-[0-9]{2}-[0-9]{2}/.test(isoString) ? isoString : null;
-  const known = typeof precision === "string" ? precision.toUpperCase() : null;
-  if (iso && known === "DAY") return iso.slice(0, 10);
-  if (iso && known === "MONTH") return iso.slice(0, 7);
-  if (iso && known === "YEAR") return iso.slice(0, 4);
-  // Without a precision only the year is certain: Spotify fills unknown months and days with 01.
-  if (typeof year === "number" && Number.isInteger(year) && year >= 1000 && year <= 9999) return String(year);
-  return iso ? iso.slice(0, 4) : null;
-}
+export { releaseDate };
 
 /** The cover Community shows: Spotify's 300 px image when listed, otherwise the largest up to 640 px. */
 export function coverImage(sources: unknown): string | null {

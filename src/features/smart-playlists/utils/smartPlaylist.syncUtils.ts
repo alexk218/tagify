@@ -1,6 +1,6 @@
 import { SmartPlaylistFilterCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
 import { TagDataStructure, TrackData } from "@/types/tagData";
-import { evaluateTrackMatchesCriteria } from "./smartPlaylist.criteria";
+import { compileTrackCriteria } from "./smartPlaylist.criteria";
 import { applyTagChoice, smartPlaylistTagChoices } from "./smartPlaylist.tagChoices";
 import { collapseRecordingEntries, recordingDisplayKeys } from "@/features/recording-reuse/utils/recordingLibrary";
 
@@ -87,21 +87,26 @@ export function findDuplicateTrackUris(trackUris: string[]): {
   };
 }
 
+/**
+ * Pass `recordingKeys` from `recordingDisplayKeys(tracks)` when checking several
+ * playlists against the same library, so it is built once instead of per playlist.
+ */
 export function collectMatchingTrackUris(
   tracks: TagDataStructure["tracks"],
   criteria: SmartPlaylistFilterCriteria,
   preferredUris: string[] = [],
+  recordingKeys?: Map<string, string>,
 ): string[] {
+  const matchesCriteria = compileTrackCriteria(criteria);
   const matchingTrackUris: string[] = [];
 
-  Object.entries(tracks).forEach(([trackUri, trackData]) => {
-    const matches = evaluateTrackMatchesCriteria(trackData, criteria);
-    if (matches) {
+  for (const trackUri in tracks) {
+    if (matchesCriteria(tracks[trackUri])) {
       matchingTrackUris.push(trackUri);
     }
-  });
+  }
 
-  const keys = recordingDisplayKeys(tracks);
+  const keys = recordingKeys ?? recordingDisplayKeys(tracks);
   const matching = new Set(matchingTrackUris);
   const ordered = [...new Set([...preferredUris.filter(uri => matching.has(uri)), ...matchingTrackUris])];
   return collapseRecordingEntries(ordered.map(uri => [uri, tracks[uri]]), keys).map(([uri]) => uri);

@@ -188,32 +188,41 @@ export function evaluateTagFilterFormula(
   trackTagIds: string[],
   formula: TagFilterFormula,
 ): boolean {
+  return compileTagFilterFormula(formula)(trackTagIds);
+}
+
+/** Prepares a formula once so it can be checked against many songs quickly. */
+export function compileTagFilterFormula(
+  formula: TagFilterFormula,
+): (trackTagIds: string[]) => boolean {
   const normalizedFormula = normalizeTagFilterFormula(formula);
 
   if (normalizedFormula.clauses.length === 0) {
-    return true;
+    return () => true;
   }
 
-  const trackTagIdSet = new Set(trackTagIds);
-  const clauseResults = normalizedFormula.clauses.map((clause) =>
-    evaluateClause(trackTagIdSet, clause),
-  );
+  return (trackTagIds) => {
+    const trackTagIdSet = new Set(trackTagIds);
+    const clauseResults = normalizedFormula.clauses.map((clause) =>
+      evaluateClause(trackTagIdSet, clause),
+    );
 
-  const andGroups: boolean[] = [clauseResults[0]];
+    const andGroups: boolean[] = [clauseResults[0]];
 
-  normalizedFormula.connectors.forEach((connector, connectorIndex) => {
-    const nextResult = clauseResults[connectorIndex + 1];
+    normalizedFormula.connectors.forEach((connector, connectorIndex) => {
+      const nextResult = clauseResults[connectorIndex + 1];
 
-    if (connector === TAG_FILTER_OPERATORS.AND) {
-      andGroups[andGroups.length - 1] =
-        andGroups[andGroups.length - 1] && nextResult;
-      return;
-    }
+      if (connector === TAG_FILTER_OPERATORS.AND) {
+        andGroups[andGroups.length - 1] =
+          andGroups[andGroups.length - 1] && nextResult;
+        return;
+      }
 
-    andGroups.push(nextResult);
-  });
+      andGroups.push(nextResult);
+    });
 
-  return andGroups.some(Boolean);
+    return andGroups.some(Boolean);
+  };
 }
 
 export interface TagFilterLocation {
