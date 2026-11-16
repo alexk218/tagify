@@ -3,13 +3,13 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.31
+    1.0.32
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
 #>
 
-$SCRIPT_VERSION = "1.0.31"
+$SCRIPT_VERSION = "1.0.32"
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -23,6 +23,12 @@ $script:USER_LOG = ""
 $script:INSTALLATION_FAILED = $false
 $script:INSTALLATION_ACTION = "Unknown"
 $script:INSTALL_START_TIME = $null
+# GitHub's API allows 60 unsigned requests an hour per internet address. Each run reads the two
+# release records once and reuses them; the rate-limit message is kept so later steps can show it.
+$script:GITHUB_API_CACHE = @{}
+$script:GITHUB_RATE_LIMIT_MESSAGE = $null
+$script:TAGIFY_RELEASE_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
+$script:SPICETIFY_RELEASE_URL = 'https://api.github.com/repos/spicetify/cli/releases/latest'
 $spicetifyFolderPath = "$env:LOCALAPPDATA\spicetify"
 $spicetifyOldFolderPath = "$HOME\spicetify-cli"
 # Windows can give TEMP as an 8.3 short path such as C:\Users\HOMEPC~1\... when the user name has a space.
@@ -404,6 +410,113 @@ function Expand-ZipFile {
 }
 #endregion Logging
 
+#region GitHub API
+function Get-GitHubRateLimitMessage {
+    param([Nullable[long]]$ResetEpoch)
+
+    $when = "in up to an hour"
+    if ($ResetEpoch) {
+        $reset = [DateTimeOffset]::FromUnixTimeSeconds([long]$ResetEpoch).LocalDateTime
+        $minutes = [math]::Max(1, [math]::Ceiling(($reset - (Get-Date)).TotalMinutes))
+        $when = "after $($reset.ToString('t')) (about $minutes minute$(if ($minutes -ne 1) { 's' }))"
+    }
+
+    # One line: Tagify Manager shows only the line that follows "ERROR:".
+    return "GitHub, where Tagify downloads from, is temporarily limiting your internet connection, so setup can't continue right now (your internet itself is working). GitHub allows 60 checks an hour per internet address, and shared connections like work, school, VPNs or some mobile networks, or several tries in a row, can use them up. Try again $when, or switch connections (turn off your VPN or use your phone's hotspot) and try again right away."
+}
+
+function Get-HttpErrorDetails {
+    param($ErrorRecord)
+
+    # Windows PowerShell 5.1 gives an HttpWebResponse; PowerShell 7 an HttpResponseMessage.
+    $details = @{ HasResponse = $false; StatusCode = 0; Remaining = $null; Reset = $null; Body = "" }
+    $response = $null
+    try { $response = $ErrorRecord.Exception.Response } catch { }
+    if ($response) {
+        $details.HasResponse = $true
+        try { $details.StatusCode = [int]$response.StatusCode } catch { }
+        foreach ($name in 'X-RateLimit-Remaining', 'X-RateLimit-Reset') {
+            $value = $null
+            try {
+                if ($response.Headers -is [System.Net.WebHeaderCollection]) { $value = $response.Headers[$name] }
+                else { $values = $null; if ($response.Headers.TryGetValues($name, [ref]$values)) { $value = @($values)[0] } }
+            }
+            catch { }
+            if ($value -match '^\d+$') {
+                if ($name -eq 'X-RateLimit-Remaining') { $details.Remaining = [long]$value } else { $details.Reset = [long]$value }
+            }
+        }
+    }
+    try { if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) { $details.Body = [string]$ErrorRecord.ErrorDetails.Message } } catch { }
+    return $details
+}
+
+function Test-GitHubRateLimited {
+    param($Details)
+
+    return ($Details.StatusCode -eq 429 -or
+        ($Details.StatusCode -eq 403 -and ($Details.Remaining -eq 0 -or $Details.Body -match 'rate limit')))
+}
+
+function Invoke-GitHubApi {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [int]$TimeoutSec = 15
+    )
+
+    if ($script:GITHUB_API_CACHE.ContainsKey($Uri)) {
+        return $script:GITHUB_API_CACHE[$Uri]
+    }
+    try {
+        $result = Invoke-RestMethod -Uri $Uri -TimeoutSec $TimeoutSec
+    }
+    catch {
+        $details = Get-HttpErrorDetails $_
+        if (Test-GitHubRateLimited $details) {
+            $script:GITHUB_RATE_LIMIT_MESSAGE = Get-GitHubRateLimitMessage -ResetEpoch $details.Reset
+            Write-Log "GitHub rate limit reached for $Uri (HTTP $($details.StatusCode), resets at epoch $($details.Reset))"
+            throw $script:GITHUB_RATE_LIMIT_MESSAGE
+        }
+        throw
+    }
+    $script:GITHUB_API_CACHE[$Uri] = $result
+    return $result
+}
+
+# Confirms GitHub can be reached and that this connection has enough GitHub API requests left
+# for setup. GitHub doesn't count /rate_limit requests against the limit.
+function Test-GitHubAccess {
+    [CmdletBinding()]
+    param()
+
+    $status = $null
+    try {
+        $status = Invoke-RestMethod -Uri 'https://api.github.com/rate_limit' -TimeoutSec 10
+    }
+    catch {
+        $details = Get-HttpErrorDetails $_
+        if (-not $details.HasResponse) {
+            Write-Log "GitHub could not be reached: $_"
+            Write-ErrorAndExit "Tagify setup couldn't reach GitHub (api.github.com), where Tagify downloads from. Check that you're connected to the internet. If you are, a firewall, antivirus, VPN or network filter may be blocking GitHub: allow github.com and api.github.com, or try another connection."
+        }
+        # GitHub answered, so the connection works; the release checks below report anything else.
+        Write-Log "GitHub answered the connection check with HTTP $($details.StatusCode)"
+        if (Test-GitHubRateLimited $details) {
+            Write-ErrorAndExit (Get-GitHubRateLimitMessage -ResetEpoch $details.Reset)
+        }
+        return
+    }
+
+    $core = $status.resources.core
+    Write-Log "Internet connection OK (GitHub API requests left this hour: $($core.remaining) of $($core.limit))"
+    $needed = @($script:TAGIFY_RELEASE_URL, $script:SPICETIFY_RELEASE_URL | Where-Object { -not $script:GITHUB_API_CACHE.ContainsKey($_) }).Count
+    if ($null -ne $core.remaining -and [long]$core.remaining -lt $needed) {
+        Write-ErrorAndExit (Get-GitHubRateLimitMessage -ResetEpoch $core.reset)
+    }
+}
+#endregion GitHub API
+
 #region Prerequisites and Validation
 function Test-Paths {
     Write-Log "=== DIAGNOSTIC TEST START ===" -ForegroundColor Cyan
@@ -453,13 +566,7 @@ function Test-Prerequisites {
     
     
     # Test internet connection
-    try {
-        Invoke-WebRequest -Uri "https://api.github.com" -UseBasicParsing -TimeoutSec 10 | Out-Null
-        Write-Log "Internet connection OK"
-    }
-    catch {
-        Write-ErrorAndExit "No internet connection. Please connect to the internet and try again."
-    }
+    Test-GitHubAccess
 
     # Check Spotify installation
     Write-Log "Verifying Spotify installation..."
@@ -574,7 +681,7 @@ function Get-LatestSpicetifyReleaseInfo {
         [int]$TimeoutSec = 15
     )
 
-    $latestRelease = Invoke-RestMethod -Uri 'https://api.github.com/repos/spicetify/cli/releases/latest' -TimeoutSec $TimeoutSec
+    $latestRelease = Invoke-GitHubApi -Uri $script:SPICETIFY_RELEASE_URL -TimeoutSec $TimeoutSec
     return @{
         Version = $latestRelease.tag_name -replace '^v', ''
         Body    = [string]$latestRelease.body
@@ -613,8 +720,7 @@ function Get-LatestTagifyVersion {
     param()
 
     try {
-        $apiUrl = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
-        $latestRelease = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 15
+        $latestRelease = Invoke-GitHubApi -Uri $script:TAGIFY_RELEASE_URL -TimeoutSec 15
         
         $version = $latestRelease.tag_name -replace 'v', ''
         $downloadUrl = $null
@@ -779,6 +885,9 @@ function Get-SystemState {
     # Get current versions
     $currentTagify = Get-InstalledTagifyVersion
     $latestTagifyInfo = Get-LatestTagifyVersion
+    if (-not $latestTagifyInfo.Success -and $script:GITHUB_RATE_LIMIT_MESSAGE) {
+        Write-ErrorAndExit $script:GITHUB_RATE_LIMIT_MESSAGE
+    }
     $spicetifyState = Test-SpicetifyState
     
     $systemState = @{
@@ -960,6 +1069,7 @@ function Install-SpicetifyCore {
         Write-Log 'Spicetify installation completed'
     }
     catch {
+        if ($script:GITHUB_RATE_LIMIT_MESSAGE) { Write-ErrorAndExit $script:GITHUB_RATE_LIMIT_MESSAGE }
         Write-ErrorAndExit "Failed to install Spicetify: $_"
     }
 }
@@ -1115,7 +1225,7 @@ function Download-TagifyRelease {
     $zipPath = Join-Path $tempDir "tagify.zip"
     
     try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" -TimeoutSec 15
+        $release = Invoke-GitHubApi -Uri $script:TAGIFY_RELEASE_URL -TimeoutSec 15
         $asset = $release.assets | Where-Object { $_.browser_download_url -eq $DownloadUrl -and $_.name -eq "tagify-$($release.tag_name).zip" } | Select-Object -First 1
         if (-not $asset -or $asset.digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or $DownloadUrl -ne "https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$($release.tag_name)/$($asset.name)") { throw "The Tagify download could not be verified. Check again before installing." }
         Write-Log "Download URL: $DownloadUrl"
@@ -1139,6 +1249,7 @@ function Download-TagifyRelease {
     }
     catch {
         Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        if ($script:GITHUB_RATE_LIMIT_MESSAGE) { Write-ErrorAndExit $script:GITHUB_RATE_LIMIT_MESSAGE }
         Write-ErrorAndExit "Failed to download Tagify: $_"
     }
 }
