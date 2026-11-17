@@ -3,13 +3,13 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.32
+    1.0.33
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
 #>
 
-$SCRIPT_VERSION = "1.0.32"
+$SCRIPT_VERSION = "1.0.33"
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -27,6 +27,8 @@ $script:INSTALL_START_TIME = $null
 # release records once and reuses them; the rate-limit message is kept so later steps can show it.
 $script:GITHUB_API_CACHE = @{}
 $script:GITHUB_RATE_LIMIT_MESSAGE = $null
+# Set when Windows runs every program as administrator (UAC off, built-in Administrator account).
+$script:SPICETIFY_BYPASS_ADMIN = $false
 $script:TAGIFY_RELEASE_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
 $script:SPICETIFY_RELEASE_URL = 'https://api.github.com/repos/spicetify/cli/releases/latest'
 $spicetifyFolderPath = "$env:LOCALAPPDATA\spicetify"
@@ -542,6 +544,103 @@ function Test-Paths {
     Write-Log "=== DIAGNOSTIC TEST END ===" -ForegroundColor Cyan
 }
 
+function Get-ElevationState {
+    <#
+    .SYNOPSIS
+        Says whether setup runs as administrator, and whether Windows leaves the person any other way to run it.
+    .NOTES
+        With User Account Control turned off, or on the built-in Administrator account (which Windows doesn't
+        prompt for), every program the person opens runs as administrator, Spotify included. Telling them to
+        open Tagify Manager "normally" can't work there, so setup runs Spicetify with --bypass-admin instead.
+        Anywhere else, administrator rights came from "Run as administrator" (or a program that was), and
+        Spicetify would patch Spotify from a different context than the one Spotify runs in.
+    #>
+    $state = @{
+        IsAdmin            = $false
+        Unavoidable        = $false
+        Reason             = ''
+        AccountName        = ''
+        DesktopAccountName = ''
+    }
+
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        $state.IsAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        $state.AccountName = $identity.Name
+    }
+    catch {
+        return $state
+    }
+    if (-not $state.IsAdmin) { return $state }
+
+    $policy = $null
+    try {
+        $policy = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction Stop
+    }
+    catch { }
+
+    if ($policy -and ($policy.PSObject.Properties.Name -contains 'EnableLUA') -and [int]$policy.EnableLUA -eq 0) {
+        $state.Unavoidable = $true
+        $state.Reason = 'User Account Control is turned off, so every program runs as administrator'
+    }
+    elseif ($identity.User -and $identity.User.Value -match '-500$') {
+        $filtered = $policy -and ($policy.PSObject.Properties.Name -contains 'FilterAdministratorToken') -and [int]$policy.FilterAdministratorToken -eq 1
+        if (-not $filtered) {
+            $state.Unavoidable = $true
+            $state.Reason = "signed in to Windows' built-in Administrator account, where every program runs as administrator"
+        }
+    }
+
+    # The account that owns the desktop (explorer.exe) is the one Spotify runs under.
+    try {
+        $explorer = Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction Stop |
+            Where-Object { $_.SessionId -eq (Get-Process -Id $PID).SessionId } |
+            Select-Object -First 1
+        if ($explorer) {
+            $owner = Invoke-CimMethod -InputObject $explorer -MethodName GetOwner -ErrorAction Stop
+            if ($owner -and $owner.User) {
+                $state.DesktopAccountName = if ($owner.Domain) { "$($owner.Domain)\$($owner.User)" } else { $owner.User }
+            }
+        }
+    }
+    catch { }
+
+    return $state
+}
+
+function Test-Elevation {
+    $elevation = Get-ElevationState
+    if (-not $elevation.IsAdmin) {
+        Write-Log "Running as normal user (not Administrator)"
+        return
+    }
+
+    Write-Log "Running as Administrator (account: $($elevation.AccountName); desktop account: $(if ($elevation.DesktopAccountName) { $elevation.DesktopAccountName } else { 'unknown' }))"
+
+    # Tagify Manager shows only the line after "ERROR:", so each message below is one line.
+    # Compare user names only: the domain part can be written differently for the same account.
+    $runningUser = ($elevation.AccountName -split '\\')[-1]
+    $desktopUser = ($elevation.DesktopAccountName -split '\\')[-1]
+    if ($runningUser -and $desktopUser -and ($runningUser -ne $desktopUser)) {
+        Write-ErrorAndExit "Tagify Manager is running as a different Windows account ($($elevation.AccountName)) than the one you're signed in to ($($elevation.DesktopAccountName)), so Tagify would be set up for the wrong account. Close Tagify Manager and open it again by double-clicking it, without 'Run as administrator' and without entering another account's password."
+    }
+
+    if ($elevation.Unavoidable) {
+        Write-Log "Continuing as Administrator: $($elevation.Reason). Spotify runs as administrator here too, so Spicetify runs with --bypass-admin." -ForegroundColor Yellow
+        $script:SPICETIFY_BYPASS_ADMIN = $true
+        return
+    }
+
+    Write-ErrorAndExit "Tagify Manager was opened as administrator, and Spicetify can't set up Spotify that way. Close Tagify Manager and open it again by double-clicking it (not right-click > 'Run as administrator', and not from another program or installer that's running as administrator). If it keeps happening: right-click Tagify Manager > Properties > Compatibility, untick 'Run this program as an administrator', then click OK."
+}
+
+function Get-SpicetifyArguments {
+    param([string[]]$Arguments)
+    if ($script:SPICETIFY_BYPASS_ADMIN) { return @('--bypass-admin') + $Arguments }
+    return $Arguments
+}
+
 function Test-Prerequisites {
     [CmdletBinding()]
     param()
@@ -555,14 +654,7 @@ function Test-Prerequisites {
     }
     Write-Log "PowerShell $($PSVersionTable.PSVersion) is compatible"
     
-    # Check admin privileges
-    $currentUser = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    $isAdmin = $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    
-    if ($isAdmin) {
-        Write-ErrorAndExit "This script is running as Administrator, which will cause permission issues with Spicetify.`n`nPlease run this script as a normal user (without 'Run as Administrator')."
-    }
-    Write-Log "Running as normal user (not Administrator)"
+    Test-Elevation
     
     
     # Test internet connection
@@ -845,7 +937,7 @@ function Get-SpicetifyVersion {
             return $null
         }
     
-        $versionOutput = & $spicetifyExe -v 2>&1
+        $versionOutput = & $spicetifyExe @(Get-SpicetifyArguments @('-v')) 2>&1
         return ($versionOutput | Out-String).Trim()
     }
     catch {
@@ -860,7 +952,7 @@ function Get-SpicetifyConfigPath {
             return $null
         }
         
-        $configPath = & $spicetifyExe -c 2>&1
+        $configPath = & $spicetifyExe @(Get-SpicetifyArguments @('-c')) 2>&1
         $exitCode = $LASTEXITCODE
         
         if ($exitCode -eq 0 -and $configPath -and (Test-Path $configPath)) {
@@ -1352,7 +1444,7 @@ function Set-SpicetifyTagifyConfiguration {
         }
         
         # Add Tagify to custom apps
-        & $spicetifyExe config custom_apps tagify 2>&1 | ForEach-Object { Write-Log $_ }
+        & $spicetifyExe @(Get-SpicetifyArguments @('config', 'custom_apps', 'tagify')) 2>&1 | ForEach-Object { Write-Log $_ }
         Write-Log "Tagify added to Spicetify config"
     }
     catch {
@@ -1432,6 +1524,7 @@ function Invoke-Spicetify {
         }
     }
     
+    if ($script:SPICETIFY_BYPASS_ADMIN) { $Arguments = "--bypass-admin $Arguments" }
     Write-Log "Running: spicetify $Arguments"
     
     try {
