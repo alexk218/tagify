@@ -1,3 +1,4 @@
+import type { TagMembershipMethod } from "@tagify/sync-contracts";
 export type PresetTagAccentId =
   | "blue"
   | "teal"
@@ -69,6 +70,8 @@ export interface TaxonomyTag {
   parentId?: string;
   subcategoryId: string;
   accentId?: TagAccentId | null;
+  /** When this tag was created on this device (ms). Absent on tags from before Tagify recorded it. */
+  createdAt?: number;
   source?: {
     type: "community";
     publicTagKey: string;
@@ -119,6 +122,13 @@ export interface TrackData {
   durationMs?: number;
   /** The album's release date from Spotify: "2024", "2024-06" or "2024-06-01". */
   releaseDate?: string;
+  /**
+   * The song's original (earliest) release date as Tagify Community knows it, for a library linked
+   * to Community: "1977", "1977-06" or "1977-06-01". The Released filter and Smart Playlists use the
+   * earlier of this and releaseDate, so a remaster lands in its song's decade. Song details still
+   * show releaseDate.
+   */
+  originalReleaseDate?: string;
   /** Failed lookups of length and release date, so unavailable songs aren't retried forever. */
   songDetailsAttempts?: number;
   /** When length and release date were last looked up and something was still missing (ms), so songs Tagify gave up on are tried again later. */
@@ -223,6 +233,11 @@ export type BatchTrackAlbumDetails = Partial<
 export interface BatchTagUpdate {
   /** Automatic enrichment preserves Last Updated order and records which rules Undo pauses. */
   automaticRuleIds?: string[];
+  /**
+   * Tag origin: how these tags were added or removed (bulk tagging, first-run copies...). Only sent
+   * to Community; never saved on the song. Automatic rules are always `rule`.
+   */
+  tagMethod?: TagMembershipMethod;
   trackUri: string;
   toAdd: TrackTag[];
   toRemove: TrackTag[];

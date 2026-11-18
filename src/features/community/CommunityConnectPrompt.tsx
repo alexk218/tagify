@@ -1,16 +1,37 @@
 import React, { useEffect, useState } from "react";
 import { Users } from "lucide-react";
 import { getUsageAccountDigest } from "@/features/discovery-survey/services/tagifyUsage";
-import { getDisconnectedSyncProvenance } from "@/services/sync/SyncLocalState";
+import { startupRecoverySettled } from "@/services/sync/SyncInstallRecovery";
+import { getDisconnectedSyncProvenance, hasCommunityLibraryOnThisComputer } from "@/services/sync/SyncLocalState";
 import { syncPairingService } from "@/services/sync/SyncPairingService";
 import { isAnotherDialogOpen } from "@/utils/openDialogs";
-import { dismissCommunityConnectPrompt, isCommunityConnectPromptDismissed } from "./communityConnectPromptHistory";
+import {
+  dismissCommunityConnectPrompt,
+  isCommunityConnectPromptDismissed,
+  isCommunityReconnectPromptSnoozed,
+  snoozeCommunityReconnectPrompt,
+} from "./communityConnectPromptHistory";
 import { recordCommunityConnectPromptDismissed, recordCommunityConnectPromptShown } from "./communityConnectAnalytics";
 // eslint-disable-next-line css-modules/no-unused-class -- shared with the publish invitation
 import styles from "./CommunityConnectPrompt.module.css";
 
 /** Delay after other dialogs close, so the invitation never flashes between two of them. */
 const SETTLE_MS = 1000;
+
+type PromptKind = "connect" | "reconnect";
+
+const COPY: Record<PromptKind, { title: string; description: string; action: string }> = {
+  connect: {
+    title: "Share your tags on Community",
+    description: "Put the music you tag on your own profile and back up your library. You choose what's public. If someone invited you, this finishes joining them.",
+    action: "Share my tags",
+  },
+  reconnect: {
+    title: "Reconnect this computer",
+    description: "Tagify lost its connection to your Community account here, so your tags aren't being backed up or shared. Reconnect to pick up where you left off.",
+    action: "Reconnect",
+  },
+};
 
 interface CommunityConnectPromptProps {
   /** False while Tagify is loading or showing anything that should take priority. */
@@ -19,25 +40,37 @@ interface CommunityConnectPromptProps {
   onConnect: () => void;
 }
 
-/** A calm, dismissible invitation to connect for people who have never used Community from Tagify. */
+/**
+ * A calm invitation to connect for people who have never used Community from Tagify, or a
+ * reminder to reconnect when this computer lost a connection it used to have.
+ */
 export function CommunityConnectPrompt({ enabled, connected, onConnect }: CommunityConnectPromptProps) {
   // Null until the Spotify account is identified, and for the session if it can't be.
   const [accountDigest, setAccountDigest] = useState<string | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  // Null until launch-time reconnection has finished, so a restored connection never sees the card.
+  const [kind, setKind] = useState<PromptKind | null>(null);
+  const [hidden, setHidden] = useState(false);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     let active = true;
-    void getUsageAccountDigest().then((digest) => {
+    void (async () => {
+      const [digest] = await Promise.all([getUsageAccountDigest(), startupRecoverySettled()]);
+      const nextKind: PromptKind = (await hasCommunityLibraryOnThisComputer()) ? "reconnect" : "connect";
       if (!active) return;
       setAccountDigest(digest);
-      if (digest) setDismissed(isCommunityConnectPromptDismissed(digest));
-    });
+      setKind(nextKind);
+      if (digest) {
+        setHidden(nextKind === "reconnect"
+          ? isCommunityReconnectPromptSnoozed(digest)
+          : isCommunityConnectPromptDismissed(digest));
+      }
+    })();
     return () => { active = false; };
   }, []);
 
   // A declined invitation can only be remembered for a known account, so wait for one.
-  const eligible = enabled && !connected && Boolean(accountDigest) && !dismissed &&
+  const eligible = enabled && !connected && Boolean(accountDigest) && kind !== null && !hidden &&
     !syncPairingService.getPending() && !getDisconnectedSyncProvenance();
 
   useEffect(() => {
@@ -69,30 +102,34 @@ export function CommunityConnectPrompt({ enabled, connected, onConnect }: Commun
   }, [eligible, visible]);
 
   const shown = eligible && visible;
+  // These measure the invitation to new members; the reconnect reminder is a different question.
   useEffect(() => {
-    if (shown && accountDigest) recordCommunityConnectPromptShown(accountDigest);
-  }, [shown, accountDigest]);
+    if (shown && kind === "connect" && accountDigest) recordCommunityConnectPromptShown(accountDigest);
+  }, [shown, kind, accountDigest]);
 
-  if (!shown) return null;
+  if (!shown || !kind) return null;
 
   const notNow = () => {
-    if (accountDigest) dismissCommunityConnectPrompt(accountDigest);
-    recordCommunityConnectPromptDismissed();
-    setDismissed(true);
+    if (kind === "reconnect") {
+      if (accountDigest) snoozeCommunityReconnectPrompt(accountDigest);
+    } else {
+      if (accountDigest) dismissCommunityConnectPrompt(accountDigest);
+      recordCommunityConnectPromptDismissed();
+    }
+    setHidden(true);
   };
+  const copy = COPY[kind];
 
   return (
     <section className={`${styles.prompt} ${styles.connect}`} aria-labelledby="community-connect-prompt-title" aria-describedby="community-connect-prompt-description">
       <span className={styles.icon} aria-hidden="true"><Users size={18} /></span>
       <div className={styles.text}>
-        <h2 id="community-connect-prompt-title" className={styles.title}>Share your tags on Community</h2>
-        <p id="community-connect-prompt-description" className={styles.description}>
-          Put the music you tag on your own profile and back up your library. You choose what's public. If someone invited you, this finishes joining them.
-        </p>
+        <h2 id="community-connect-prompt-title" className={styles.title}>{copy.title}</h2>
+        <p id="community-connect-prompt-description" className={styles.description}>{copy.description}</p>
       </div>
       <div className={styles.actions}>
         <button type="button" className={styles.secondary} onClick={notNow}>Not now</button>
-        <button type="button" className={styles.primary} onClick={onConnect}>Share my tags</button>
+        <button type="button" className={styles.primary} onClick={onConnect}>{copy.action}</button>
       </div>
     </section>
   );

@@ -1,0 +1,469 @@
+.section {
+  display: grid;
+  justify-items: center;
+  padding: 16px 28px 28px;
+}
+
+.card {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 620px);
+  min-width: 0;
+  padding: 24px 32px;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 12px;
+  background: var(--spice-card);
+}
+
+.header {
+  display: grid;
+  gap: 6px;
+}
+
+.title {
+  margin: 0;
+  color: var(--spice-text);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+/* The title, with when it was checked and "Check again" kept small beside it. */
+.titleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+}
+
+.checked {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.checkAgain {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 5%);
+  color: var(--spice-text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.checkAgain:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.checkAgain:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--spice-text) 35%, transparent);
+  background: rgb(255 255 255 / 9%);
+}
+
+/* "Also check playlists I made…" and "Check the remaining N playlists": secondary pills, never stretched across the card. */
+.playlistsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.search,
+.sort {
+  padding: 8px 12px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 4px;
+  background: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.search {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.sort {
+  flex: 0 1 auto;
+  cursor: pointer;
+}
+
+.sort option {
+  background: var(--spice-card);
+  color: var(--spice-text);
+}
+
+.search:focus,
+.sort:focus {
+  outline: none;
+  border-color: rgb(255 255 255 / 30%);
+}
+
+.checkAgain:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
+.lead,
+.progress,
+.notice {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.lead {
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+.progress {
+  color: var(--spice-subtext);
+  font-variant-numeric: tabular-nums;
+}
+
+.notice {
+  padding: 10px 12px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 4%);
+  color: var(--spice-text);
+}
+
+.action:focus-visible,
+.more:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
+.action,
+.more {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.action {
+  justify-self: start;
+  border: 1px solid transparent;
+  background: var(--spice-button);
+  color: var(--spice-text);
+}
+
+.action:hover {
+  filter: brightness(1.08);
+}
+
+.more {
+  justify-self: center;
+  min-height: 36px;
+  border: 1px solid var(--spice-button-disabled);
+  background: rgb(255 255 255 / 5%);
+  color: var(--spice-text);
+}
+
+.more:hover {
+  border-color: color-mix(in srgb, var(--spice-text) 35%, transparent);
+  background: rgb(255 255 255 / 9%);
+}
+
+@media (max-width: 720px) {
+  .section {
+    padding: 12px 16px 16px;
+  }
+
+  .card {
+    padding: 20px;
+  }
+}
+
+/* The track list's "Tagged by others" view: the list's own width, no card around it, and spaced like
+   Tagged Tracks (Alex, 2026-11-18): the status line sits right under the tabs, as "N tracks" does there,
+   the header lines close together, then the filters. The track list's own 16px gap is pulled back. */
+.inTrackList {
+  justify-items: stretch;
+  margin-top: -14px;
+  padding: 0 0 16px;
+}
+
+.inTrackList .card {
+  width: 100%;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.section.inTrackList .checkAgain {
+  min-height: 22px;
+}
+
+.inTrackList .filters {
+  gap: 8px;
+  margin: 8px 0 6px;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .inTrackList {
+    padding: 0 0 12px;
+  }
+}
+
+/* Filters: search, artist and sort on one row; "Not tagged by me yet" and the tag names others used under it. */
+.filters {
+  display: grid;
+  gap: 10px;
+}
+
+.sort {
+  max-width: 220px;
+  text-overflow: ellipsis;
+}
+
+.tagFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tagFilter,
+.tagFilterMore {
+  align-items: center;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 6px;
+  height: 28px;
+  max-width: 220px;
+  padding: 0 12px;
+}
+
+.tagFilter {
+  background: rgb(255 255 255 / 7%);
+  border: 0;
+  color: var(--spice-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tagFilter:hover {
+  background: rgb(255 255 255 / 12%);
+}
+
+/* Spotify's own selected filter chip: white with dark text. */
+.tagFilterOn,
+.tagFilterOn:hover {
+  background: var(--spice-text);
+  color: var(--spice-main, #121212);
+}
+
+.tagFilterCount {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+}
+
+.tagFilterMore {
+  background: transparent;
+  border: 0;
+  color: var(--spice-subtext);
+  font-weight: 700;
+}
+
+.tagFilterMore:hover {
+  color: var(--spice-text);
+}
+
+.tagFilter:focus-visible,
+.tagFilterMore:focus-visible,
+.linkButton:focus-visible,
+.dismiss:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
+.linkButton {
+  background: transparent;
+  border: 0;
+  color: var(--spice-text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* "Hid “Song”. Undo" right after hiding. */
+.undoBar {
+  align-items: center;
+  background: rgb(255 255 255 / 6%);
+  border-radius: 6px;
+  color: var(--spice-text);
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 8px 8px 12px;
+}
+
+.undoBar > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dismiss {
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  font-size: 18px;
+  height: 24px;
+  line-height: 1;
+  width: 24px;
+}
+
+.dismiss:hover {
+  color: var(--spice-text);
+}
+
+.hiddenSongs {
+  color: var(--spice-subtext);
+  display: grid;
+  font-size: 13px;
+  gap: 8px;
+  justify-items: start;
+}
+
+.hiddenList {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+.hiddenRow {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.hiddenName {
+  color: var(--spice-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hiddenArtist {
+  color: var(--spice-subtext);
+}
+
+/* No pills: quiet text buttons with an icon, like Spotify's "Show all" (Alex's pick, 2026-11-17). */
+.section .checkAgain {
+  min-height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--spice-subtext);
+  font-size: 13px;
+}
+
+.section .checkAgain:hover {
+  border: 0;
+  background: transparent;
+  color: var(--spice-text);
+}
+
+.section .playlistsRow .checkAgain {
+  margin-left: -4px;
+  color: var(--spice-text);
+  font-size: 14px;
+}
+
+.section .playlistsRow .checkAgain:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.section .more {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+.section .more:hover {
+  background: transparent;
+  color: var(--spice-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* "Check again in N min" while Tagify waits between checks, plain status, not a dimmed button. */
+.checkAgain:disabled .buttonLabel {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Muted text with a muted icon; nothing reacts on hover. */
+.section .checkAgain:disabled,
+.section .checkAgain:disabled:hover {
+  opacity: 1;
+  color: color-mix(in srgb, var(--spice-subtext) 70%, transparent);
+  font-weight: 400;
+  text-decoration: none;
+}
+
+/* "Not tagged by me yet": a filter chip leading the tag names, a thin rule between it and them (Alex's pick C, 2026-11-18). */
+.chipDivider {
+  align-self: center;
+  background: rgb(255 255 255 / 14%);
+  height: 18px;
+  margin: 0 4px;
+  width: 1px;
+}

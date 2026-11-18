@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 import { recordingName } from "../features/recording-reuse/utils/recordingReuse";
 import { checkAutomaticRecordingReuse, getRecordingReuseStatus, getRecordingReuseRetryAt, RECORDING_REUSE_EVENT, recordingReuseSignature } from "../features/recording-reuse/services/automaticRecordingReuse";
 import { getTagifyDatabaseName } from "../services/sync/SyncLocalState";
@@ -54,13 +55,18 @@ import {
 } from "./extensionTagLookup";
 import {
   buildSpotifyColumnTemplate,
+  buildTagifyGridTemplate,
   getRowItemUri,
   getSpotifyPlayerAnchor,
   getSpotifyRowLayout,
   getSpotifyTracklistHeader,
   getSpotifyTracklists,
   getSpotifyTrackRows,
+  getTagifyColumnWidth,
   insertSpotifyColumn,
+  planTagifyColumn,
+  TAGIFY_GRID_TEMPLATE_PROPERTY,
+  usesSpotifyGridTemplate,
 } from "./spotifyLayout";
 
 // Rows whose item could not be found, keyed by the row index they showed then.
@@ -306,6 +312,7 @@ function findUriInObject(root, maxDepth = 6) {
       }
 
       inlineEditor.refreshAll();
+      tracklistEnhancer.resizeColumns();
       playbarEnhancer.updateNowPlayingWidget();
     },
   };
@@ -1887,6 +1894,8 @@ function findUriInObject(root, maxDepth = 6) {
     pendingObserveNew: false,
     columnRestorers: new Map(),
     originalColumnCounts: new Map(),
+    gridSizers: new Map(),
+    columnStyleId: "tagify-tracklist-column-styles",
     updateInterval: null,
     processedElements: new WeakSet(),
     lastProcessedCount: 0,
@@ -2082,6 +2091,9 @@ function findUriInObject(root, maxDepth = 6) {
       for (const grid of this.originalColumnCounts.keys()) {
         if (!grid.isConnected) this.originalColumnCounts.delete(grid);
       }
+      for (const grid of this.gridSizers.keys()) {
+        if (!grid.isConnected) this.unwatchGrid(grid);
+      }
 
       const tracklists = getSpotifyTracklists();
 
@@ -2184,11 +2196,123 @@ function findUriInObject(root, maxDepth = 6) {
       if (grid && !this.originalColumnCounts.has(grid)) {
         this.originalColumnCounts.set(grid, grid.getAttribute("aria-colcount"));
       }
-      const template = buildSpotifyColumnTemplate(layout);
+      const width = getTagifyColumnWidth(state.activeExtensions.tracklistDisplayMode);
+      const fixedTemplate = buildSpotifyColumnTemplate(layout, width);
+      // Spotify changes its columns as the window resizes. Rows that use the
+      // grid's template follow it live; the fixed template only covers the
+      // moment before the first measurement.
+      const live = Boolean(grid) && usesSpotifyGridTemplate(layout);
+      const template = live ? `var(${TAGIFY_GRID_TEMPLATE_PROPERTY}, ${fixedTemplate})` : fixedTemplate;
       this.columnRestorers.set(column, insertSpotifyColumn(layout, column, template));
       if (grid) {
         grid.setAttribute("aria-colcount", String(Math.max(Number(grid.getAttribute("aria-colcount")) || 0, layout.columnIndex + 1)));
       }
+      if (live) this.watchGrid(grid);
+    },
+
+    ensureColumnStyles() {
+      if (document.getElementById(this.columnStyleId)) return;
+      const style = document.createElement("style");
+      style.id = this.columnStyleId;
+      const hide = "display: none !important;";
+      const spotifyColumns = Array.from({ length: 11 }, (_, offset) => offset + 2).map((index) =>
+        `[data-tagify-hidden-columns~="${index}"] [aria-colindex="${index}"]:not(.tagify-info):not(.tagify-header) { ${hide} }`);
+      style.textContent = [
+        `[data-tagify-column="hidden"] .tagify-info, [data-tagify-column="hidden"] .tagify-header { ${hide} }`,
+        ...spotifyColumns,
+      ].join("\n");
+      document.head.appendChild(style);
+    },
+
+    /** Re-fits the Tagify column whenever the grid resizes or Spotify changes its columns. */
+    watchGrid(grid) {
+      if (this.gridSizers.has(grid)) return;
+      this.ensureColumnStyles();
+      const sizer = { frame: null, retries: 0 };
+      sizer.schedule = () => {
+        if (sizer.frame) return;
+        sizer.frame = requestAnimationFrame(() => {
+          sizer.frame = null;
+          this.fitColumn(grid);
+        });
+      };
+      sizer.resizeObserver = new ResizeObserver(sizer.schedule);
+      sizer.resizeObserver.observe(grid);
+      sizer.styleObserver = new MutationObserver(sizer.schedule);
+      sizer.styleObserver.observe(grid, { attributes: true, attributeFilter: ["style"] });
+      this.gridSizers.set(grid, sizer);
+      this.fitColumn(grid);
+    },
+
+    unwatchGrid(grid) {
+      const sizer = this.gridSizers.get(grid);
+      if (!sizer) return;
+      sizer.resizeObserver.disconnect();
+      sizer.styleObserver.disconnect();
+      if (sizer.frame) cancelAnimationFrame(sizer.frame);
+      this.gridSizers.delete(grid);
+      grid.style.removeProperty(TAGIFY_GRID_TEMPLATE_PROPERTY);
+      delete grid.dataset.tagifyColumn;
+      delete grid.dataset.tagifyHiddenColumns;
+    },
+
+    resizeColumns() {
+      this.gridSizers.forEach((sizer) => sizer.schedule());
+    },
+
+    fitColumn(grid) {
+      const cell = grid.querySelector(".tagify-header, .tagify-info");
+      if (!cell) return;
+      const row = cell.parentElement;
+      // Measure Spotify's own columns, without the ones Tagify hid last time.
+      const previousHidden = grid.dataset.tagifyHiddenColumns;
+      delete grid.dataset.tagifyHiddenColumns;
+      const resolvedTemplate = getComputedStyle(grid).getPropertyValue("--grid-template-columns");
+      const nativeTemplate = grid.style.getPropertyValue("--grid-template-columns") || resolvedTemplate;
+      const rowStyle = getComputedStyle(row);
+      const columnWidth = getTagifyColumnWidth(state.activeExtensions.tracklistDisplayMode);
+      const plan = planTagifyColumn({
+        resolvedTemplate,
+        availableWidth: row.clientWidth - parseFloat(rowStyle.paddingLeft || "0") - parseFloat(rowStyle.paddingRight || "0"),
+        gap: parseFloat(rowStyle.columnGap) || 0,
+        columnWidth,
+      });
+
+      // Spotify's visible cells line up with its template's tracks, in order.
+      const trackNames = resolvedTemplate.match(/\[[\w-]+\]/g)?.map((name) => name.slice(1, -1)) || [];
+      const spotifyCells = Array.from(row.children).filter((child) =>
+        child.hasAttribute("aria-colindex") &&
+        !child.classList.contains("tagify-header") &&
+        !child.classList.contains("tagify-info") &&
+        getComputedStyle(child).display !== "none");
+      const variablePositions = trackNames.flatMap((name, position) => (name.startsWith("var") ? [position] : []));
+      const cellsMatch = spotifyCells.length === trackNames.length;
+      // Spotify can switch templates a frame before it hides the matching
+      // cells. Watching the cells re-fits once they settle.
+      const sizer = this.gridSizers.get(grid);
+      Array.from(row.children).forEach((child) => sizer?.resizeObserver.observe(child));
+      if (!cellsMatch && sizer && sizer.retries < 10) {
+        sizer.retries += 1;
+        if (previousHidden) grid.dataset.tagifyHiddenColumns = previousHidden;
+        sizer.schedule();
+        return;
+      }
+      if (sizer) sizer.retries = 0;
+      const hiddenColumns = cellsMatch
+        ? plan.hiddenVariables.map((variable) => spotifyCells[variablePositions[variable]]?.getAttribute("aria-colindex")).filter(Boolean)
+        : [];
+      const fits = plan.show && hiddenColumns.length === plan.hiddenVariables.length;
+      const template = buildTagifyGridTemplate(nativeTemplate, {
+        show: fits,
+        trackNames: fits ? plan.trackNames : trackNames,
+        columnWidth,
+      });
+
+      if (grid.style.getPropertyValue(TAGIFY_GRID_TEMPLATE_PROPERTY) !== template) {
+        grid.style.setProperty(TAGIFY_GRID_TEMPLATE_PROPERTY, template);
+      }
+      grid.dataset.tagifyColumn = fits ? "shown" : "hidden";
+      if (fits && hiddenColumns.length > 0) grid.dataset.tagifyHiddenColumns = hiddenColumns.join(" ");
     },
 
     /**
@@ -2504,6 +2628,8 @@ function findUriInObject(root, maxDepth = 6) {
 
       this.columnRestorers.forEach((restore) => restore());
       this.columnRestorers.clear();
+      Array.from(this.gridSizers.keys()).forEach((grid) => this.unwatchGrid(grid));
+      document.getElementById(this.columnStyleId)?.remove();
       this.observedTracklists.clear();
       this.originalColumnCounts.forEach((count, grid) => {
         if (count === null) grid.removeAttribute("aria-colcount");

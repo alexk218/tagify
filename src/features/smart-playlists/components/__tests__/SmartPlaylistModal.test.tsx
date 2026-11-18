@@ -12,6 +12,7 @@ import { defaultTagData } from "@/constants/defaultTagData";
 import { markConfirmedMembershipBaselines, clearConfirmedMembershipBaselines } from "../../utils/smartPlaylist.storage";
 import { spotifyLocalPause } from "@/utils/spotifyRequestFailure";
 import React, { act } from "react";
+import { IPHONE_APP_URL } from "@/features/phone-app";
 import {
   buildTaxonomyFromCategoryTree,
   createLegacyTagIdentityId,
@@ -162,6 +163,76 @@ describe("SmartPlaylistModal", () => {
     );
   };
 
+  describe("smart playlists Community fills", () => {
+    // Alex, 2026-11-17: "the Community playlists should be basically indistinguishable from the ones on desktop.
+    // perhaps a "+ new (from Community)" type of badge the first time a new Community playlist is there."
+    const filledByCommunity = [{
+      id: "00000000-0000-4000-8000-000000000301", name: "Everyone's chill", description: "", source: "community", origin: "community",
+      spotifyPlaylistId: null, trackCount: 27, createdAt: "2026-11-10T00:00:00.000Z",
+      rules: { clauses: [{ tagIds: ["chill"], excludedTagIds: [], operator: "AND" }], connectors: [], minPeople: 3 },
+    }, {
+      id: "00000000-0000-4000-8000-000000000302", name: "Deep cuts", description: "", source: "library", origin: "community",
+      spotifyPlaylistId: null, trackCount: 9, createdAt: "2026-11-11T00:00:00.000Z",
+      rules: { clauses: [{ tagIds: [HOUSE_TAG_ID], excludedTagIds: [], operator: "AND" }], connectors: [], released: { min: 1990, max: 1999 } },
+    }];
+    const keys = ["tagify:sync:account-id", "tagify:smart-playlists:community-only:v1:account-1",
+      "tagify:smart-playlists:community-seen:v1:account-1", "tagify:smart-playlists:community-removals:v1:account-1"];
+    beforeEach(() => {
+      localStorage.setItem("tagify:sync:account-id", "account-1");
+      localStorage.setItem("tagify:smart-playlists:community-only:v1:account-1", JSON.stringify(filledByCommunity));
+    });
+    afterEach(() => keys.forEach((key) => localStorage.removeItem(key)));
+
+    const rowOf = (name: string) => screen.getByText(name).closest("[class*=playlistItem]") as HTMLElement;
+
+    it("sit in the one list, sorted with the others, laid out like them, and ask for a fresh read on open", () => {
+      const asked = vi.fn();
+      window.addEventListener("tagify:smartPlaylistsRefreshRequested", asked);
+      renderModal();
+      window.removeEventListener("tagify:smartPlaylistsRefreshRequested", asked);
+      expect(asked).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(`Smart Playlists (${mockSmartPlaylists.length + 2})`)).toBeTruthy();
+      const names = Array.from(document.querySelectorAll("h3")).map((heading) => heading.textContent);
+      expect(names).toEqual([...names].sort((left, right) => String(left).localeCompare(String(right))));
+      const chill = rowOf("Everyone's chill");
+      expect(within(chill).getByText("Match")).toBeTruthy();
+      expect(within(chill).getByText("chill")).toBeTruthy();
+      expect(within(chill).getByText("From: Everyone’s tags")).toBeTruthy();
+      expect(within(chill).getByText("3+ people agree")).toBeTruthy();
+      expect(within(chill).getByText("In Playlist")).toBeTruthy();
+      expect(within(chill).getByRole("button", { name: /Edit Filters/ })).toBeTruthy();
+      expect(within(chill).getByRole("button", { name: "Remove Tracking" })).toBeTruthy();
+      const deep = rowOf("Deep cuts");
+      expect(within(deep).getByText("House")).toBeTruthy();
+      expect(within(deep).getByText("Released: 1990–1999")).toBeTruthy();
+    });
+
+    it("show \"+ New from Community\" the first time only", () => {
+      const { unmount } = renderModal();
+      expect(within(rowOf("Everyone's chill")).getByText("+ New from Community")).toBeTruthy();
+      expect(within(rowOf("Electronic House Mix")).queryByText("+ New from Community")).toBeNull();
+      unmount();
+      renderModal();
+      expect(screen.queryByText("+ New from Community")).toBeNull();
+    });
+
+    it("open Community from Edit Filters, and leave the list on Remove Tracking", async () => {
+      const open = vi.spyOn(window, "open").mockImplementation(() => null);
+      renderModal();
+      await userEvent.click(within(rowOf("Everyone's chill")).getByRole("button", { name: /Edit Filters/ }));
+      expect(open).toHaveBeenCalledWith("https://tagify.fm/library/playlists", "_blank", "noopener,noreferrer");
+      const asked = vi.fn();
+      window.addEventListener("tagify:smartPlaylistsRefreshRequested", asked);
+      await userEvent.click(within(rowOf("Everyone's chill")).getByRole("button", { name: "Remove Tracking" }));
+      window.removeEventListener("tagify:smartPlaylistsRefreshRequested", asked);
+      await waitFor(() => expect(screen.queryByText("Everyone's chill")).toBeNull());
+      expect(asked).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(localStorage.getItem("tagify:smart-playlists:community-removals:v1:account-1")!)).toEqual([filledByCommunity[0].id]);
+      expect(screen.getByText("Deep cuts")).toBeTruthy();
+      expect(screen.getByText("Electronic House Mix")).toBeTruthy();
+    });
+  });
+
   it("stops sequential name checks when the modal closes", async () => {
     const metadata = (Spicetify.Platform.PlaylistAPI as any).getMetadata;
     let finish!: (value: { name: string }) => void;
@@ -185,6 +256,31 @@ describe("SmartPlaylistModal", () => {
   });
 
   describe("Rendering", () => {
+    it("counts matching songs only for setups that aren't connected, and keeps the count across reloads", async () => {
+      const matched = { rating: 5, energy: 7, bpm: 125, tagIds: [HOUSE_TAG_ID], dateCreated: 1, dateModified: 1 };
+      const tracks = { "spotify:track:a": matched, "spotify:track:b": { ...matched, tagIds: [TECHNO_TAG_ID] } };
+      const setup = { ...mockSmartPlaylists[0], playlistId: "", isActive: false, id: "saved-setup" };
+      const connectedSpy = vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict").mockResolvedValue([]);
+      const modal = renderModal({ smartPlaylists: [setup], tracks });
+      expect(await screen.findByText(/1 Spotify song matches\./)).toBeInTheDocument();
+      expect(connectedSpy).not.toHaveBeenCalled();
+      modal.rerender(
+        <SmartPlaylistModal
+          smartPlaylists={[{ ...setup }]}
+          taxonomy={mockTaxonomy}
+          tracks={{ ...tracks, "spotify:track:c": matched }}
+          onEditPlaylist={mockOnEditPlaylist}
+          onUpdateSmartPlaylists={mockOnUpdateSmartPlaylists}
+          onSyncPlaylist={mockOnSyncPlaylist}
+          onExportSmartPlaylists={mockOnExportSmartPlaylists}
+          onImportSmartPlaylists={mockOnImportSmartPlaylists}
+          onClose={mockOnClose}
+        />,
+      );
+      // The earlier count stays on screen until the new one is ready.
+      expect(screen.getByText(/1 Spotify song matches\./)).toBeInTheDocument();
+      expect(await screen.findByText(/2 Spotify songs match\./)).toBeInTheDocument();
+    });
     it.each([
       { actual: ["spotify:track:matched"], status: "In Sync" },
       { actual: ["spotify:track:matched", "spotify:local:wrong"], status: "Needs Sync" },
@@ -228,21 +324,47 @@ describe("SmartPlaylistModal", () => {
         } finally { vi.useRealTimers(); }
       });
 
-      it("checks the playlists once after a burst of library saves, not once per save", async () => {
+      it("re-checks once after a burst of library saves, against the playlists already read from Spotify", async () => {
         vi.useFakeTimers({ shouldAdvanceTime: true });
         try {
           const read = vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict").mockResolvedValue(["spotify:track:matched"]);
+          const load = vi.mocked(storageService.loadAllStrict);
           renderModal({ smartPlaylists: [mockSmartPlaylists[0]] });
           expect(await screen.findByText("In Sync")).toBeInTheDocument();
           expect(read).toHaveBeenCalledTimes(1);
+          const loadsBefore = load.mock.calls.length;
+          // The song no longer matches, and Tagify hasn't synced the playlist yet.
+          load.mockResolvedValue({ ...defaultTagData, tracks: { "spotify:track:matched": { ...matched, rating: 1 } } });
           act(() => {
             for (let i = 0; i < 5; i += 1) window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
           });
           await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
-          expect(read).toHaveBeenCalledTimes(1);
+          expect(load.mock.calls.length).toBe(loadsBefore);
           await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
-          await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+          expect(await screen.findByText("Needs Sync", { selector: "span" })).toBeInTheDocument();
+          expect(load.mock.calls.length).toBe(loadsBefore + 1);
+          expect(read).toHaveBeenCalledTimes(1);
+          expect(inPlaylistCount()).toBe("1");
         } finally { vi.useRealTimers(); }
+      });
+
+      it("reads Spotify again when the saved playlists change, such as after a sync", async () => {
+        const read = vi.spyOn(spotifyApiService, "getAllTrackUrisInPlaylistStrict").mockResolvedValue(["spotify:track:matched"]);
+        const modal = renderModal({ smartPlaylists: [mockSmartPlaylists[0]] });
+        expect(await screen.findByText("In Sync")).toBeInTheDocument();
+        modal.rerender(
+          <SmartPlaylistModal
+            smartPlaylists={[{ ...mockSmartPlaylists[0], lastSyncAt: mockSmartPlaylists[0].lastSyncAt + 1 }]}
+            taxonomy={mockTaxonomy}
+            onEditPlaylist={mockOnEditPlaylist}
+            onUpdateSmartPlaylists={mockOnUpdateSmartPlaylists}
+            onSyncPlaylist={mockOnSyncPlaylist}
+            onExportSmartPlaylists={mockOnExportSmartPlaylists}
+            onImportSmartPlaylists={mockOnImportSmartPlaylists}
+            onClose={mockOnClose}
+          />,
+        );
+        await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
       });
 
       it("suggests restarting Spotify when it stops responding", async () => {
@@ -379,6 +501,12 @@ describe("SmartPlaylistModal", () => {
       expect(screen.getByText(/mobile tagging shortcuts/i)).toBeInTheDocument();
       expect(screen.getByText(/spotify on your phone/i)).toBeInTheDocument();
       expect(screen.getByText(/tells you exactly what changed/i)).toBeInTheDocument();
+      expect(screen.queryByText(/New in Tagify 3\.0/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/from Spotify's Share button/i)).toBeInTheDocument();
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      await user.click(screen.getByRole("button", { name: "Get the app" }));
+      expect(openSpy).toHaveBeenCalledWith(IPHONE_APP_URL, "_blank", "noopener,noreferrer");
+      openSpy.mockRestore();
 
       await user.click(screen.getByRole("button", { name: "Got it" }));
       expect(history.markSeen).toHaveBeenCalledWith("mobileTaggingIntroSeen");
@@ -580,7 +708,7 @@ describe("SmartPlaylistModal", () => {
         await user.click(syncButton);
 
         await waitFor(() => {
-          expect(mockOnSyncPlaylist).toHaveBeenCalledWith(mockSmartPlaylists[0]);
+          expect(mockOnSyncPlaylist).toHaveBeenCalledWith(mockSmartPlaylists[0], "manual");
         });
       } else {
         // If button not found, fail with helpful message

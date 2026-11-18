@@ -1,0 +1,48 @@
+/* The year's number, where the Community invitations show their icon. */
+.number {
+  align-items: baseline;
+  border-right: 1px solid rgb(155 140 255 / 26%);
+  display: grid;
+  flex: 0 0 auto;
+  gap: 1px;
+  justify-items: start;
+  padding-right: 14px;
+}
+
+.number strong {
+  color: #c3b9ff;
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.number span {
+  color: var(--spice-subtext);
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+/* The long button keeps its words on one line; "Not now" moves beside or above it as space allows. */
+.actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.actions button {
+  white-space: nowrap;
+}
+
+/* In a narrow panel the number sits on its own line above the text. */
+@container (max-width: 560px) {
+  .number {
+    align-items: baseline;
+    border-right: 0;
+    display: flex;
+    gap: 8px;
+    padding-right: 0;
+    width: 100%;
+  }
+}

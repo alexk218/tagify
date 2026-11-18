@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import packageJson from "@/package";
 import { getDesktopSyncConnectionState } from "@/services/sync/SyncLocalState";
-import { ANALYTICS_CHOICE_EVENT, isAnalyticsSharing, presenceRecordedToday, recordProductEvent, savedSongsBucket, songsBucket, trackAggregateRequest, releaseAggregateRequest, type ProductEventDetails } from "@/features/product-analytics/productAnalytics";
+import { ANALYTICS_CHOICE_EVENT, isAnalyticsSharing, presenceRecordedToday, recordProductEvent, savedSongsBucket, taggedSongsBucket, songsBucket, trackAggregateRequest, releaseAggregateRequest, type ProductEventDetails } from "@/features/product-analytics/productAnalytics";
 
 const USAGE_URL = "https://community.tagify.fm/api/v1/tagify-usage";
 /** How often a visible Tagify checks, locally, whether today's report is due. */
@@ -205,17 +205,29 @@ function sendUsage(accountDigest: string, appVersion: string, answer?: Discovery
  * Coarse library size, or nothing when the library can't be read; a failure is never reported as an empty library.
  * Storage loads on first use so analytics, which many features import, doesn't pull the library into their module graph.
  */
-async function savedSongsDetail(): Promise<Pick<ProductEventDetails, "saved_songs">> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+async function savedSongsDetail(): Promise<Pick<ProductEventDetails, "saved_songs" | "tagged_songs">> {
   try {
     const { indexedDBStorage } = await import("@/services/storage/IndexedDBStorageService");
-    const count = await Promise.race([
-      indexedDBStorage.getTrackCount(),
+    // Each count has its own time limit, so a slow tagged-songs walk never drops the library size.
+    const [saved, tagged] = await Promise.all([
+      countWithin(() => indexedDBStorage.getTrackCount()),
+      countWithin(() => indexedDBStorage.getTaggedTrackCount()),
+    ]);
+    const savedBucket = saved === null ? undefined : savedSongsBucket(saved);
+    const taggedBucket = tagged === null ? undefined : taggedSongsBucket(tagged);
+    return { ...(savedBucket ? { saved_songs: savedBucket } : {}), ...(taggedBucket ? { tagged_songs: taggedBucket } : {}) };
+  } catch { return {}; }
+}
+
+/** A count, or null when it fails or takes longer than 3 seconds. */
+async function countWithin(count: () => Promise<number>): Promise<number | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      count(),
       new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 3_000); }),
     ]);
-    const bucket = count === null ? undefined : savedSongsBucket(count);
-    return bucket ? { saved_songs: bucket } : {};
-  } catch { return {}; }
+  } catch { return null; }
   finally { if (timer) clearTimeout(timer); }
 }
 

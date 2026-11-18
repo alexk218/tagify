@@ -354,22 +354,34 @@ export function findDisplayTagName(
   tagId: string,
   options: { disambiguate?: boolean } = {},
 ): string {
-  const resolvedTag = resolveTagId(taxonomy, tagId);
-  if (!resolvedTag) {
-    return tagId;
-  }
+  return createDisplayTagNameResolver(taxonomy, options)(tagId);
+}
 
+/**
+ * Same names as `findDisplayTagName`, with the taxonomy read once. Use it when
+ * naming many tags, such as every rule in a list of Smart Playlists.
+ */
+export function createDisplayTagNameResolver(
+  taxonomy: TagTaxonomy,
+  options: { disambiguate?: boolean } = {},
+): (tagId: string) => string {
+  const lookup = buildResolvedTagLookup(taxonomy);
   const { disambiguate = false } = options;
-  if (!disambiguate) {
-    return resolvedTag.name;
-  }
-
-  const duplicateNames = buildDuplicateTagNameSet(taxonomy);
-  if (!duplicateNames.has(resolvedTag.name.toLowerCase())) {
-    return resolvedTag.name;
-  }
-
-  return `${resolvedTag.name} (${[resolvedTag.categoryName, ...resolvedTag.folderPath].filter(Boolean).join(" / ")})`;
+  let duplicateNames: Set<string> | undefined;
+  return (tagId) => {
+    const resolvedTag = lookup.get(tagId);
+    if (!resolvedTag) {
+      return tagId;
+    }
+    if (!disambiguate) {
+      return resolvedTag.name;
+    }
+    duplicateNames ??= buildDuplicateTagNameSet(taxonomy);
+    if (!duplicateNames.has(resolvedTag.name.toLowerCase())) {
+      return resolvedTag.name;
+    }
+    return `${resolvedTag.name} (${[resolvedTag.categoryName, ...resolvedTag.folderPath].filter(Boolean).join(" / ")})`;
+  };
 }
 
 export function collectTagIdsForSubcategory(

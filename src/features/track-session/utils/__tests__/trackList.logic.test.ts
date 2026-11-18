@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { filterTrackEntries } from "@/features/track-session/utils/trackList.logic";
+import { filterTrackEntries, listedTaggedTrackEntries } from "@/features/track-session/utils/trackList.logic";
 import type {
   TrackListEntry,
   TrackListFilterInputs,
@@ -142,6 +142,25 @@ describe("filterTrackEntries", () => {
     expect(filtered.map(([uri]) => uri)).toEqual([
       "spotify:track:pop-sfw",
       "spotify:track:rock-sfw",
+    ]);
+  });
+});
+
+describe("listedTaggedTrackEntries", () => {
+  it("lists songs with a rating, energy or tag and leaves out linked releases with nothing on them", () => {
+    const blank = { rating: 0, energy: 0, bpm: null, tagIds: [] };
+    const entries: TrackListEntry[] = [
+      ["spotify:track:rated", { ...blank, rating: 2 }],
+      ["spotify:track:energy", { ...blank, energy: 5 }],
+      ["spotify:track:tagged", { ...blank, tagIds: ["tag_pop"] }],
+      ["spotify:track:linked-cleared", { ...blank, bpm: 120, recordingGroupId: "group-1", recordingGroupConfirmed: true }],
+      ["spotify:track:unlinked-cleared", { ...blank, recordingReuseDisabled: true }],
+    ];
+
+    expect(listedTaggedTrackEntries(entries).map(([uri]) => uri)).toEqual([
+      "spotify:track:rated",
+      "spotify:track:energy",
+      "spotify:track:tagged",
     ]);
   });
 });

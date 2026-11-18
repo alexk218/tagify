@@ -247,9 +247,9 @@ describe("TrackList tag filtering", () => {
   it("saves a new smart-playlist rule before opening its Spotify playlist", async () => {
     const user = userEvent.setup();
     const historyPush = vi.spyOn(Spicetify.Platform.History, "push");
-    const createSpotifyPlaylist = vi.spyOn(Spicetify.Platform.RootlistAPI as any, "createPlaylist")
+    const createSpotifyPlaylist = vi.spyOn(Spicetify.Platform.RootlistAPI as unknown as { createPlaylist: (...args: unknown[]) => Promise<string> }, "createPlaylist")
       .mockResolvedValue("spotify:playlist:new-smart-playlist");
-    const addSpotifyTracks = vi.spyOn(Spicetify.Platform.PlaylistAPI as any, "add")
+    const addSpotifyTracks = vi.spyOn(Spicetify.Platform.PlaylistAPI as unknown as { add: (...args: unknown[]) => Promise<void> }, "add")
       .mockResolvedValue(undefined);
     let finishSavingRule!: () => void;
     const savingRule = new Promise<void>((resolve) => { finishSavingRule = resolve; });
@@ -268,7 +268,7 @@ describe("TrackList tag filtering", () => {
       await waitFor(() => expect(onCreateSmartPlaylist).toHaveBeenCalledTimes(1));
       expect(createSpotifyPlaylist).toHaveBeenCalledTimes(1);
       // "Public playlist" is unticked, so the new playlist is made private.
-      expect((Spicetify.Platform as any).PlaylistPermissionsAPI.setBasePermission).toHaveBeenCalledWith("spotify:playlist:new-smart-playlist", "BLOCKED");
+      expect((Spicetify.Platform as unknown as { PlaylistPermissionsAPI: { setBasePermission: unknown } }).PlaylistPermissionsAPI.setBasePermission).toHaveBeenCalledWith("spotify:playlist:new-smart-playlist", "BLOCKED");
       expect(addSpotifyTracks).toHaveBeenCalledTimes(1);
       expect(historyPush).not.toHaveBeenCalled();
 

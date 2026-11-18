@@ -9,6 +9,8 @@ function renderSettings() {
       onClose={vi.fn()}
       showOptionalButtons
       onToggleOptionalButtons={vi.fn()}
+      showPhoneButton
+      onTogglePhoneButton={vi.fn()}
     />,
   );
 }
@@ -87,6 +89,8 @@ describe("MainSettingsModal when changes can't be saved", () => {
         onClose={vi.fn()}
         showOptionalButtons
         onToggleOptionalButtons={vi.fn()}
+        showPhoneButton
+        onTogglePhoneButton={vi.fn()}
         onRetryMigration={onRetryMigration}
       />,
     );
@@ -97,5 +101,17 @@ describe("MainSettingsModal when changes can't be saved", () => {
 
     await vi.waitFor(() => expect(Spicetify.showNotification).toHaveBeenCalledWith("Your library is open again. Changes will save.", false));
     expect(onRetryMigration).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("MainSettingsModal private notes switch", () => {
+  it("is on by default and remembers turning private notes off", async () => {
+    localStorage.removeItem("tagify:private-notes:shown");
+    renderSettings();
+    const toggle = await screen.findByLabelText("Show private notes");
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(toggle).not.toBeChecked();
+    expect(localStorage.getItem("tagify:private-notes:shown")).toBe("false");
   });
 });

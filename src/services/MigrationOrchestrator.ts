@@ -388,34 +388,40 @@ class MigrationOrchestrator {
         this.saveMigrationState(state);
       }
 
-      // Older inline controls could persist tracks after their final annotation
-      // was cleared. Re-run empty-track cleanup once for affected installations.
-      if (!state.migrations.cleanupInlineEditorEmptyTracks) {
-        const emptyTrackUris = Object.entries(data.tracks)
-          .filter(([, trackData]) => isTrackEmpty(trackData))
-          .map(([trackUri]) => trackUri);
+      // Songs left with no rating, energy or tags are not in the library.
+      // Older inline controls and older Community sync could keep them as
+      // blank entries, so remove any that are found on every start. Only the
+      // first cleanup is reported to the user.
+      const emptyTrackUris = Object.entries(data.tracks)
+        .filter(([, trackData]) => isTrackEmpty(trackData))
+        .map(([trackUri]) => trackUri);
 
-        if (emptyTrackUris.length > 0) {
-          data = enforceMigrationDateModifiedPolicy(
-            this.cleanupEmptyTracks(data),
-            trackDateModifiedBeforeMigrations,
-            "cleanupInlineEditorEmptyTracks",
+      if (emptyTrackUris.length > 0) {
+        data = enforceMigrationDateModifiedPolicy(
+          this.cleanupEmptyTracks(data),
+          trackDateModifiedBeforeMigrations,
+          "cleanupInlineEditorEmptyTracks",
+        );
+
+        if (dataSource === "indexedDB") {
+          const deleted = await indexedDBStorage.saveTrackChanges(
+            new Map(emptyTrackUris.map((trackUri) => [trackUri, null])),
           );
-
-          if (dataSource === "indexedDB") {
-            const deleted = await indexedDBStorage.saveTrackChanges(
-              new Map(emptyTrackUris.map((trackUri) => [trackUri, null])),
-            );
-            if (!deleted) {
-              throw new Error("Failed to remove stale empty tracks from IndexedDB");
-            }
-          } else {
-            this.refreshLocalCopy(data, startedFresh);
+          if (!deleted && !state.migrations.cleanupInlineEditorEmptyTracks) {
+            throw new Error("Failed to remove stale empty tracks from IndexedDB");
           }
-
-          migrationsRun.push("cleanupInlineEditorEmptyTracks");
+          // A later start tries again; blank songs are already hidden here.
+          if (!deleted) console.warn("[Orchestrator] Could not remove blank songs yet");
+        } else {
+          this.refreshLocalCopy(data, startedFresh);
         }
 
+        if (!state.migrations.cleanupInlineEditorEmptyTracks) {
+          migrationsRun.push("cleanupInlineEditorEmptyTracks");
+        }
+      }
+
+      if (!state.migrations.cleanupInlineEditorEmptyTracks) {
         state.migrations.cleanupInlineEditorEmptyTracks = true;
         this.saveMigrationState(state);
       }

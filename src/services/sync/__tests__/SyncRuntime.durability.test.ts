@@ -120,7 +120,8 @@ describe.each([
     expect(synced).toHaveBeenCalledTimes(1);
     expect(synced).toHaveBeenCalledWith({ [SONG_URI]: expect.objectContaining({ tagIds: ["tag_house"] }) });
 
-    // A tag taken off elsewhere takes the song out, and this device's own edits stay with the editor.
+    // A last tag taken off elsewhere removes the song from the library and its
+    // Smart Playlists, and this device's own edits stay with the editor.
     await useDevice(website);
     await edit(SONG_URI, (current) => ({ ...current, tagIds: [] }));
     await sync(website);
@@ -128,7 +129,8 @@ describe.each([
     synced.mockClear();
     await sync(desktop);
     await smartPlaylistsDone();
-    expect(synced).toHaveBeenCalledWith({ [SONG_URI]: expect.objectContaining({ tagIds: [] }) });
+    expect(synced).toHaveBeenCalledWith({ [SONG_URI]: null });
+    expect(await indexedDBStorage.getTrack(SONG_URI)).toBeNull();
     synced.mockClear();
     await edit(SONG_URI, (current) => ({ ...current, tagIds: ["tag_deep"] }));
     await sync(desktop);

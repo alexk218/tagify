@@ -2,6 +2,8 @@ import { spotifyLocalPause } from "@/utils/spotifyRequestFailure";
 import { requestFingerprint } from "@/utils/spotifyRequestAccounting";
 
 const HOUR = 60 * 60_000;
+/** Reservations kept per feature and hour, so an hourly limit up to this many is counted exactly (a higher one is not enforced by the hour). */
+export const MAX_HOURLY_RESERVATIONS = 600;
 type Entry = { id: number; at: number };
 type State = { attempts: Record<string, Entry[]>; throttledAt: number; strikes: number; until: number };
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
@@ -22,7 +24,7 @@ export class SpotifyBackgroundPolicy {
       if (parsed && typeof parsed.attempts === "object" && parsed.attempts && Number.isFinite(parsed.until) && Number.isFinite(parsed.throttledAt) && Number.isFinite(parsed.strikes)) state = parsed;
     } catch { /* In-memory protection remains available. */ }
     state.attempts = Object.fromEntries(Object.entries(state.attempts).slice(0, 16).map(([name, entries]) => [name,
-      Array.isArray(entries) ? entries.filter(entry => entry && Number.isFinite(entry.id) && Number.isFinite(entry.at) && entry.at <= now && now - entry.at < HOUR).slice(-200) : [],
+      Array.isArray(entries) ? entries.filter(entry => entry && Number.isFinite(entry.id) && Number.isFinite(entry.at) && entry.at <= now && now - entry.at < HOUR).slice(-MAX_HOURLY_RESERVATIONS) : [],
     ]));
     if (now - state.throttledAt >= HOUR || state.throttledAt > now) { state.strikes = 0; state.until = 0; }
     state.until = Math.min(state.until, now + HOUR);

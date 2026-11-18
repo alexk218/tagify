@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 const ENERGY_MIN = 1;
 const ENERGY_MAX = 10;
 

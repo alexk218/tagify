@@ -13,6 +13,7 @@ import {
   compareResolvedTagsByTaxonomyOrder,
 } from "@/utils/tagTaxonomy";
 import { formatCondensedDate, formatTimestamp } from "@/utils/formatters";
+import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import type { PlaylistMetadata, TrackMetadata } from "@/features/tag-data";
 import {
   EntityDetailsCard,
@@ -300,7 +301,10 @@ const PlaylistDetails: React.FC<PlaylistDetailsProps> = ({
           tagNames={sortedTags.map((tag) => tag.name)}
           tracks={tracks}
           loadTrackUris={() => onLoadTrackUris(playlistUri)}
-          onApply={onApplyTrackUpdates}
+          onApply={async (updates) => {
+            await onApplyTrackUpdates(updates);
+            if (isAlbum) recordProductInteraction("album_apply_to_tracks");
+          }}
           onClose={() => setIsApplyDialogOpen(false)}
         />
       ) : null}

@@ -2,11 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { PRIVATE_NOTES_CHANGED_EVENT } from "@/services/sync/PrivateNotes.types";
 import { getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
+import { usePrivateNotesShown } from "../privateNotesSetting";
 
 /** Read only the visible music's notes, independently of its public annotations. */
 export function usePrivateNotePreviews(uris: string[]) {
   const account = getTagifyDatabaseName();
-  const uriKey = JSON.stringify([...new Set(uris)]);
+  // Turned off in Settings: nothing is read, so no previews show.
+  const shown = usePrivateNotesShown();
+  const uriKey = JSON.stringify(shown ? [...new Set(uris)] : []);
   const [revision, setRevision] = useState(0);
   const [saved, setSaved] = useState<{
     account: string;

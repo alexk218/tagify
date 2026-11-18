@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 import { evaluateTrackMatchesCriteria } from "../features/smart-playlists/utils/smartPlaylist.criteria";
 
 export function getSmartPlaylistRatingRemoval({

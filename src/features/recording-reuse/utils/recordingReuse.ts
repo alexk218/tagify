@@ -28,6 +28,14 @@ export function compatibleRecordingLinks(a: TrackData, b: TrackData): boolean {
 const fields = ["rating", "energy", "tagIds"] as const;
 const equalField = (a: unknown, b: unknown) => JSON.stringify(Array.isArray(a) ? [...a].sort() : a) === JSON.stringify(Array.isArray(b) ? [...b].sort() : b);
 export const recordingAnnotations = (track: TrackData | undefined) => JSON.stringify([track?.rating || 0, track?.energy || 0, [...(track?.tagIds || [])].sort()]);
+/**
+ * The tagging a person sees. A tag ID that is no longer in the tag list (left
+ * over on one copy, for example after a tag was removed elsewhere) can't be
+ * shown, so it never makes two copies of a song look different.
+ */
+export const visibleRecordingAnnotations = (track: TrackData | undefined, validTagIds?: ReadonlySet<string>) => validTagIds
+  ? JSON.stringify([track?.rating || 0, track?.energy || 0, [...new Set((track?.tagIds || []).filter(id => validTagIds.has(id)))].sort()])
+  : recordingAnnotations(track);
 export function recordingConflict(a: TrackData | undefined, b: TrackData | undefined) {
   return !!a && !!b && (["rating", "energy"] as const).some(field => {
     const av = a[field], bv = b[field];
@@ -37,7 +45,7 @@ export function recordingConflict(a: TrackData | undefined, b: TrackData | undef
 }
 
 /** A restored independent cloud copy must not inherit a conflicting local link. */
-export function detachInconsistentRecordingGroups(tracks: Record<string, TrackData>) {
+export function detachInconsistentRecordingGroups(tracks: Record<string, TrackData>, validTagIds?: ReadonlySet<string>) {
   const groups = new Map<string, TrackData[]>();
   Object.values(tracks).forEach(track => {
     if (track.recordingGroupId) {
@@ -45,7 +53,7 @@ export function detachInconsistentRecordingGroups(tracks: Record<string, TrackDa
       members.push(track); groups.set(track.recordingGroupId, members);
     }
   });
-  const invalid = new Set([...groups].filter(([, members]) => members.some(track => recordingAnnotations(track) !== recordingAnnotations(members[0]) || members.some(other => !compatibleRecordingLinks(track, other)))).map(([id]) => id));
+  const invalid = new Set([...groups].filter(([, members]) => members.some(track => visibleRecordingAnnotations(track, validTagIds) !== visibleRecordingAnnotations(members[0], validTagIds) || members.some(other => !compatibleRecordingLinks(track, other)))).map(([id]) => id));
   return Object.fromEntries(Object.entries(tracks).map(([uri, track]) => [uri, track.recordingGroupId && invalid.has(track.recordingGroupId) ? { ...track, recordingGroupId: undefined, ...(track.recordingGroupConfirmed ? { recordingGroupConfirmed: undefined } : {}) } : track]));
 }
 

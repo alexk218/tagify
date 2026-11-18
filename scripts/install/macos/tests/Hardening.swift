@@ -15,7 +15,19 @@ func testHardening() throws {
     _ = try beta.installer.install(architecture: "arm64")
     try put(beta.paths.tagify.appendingPathComponent("package.json"), "{\"version\":\"3.1.1-beta.1\"}")
     let before = SetupStatus.inspect(paths: beta.paths)
-    try expect(before.ready && before.tagifyVersion == "3.1.1-beta.1" && !before.needsTagifyUpdate(latest: "4.0.0"), "Beta changed channel or was called missing")
+    try expect(before.ready && before.tagifyVersion == "3.1.1-beta.1" && !before.needsTagifyUpdate(latest: "3.1.0"), "A beta ahead of the stable release was offered a downgrade")
+    try expect(before.needsTagifyUpdate(latest: "3.1.1") && before.needsTagifyUpdate(latest: "v3.2.0"), "A beta wasn't offered the stable release that replaced it")
+    try expect(try beta.installer.install(architecture: "arm64") == "3.1.1-beta.1" && TagifyPackage.version(at: beta.paths.tagify) == "3.1.1-beta.1", "Update replaced a beta that is ahead of the stable release")
+
+    // Discord report 2026-11-11: a 3.0.1 beta stayed installed forever; the Manager must move it to stable.
+    let staleBeta = try Fixture(fresh: true)
+    _ = try staleBeta.installer.install(architecture: "arm64")
+    try put(staleBeta.paths.tagify.appendingPathComponent("package.json"), "{\"version\":\"3.0.0-beta.1\"}")
+    try expect(SetupStatus.inspect(paths: staleBeta.paths).needsTagifyUpdate(latest: "v3.0.0"), "An older beta wasn't offered the stable update")
+    try expect(try staleBeta.installer.install(architecture: "arm64") == "3.0.0", "Update kept an older beta instead of installing the stable release")
+    let afterStale = SetupStatus.inspect(paths: staleBeta.paths)
+    try expect(afterStale.ready && afterStale.tagifyVersion == "3.0.0" && !afterStale.needsTagifyUpdate(latest: "v3.0.0"), "Stable update after a beta didn't finish cleanly")
+    try expect(text(staleBeta.paths.home.appendingPathComponent("Library/Application Support/Spotify/PersistentCache/library.json")).contains("Keep me"), "Updating from a beta touched saved Spotify data")
     beta.installer.download = { _, _ in throw InstallerFailure(message: "Offline") }
     let repaired = try beta.installer.install(architecture: "arm64", intent: .repair)
     try expect(repaired == "3.1.1-beta.1" && SetupStatus.inspect(paths: beta.paths).ready, "Offline repair changed beta version")

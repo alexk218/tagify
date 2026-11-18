@@ -127,12 +127,27 @@ describe("saving when the device can't finish a save", () => {
   });
 });
 
+describe("counting songs with tags", () => {
+  it("counts only songs with at least one tag, not rated-only songs", async () => {
+    const other = (letter: string) => `spotify:track:${letter.repeat(22)}`;
+    expect(await indexedDBStorage.saveAll(library({
+      [uri]: song,
+      [other("b")]: { ...song, tagIds: ["house"] },
+      [other("c")]: { ...song, rating: 0, energy: 0, tagIds: ["house", "techno"] },
+    }))).toBe(true);
+
+    expect(await indexedDBStorage.getTrackCount()).toBe(3);
+    expect(await indexedDBStorage.getTaggedTrackCount()).toBe(2);
+  });
+});
+
 describe("telling an unreadable library apart from an empty one", () => {
   it("reports counts it can't read instead of zero", async () => {
     indexedDBStorage.resetConnection();
     vi.spyOn(indexedDBStorage, "init").mockResolvedValue(false);
 
     await expect(indexedDBStorage.getTrackCount()).rejects.toThrow();
+    await expect(indexedDBStorage.getTaggedTrackCount()).rejects.toThrow();
     await expect(indexedDBStorage.getPlaylistCount()).rejects.toThrow();
     await expect(indexedDBStorage.getArtistCount()).rejects.toThrow();
     await expect(indexedDBStorage.isInitialized()).rejects.toThrow();

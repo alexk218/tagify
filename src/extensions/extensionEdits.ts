@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 /**
  * Saves ratings, energy, and tags changed outside the Tagify page (keyboard
  * shortcuts and the controls added to Spotify's own views).
@@ -15,6 +16,7 @@ import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { storageService } from "@/services/storage/StorageService";
 import { flushLocalPersistence, getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
 import { recordMeaningfulAction } from "@/features/discovery-survey/services/tagifyUsage";
+import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 
 /** Where a change made outside the Tagify page came from, for usage counts. */
 export type EditSurface = "spotify_views" | "keyboard";
@@ -146,6 +148,8 @@ function countSavedEdit(edit: AnnotationEdit, saved: Record<string, unknown>, su
   // `saved` can also hold linked releases; only the edited songs count.
   if (edit.addTagIds?.length || edit.removeTagIds?.length) void recordMeaningfulAction("tagging", surface, uris.filter(uri => Object.hasOwn(saved, uri)).length);
   if (edit.rating !== undefined || edit.toggleRating !== undefined) void recordMeaningfulAction("rating", surface);
+  // Energy is measured on its own, outside the meaningful-edit counts.
+  if (edit.energy !== undefined || edit.toggleEnergy !== undefined) recordProductInteraction("energy_set", { edit_surface: surface });
 }
 
 /** Saves edits made on this page before applying a change made elsewhere. */
@@ -178,7 +182,8 @@ export async function saveTrackEdits(
   const saved = await indexedDBStorage.patchTracks(
     Object.fromEntries(uris.map((uri) => [uri, (current: TrackData | null) =>
       editSavedTrack(current, edit, now, current ? undefined : options.details?.(uri))])),
-    { expectedDatabaseName, undoable: options.undoable },
+    // Tag origin: tags picked for one song are typed; one change to several selected songs is bulk.
+    { expectedDatabaseName, undoable: options.undoable, tagMethod: uris.length > 1 ? "bulk" : "typed" },
   );
   countSavedEdit(edit, saved, options.surface, uris);
   return saved;
@@ -199,7 +204,7 @@ export async function saveEntityEdit<T extends PlaylistData | ArtistData>(
   return indexedDBStorage.patchEntities<T>(
     kind,
     { [uri]: (current) => editSavedEntity(current, edit, now, details) },
-    { expectedDatabaseName },
+    { expectedDatabaseName, tagMethod: "typed" },
   );
 }
 

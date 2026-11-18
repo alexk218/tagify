@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 import { getTagAccentTokens } from "../features/tag-data/utils/tagAccent";
 
 const CLOSE_GRACE_MS = 120;

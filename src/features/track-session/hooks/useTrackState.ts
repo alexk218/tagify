@@ -94,11 +94,12 @@ export function useTrackState(savedTracks: Record<string, TrackData> = {}) {
     setIsLocked(true);
   };
 
-  const handleSelectTrackForTagging = async (uri: string) => {
+  /** `known`: the song's details from where it was picked, used while the library has none of its own. */
+  const handleSelectTrackForTagging = async (uri: string, known?: SpotifyTrack) => {
     const request = ++selectionRequest.current;
     const saved = savedTracks[uri];
     // Switch the editor now; Spotify details may arrive much later.
-    const knownTrack: SpotifyTrack | null = saved?.name && saved.artists ? {
+    const knownTrack: SpotifyTrack | null = !(saved?.name && saved.artists) && known ? known : saved?.name && saved.artists ? {
       uri, name: saved.name, artists: [{ name: saved.artists }],
       album: { name: saved.albumName || "", uri: saved.albumUri || undefined, images: saved.albumImageUrl ? [{ url: saved.albumImageUrl }] : [] },
       duration_ms: 0,

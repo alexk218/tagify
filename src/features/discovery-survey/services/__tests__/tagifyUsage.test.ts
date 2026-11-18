@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { ACTIVITY_REPORT_INTERVAL_MS, activityDay, recordMeaningfulAction, getUsageAccountDigest, isUsageReportDue, recordDiscoveryAnswer, recordTagifyOpen, recordTagifyPresent, retryAfterMs, USAGE_PAUSED_UNTIL_KEY, useTagifyUsage } from "../tagifyUsage";
 
+// Activity counts per Toronto calendar day. Fake clocks start here, at Toronto noon, so a
+// test that advances hours never crosses midnight on a late-evening run.
+const TORONTO_NOON = Date.UTC(2026, 10, 14, 17);
+
 describe("private Tagify usage recording", () => {
   let getUser: ReturnType<typeof vi.fn>;
   beforeEach(async () => {
@@ -62,15 +66,27 @@ describe("private Tagify usage recording", () => {
   it("adds a library size bucket to opens and presence, and leaves it out when the library can't be read", async () => {
     const recorded = vi.spyOn(productAnalytics, "recordProductEvent");
     const count = vi.spyOn(indexedDBStorage, "getTrackCount").mockResolvedValueOnce(240).mockRejectedValueOnce(new Error("unreadable")).mockResolvedValueOnce(0);
+    const tagged = vi.spyOn(indexedDBStorage, "getTaggedTrackCount").mockResolvedValueOnce(180).mockRejectedValueOnce(new Error("unreadable")).mockResolvedValueOnce(0);
     await recordTagifyOpen("3.3.2");
     await recordTagifyOpen("3.3.2");
     await recordTagifyPresent();
     expect(recorded.mock.calls.map(([, event, details]) => [event, details])).toEqual([
-      ["tagify_opened", { sync_state: expect.any(String), saved_songs: "100-999" }],
+      ["tagify_opened", { sync_state: expect.any(String), saved_songs: "100-999", tagged_songs: "100-999" }],
       ["tagify_opened", { sync_state: expect.any(String) }],
-      ["tagify_present", { saved_songs: "0" }],
+      ["tagify_present", { saved_songs: "0", tagged_songs: "0" }],
     ]);
-    count.mockRestore(); recorded.mockRestore();
+    count.mockRestore(); tagged.mockRestore(); recorded.mockRestore();
+  });
+
+  it("reports songs with tags apart from rated-only songs, and keeps the library size when the tagged count fails", async () => {
+    const recorded = vi.spyOn(productAnalytics, "recordProductEvent");
+    const count = vi.spyOn(indexedDBStorage, "getTrackCount").mockResolvedValueOnce(12_000);
+    const tagged = vi.spyOn(indexedDBStorage, "getTaggedTrackCount").mockRejectedValueOnce(new Error("unreadable"));
+    await recordTagifyOpen("3.3.6");
+    expect(recorded.mock.calls.map(([, event, details]) => [event, details])).toEqual([
+      ["tagify_opened", { sync_state: expect.any(String), saved_songs: "1000+" }],
+    ]);
+    count.mockRestore(); tagged.mockRestore(); recorded.mockRestore();
   });
 
   it("records edits from the Tagify page unless another surface is named", async () => {
@@ -116,7 +132,7 @@ describe("private Tagify usage recording", () => {
   });
 
   it("flushes inline edits without mounting the main app and stops after acknowledgement", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ now: TORONTO_NOON });
     vi.resetModules();
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     try {
@@ -133,7 +149,7 @@ describe("private Tagify usage recording", () => {
   });
 
   it("backs off inline counters while offline or rate-limited without losing later edits", async () => {
-    vi.useFakeTimers(); vi.resetModules();
+    vi.useFakeTimers({ now: TORONTO_NOON }); vi.resetModules();
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     try {
@@ -155,7 +171,7 @@ describe("private Tagify usage recording", () => {
   });
 
   it("does not flush the previous Spotify account's inline queue after a switch", async () => {
-    vi.useFakeTimers(); vi.resetModules();
+    vi.useFakeTimers({ now: TORONTO_NOON }); vi.resetModules();
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     try {
       const inline = await import("../tagifyUsage");
@@ -176,7 +192,7 @@ describe("private Tagify usage recording", () => {
     // Keep hashing on the fake clock's microtasks.
     vi.stubGlobal("crypto", { subtle: { digest: async () => new Uint8Array(32).buffer }, randomUUID: () => "123e4567-e89b-42d3-a456-426614174000" });
     setAnalyticsSharing("0".repeat(64), true);
-    vi.useFakeTimers(); vi.resetModules();
+    vi.useFakeTimers({ now: TORONTO_NOON }); vi.resetModules();
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     try {
       const inline = await import("../tagifyUsage");
@@ -288,7 +304,7 @@ describe("private Tagify usage recording", () => {
     // Keep hashing on the fake clock's microtasks.
     vi.stubGlobal("crypto", { subtle: { digest: async () => new Uint8Array(32).buffer } });
     setAnalyticsSharing("0".repeat(64), true);
-    vi.useFakeTimers();
+    vi.useFakeTimers({ now: TORONTO_NOON });
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     vi.mocked(fetch).mockResolvedValue({ ok: false, status: 503 } as Response);
     const { unmount } = renderHook(() => useTagifyUsage("3.0.1"));

@@ -1,13 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { defaultTagData } from "@/constants/defaultTagData";
-import { filterTrackEntries, buildSmartPlaylistCriteria } from "@/features/track-session/utils/trackList.logic";
+import { buildSmartPlaylistCriteria, collectTrackFilterData, filterTrackEntries } from "@/features/track-session/utils/trackList.logic";
 import type { TrackListEntry, TrackListFilterInputs } from "@/features/track-session/model/trackList.types";
 import { normalizeSmartPlaylistCriteriaList, normalizeTagDataStructure } from "@/features/tag-data/utils/tagData.schema";
 import { createSmartPlaylistRecipeBundle, isSmartPlaylistRecipeBundle } from "@/features/smart-playlists/utils/smartPlaylist.recipes";
 import type { SmartPlaylistCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
 import { TAG_DATA_SCHEMA_VERSION } from "@/utils/tagTaxonomy";
-import { formatLength, matchesSongDetailFilters, releaseDate, songDetailFilterLabels } from "@/utils/songDetails";
+import { filterReleaseYearOf, formatLength, matchesSongDetailFilters, releaseDate, songDetailFilterLabels } from "@/utils/songDetails";
 
 const entry = (uri: string, durationMs?: number, date?: string): TrackListEntry =>
   [uri, { rating: 0, energy: 0, bpm: null, tagIds: ["tag_a"], name: uri, artists: "x", ...(durationMs ? { durationMs } : {}), ...(date ? { releaseDate: date } : {}) }];
@@ -44,6 +44,24 @@ describe("length and release year filters", () => {
     expect(matchesSongDetailFilters({}, {})).toBe(true);
     expect(matchesSongDetailFilters({}, { lengthMaxFilter: 600 })).toBe(false);
     expect(matchesSongDetailFilters({ durationMs: 100_000 }, { releaseYearMinFilter: 1900 })).toBe(false);
+  });
+
+  it("uses a song's original year from Community when it is earlier than its album's", () => {
+    // A 2011 remaster of a 1977 song, a song whose album is older than Community's date, and songs with one date.
+    expect(filterReleaseYearOf({ releaseDate: "2011-03-01", originalReleaseDate: "1977-06" })).toBe(1977);
+    expect(filterReleaseYearOf({ releaseDate: "1990", originalReleaseDate: "1995-01-01" })).toBe(1990);
+    expect(filterReleaseYearOf({ originalReleaseDate: "1977" })).toBe(1977);
+    expect(filterReleaseYearOf({ releaseDate: "2011" })).toBe(2011);
+    expect(filterReleaseYearOf({ releaseDate: "soon", originalReleaseDate: "later" })).toBeNull();
+
+    const remaster: TrackListEntry = ["spotify:track:remaster", { rating: 0, energy: 0, bpm: null, tagIds: ["tag_a"], releaseDate: "2011-03-01", originalReleaseDate: "1977" }];
+    const withRemaster = [...entries, remaster];
+    const filtered = (filters: Partial<TrackListFilterInputs>) => filterTrackEntries(withRemaster, { ...info, "spotify:track:remaster": { name: "remaster", artists: "x" } }, { ...base, ...filters }).map(([uri]) => uri);
+    expect(filtered({ releaseYearMinFilter: 1970, releaseYearMaxFilter: 1979 })).toEqual(["spotify:track:remaster"]);
+    expect(filtered({ releaseYearMinFilter: 2010, releaseYearMaxFilter: 2019 })).toEqual([]);
+    expect([...collectTrackFilterData(withRemaster, new Map()).allReleaseYears].sort()).toEqual([1977, 1995, 2008, 2023]);
+    // Smart Playlists match the same way.
+    expect(matchesSongDetailFilters(remaster[1], { releaseYearMinFilter: 1970, releaseYearMaxFilter: 1979 })).toBe(true);
   });
 
   it("reads Spotify release dates and describes filters in plain words", () => {

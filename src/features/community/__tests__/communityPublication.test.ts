@@ -7,6 +7,7 @@ import {
   keepTagsPrivate,
   publicTagSummary,
   publishTags,
+  savePublicationPolicy,
 } from "../communityPublication";
 import { policyFixture, taxonomyFixture, tracksFixture } from "./sharingFixtures";
 
@@ -48,6 +49,29 @@ describe("community publication", () => {
     } finally {
       window.removeEventListener(COMMUNITY_SHARING_CHANGED_EVENT, changed);
     }
+  });
+
+  it("shares song and album ratings with the tags when someone who isn't public yet publishes", async () => {
+    mocks.communityRequest.mockImplementation(async (_path, options) => ({ policy: options.body.policy }));
+    const ratingsOn = { track: { tags: true, rating: true }, album: { tags: true, rating: true }, artist: { tags: true, rating: false } };
+
+    await publishTags(policyFixture({ reviewedAt: null, enabled: false }), "workspace");
+    expect(mocks.communityRequest.mock.calls[0][1].body.policy.entities).toEqual(ratingsOn);
+
+    // Chose "Keep my tags private" earlier, publishes now.
+    await publishTags(policyFixture({ enabled: false }), "workspace");
+    expect(mocks.communityRequest.mock.calls[1][1].body.policy.entities).toEqual(ratingsOn);
+  });
+
+  it("leaves the saved rating choice of a member who is already public as it was", async () => {
+    mocks.communityRequest.mockImplementation(async (_path, options) => ({ policy: options.body.policy }));
+    const ratingsOff = policyFixture().entities;
+
+    await savePublicationPolicy(policyFixture({ hiddenTagIds: ["rain"] }));
+    await publishTags(policyFixture(), "workspace");
+    await publishTags(policyFixture({ paused: true }), "workspace");
+    await keepTagsPrivate(policyFixture({ reviewedAt: null }));
+    mocks.communityRequest.mock.calls.forEach(([, options]) => expect(options.body.policy.entities).toEqual(ratingsOff));
   });
 
   it("keeps a private choice private and never counts it as publishing", async () => {

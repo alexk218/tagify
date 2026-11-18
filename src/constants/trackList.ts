@@ -5,6 +5,8 @@ export const SORT_OPTIONS = {
   RATING: "rating",
   ENERGY: "energy",
   BPM: "bpm",
+  /** How many other Community members tagged the song; offered only on a connected computer. */
+  COMMUNITY_PEOPLE: "communityPeople",
 } as const;
 
 export const SORT_ORDERS = {

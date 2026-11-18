@@ -64,6 +64,38 @@
   min-width: 0;
 }
 
+/* The song as a way into its details (Community view). */
+.songButton {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 0;
+  text-align: left;
+}
+
+.songButton:hover .songName {
+  text-decoration: underline;
+}
+
+.songButton:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
+.detail {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  grid-column: 2 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .songName,
 .songArtist {
   overflow: hidden;
@@ -112,6 +144,11 @@
 
 .tag:disabled {
   cursor: default;
+}
+
+/* A long tag name shortens; its plus or tick keeps its size. */
+.tag svg {
+  flex: 0 0 auto;
 }
 
 .tagName {

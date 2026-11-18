@@ -15,6 +15,14 @@ function validArtists(value: unknown): TrackArtist[] {
     typeof artist?.uri === "string" && artist.uri.startsWith("spotify:artist:") && typeof artist.name === "string") : [];
 }
 
+/** Unchanged artists are refreshed at most daily, which keeps the newest-first cache limit meaningful. */
+const UNCHANGED_REFRESH_MS = 24 * 60 * 60_000;
+function sameRecentArtists(cached: CachedArtists | undefined, artists: TrackArtist[], now: number): boolean {
+  return !!cached && now - cached.checkedAt < UNCHANGED_REFRESH_MS &&
+    cached.artists.length === artists.length &&
+    cached.artists.every((artist, index) => artist.uri === artists[index].uri && artist.name === artists[index].name);
+}
+
 /** Public identities only. Enrichment never writes annotations or track timestamps. */
 export class TrackArtistIdentitiesStore {
   private snapshot: Readonly<Record<string, CachedArtists>> | null = null;
@@ -76,13 +84,17 @@ export class TrackArtistIdentitiesStore {
   }
   remember(uri: string, artists: TrackArtist[]): void { this.rememberMany([[uri, artists]]); }
   rememberMany(entries: Iterable<readonly [string, TrackArtist[]]>): void {
+    const known = this.getSnapshot();
+    const now = Date.now();
     const updates = Object.fromEntries(Array.from(entries).flatMap(([uri, artists]) => {
       const valid = validArtists(artists);
-      return uri.startsWith("spotify:track:") && valid.length
-        ? [[uri, { artists: valid, checkedAt: Date.now() }]] : [];
+      // Reading the same playlists again brings the same artists. Copying and
+      // saving the whole cache for them made large libraries slow.
+      return uri.startsWith("spotify:track:") && valid.length && !sameRecentArtists(known[uri], valid, now)
+        ? [[uri, { artists: valid, checkedAt: now }]] : [];
     }));
     if (!Object.keys(updates).length) return;
-    this.snapshot = { ...this.getSnapshot(), ...updates };
+    this.snapshot = { ...known, ...updates };
     if (this.storage && !this.saveTimer) this.saveTimer = setTimeout(() => {
       this.saveTimer = undefined;
       try {

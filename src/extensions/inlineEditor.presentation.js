@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 import { renderEnergyControl } from "./inlineEditor.energyControl";
 import { renderStarRatingControl } from "./inlineEditor.ratingControl";
 import { createTagStatusIndicator } from "./inlineEditor.tagIndicator";

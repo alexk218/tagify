@@ -19,12 +19,23 @@ const tree = [
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
 
 describe("the playlist list Community's picker shows", () => {
+  it("marks playlists Spotify made, and never sends that to Community", () => {
+    const made = [
+      { type: "playlist", uri: `spotify:playlist:${id(7)}`, name: "Daily Mix 1", isOwnedBySelf: false, totalLength: 50, owner: { displayName: "Spotify", username: "spotify", uri: "spotify:user:spotify" } },
+      ...tree,
+    ];
+    const read = rootlistCatalog(made);
+    expect(read[0].spotifyMade).toBe(true);
+    expect(read.slice(1).every((playlist) => playlist.spotifyMade === undefined)).toBe(true);
+    expect(JSON.stringify(spotifyListCatalog({ likedCount: 1, playlists: read }))).not.toContain("spotifyMade");
+  });
+
   it("knows which playlists the member made, from Spotify's own flags", () => {
     expect(rootlistCatalog(tree)).toEqual([
       { playlistId: id(1), playlistName: "Night drives", folders: [], owned: true, ownerName: null, songCount: 42 },
       { playlistId: id(2), playlistName: "Sam's indie", folders: [{ id: "a1b2c3d4e5f60718", name: "Friends" }], owned: false, ownerName: "Sam", songCount: 120 },
-      // A collaborative playlist the member can edit counts as theirs.
-      { playlistId: id(3), playlistName: "Road trip", folders: [{ id: "a1b2c3d4e5f60718", name: "Friends" }], owned: true, ownerName: null, songCount: 15 },
+      // Someone else's collaborative playlist the member can edit isn't theirs: only playlists they made count.
+      { playlistId: id(3), playlistName: "Road trip", folders: [{ id: "a1b2c3d4e5f60718", name: "Friends" }], owned: false, ownerName: "Kim", songCount: 15 },
       // Spotify didn't say: not counted as the member's.
       { playlistId: id(4), playlistName: "Mystery", folders: [], owned: false, ownerName: null, songCount: null },
     ]);
@@ -33,7 +44,7 @@ describe("the playlist list Community's picker shows", () => {
   it("builds the catalog in Spotify's order, without account names", () => {
     const catalog = spotifyListCatalog({ likedCount: 900, playlists: rootlistCatalog(tree) });
     expect(catalog.likedCount).toBe(900);
-    expect(catalog.playlists.map((playlist) => [playlist.position, playlist.name, playlist.owned])).toEqual([[1, "Night drives", true], [2, "Sam's indie", false], [3, "Road trip", true], [4, "Mystery", false]]);
+    expect(catalog.playlists.map((playlist) => [playlist.position, playlist.name, playlist.owned])).toEqual([[1, "Night drives", true], [2, "Sam's indie", false], [3, "Road trip", false], [4, "Mystery", false]]);
     expect(JSON.stringify(catalog)).not.toMatch(/alex\.k|sam99/);
   });
 

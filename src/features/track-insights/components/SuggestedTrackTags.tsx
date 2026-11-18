@@ -3,6 +3,7 @@ import { Check, Plus } from "lucide-react";
 import type { AlbumTrackSummary, TagTaxonomy } from "@/types/tagData";
 import { buildResolvedTagLookup } from "@/utils/tagTaxonomy";
 import { buildTagAccentCssVars } from "@/features/tag-data/utils/tagAccent";
+import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import styles from "./SuggestedTrackTags.module.css";
 
 interface Props {
@@ -37,7 +38,7 @@ export function SuggestedTrackTags({ summary, taxonomy, entityLabel, appliedTagI
           <button type="button" className={styles.add} disabled={added}
             aria-label={added ? `${resolved.name} added to this ${entityLabel}` : `Add ${resolved.name} to this ${entityLabel}`}
             title={`${coverage} ${added ? `Already added to this ${entityLabel}.` : `Add to this ${entityLabel}.`}`}
-            onClick={(event) => { event.stopPropagation(); if (!added) onAddTag(tagId); }}>
+            onClick={(event) => { event.stopPropagation(); if (!added) { onAddTag(tagId); recordProductInteraction("suggested_tag_used"); } }}>
             <span className={styles.name}>{resolved.name}</span>
             <span className={styles.count} aria-label={`${trackCount} tracks`}>{trackCount}</span>
             <span className={styles.action}>{added ? <Check size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}{added ? "Added" : "Add"}</span>

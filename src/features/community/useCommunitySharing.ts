@@ -23,6 +23,15 @@ export interface CommunitySharing {
 }
 
 /**
+ * Whether others' tags in the track list wait for the member to share theirs: only actively shared
+ * tags open everything, so not public yet, private and paused all ask to share. While the choice is
+ * still loading or couldn't be read, nothing is locked.
+ */
+export function othersTagsWaitForSharing(connected: boolean, sharing: Pick<CommunitySharing, "phase" | "state">): boolean {
+  return connected && sharing.phase === "ready" && sharing.state !== null && sharing.state !== "public";
+}
+
+/**
  * The member's saved sharing choice while a sharing view is open. It loads
  * when one opens, follows saves made anywhere in Tagify, and checks again when
  * Spotify comes back to the front, since Community can publish too.

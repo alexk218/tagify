@@ -8,7 +8,10 @@ import { defaultTagData } from "@/constants/defaultTagData";
 import { TAG_DATA_SCHEMA_VERSION } from "@/utils/tagTaxonomy";
 import type { TagDataStructure } from "@/types/tagData";
 import { evaluateTrackMatchesCriteria } from "@/features/smart-playlists";
-import { MAX_SONG_DETAILS_ATTEMPTS, needsSongDetails, runSongDetailsFill, SONG_DETAILS_RETRY_AFTER_MS } from "../songDetailsFill";
+import {
+  MAX_SONG_DETAILS_ATTEMPTS, needsSongDetails, runSongDetailsFill, SONG_DETAILS_HOURLY_READS, SONG_DETAILS_READ_INTERVAL_MS,
+  SONG_DETAILS_RETRY_AFTER_MS, songDetailsBackoff, songDetailsProgress,
+} from "../songDetailsFill";
 
 const short = `spotify:track:${"a".repeat(22)}`;
 const long = `spotify:track:${"b".repeat(22)}`;
@@ -157,15 +160,41 @@ it("shows each saved batch right away instead of waiting for the whole run", asy
   vi.spyOn(spotifyService, "getTrack").mockResolvedValue(info(200_000, "2010"));
   const onSaved = vi.fn();
   const result = await runSongDetailsFill({ paceMs: 0, onSaved });
-  // 32 Spotify songs: one batch of 25 mid-run, then the last 7 at the end.
+  // 32 Spotify songs: the first 5 at once (so the filters appear quickly), then 25, then the last 2 at the end.
   expect(result.updated).toBe(32);
-  expect(onSaved).toHaveBeenCalledTimes(2);
+  expect(onSaved).toHaveBeenCalledTimes(3);
 });
 
 it("stops when the hour's allowance is used up and keeps what it found", async () => {
   vi.spyOn(spotifyService, "getTrack").mockResolvedValue(info(200_000, "2010"));
   const reserve = vi.spyOn(spotifyBackgroundPolicy, "reserve").mockReturnValueOnce(true).mockReturnValue(false);
   const result = await runSongDetailsFill({ paceMs: 0 });
-  expect(reserve).toHaveBeenCalledWith("song-details", long, 150);
+  expect(reserve).toHaveBeenCalledWith("song-details", long, SONG_DETAILS_HOURLY_READS);
+  expect(SONG_DETAILS_HOURLY_READS).toBe(600);
   expect(result).toMatchObject({ reads: 1, updated: 1, remaining: 1, stopped: "budget" });
+});
+
+it("spreads the hour's reads evenly: one every 6 seconds is 600 an hour", () => {
+  expect(SONG_DETAILS_READ_INTERVAL_MS * SONG_DETAILS_HOURLY_READS).toBe(60 * 60_000);
+});
+
+it("slows down after Spotify asks it to wait, and the next run keeps the slower pace", async () => {
+  vi.spyOn(spotifyService, "getTrack").mockImplementation(async () => {
+    spotifyBackgroundPolicy.throttled(60_000);
+    throw Object.assign(new Error("Spotify asked Tagify to wait"), { status: 429 });
+  });
+  const result = await runSongDetailsFill({ paceMs: 0 });
+  expect(result.stopped).toBe("paused");
+  expect(songDetailsBackoff().slowdown()).toBe(2);
+});
+
+it("counts progress over tagged Spotify songs, leaving out songs Spotify couldn't describe", () => {
+  const now = 10 * SONG_DETAILS_RETRY_AFTER_MS;
+  const tracks = {
+    ...library().tracks,
+    [`spotify:track:${"c".repeat(22)}`]: { rating: 0, energy: 0, bpm: null, tagIds: [], dateCreated: 1, dateModified: 1, durationMs: 200_000, releaseDate: "2001" },
+    [`spotify:track:${"d".repeat(22)}`]: { rating: 0, energy: 0, bpm: null, tagIds: [], dateCreated: 1, dateModified: 1, songDetailsAttempts: MAX_SONG_DETAILS_ATTEMPTS, songDetailsCheckedAt: now - 1_000 },
+  };
+  // Four Spotify songs (the local file doesn't count): short and long still waiting, one filled, one given up on.
+  expect(songDetailsProgress(tracks, now)).toEqual({ total: 4, waiting: 2 });
 });

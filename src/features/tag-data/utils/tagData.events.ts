@@ -4,7 +4,9 @@ export type TagDataUpdatedEventType =
   | "save"
   | "import"
   | "batchUpdate"
-  | "smartPlaylistSync";
+  | "smartPlaylistSync"
+  /** Song details saved in the background, such as original release dates from Community. */
+  | "songDetails";
 
 // The Tagify page and the background extension are separate bundles, each
 // with its own copy of this module, so this tells a bundle's own events apart.
@@ -28,12 +30,13 @@ export function dispatchTagDataUpdatedEvent(type: TagDataUpdatedEventType, optio
 /**
  * Whether an update event reports library changes this bundle has not shown
  * yet: anything another bundle saved, synced changes, and Smart Playlist
- * updates. This bundle's own saves, imports, and bulk edits are already shown.
+ * updates and song details saved in the background. This bundle's own saves,
+ * imports, and bulk edits are already shown.
  */
 export function isUnshownTagDataUpdate(detail: { type?: string; origin?: string; sourceId?: string; recordsAnnounced?: boolean } | null | undefined): boolean {
   if (!detail) return true;
   if (detail.recordsAnnounced) return false;
   if (detail.type === "sync") return detail.origin === "remote";
   if (detail.sourceId !== BUNDLE_SOURCE_ID) return true;
-  return detail.type === "smartPlaylistSync";
+  return detail.type === "smartPlaylistSync" || detail.type === "songDetails";
 }

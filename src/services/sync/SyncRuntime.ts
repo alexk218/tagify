@@ -39,6 +39,7 @@ import { expandRecordingEdits } from "@/features/recording-reuse/utils/recording
 import {
   getDesktopSyncConfiguration,
   getTagifyDatabaseName,
+  HISTORY_BACKFILL_STATE_KEY,
   isSyncSafeId,
   normalizeSyncBpm,
   normalizeSyncEnergy,
@@ -48,6 +49,7 @@ import {
   editsInclude,
   entityEdits,
   hasEntityEdits,
+  mergedTagMethods,
   makeEntityReplaceIntent,
   syncTimestamps,
   LOCAL_FILES_CHANGED_EVENT,
@@ -73,15 +75,31 @@ import {
   wereSmartPlaylistsExplicitlyCleared,
 } from "@/features/smart-playlists/utils/smartPlaylist.storage";
 import { knownCloudTaxonomy, rebuildDeviceTaxonomy } from "./PreserveLocalTaxonomyMetadata";
+import { pendingHistoryBackfill, runHistoryBackfill, type HistoryBackfillRecord } from "./LibraryHistoryBackfill";
 import { privateNoteBackupStatus, syncPrivateNotes } from "./PrivateNotes";
 import { canReadSpotifyLibrary, isNewSpotifyLibraryRequest, markSpotifyLibraryRequestHandled, reportDesktopFeatures, runSpotifyLibrarySend, SPOTIFY_LISTS_FEATURE, type SendSession, type SpotifySendFailure, type SpotifySendOutcome } from "./SpotifyLibrarySender";
 import { canSaveToLikedSongs, runSpotifySaves, SPOTIFY_SAVES_FEATURE, spotifySaveNotice } from "./SpotifySaveRunner";
 import { canWritePlaylists, localCreatedPlaylists, PLAYLIST_WRITES_FEATURE, PlaylistWriteScheduler, playlistWriteNotice, runPlaylistWrites } from "./PlaylistWriteRunner";
+import {
+  desktopFilledSpotifyPlaylist,
+  SMART_PLAYLIST_LINKS_STATE_KEY,
+  SMART_PLAYLISTS_REFRESH_REQUEST_EVENT,
+  SMART_PLAYLISTS_REFRESHED_EVENT,
+  sharedFingerprint,
+  smartPlaylistsCapability,
+  storeCommunityOnlySmartPlaylists,
+  readQueuedSmartPlaylistRemovals,
+  clearQueuedSmartPlaylistRemovals,
+  syncSmartPlaylistList,
+  type SmartPlaylistLinksRecord,
+} from "./SmartPlaylistCommunityList";
+import { loadSmartPlaylistsFromStorage, updateSmartPlaylistsInStorage } from "@/features/smart-playlists/utils/smartPlaylist.storage";
+import type { SmartPlaylistCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
 import { runArtistCreditReports } from "./CommunityArtistCredits";
 import { communityArtistCreditSources } from "./CommunityArtistCreditSources";
 import { runSongReleaseReports } from "./CommunitySongReleases";
 import { runCatalogFillJobs } from "./CommunityCatalogFillJobs";
-import { NowPlayingLookupScheduler, runNowPlayingLookups } from "./CommunityNowPlayingLookups";
+import { NOW_PLAYING_LOOKUP_REQUEST_EVENT, NowPlayingLookupScheduler, runNowPlayingLookups } from "./CommunityNowPlayingLookups";
 import { communityNowPlayingLookupSources } from "./CommunityNowPlayingLookupSources";
 import { SpotifySearchLookupScheduler, runSpotifySearchLookups } from "./CommunitySpotifySearchLookups";
 import { communitySpotifySearchLookupSources } from "./CommunitySpotifySearchLookupSources";
@@ -91,6 +109,9 @@ import { runSongNameReports } from "./CommunitySongNames";
 import { communitySongNameSources } from "./CommunitySongNameSources";
 import { runSongDetailReports } from "./CommunitySongDetails";
 import { communitySongDetailSources } from "./CommunitySongDetailSources";
+import { runOriginalReleaseDates } from "./CommunityOriginalReleaseDates";
+import { communityOriginalReleaseDateSources } from "./CommunityOriginalReleaseDateSources";
+import { dispatchTagDataUpdatedEvent } from "@/features/tag-data/utils/tagData.events";
 import { canPlayFromCommunity, DESKTOP_PLAY_FEATURE, DesktopPlayer, readDesktopPlayRequest } from "./DesktopPlay";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { spotifyAccountKey } from "@/services/SpotifyRequests";
@@ -114,6 +135,7 @@ import { isBusyStatus, retryAfterSeconds } from "./SyncRetryAfter";
 import packageJson from "@/package";
 import { downloadTagDataBackup } from "@/features/tag-data/utils/tagData.backup";
 import { readCompleteBackupContents } from "@/features/tag-data/utils/tagData.backupContents";
+import { isArtistEmpty, isPlaylistEmpty, isTrackEmpty } from "@/features/tag-data/utils/tagData.helpers";
 
 export type SyncStatus = "unlinked" | "idle" | "syncing" | "publishing" | "offline" | "reauthorize" | "snapshot-required" | "merge-required" | "publication-review-required" | "recovery-available" | "restoring" | "restore-failed" | "error";
 export interface InitialMergeReview extends InitialMergePlanV1 {
@@ -200,6 +222,8 @@ const LIBRARY_SUMMARY_REFRESH_MS = 6 * 60 * 60_000;
 // How long Tagify trusts Community's capability list, saved or in memory, before asking again, so a
 // desktop picks up what a Community release adds within the hour even while Spotify stays open.
 const CAPABILITIES_REFRESH_MS = 60 * 60_000;
+/** A library history catch-up that didn't finish tries again on a sync this long after. */
+const HISTORY_BACKFILL_RETRY_MS = 10 * 60_000;
 const CLIENT_VERSION = packageJson.version;
 /** Edits are backed up once typing pauses, and at least this often during continuous editing. */
 export const EDIT_SYNC_DEBOUNCE_MS = 3_000;
@@ -396,6 +420,21 @@ const CATALOG_FILL_INTERVAL_MS = 3 * 60 * 60_000;
 const SONG_NAMES_INTERVAL_MS = 10 * 60_000;
 /** Song lengths and release dates fill in slowly in the background, so a few hours apart is soon enough. */
 const SONG_DETAILS_INTERVAL_MS = 3 * 60 * 60_000;
+/** Original release dates change rarely: Tagify reads them about once a day per library. */
+export const ORIGINAL_RELEASE_DATES_INTERVAL_MS = 24 * 60 * 60_000;
+/** After a run that couldn't reach Community or save, Tagify tries again on a sync this much later. */
+const ORIGINAL_RELEASE_DATES_RETRY_MS = 3 * 60 * 60_000;
+const ORIGINAL_RELEASE_DATES_RAN_AT_KEY = "tagify:original-release-dates:ran-at:v1:";
+
+/** Smart playlists shared with Community are read again after a sync at most this often. */
+const SMART_PLAYLIST_LIST_INTERVAL_MS = 15 * 60_000;
+/** A local smart playlist edit goes to Community once edits pause this long. */
+const SMART_PLAYLIST_EDIT_DELAY_MS = 2_000;
+
+/** The fields of a whole local list that Community shares (bookkeeping such as tracked songs left out). */
+export function smartPlaylistListFingerprint(playlists: SmartPlaylistCriteria[]): string {
+  return playlists.map((playlist) => `${playlist.id ?? ""}=${sharedFingerprint(playlist)}`).sort().join("\n");
+}
 
 export function capabilitiesCacheKey(apiBaseUrl: string): string {
   return `tagify:sync-capabilities:${CLIENT_VERSION}:notes-v1:merge-v2:${new URL(apiBaseUrl).origin}`;
@@ -494,10 +533,15 @@ export function coalesceOutboxIntents(intents: LocalSyncIntent[]): { intents: Lo
       if (earliest.base) intent.base = earliest.base; else delete intent.base;
       return { key, intent, ids: members.map((member) => member.id) };
     }
-    return {
-      key, intent: latest, ids: members.map((intent) => intent.id),
-      edits: entityEdits(members.filter((intent): intent is EntityReplaceIntent | EntityDeleteIntent => intent.type === "entity.replace" || intent.type === "entity.delete")),
-    };
+    const entityMembers = members.filter((intent): intent is EntityReplaceIntent | EntityDeleteIntent => intent.type === "entity.replace" || intent.type === "entity.delete");
+    let intent = latest;
+    if (latest.type === "entity.replace") {
+      // Tag origin: each tag goes out with the method of the latest change to it.
+      const { tagMethods: _, ...desired } = latest.desired;
+      const tagMethods = mergedTagMethods(entityMembers);
+      intent = { ...latest, desired: tagMethods ? { ...desired, tagMethods } : desired };
+    }
+    return { key, intent, ids: members.map((member) => member.id), edits: entityEdits(entityMembers) };
   }).sort((left, right) => left.intent.createdAt - right.intent.createdAt);
   return {
     intents: groups.map((group) => group.intent),
@@ -555,6 +599,10 @@ class SyncRuntime extends EventTarget {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running: Promise<void> | null = null;
   private rerunRequested = false;
+  /** Whether a library history catch-up is owed; null until this session reads its record once. */
+  private historyBackfillDue: boolean | null = null;
+  private historyBackfillRetryAt = 0;
+  private historyBackfillRunning: Promise<void> | null = null;
   private status: SyncStatus = "unlinked";
   private realtime: SupabaseClient | null = null;
   private channel: RealtimeChannel | null = null;
@@ -660,7 +708,10 @@ class SyncRuntime extends EventTarget {
     run: async (capability) => {
       const configuration = getDesktopSyncConfiguration();
       if (!configuration || !canWritePlaylists()) return { written: 0, failed: 0, created: [] };
-      const run = await runPlaylistWrites(this.sideSession(configuration), spotifyApiService, capability, localCreatedPlaylists(spotifyAccountKey));
+      // One writer per Spotify playlist: a smart playlist Tagify fills itself is left to that fill.
+      const desktopFills = async (communityId: string) => desktopFilledSpotifyPlaylist(
+        communityId, await getState<SmartPlaylistLinksRecord>(SMART_PLAYLIST_LINKS_STATE_KEY), await loadSmartPlaylistsFromStorage());
+      const run = await runPlaylistWrites(this.sideSession(configuration), spotifyApiService, capability, localCreatedPlaylists(spotifyAccountKey), fetch, undefined, desktopFills);
       const notice = playlistWriteNotice(run);
       if (notice) Spicetify.showNotification(notice);
       return run;
@@ -717,7 +768,18 @@ class SyncRuntime extends EventTarget {
   private songDetails: Promise<void> | null = null;
   private songDetailsRanAt = 0;
   private songDetailsUnsupported = false;
+  private originalReleaseDates: Promise<void> | null = null;
+  /** When this session last started a run, so one that failed isn't retried on every sync. */
+  private originalReleaseDatesTriedAt = 0;
+  private originalReleaseDatesUnsupported = false;
   private spotifySavesAgain = false;
+  /** Smart playlists shared with Community (SmartPlaylistCommunityList.ts): the run in progress, when the last one finished, and whether another is owed. */
+  private smartPlaylistList: Promise<void> | null = null;
+  private smartPlaylistListAt = 0;
+  private smartPlaylistListAgain = false;
+  /** The shared fields of the local list as the last run left them; a different list means a local edit to send. */
+  private smartPlaylistListShared: string | null = null;
+  private smartPlaylistListTimer: ReturnType<typeof setTimeout> | null = null;
 
   start(): void {
     if (this.started) return;
@@ -732,6 +794,8 @@ class SyncRuntime extends EventTarget {
     document.addEventListener("visibilitychange", this.handleVisibilityChange);
     window.addEventListener(SYNC_OUTBOX_CHANGED_EVENT, this.handleOutboxChanged);
     window.addEventListener(LOCAL_FILES_CHANGED_EVENT, this.handleOutboxChanged);
+    window.addEventListener(SMART_PLAYLISTS_REFRESH_REQUEST_EVENT, this.handleSmartPlaylistRefreshRequest);
+    window.addEventListener("tagify:smartPlaylistsUpdated", this.handleSmartPlaylistsEdited);
     // Realtime triggers sync immediately; local edits sync once typing pauses.
     // Safety checks back off from 5 to 15 to 30 minutes while the live
     // connection is down, and from 60 to 90 to 120 minutes while it is live
@@ -776,6 +840,12 @@ class SyncRuntime extends EventTarget {
     document.removeEventListener("visibilitychange", this.handleVisibilityChange);
     window.removeEventListener(SYNC_OUTBOX_CHANGED_EVENT, this.handleOutboxChanged);
     window.removeEventListener(LOCAL_FILES_CHANGED_EVENT, this.handleOutboxChanged);
+    window.removeEventListener(SMART_PLAYLISTS_REFRESH_REQUEST_EVENT, this.handleSmartPlaylistRefreshRequest);
+    window.removeEventListener("tagify:smartPlaylistsUpdated", this.handleSmartPlaylistsEdited);
+    if (this.smartPlaylistListTimer) clearTimeout(this.smartPlaylistListTimer);
+    this.smartPlaylistListTimer = null;
+    this.smartPlaylistListAt = 0;
+    this.smartPlaylistListShared = null;
     if (this.channel && this.realtime) void this.realtime.removeChannel(this.channel);
     this.channel = null; this.realtime = null;
     this.settleRealtimeJoin();
@@ -854,6 +924,7 @@ class SyncRuntime extends EventTarget {
       dispatchSyncEvent("remote", crypto.randomUUID(), []);
       this.updateProjectionStatus(response.projection);
       this.setSettledStatus();
+      await this.requestHistoryBackfill(configuration);
       return {
         ...(response.merge as InitialMergeResultV1),
         additionsFromDevice: review.additionsFromDevice,
@@ -942,6 +1013,8 @@ class SyncRuntime extends EventTarget {
     this.conditionalLocalFileReads = true;
     this.pullRequestBodyUnavailable = false;
     this.directPullUnavailable = false;
+    this.historyBackfillDue = null;
+    this.historyBackfillRetryAt = 0;
   }
 
   async replaceCloudWithCurrentLocalState(): Promise<void> {
@@ -990,6 +1063,7 @@ class SyncRuntime extends EventTarget {
       await this.acknowledgeCursor(configuration, canonical.headCursor);
       dispatchSyncEvent("local", operationId, []);
       this.setSettledStatus();
+      await this.requestHistoryBackfill(configuration);
     } finally {
       this.cloudReplacementArmed = false;
     }
@@ -1115,6 +1189,9 @@ class SyncRuntime extends EventTarget {
       // This run was a check too; the next safety check counts from now.
       this.scheduleSafetySync(true);
       this.setSettledStatus();
+      await this.backfillHistory(active);
+      // After the push, so a first move reads the list as this computer last saved it.
+      if (Date.now() - this.smartPlaylistListAt >= SMART_PLAYLIST_LIST_INTERVAL_MS) void this.syncSmartPlaylistList();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Sync failed";
       if (/sync_waiting/i.test(message)) {
@@ -1351,6 +1428,7 @@ class SyncRuntime extends EventTarget {
     this.handleBackgroundReaders(configuration);
     this.handleSongNames(configuration);
     this.handleSongDetails(configuration);
+    this.handleOriginalReleaseDates(configuration);
     this.nowPlayingLookups.poll();
     this.spotifySearchLookups.poll();
     this.pollPlaylistWrites();
@@ -2111,6 +2189,137 @@ class SyncRuntime extends EventTarget {
     this.initialMergeDeviceSnapshot = null;
     this.initialMergeOperationId = null;
     console.info("Tagify sync: private library bootstrap complete", { mode: "initialize", annotationCount: canonical.annotations.length, taxonomyNodeCount: canonical.taxonomy.length, operationId: intentId });
+    await this.requestHistoryBackfill(configuration);
+  }
+
+  /**
+   * After the first upload, a combined library or a library restored onto Community: owes Community
+   * the library history it never logged (LibraryHistoryBackfill.ts). Inside a sync run, the run sends
+   * it when it finishes; otherwise it is sent now.
+   */
+  private async requestHistoryBackfill(configuration: DesktopSyncConfiguration): Promise<void> {
+    try {
+      await putState(pendingHistoryBackfill(await getState<HistoryBackfillRecord>(HISTORY_BACKFILL_STATE_KEY), configuration.libraryId));
+    } catch (error) {
+      console.warn("Tagify sync: couldn't note the library history catch-up", error);
+    }
+    this.historyBackfillDue = true;
+    this.historyBackfillRetryAt = 0;
+    if (!this.running) void this.backfillHistory(configuration);
+  }
+
+  /** The Smart Playlists window asked for a fresh read (on open and before Sync Now). */
+  private readonly handleSmartPlaylistRefreshRequest = (): void => {
+    if (!this.started || !getDesktopSyncConfiguration()) { this.smartPlaylistListDone("unsupported"); return; }
+    void this.syncSmartPlaylistList();
+  };
+
+  /** A local save: send it once edits pause, only when a field Community shares changed. */
+  private readonly handleSmartPlaylistsEdited = (event: Event): void => {
+    const playlists = (event as CustomEvent<{ playlists?: SmartPlaylistCriteria[] }>).detail?.playlists;
+    if (!this.started || !Array.isArray(playlists) || this.smartPlaylistListShared === null) return;
+    if (smartPlaylistListFingerprint(playlists) === this.smartPlaylistListShared) return;
+    if (this.smartPlaylistListTimer) clearTimeout(this.smartPlaylistListTimer);
+    this.smartPlaylistListTimer = setTimeout(() => { this.smartPlaylistListTimer = null; void this.syncSmartPlaylistList(); }, SMART_PLAYLIST_EDIT_DELAY_MS);
+  };
+
+  private smartPlaylistListDone(outcome: string): void {
+    try { window.dispatchEvent(new CustomEvent(SMART_PLAYLISTS_REFRESHED_EVENT, { detail: { outcome } })); } catch { /* best effort */ }
+  }
+
+  /**
+   * Reads and writes the smart playlist list Tagify shares with Community, when Community offers it:
+   * after each sync (at most every 15 minutes), when the Smart Playlists window opens or refreshes,
+   * and after a local edit. One run at a time; a request during a run starts one more after it.
+   */
+  private syncSmartPlaylistList(): Promise<void> {
+    if (this.smartPlaylistList) { this.smartPlaylistListAgain = true; return this.smartPlaylistList; }
+    this.smartPlaylistList = (async () => {
+      let outcome = "unsupported";
+      try {
+        do {
+          this.smartPlaylistListAgain = false;
+          const configuration = getDesktopSyncConfiguration();
+          if (!configuration || !this.started) break;
+          const active = await this.refreshIfNeeded(configuration);
+          const capability = smartPlaylistsCapability(await this.currentCapabilities(active));
+          this.smartPlaylistListAt = Date.now();
+          outcome = await syncSmartPlaylistList({
+            capability,
+            libraryId: active.libraryId,
+            deviceId: active.deviceId,
+            call: (method, path, body) => this.smartPlaylistRequest(active, method, path, body),
+            loadLocal: () => loadSmartPlaylistsFromStorage(),
+            updateLocal: async (updater) => {
+              const saved = await updateSmartPlaylistsInStorage(updater);
+              window.dispatchEvent(new CustomEvent("tagify:smartPlaylistsUpdated", { detail: { count: saved.length, playlistIds: saved.map((item) => item.playlistId), playlists: saved } }));
+              return saved;
+            },
+            getRecord: () => getState<SmartPlaylistLinksRecord>(SMART_PLAYLIST_LINKS_STATE_KEY),
+            putRecord: (record) => putState(record),
+            showCommunityOnly: storeCommunityOnlySmartPlaylists,
+            pendingRemovals: readQueuedSmartPlaylistRemovals,
+            removalsSent: clearQueuedSmartPlaylistRemovals,
+          });
+          // Without the shared list (older Community, paused), local edits wait for the next sync.
+          this.smartPlaylistListShared = outcome === "done" ? smartPlaylistListFingerprint(await loadSmartPlaylistsFromStorage()) : null;
+        } while (this.smartPlaylistListAgain && this.started);
+      } catch (error) {
+        console.warn("Tagify sync: smart playlists will be read again later", error);
+        outcome = "failed";
+      } finally {
+        this.smartPlaylistList = null;
+        this.smartPlaylistListAgain = false;
+        this.smartPlaylistListDone(outcome);
+      }
+    })();
+    return this.smartPlaylistList;
+  }
+
+  /** A smart playlist request with the answer's status; rejects only when Community couldn't be reached. */
+  private async smartPlaylistRequest(configuration: DesktopSyncConfiguration, method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<{ status: number; body: unknown }> {
+    const response = await fetch(`${configuration.apiBaseUrl}${path}`, {
+      method,
+      headers: { ...syncClientHeaders(configuration.accessToken), ...(body === undefined ? {} : { "content-type": "application/json" }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: "no-store",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 401 || response.status === 403) this.sessionRefused(response, payload, configuration.accessToken);
+    return { status: response.status, body: payload };
+  }
+
+  /** Sends owed library history. Reads its record once per session; never rejects. */
+  private backfillHistory(configuration: DesktopSyncConfiguration): Promise<void> {
+    if (this.historyBackfillDue === false || Date.now() < this.historyBackfillRetryAt) return Promise.resolve();
+    this.historyBackfillRunning ??= (async () => {
+      try {
+        const record = await getState<HistoryBackfillRecord>(HISTORY_BACKFILL_STATE_KEY);
+        if (!record?.pending || record.libraryId !== configuration.libraryId) {
+          this.historyBackfillDue = false;
+          return;
+        }
+        const active = await this.refreshIfNeeded(configuration);
+        const capabilities = await this.currentCapabilities(active) as SyncCapabilitiesV2;
+        const outcome = await runHistoryBackfill({
+          capability: capabilities.historyBackfill,
+          libraryId: active.libraryId,
+          deviceId: active.deviceId,
+          request: (path, body) => this.request(active, path, body),
+          readRows: (afterId, limit) => indexedDBStorage.getLibraryHistoryAfter(afterId, limit),
+          getRecord: () => getState<HistoryBackfillRecord>(HISTORY_BACKFILL_STATE_KEY),
+          putRecord: (next) => putState(next),
+        });
+        if (outcome === "done") this.historyBackfillDue = false;
+        else this.historyBackfillRetryAt = Date.now() + HISTORY_BACKFILL_RETRY_MS;
+      } catch (error) {
+        console.warn("Tagify sync: library history catch-up will try again later", error);
+        this.historyBackfillRetryAt = Date.now() + HISTORY_BACKFILL_RETRY_MS;
+      } finally {
+        this.historyBackfillRunning = null;
+      }
+    })();
+    return this.historyBackfillRunning;
   }
 
   private async request(configuration: DesktopSyncConfiguration, path: string, body?: unknown, ifNoneMatch?: string): Promise<any> {
@@ -2532,6 +2741,39 @@ class SyncRuntime extends EventTarget {
   }
 
   /**
+   * Saves each song's original release date from Community (originalReleaseDate) on songs in this
+   * library, so the Released filter and Smart Playlists put a remaster in its song's decade, the
+   * way Community's filters do. Read-only on Community, no Spotify request, and Last Updated stays
+   * as it is (CommunityOriginalReleaseDates.ts). Only when Community advertises
+   * `originalReleaseDates`: about once a day per library, remembered across starts; a 404 leaves
+   * Community alone until the next start.
+   */
+  private handleOriginalReleaseDates(configuration: DesktopSyncConfiguration): void {
+    if (!this.started || this.originalReleaseDates || this.originalReleaseDatesUnsupported) return;
+    // Only a Community that advertises the route (tagify-community /api/v2/sync/capabilities).
+    if ((this.capabilities as { originalReleaseDates?: { protocolVersion?: unknown } } | null)?.originalReleaseDates?.protocolVersion !== 1) return;
+    const now = Date.now();
+    if (this.originalReleaseDatesTriedAt && now - this.originalReleaseDatesTriedAt < ORIGINAL_RELEASE_DATES_RETRY_MS) return;
+    const databaseName = getTagifyDatabaseName();
+    const key = ORIGINAL_RELEASE_DATES_RAN_AT_KEY + databaseName;
+    let ranAt = 0;
+    try { ranAt = Number(localStorage.getItem(key)) || 0; } catch { /* Unreadable: run now. */ }
+    if (ranAt && ranAt <= now && now - ranAt < ORIGINAL_RELEASE_DATES_INTERVAL_MS) return;
+    this.originalReleaseDatesTriedAt = now;
+    this.originalReleaseDates = runOriginalReleaseDates(this.sideSession(configuration), communityOriginalReleaseDateSources(databaseName))
+      .then((run) => {
+        if (run.stopped === "unsupported") this.originalReleaseDatesUnsupported = true;
+        // A run Community answered counts as today's, even a paused one; one that never got through is retried later.
+        if (run.stopped !== "network" && run.stopped !== "save_failed") {
+          try { localStorage.setItem(key, String(now)); } catch { /* It only runs again sooner. */ }
+        }
+        if (run.saved) dispatchTagDataUpdatedEvent("songDetails");
+      })
+      .catch((error) => { console.warn("Tagify sync: original release dates were not saved", error instanceof Error ? error.message : error); })
+      .finally(() => { this.originalReleaseDates = null; });
+  }
+
+  /**
    * The member asked on Community to save songs to their Liked Songs. Saves every waiting song
    * through Spotify's desktop app in the background, then looks again if more were asked meanwhile.
    */
@@ -2661,6 +2903,12 @@ class SyncRuntime extends EventTarget {
           this.playlistWrites.request();
         })
         .on("broadcast", { event: "desktop_play_request" }, ({ payload }) => this.handleDesktopPlayRequest(payload))
+        // A member's Now playing card opened a lookup: a filler asks for it now instead of at its next
+        // 15-second poll (the scheduler ignores this on other desktops and during any back-off).
+        .on("broadcast", { event: NOW_PLAYING_LOOKUP_REQUEST_EVENT }, ({ payload }) => {
+          if (payload?.libraryId !== undefined && payload.libraryId !== configuration.libraryId) return;
+          this.nowPlayingLookups.nudge();
+        })
         .on("broadcast", { event: "projection_cursor" }, ({ payload }) => {
           if (payload?.libraryId !== configuration.libraryId || !Number.isSafeInteger(payload?.projectionCursor)) return;
           if (Number(payload.projectionCursor) < this.projectionTargetCursor) return;
@@ -3162,9 +3410,11 @@ export async function materializeEntity(intent: EntityReplaceIntent, shadow: Ann
     if (!editsInclude(scope, { tagId })) continue;
     const known = shadow.tagMemberships[tagId] || { value: false, revision: 0 };
     const present = desiredTags.has(tagId);
+    // Tag origin: older Community servers ignore `method`, and a tag without one is stored as unknown.
+    const method = desired.tagMethods?.[tagId];
     if (known.value !== present) operations.push({
       type: "annotation.tag-membership", operationId: await stableUuid(intent.id, `tag:${tagId}`), origin: "desktop",
-      entity: intent.entity, tagId, present, expectedRevision: known.revision, ...timestamps,
+      entity: intent.entity, tagId, present, expectedRevision: known.revision, ...timestamps, ...(method ? { method } : {}),
     } as TagMembershipMutationV1);
   }
   return operations;
@@ -3375,6 +3625,14 @@ function applyRemoteAnnotation(working: LibraryRecords, changes: LibraryChanges,
     }
   }
   if (!appliedFields.length && !tagsChanged) return;
+  // A change that clears the last rating, energy or tag removes the item, as
+  // the same edit on this device would, instead of keeping a blank record.
+  if (isEmptyRecord(recordKey, next)) {
+    if (!current) return;
+    delete records[uri];
+    recordChanges[uri] = null;
+    return;
+  }
   const applied = operation.type === "annotation.patch"
     ? { ...operation, fields: Object.fromEntries(appliedFields.map((field) => [field, operation.fields[field]])) }
     : operation;
@@ -3386,6 +3644,11 @@ function applyRemoteAnnotation(working: LibraryRecords, changes: LibraryChanges,
   }
   records[uri] = next;
   recordChanges[uri] = next;
+}
+
+function isEmptyRecord(recordKey: keyof LibraryRecords, record: TrackData | PlaylistData | ArtistData): boolean {
+  if (recordKey === "tracks") return isTrackEmpty(record as TrackData);
+  return recordKey === "artists" ? isArtistEmpty(record as ArtistData) : isPlaylistEmpty(record as PlaylistData);
 }
 
 function emptyTaxonomyShadow(): TaxonomyShadowRecord {
@@ -3502,6 +3765,9 @@ async function seedShadowFromSnapshot(snapshot: LibrarySnapshotV1, cursor: numbe
   const db = await openSyncDb();
   await completeTransaction(db.transaction([SYNC_STORES.STATE, SYNC_STORES.CONFLICTS, SYNC_STORES.TOMBSTONES], "readwrite"), (transaction) => {
     const store = transaction.objectStore(SYNC_STORES.STATE);
+    // How far the library history catch-up got outlives the shadow it is cleared with.
+    const historyBackfill = store.get(HISTORY_BACKFILL_STATE_KEY);
+    historyBackfill.onsuccess = () => { if (historyBackfill.result) store.put(historyBackfill.result); };
     store.clear();
     transaction.objectStore(SYNC_STORES.CONFLICTS).clear();
     transaction.objectStore(SYNC_STORES.TOMBSTONES).clear();
@@ -3547,6 +3813,9 @@ function tagDataFromSnapshot(snapshot: LibrarySnapshotV1 | LibrarySnapshotV2): T
       ...(dateCreated === undefined ? {} : { dateCreated }),
       ...(dateModified === undefined ? {} : { dateModified }),
     };
+    // An item whose rating, energy and tags were all cleared is not in the
+    // library, so a fresh copy doesn't bring it back as a blank entry.
+    if (base.rating === 0 && base.energy === 0 && base.tagIds.length === 0) continue;
     if (annotation.entity.kind === "track") tracks[uri] = { ...base, bpm: annotation.fields.bpm.value as number | null, camelotKey: annotation.fields.key.value as string | null };
     else if (annotation.entity.kind === "artist") artists[uri] = { ...base };
     else playlists[uri] = { ...base };

@@ -150,6 +150,41 @@ describe("linking a library started with other starter tags than Community's", (
     expect(Object.keys(local.taxonomy.tagsById).sort()).toEqual([...community.nodes.values()].filter((node) => node.kind === "tag").map((node) => node.id).sort());
   });
 
+  it.each([
+    { desktop: 3 as const, website: 2 as const },
+    { desktop: 3 as const, website: 1 as const },
+    { desktop: 2 as const, website: 3 as const },
+  ])("treats an untouched version $desktop library as new beside a version $website website library", async ({ desktop, website }) => {
+    seedWebsiteStarterTags(website);
+    const device = await desktopLibrary(desktop);
+
+    expect(classifyLocalReplica(await storageService.loadAll(), KNOWN_STARTER_TAXONOMIES, null)).toBe("fresh-default");
+    expect(await firstSync(device)).toBe(false);
+    expect(syncRuntime.getStatus()).toBe("recovery-available");
+    expect(merges).toEqual([]);
+  });
+
+  it.each([
+    { desktop: 3 as const, website: 2 as const, song: ["Rock", "Retro"] },
+    { desktop: 2 as const, website: 3 as const, song: ["Rock", "90s"] },
+  ])("combines a tagged version $desktop library with a version $website website library without asking or losing a tag", async ({ desktop, website, song }) => {
+    seedWebsiteStarterTags(website);
+    const device = await desktopLibrary(desktop, song);
+
+    expect(await firstSync(device)).toBe(true);
+
+    expect(syncRuntime.getStatus()).not.toBe("merge-required");
+    expect(merges).toHaveLength(1);
+    // Both versions' tags are kept: an existing library never loses its decade tags.
+    const names = communityNames();
+    for (const version of [2, 3] as const) {
+      for (const row of STARTER_TAG_SEEDS[version].filter((item) => item.kind === "tag")) expect(names).toContain(row.name);
+    }
+    expect(communityTagsOnSong()).toEqual([...song].sort());
+    const local = await storageService.loadAll();
+    expect(local.tracks[SONG_URI]?.tagIds.sort()).toEqual(song.map((name) => tagId(desktop, name)).sort());
+  });
+
   it("still asks about a starter tag the member moved themselves, and sends the settled moves with their choices", async () => {
     seedWebsiteStarterTags(1);
     // The member put Chill first in Energy Level.

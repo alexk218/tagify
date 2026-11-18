@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 import packageJson from "@/package";
 import { initializeStatsIntroduction } from "@/features/library-stats/model/statsIntroduction";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";

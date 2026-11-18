@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assertSpotifySearchLookupAnswers } from "@tagify/sync-contracts";
-import { parseSpotifyTrackSearch, parseSpotifyTrackSearchItems, resetSpotifyTrackSearchForTests, searchTracksDefinition, searchTracksHashFromScript } from "../SpotifyTrackSearch";
+import {
+  parseSpotifyAlbumSearchItems, parseSpotifyArtistSearchItems, parseSpotifyTrackSearch, parseSpotifyTrackSearchItems, resetSpotifyTrackSearchForTests,
+  searchDefinition, searchHashFromScript, searchTracksDefinition, searchTracksHashFromScript,
+} from "../SpotifyTrackSearch";
 
 const HASH = "59ee4a659c32e9ad894a71308207594a65ba67bb6b632b183abe97303a51fa55";
 // As Spotify 1.2.92.148 registers it in xpui-routes-search.js.
 const SCRIPT = `let aI=[],aS=Spicetify.GraphQL.Definitions["searchTracks"]=new E.l("searchTracks","query","${HASH}",null);async function aE(e,t,s){}`;
+const ALBUMS_HASH = "64ae1fe6df380b038c0a65a2606d3361bc270de6870b2fdc99cf0848b1efa6d3";
+const ARTISTS_HASH = "270905851ba5c7faca81cfe053c2dbd8ceb4f156a0e0ef4b385af75ab69ffd13";
+// As Spotify 1.2.92 registers the album and artist searches in the same script.
+const FULL_SCRIPT = `let sZ=Spicetify.GraphQL.Definitions["searchAlbums"]=new E.l("searchAlbums","query","${ALBUMS_HASH}",null);`
+  + `let s2=Spicetify.GraphQL.Definitions["searchArtists"]=new E.l("searchArtists","query","${ARTISTS_HASH}",null);${SCRIPT}`;
 class Definition { constructor(readonly name: string, readonly operation: string, readonly sha256Hash: string, readonly value: unknown) {} }
 
 const track = (uri: string, name: string, artists: string[], extra: Record<string, unknown> = {}) => ({ item: { __typename: "TrackResponseWrapper", data: {
@@ -88,5 +96,68 @@ describe("Spotify song search", () => {
     now = 10 * 60_000;
     readScript.mockResolvedValueOnce(SCRIPT);
     expect(await searchTracksDefinition({ definitions: {}, readScript, now: () => now })).toEqual({ name: "searchTracks", operation: "query", sha256Hash: HASH, value: null });
+  });
+});
+
+describe("Spotify album and artist search (Community handoff slice 2)", () => {
+  const cover = (...widths: number[]) => ({ sources: widths.map((width) => ({ url: `https://i.scdn.co/image/${width}`, width, height: width })) });
+  const M83 = { profile: { name: "M83" }, uri: "spotify:artist:63MQldklfxkjYDoUE4Tppz" };
+  const album = (uri: string, name: string, extra: Record<string, unknown> = {}) => ({ __typename: "AlbumResponseWrapper", data: {
+    __typename: "Album", uri, name, artists: { items: [M83] }, coverArt: cover(300, 64, 640), playability: { playable: true }, ...extra,
+  } });
+
+  it("lists albums with ids, the largest cover and artists with ids, in Spotify's order", () => {
+    const items = parseSpotifyAlbumSearchItems({ data: { searchV2: { albumsV2: { totalCount: 3, items: [
+      album("spotify:album:6R0ynY7RF20ofs9GJR5TXR", "Hurry Up, We're Dreaming"),
+      album("spotify:album:7R0ynY7RF20ofs9GJR5TXR", "No cover", { coverArt: null }),
+      album("spotify:album:8R0ynY7RF20ofs9GJR5TXR", "No artist ids", { artists: { items: [{ profile: { name: "M83" }, uri: "spotify:artist:x" }] } }),
+      album("spotify:track:9R0ynY7RF20ofs9GJR5TXR", "A song"),
+      { __typename: "PreReleaseResponseWrapper", data: { __typename: "PreRelease" } },
+    ] } } } });
+    expect(items).toEqual([
+      { providerId: "6R0ynY7RF20ofs9GJR5TXR", name: "Hurry Up, We're Dreaming", imageUrl: "https://i.scdn.co/image/640", artists: [{ providerId: "63MQldklfxkjYDoUE4Tppz", name: "M83" }] },
+      { providerId: "7R0ynY7RF20ofs9GJR5TXR", name: "No cover", imageUrl: null, artists: [{ providerId: "63MQldklfxkjYDoUE4Tppz", name: "M83" }] },
+    ]);
+    expect(() => assertSpotifySearchLookupAnswers({ protocolVersion: 1, deviceId: "11111111-1111-4111-8111-111111111111", answers: [{ requestId: "r", items }] })).not.toThrow();
+  });
+
+  it("lists artists with ids, the largest picture and no artists list", () => {
+    const items = parseSpotifyArtistSearchItems({ data: { searchV2: { artists: { totalCount: 2, items: [
+      { __typename: "ArtistResponseWrapper", data: { __typename: "Artist", uri: "spotify:artist:63MQldklfxkjYDoUE4Tppz", profile: { name: "M83" },
+        visuals: { avatarImage: cover(160, 640, 320) } } },
+      { __typename: "ArtistResponseWrapper", data: { __typename: "Artist", uri: "spotify:artist:73MQldklfxkjYDoUE4Tppz", profile: { name: "No picture" }, visuals: { avatarImage: null } } },
+      { __typename: "ArtistResponseWrapper", data: { __typename: "Artist", uri: "spotify:artist:short", profile: { name: "Bad id" } } },
+      { __typename: "NotFound", data: { __typename: "NotFound" } },
+    ] } } } });
+    expect(items).toEqual([
+      { providerId: "63MQldklfxkjYDoUE4Tppz", name: "M83", imageUrl: "https://i.scdn.co/image/640", artists: [] },
+      { providerId: "73MQldklfxkjYDoUE4Tppz", name: "No picture", imageUrl: null, artists: [] },
+    ]);
+    expect(() => assertSpotifySearchLookupAnswers({ protocolVersion: 1, deviceId: "11111111-1111-4111-8111-111111111111", answers: [{ requestId: "r", items }] })).not.toThrow();
+  });
+
+  it("treats errors and unknown shapes as no answer", () => {
+    expect(parseSpotifyAlbumSearchItems({ errors: [{ message: "PersistedQueryNotFound" }] })).toBeNull();
+    expect(parseSpotifyArtistSearchItems({ data: { searchV2: {} } })).toBeNull();
+    expect(parseSpotifyArtistSearchItems({ data: { searchV2: { artists: { items: [] } } } })).toEqual([]);
+  });
+
+  it("builds each definition from Spotify's own registration, reading the script once", async () => {
+    expect(searchHashFromScript(FULL_SCRIPT, "searchAlbums")).toBe(ALBUMS_HASH);
+    expect(searchHashFromScript(FULL_SCRIPT, "searchArtists")).toBe(ARTISTS_HASH);
+    const readScript = vi.fn(async () => FULL_SCRIPT);
+    expect(await searchDefinition("searchAlbums", { definitions: {}, readScript })).toEqual({ name: "searchAlbums", operation: "query", sha256Hash: ALBUMS_HASH, value: null });
+    expect(await searchDefinition("searchArtists", { definitions: {}, readScript })).toEqual({ name: "searchArtists", operation: "query", sha256Hash: ARTISTS_HASH, value: null });
+    expect(await searchTracksDefinition({ definitions: {}, readScript })).toEqual({ name: "searchTracks", operation: "query", sha256Hash: HASH, value: null });
+    expect(readScript).toHaveBeenCalledTimes(1);
+    const registered = new Definition("searchArtists", "query", ARTISTS_HASH, null);
+    expect(await searchDefinition("searchArtists", { definitions: { searchArtists: registered }, readScript })).toBe(registered);
+  });
+
+  it("never makes up an album definition when the script has only the song search", async () => {
+    const readScript = vi.fn(async () => SCRIPT);
+    expect(await searchDefinition("searchAlbums", { definitions: {}, readScript, now: () => 0 })).toBeNull();
+    expect(await searchTracksDefinition({ definitions: {}, readScript, now: () => 0 })).toMatchObject({ sha256Hash: HASH });
+    expect(readScript).toHaveBeenCalledTimes(1);
   });
 });

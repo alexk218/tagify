@@ -1,8 +1,10 @@
 import type { LocalPrivateNote } from "./PrivateNotes.types";
+import { assertNotInOnboardingPreview } from "@/features/onboarding/preview/onboardingPreview";
 import { isPrivateNoteUri } from "@tagify/sync-contracts";
 import type { ArtistData, PlaylistData, TagDataStructure, TagTaxonomy, TrackData } from "@/types/tagData";
 import { storageService } from "@/services/storage/StorageService";
 import { IndexedDBStorageService } from "@/services/storage/IndexedDBStorageService";
+import { carryLibraryHistory } from "@/services/storage/libraryHistory";
 import {
   appendIntent,
   createEntityDeleteIntent,
@@ -69,6 +71,7 @@ let stagedApproval: ApprovedPairing | null = null;
 
 export class SyncPairingService {
   async begin(apiBaseUrl: string, name: string, platform: string): Promise<PendingPairing> {
+    assertNotInOnboardingPreview("Connecting to Community");
     this.cancelPending();
     // Choosing to link again means automatic reconnection is worth checking on the next start.
     clearRecoveryUnavailable();
@@ -279,6 +282,7 @@ export class SyncPairingService {
   }
 
   async recoverLegacyReplica(accountId: string): Promise<void> {
+    assertNotInOnboardingPreview("Connecting to Community");
     if (typeof indexedDB.databases === "function") {
       const databases = await indexedDB.databases();
       if (!databases.some((database) => database.name === LEGACY_DATABASE_NAME)) return;
@@ -476,6 +480,7 @@ async function reconcileUnlinkedReplica(accountId: string): Promise<void> {
     if (plan.taxonomyIntent) outbox.put(plan.taxonomyIntent);
     await transactionDone(transaction);
     await copyPrivateNotesReplica(source.name, target.name, true);
+    await carryLibraryHistory(source, target);
   } finally {
     source.close();
     target.close();
@@ -520,7 +525,10 @@ async function prepareAccountReplica(accountId: string, mode: ReturnType<typeof 
   ].map((store) => countStore(target, store))).then((counts) => counts.some((count) => count > 0));
   if (targetHasReplica) {
     target.close();
-    if (mode === "seed-unlinked") await copyPrivateNotesReplica(getTagifyDatabaseName(), targetName, false);
+    if (mode === "seed-unlinked") {
+      await copyPrivateNotesReplica(getTagifyDatabaseName(), targetName, false);
+      await carryHistoryReplica(getTagifyDatabaseName(), targetName);
+    }
     return;
   }
   const preparation = getEmptyReplicaPreparation(mode);
@@ -546,7 +554,17 @@ async function prepareAccountReplica(accountId: string, mode: ReturnType<typeof 
     transaction.objectStore(SYNC_STORES.OUTBOX).put({ id: crypto.randomUUID(), batchId: crypto.randomUUID(), createdAt: Date.now(), type: "library.snapshot", reason: "migration" });
     transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); transaction.onabort = () => reject(transaction.error);
   });
+  await carryLibraryHistory(source, target);
   source.close(); target.close();
+}
+
+/** The library history kept before connecting goes with the library, for the catch-up to send. */
+async function carryHistoryReplica(sourceName: string, targetName: string): Promise<void> {
+  const source = await openReplica(sourceName, false);
+  const target = await openReplica(targetName, true);
+  try {
+    await carryLibraryHistory(source, target);
+  } finally { source.close(); target.close(); }
 }
 
 async function copyPrivateNotesReplica(sourceName: string, targetName: string, replace: boolean): Promise<void> {

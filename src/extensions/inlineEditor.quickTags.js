@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 import { findTagSuggestions, findUsualTagName } from "@tagify/community-contracts";
 import { getQuickTagMatches, getQuickTagNameError, getQuickTagTags, getQuickTagTargets } from "../features/tag-data/utils/quickTag";
 

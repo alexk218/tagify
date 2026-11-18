@@ -1,3 +1,3 @@
-Tagify Manager 1.0.15
+Tagify Manager 1.0.16
 
-Some more setup fixes to make the installer more robust.
+If you were stuck on an old Tagify beta (like 3.0.1 beta), the Manager now updates you to the latest version. No more digging through folders

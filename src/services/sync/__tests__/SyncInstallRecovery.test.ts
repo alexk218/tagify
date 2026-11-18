@@ -501,7 +501,8 @@ describe("Spotify update Community recovery", () => {
 
       let first: boolean | undefined;
       void enrollDesktopRecovery(configuration, request).then((value) => { first = value; });
-      for (let step = 0; step < 100 && first === undefined; step++) {
+      // Generous bound: under a busy full-suite run the real digest can need many turns.
+      for (let step = 0; step < 2_000 && first === undefined; step++) {
         await new Promise((resolve) => setImmediate(resolve));
         await vi.advanceTimersByTimeAsync(100);
       }

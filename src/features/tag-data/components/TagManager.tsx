@@ -22,7 +22,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Download, GripVertical, MoreHorizontal, Pencil, Trash2, Upload } from "lucide-react";
+import { Download, FolderInput, GripVertical, MoreHorizontal, Palette, Pencil, Trash2, Upload, X } from "lucide-react";
 import styles from "./TagManager.module.css";
 import { Portal } from "@/components/ui";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
@@ -44,15 +44,29 @@ import {
   cloneTaxonomy,
   getRelativeInsertIndex,
   getSortableReorderTargetIndex,
+  isWithinAnyFolder,
   moveCategory,
   moveCategoryIntoParent,
   moveSubcategory,
   moveTag,
+  moveSubcategoriesToParent,
+  moveTagsToParent,
+  removeTags,
+  setTagsAccent,
   type RelativeDropPlacement,
+  type TaxonomyBulkResult,
   type TaxonomyMoveReason,
   type TaxonomyMoveResult,
 } from "@/features/tag-data/utils/tagManager.taxonomy";
 import { mergeTaxonomy } from "@/features/tag-data/utils/tagData.taxonomyMerge";
+import {
+  getNextSelection,
+  getSelectionClickModifiers,
+  isMacPlatform,
+  orderSelectedIds,
+  type TagManagerSelection,
+  type TagManagerSelectionKind,
+} from "@/features/tag-data/utils/tagManager.selection";
 import {
   buildCommunityTagSearchUrl,
   COMMUNITY_TAG_SEARCH_MAX_LENGTH,
@@ -196,10 +210,17 @@ interface SortableSubcategoryRowProps {
   childFolderCount: number;
   isExpanded: boolean;
   isSelected: boolean;
+  isMultiSelected: boolean;
   isDragDisabled: boolean;
   isTagDropActive: boolean;
   onToggleExpanded: (subcategoryId: string) => void;
   onSelectSubcategory: (categoryId: string, subcategoryId: string) => void;
+  /** Handles Ctrl/Cmd/Shift+Click selection; returns true when the click was used for that. */
+  onSelectionClick: (
+    event: React.MouseEvent,
+    categoryId: string,
+    subcategoryId: string,
+  ) => boolean;
   onRenameSubcategory: (categoryId: string, subcategoryId: string) => void;
   onDeleteSubcategory: (categoryId: string, subcategoryId: string) => void;
   onNativeDragStart: (
@@ -224,6 +245,7 @@ interface SortableTagRowProps {
   tag: Tag;
   isDragDisabled: boolean;
   isDropActive: boolean;
+  isMultiSelected: boolean;
   isAccentPickerOpen: boolean;
   customAccentsById: TagTaxonomy["customAccentsById"];
   accentGroups: TagAccentGroup[];
@@ -231,6 +253,7 @@ interface SortableTagRowProps {
   onDeleteTag: (subcategoryId: string, tagId: string) => void;
   onToggleAccentPicker: (tagId: string) => void;
   onSetTagAccent: (tagId: string, accentId: TagAccentId | null) => void;
+  onSelectionClick: (event: React.MouseEvent, tagId: string) => void;
   onNativeDragStart: (
     event: React.DragEvent,
     categoryId: string,
@@ -245,11 +268,6 @@ interface SortableTagRowProps {
     tagId: string,
   ) => void;
   onNativeDragEnd: () => void;
-}
-
-interface TagAccentGroup {
-  label: string;
-  options: TagAccentOption[];
 }
 
 interface TagEndDropZoneProps {
@@ -282,6 +300,7 @@ const MAX_NAME_LENGTH = 30;
 const UNSUPPORTED_NAME_CHARACTERS = /[<>]/;
 const UNSUPPORTED_NAME_MESSAGE = "Names can't include < or >.";
 const HOVER_EXPAND_DELAY_MS = 400;
+const MULTI_SELECT_KEY_LABEL = isMacPlatform() ? "⌘" : "Ctrl";
 const UNGROUPED_COLOR_FILTER = "__ungrouped__";
 const SHOW_DEFAULT_PALETTE_STORAGE_KEY = "tagify:showDefaultColorPalette";
 // Preserve the existing storage key so current users keep their selected mode.
@@ -586,6 +605,358 @@ function buildTagMoveErrorMessage(reason: TaxonomyMoveReason): string {
   }
 }
 
+interface TagAccentGroup {
+  label: string;
+  options: TagAccentOption[];
+}
+
+interface TagAccentMenuProps {
+  accentGroups: TagAccentGroup[];
+  customAccentsById: TagTaxonomy["customAccentsById"];
+  /** The accent shown as current, or null when there isn't a single one. */
+  activeAccentId: TagAccentId | null;
+  /** Completes "Set Red accent on …", e.g. "tag House" or "3 selected tags". */
+  targetLabel: string;
+  clearLabel?: string;
+  className?: string;
+  onSelect: (accentId: TagAccentId | null) => void;
+}
+
+const stopEvent = (event: React.SyntheticEvent) => {
+  event.stopPropagation();
+};
+
+function TagAccentMenu({
+  accentGroups,
+  customAccentsById,
+  activeAccentId,
+  targetLabel,
+  clearLabel = "Clear accent",
+  className,
+  onSelect,
+}: TagAccentMenuProps) {
+  return (
+    <div
+      className={`${styles.tagAccentMenu} ${className ?? ""}`}
+      onPointerDown={stopEvent}
+      onClick={stopEvent}
+    >
+      {accentGroups.map((group) => (
+        <div key={group.label} className={styles.tagAccentGroup} role="group" aria-label={`${group.label} colors`}>
+          <div className={styles.tagAccentGroupLabel}>{group.label}</div>
+          <div className={styles.tagAccentSwatches}>
+            {group.options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`${styles.tagAccentSwatch} ${
+                  activeAccentId === option.value ? styles.tagAccentSwatchActive : ""
+                }`}
+                aria-label={`Set ${option.label} accent on ${targetLabel}`}
+                title={option.label}
+                style={buildTagAccentCssVars(option.value, customAccentsById)}
+                onClick={(event) => {
+                  stopEvent(event);
+                  onSelect(option.value);
+                }}
+              >
+                <span className={styles.tagAccentSwatchDot} aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        className={styles.tagAccentClearButton}
+        onClick={(event) => {
+          stopEvent(event);
+          onSelect(null);
+        }}
+      >
+        {clearLabel}
+      </button>
+    </div>
+  );
+}
+
+interface TagManagerMoveDestination {
+  id: string;
+  name: string;
+  depth: number;
+  isCategory: boolean;
+  /** Shown but not choosable, e.g. where the tags already are. */
+  disabledReason?: string;
+}
+
+interface TagManagerSelectionBarProps {
+  kind: TagManagerSelectionKind;
+  count: number;
+  destinations: TagManagerMoveDestination[];
+  accentGroups: TagAccentGroup[];
+  customAccentsById: TagTaxonomy["customAccentsById"];
+  /** The accent every selected tag shares, if any. */
+  sharedAccentId: TagAccentId | null;
+  onSetAccent: (accentId: TagAccentId | null) => void;
+  onMoveTo: (parentId: string) => void;
+  onDelete: () => void;
+  onClear: () => void;
+}
+
+type OpenMenu = "color" | "move" | null;
+
+function describeSelectionCount(kind: TagManagerSelectionKind, count: number): string {
+  if (kind === "tags") {
+    return `${count} ${count === 1 ? "tag" : "tags"}`;
+  }
+  return `${count} ${count === 1 ? "folder" : "folders"}`;
+}
+
+function TagManagerSelectionBar({
+  kind,
+  count,
+  destinations,
+  accentGroups,
+  customAccentsById,
+  sharedAccentId,
+  onSetAccent,
+  onMoveTo,
+  onDelete,
+  onClear,
+}: TagManagerSelectionBarProps) {
+  const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
+  const [destinationQuery, setDestinationQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const countLabel = describeSelectionCount(kind, count);
+
+  useEffect(() => {
+    if (!openMenu) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && rootRef.current?.contains(event.target)) {
+        return;
+      }
+      setOpenMenu(null);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [openMenu]);
+
+  useEffect(() => {
+    if (openMenu !== "move") {
+      setDestinationQuery("");
+    }
+  }, [openMenu]);
+
+  const visibleDestinations = useMemo(() => {
+    const query = destinationQuery.trim().toLowerCase();
+    if (!query) {
+      return destinations;
+    }
+    return destinations.filter((destination) => destination.name.toLowerCase().includes(query));
+  }, [destinationQuery, destinations]);
+
+  const toggleMenu = (menu: Exclude<OpenMenu, null>) => {
+    setOpenMenu((current) => (current === menu ? null : menu));
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      className={styles.selectionBar}
+      role="toolbar"
+      aria-label={`Actions for ${countLabel} selected`}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && openMenu) {
+          // Close the menu first; the next Escape clears the selection.
+          event.preventDefault();
+          setOpenMenu(null);
+        }
+      }}
+    >
+      <span className={styles.selectionBarCount} aria-live="polite">
+        {countLabel} selected
+      </span>
+      <div className={styles.selectionBarActions}>
+        {kind === "tags" ? (
+          <div className={styles.selectionBarMenuAnchor}>
+            <button
+              type="button"
+              className={styles.secondaryButtonSmall}
+              aria-haspopup="true"
+              aria-expanded={openMenu === "color"}
+              onClick={() => toggleMenu("color")}
+            >
+              {sharedAccentId ? (
+                <span
+                  className={`${styles.tagChipAccentPreview} ${styles.tagChipAccentPreviewFilled}`}
+                  style={buildTagAccentCssVars(sharedAccentId, customAccentsById)}
+                  aria-hidden="true"
+                />
+              ) : (
+                <Palette size={14} aria-hidden="true" />
+              )}
+              Color
+            </button>
+            {openMenu === "color" ? (
+              <TagAccentMenu
+                accentGroups={accentGroups}
+                customAccentsById={customAccentsById}
+                activeAccentId={sharedAccentId}
+                targetLabel={`${countLabel} selected`}
+                clearLabel="Clear color"
+                onSelect={(accentId) => {
+                  onSetAccent(accentId);
+                  setOpenMenu(null);
+                }}
+              />
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className={styles.selectionBarMenuAnchor}>
+          <button
+            type="button"
+            className={styles.secondaryButtonSmall}
+            aria-haspopup="true"
+            aria-expanded={openMenu === "move"}
+            onClick={() => toggleMenu("move")}
+          >
+            <FolderInput size={14} aria-hidden="true" />
+            Move to…
+          </button>
+          {openMenu === "move" ? (
+            <div className={styles.moveMenu} role="dialog" aria-label={`Move ${countLabel} to`}>
+              <input
+                type="text"
+                autoFocus
+                className={styles.moveMenuSearch}
+                value={destinationQuery}
+                onChange={(event) => setDestinationQuery(event.target.value)}
+                placeholder="Find a category or folder…"
+                aria-label="Find a category or folder"
+                onKeyDown={(event) => {
+                  const firstAvailable = visibleDestinations.find((destination) => !destination.disabledReason);
+                  if (event.key === "Enter" && firstAvailable) {
+                    event.preventDefault();
+                    onMoveTo(firstAvailable.id);
+                    setOpenMenu(null);
+                  }
+                }}
+              />
+              <div className={styles.moveMenuList}>
+                {visibleDestinations.length === 0 ? (
+                  <div className={styles.moveMenuEmpty}>No categories or folders match.</div>
+                ) : (
+                  visibleDestinations.map((destination) => (
+                    <button
+                      key={destination.id}
+                      type="button"
+                      className={`${styles.moveMenuItem} ${
+                        destination.isCategory ? styles.moveMenuItemCategory : ""
+                      }`}
+                      style={{ paddingLeft: `${10 + (destinationQuery ? 0 : destination.depth * 14)}px` }}
+                      disabled={Boolean(destination.disabledReason)}
+                      title={destination.disabledReason}
+                      onClick={() => {
+                        onMoveTo(destination.id);
+                        setOpenMenu(null);
+                      }}
+                    >
+                      <span className={styles.moveMenuItemName}>{destination.name}</span>
+                      {destination.disabledReason ? (
+                        <span className={styles.moveMenuItemNote}>{destination.disabledReason}</span>
+                      ) : null}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {kind === "tags" ? (
+          <button
+            type="button"
+            className={styles.dangerButtonSmall}
+            onClick={() => {
+              setOpenMenu(null);
+              onDelete();
+            }}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+            Delete
+          </button>
+        ) : null}
+
+        <button
+          type="button"
+          className={`${styles.secondaryButtonSmall} ${styles.selectionBarClear}`}
+          aria-label="Clear selection"
+          title="Clear selection (Esc)"
+          onClick={onClear}
+        >
+          <X size={14} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Shows "3 tags" under the pointer while a group is dragged. */
+function setGroupDragImage(event: React.DragEvent, kind: "tags" | "folders", count: number) {
+  if (typeof event.dataTransfer.setDragImage !== "function") {
+    return;
+  }
+  const preview = document.createElement("div");
+  preview.className = styles.groupDragPreview;
+  preview.textContent = describeSelectionCount(kind, count);
+  document.body.appendChild(preview);
+  event.dataTransfer.setDragImage(preview, 12, 12);
+  window.setTimeout(() => preview.remove(), 0);
+}
+
+function describeGroupMoveBlock(reason: TaxonomyMoveReason, targetName: string): string {
+  switch (reason) {
+    case "duplicate-tag-name":
+    case "duplicate-subcategory-name":
+      return `${targetName} already has something with the same name`;
+    case "invalid-descendant":
+      return "a folder can't go inside itself";
+    default:
+      return "they couldn't be moved";
+  }
+}
+
+function buildGroupMoveMessage(
+  kind: "tags" | "folders",
+  result: Pick<TaxonomyBulkResult, "movedIds" | "unchangedIds" | "blocked">,
+  targetName: string,
+): { text: string; isError: boolean } {
+  const noun = (count: number) =>
+    kind === "tags" ? (count === 1 ? "tag" : "tags") : count === 1 ? "folder" : "folders";
+  const moved = result.movedIds.length;
+  const blockedCount = result.blocked.length;
+  const reasons = Array.from(
+    new Set(result.blocked.map((item) => describeGroupMoveBlock(item.reason, targetName))),
+  ).join(", and ");
+
+  if (blockedCount === 0) {
+    if (moved === 0) {
+      return { text: "", isError: false };
+    }
+    return { text: `Moved ${moved} ${noun(moved)} to ${targetName}.`, isError: false };
+  }
+
+  const stayed = `${blockedCount} ${noun(blockedCount)} stayed where ${blockedCount === 1 ? "it was" : "they were"} because ${reasons}.`;
+  if (moved === 0) {
+    return { text: `Nothing moved. ${stayed}`, isError: true };
+  }
+  return { text: `Moved ${moved} ${noun(moved)} to ${targetName}. ${stayed}`, isError: true };
+}
+
 function SortableCategoryCard({
   category,
   isExpanded,
@@ -665,7 +1036,9 @@ function SortableCategoryCard({
           aria-label={`Select category ${category.name}`}
           onClick={() => onSelectCategory(category.id)}
         >
-          <span className={styles.rowTitle}>{category.name}</span>
+          <span className={styles.rowTitle} title={category.name}>
+            {category.name}
+          </span>
           <span className={styles.rowMeta}>
             {category.subcategories.length} subcategories • {tagCount} tags
           </span>
@@ -713,10 +1086,12 @@ function SortableSubcategoryRow({
   childFolderCount,
   isExpanded,
   isSelected,
+  isMultiSelected,
   isDragDisabled,
   isTagDropActive,
   onToggleExpanded,
   onSelectSubcategory,
+  onSelectionClick,
   onRenameSubcategory,
   onDeleteSubcategory,
   onNativeDragStart,
@@ -756,7 +1131,9 @@ function SortableSubcategoryRow({
       onDragEnd={onNativeDragEnd}
       className={`${styles.subcategoryRow} ${
         isSelected ? styles.subcategoryRowSelected : ""
-      } ${sortable.isDragging ? styles.sortableDragging : ""} ${
+      } ${isMultiSelected ? styles.subcategoryRowMultiSelected : ""} ${
+        sortable.isDragging ? styles.sortableDragging : ""
+      } ${
         isTagDropActive ? styles.dropTargetActive : ""
       }`}
     >
@@ -795,9 +1172,21 @@ function SortableSubcategoryRow({
         type="button"
         className={styles.subcategorySummaryButton}
         aria-label={`Select subcategory ${name}`}
-        onClick={() => onSelectSubcategory(categoryId, subcategoryId)}
+        aria-pressed={isMultiSelected}
+        onMouseDown={(event) => {
+          // Keep Shift+Click from also highlighting text.
+          if (event.shiftKey) event.preventDefault();
+        }}
+        onClick={(event) => {
+          if (onSelectionClick(event, categoryId, subcategoryId)) {
+            return;
+          }
+          onSelectSubcategory(categoryId, subcategoryId);
+        }}
       >
-        <span className={styles.rowTitle}>{name}</span>
+        <span className={styles.rowTitle} title={name}>
+          {name}
+        </span>
         <span className={styles.rowMeta}>{tagCount} tags</span>
       </button>
 
@@ -837,6 +1226,7 @@ function SortableTagRow({
   tag,
   isDragDisabled,
   isDropActive,
+  isMultiSelected,
   isAccentPickerOpen,
   customAccentsById,
   accentGroups,
@@ -844,6 +1234,7 @@ function SortableTagRow({
   onDeleteTag,
   onToggleAccentPicker,
   onSetTagAccent,
+  onSelectionClick,
   onNativeDragStart,
   onNativeDragOver,
   onNativeDrop,
@@ -886,8 +1277,11 @@ function SortableTagRow({
         isDragDisabled ? styles.tagChipDragDisabled : ""
       } ${
         isDropActive ? styles.dropTargetActive : ""
+      } ${
+        isMultiSelected ? styles.tagChipSelected : ""
       }`}
       draggable={!isDragDisabled}
+      onClick={(event) => onSelectionClick(event, tag.id)}
       onDragStart={(event) =>
         onNativeDragStart(event, categoryId, subcategoryId, tag.id)
       }
@@ -899,7 +1293,9 @@ function SortableTagRow({
       data-accented={accentId ? "true" : "false"}
       data-accent-picker-open={isAccentPickerOpen ? "true" : "false"}
       data-tag-accent-menu-root="true"
+      data-selected={isMultiSelected ? "true" : "false"}
       {...draggableProps}
+      aria-pressed={isMultiSelected}
     >
       <span className={styles.tagChipGrip} aria-hidden="true">
         <GripVertical size={14} />
@@ -956,47 +1352,13 @@ function SortableTagRow({
           <Trash2 size={12} />
         </button>
         {isAccentPickerOpen ? (
-          <div
-            className={styles.tagAccentMenu}
-            onPointerDown={stopActionEvent}
-            onClick={stopActionEvent}
-          >
-            {accentGroups.map((group) => (
-              <div key={group.label} className={styles.tagAccentGroup} role="group" aria-label={`${group.label} colors`}>
-                <div className={styles.tagAccentGroupLabel}>{group.label}</div>
-                <div className={styles.tagAccentSwatches}>
-                  {group.options.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`${styles.tagAccentSwatch} ${
-                        accentId === option.value ? styles.tagAccentSwatchActive : ""
-                      }`}
-                      aria-label={`Set ${option.label} accent on tag ${tag.name}`}
-                      title={option.label}
-                      style={buildTagAccentCssVars(option.value, customAccentsById)}
-                      onClick={(event) => {
-                        stopActionEvent(event);
-                        onSetTagAccent(tag.id, option.value);
-                      }}
-                    >
-                      <span className={styles.tagAccentSwatchDot} aria-hidden="true" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-            <button
-              type="button"
-              className={styles.tagAccentClearButton}
-              onClick={(event) => {
-                stopActionEvent(event);
-                onSetTagAccent(tag.id, null);
-              }}
-            >
-              Clear accent
-            </button>
-          </div>
+          <TagAccentMenu
+            accentGroups={accentGroups}
+            customAccentsById={customAccentsById}
+            activeAccentId={accentId}
+            targetLabel={`tag ${tag.name}`}
+            onSelect={(nextAccentId) => onSetTagAccent(tag.id, nextAccentId)}
+          />
         ) : null}
       </div>
     </div>
@@ -1157,16 +1519,60 @@ const TagManager: React.FC<TagManagerProps> = ({
   const [pendingDeleteColorThemeId, setPendingDeleteColorThemeId] = useState<string | null>(null);
   const colorImportRef = useRef<HTMLInputElement | null>(null);
   const [openAccentPickerTagId, setOpenAccentPickerTagId] = useState<string | null>(null);
+  // Tags or folders picked with Ctrl/Cmd+Click or Shift+Click for a group action.
+  const [multiSelection, setMultiSelection] = useState<TagManagerSelection | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [nativeTaxonomyDragState, setNativeTaxonomyDragState] =
     useState<NativeTaxonomyDragState | null>(null);
   const [hoveredCategoryId, setHoveredCategoryId] = useState<string | null>(null);
   const [hoveredSubcategoryId, setHoveredSubcategoryId] = useState<string | null>(null);
+  const [taxonomyPaneWidth, setTaxonomyPaneWidth] = useState<number | null>(null);
 
   const hoverExpandTimerRef = useRef<number | null>(null);
   const hoverExpandCategoryIdRef = useRef<string | null>(null);
   const treePaneRef = useRef<HTMLDivElement | null>(null);
+  const taxonomyPaneRef = useRef<HTMLDivElement | null>(null);
+  const taxonomyBodyRef = useRef<HTMLDivElement | null>(null);
   const dragPlacementRef = useRef<RelativeDropPlacement>("before");
+
+  const handleTaxonomyResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const pane = taxonomyPaneRef.current;
+    const body = taxonomyBodyRef.current;
+    if (!pane || !body) return;
+
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = pane.getBoundingClientRect().width;
+    const bodyRect = body.getBoundingClientRect();
+    const minimumWidth = 280;
+    const maximumWidth = Math.max(minimumWidth, bodyRect.width - 320);
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setTaxonomyPaneWidth(Math.min(maximumWidth, Math.max(minimumWidth, startWidth + moveEvent.clientX - startX)));
+    };
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+  }, []);
+
+  const handleTaxonomyResizeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+
+    const pane = taxonomyPaneRef.current;
+    const body = taxonomyBodyRef.current;
+    if (!pane || !body) return;
+
+    event.preventDefault();
+    const minimumWidth = 280;
+    const maximumWidth = Math.max(minimumWidth, body.getBoundingClientRect().width - 320);
+    const currentWidth = taxonomyPaneWidth ?? pane.getBoundingClientRect().width;
+    const change = event.key === "ArrowLeft" ? -24 : 24;
+    setTaxonomyPaneWidth(Math.min(maximumWidth, Math.max(minimumWidth, currentWidth + change)));
+  }, [taxonomyPaneWidth]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -2133,6 +2539,7 @@ const TagManager: React.FC<TagManagerProps> = ({
     categoryId: string,
     subcategory: TagSubcategory,
     parentId: string,
+    depth = 0,
   ): React.ReactNode => {
     const childFolders = subcategory.subcategories || [];
     const isExpanded = interactionLocked || expandedCategories.includes(subcategory.id);
@@ -2148,10 +2555,12 @@ const TagManager: React.FC<TagManagerProps> = ({
         childFolderCount={childFolders.length}
         isExpanded={isExpanded}
         isSelected={selectedSubcategoryId === subcategory.id}
+        isMultiSelected={multiSelection?.kind === "folders" && multiSelectedIds.has(subcategory.id)}
         isDragDisabled={interactionLocked}
         isTagDropActive={hoveredSubcategoryId === subcategory.id}
         onToggleExpanded={toggleTaxonomyNodeExpanded}
         onSelectSubcategory={selectSubcategory}
+        onSelectionClick={handleFolderSelectionClick}
         onRenameSubcategory={handleRenameSubcategory}
         onDeleteSubcategory={handleRemoveSubcategory}
         onNativeDragStart={handleNativeSubcategoryDragStart}
@@ -2160,7 +2569,7 @@ const TagManager: React.FC<TagManagerProps> = ({
         onNativeDragEnd={clearNativeTaxonomyDrag}
       />
       {isExpanded && childFolders.length > 0 ? (
-        <div className={styles.subcategoryList}>
+        <div className={depth === 0 ? styles.subcategoryList : styles.nestedSubcategoryList}>
           <SortableContext
             items={childFolders.map((child) =>
               buildSubcategoryDndId(child.id),
@@ -2168,7 +2577,7 @@ const TagManager: React.FC<TagManagerProps> = ({
             strategy={verticalListSortingStrategy}
           >
             {childFolders.map((child) =>
-              renderSubcategoryTree(categoryId, child, subcategory.id),
+              renderSubcategoryTree(categoryId, child, subcategory.id, depth + 1),
             )}
           </SortableContext>
         </div>
@@ -2504,6 +2913,331 @@ const TagManager: React.FC<TagManagerProps> = ({
     [localTaxonomy],
   );
 
+  // On-screen order of the folders in the tree, for Shift+Click ranges.
+  const visibleFolderOrder = useMemo(() => {
+    const ids: string[] = [];
+    const appendFolders = (folders: TagSubcategory[]) => {
+      folders.forEach((folder) => {
+        ids.push(folder.id);
+        if (interactionLocked || expandedCategories.includes(folder.id)) {
+          appendFolders(folder.subcategories || []);
+        }
+      });
+    };
+    filteredCategories.forEach((category) => {
+      if (interactionLocked || expandedCategories.includes(category.id)) {
+        appendFolders(category.subcategories);
+      }
+    });
+    return ids;
+  }, [expandedCategories, filteredCategories, interactionLocked]);
+
+  const selectedTagOrder = useMemo(() => selectedTags.map((tag) => tag.id), [selectedTags]);
+  const multiSelectedIds = useMemo(
+    () => new Set(multiSelection?.ids ?? []),
+    [multiSelection],
+  );
+
+  // Selected tags belong to the open category or folder, and deleted items drop out.
+  useEffect(() => {
+    setMultiSelection((current) => {
+      if (!current) {
+        return current;
+      }
+      const isAvailable = current.kind === "tags"
+        ? (id: string) => selectedTagOrder.includes(id)
+        : (id: string) => Boolean(localTaxonomy.subcategoriesById[id]);
+      const ids = current.ids.filter(isAvailable);
+      if (ids.length === current.ids.length) {
+        return current;
+      }
+      return ids.length > 0
+        ? { ...current, ids, anchorId: current.anchorId && ids.includes(current.anchorId) ? current.anchorId : null }
+        : null;
+    });
+  }, [localTaxonomy.subcategoriesById, selectedTagOrder]);
+
+  useEffect(() => {
+    setMultiSelection(null);
+  }, [activeView]);
+
+  useEffect(() => {
+    // Leave Esc to an open rename, color picker or text field before it clears the selection.
+    if (!multiSelection || renameTarget || openAccentPickerTagId) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) {
+        return;
+      }
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || target.closest("input, textarea, select"))
+      ) {
+        return;
+      }
+      setMultiSelection(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [multiSelection, openAccentPickerTagId, renameTarget]);
+
+  const getOrderedSelectionIds = useCallback(
+    (selection: TagManagerSelection) =>
+      orderSelectedIds(
+        selection.ids,
+        selection.kind === "tags" ? selectedTagOrder : expandableTaxonomyIds,
+      ),
+    [expandableTaxonomyIds, selectedTagOrder],
+  );
+
+  const handleTagSelectionClick = useCallback(
+    (event: React.MouseEvent, tagId: string) => {
+      const modifiers = getSelectionClickModifiers(event);
+      if (!modifiers) {
+        setMultiSelection((current) => (current?.kind === "tags" ? null : current));
+        return;
+      }
+      event.preventDefault();
+      setOpenAccentPickerTagId(null);
+      setMultiSelection((current) =>
+        getNextSelection(current, "tags", selectedTagOrder, tagId, modifiers),
+      );
+    },
+    [selectedTagOrder],
+  );
+
+  const handleFolderSelectionClick = useCallback(
+    (event: React.MouseEvent, _categoryId: string, folderId: string) => {
+      const modifiers = getSelectionClickModifiers(event);
+      if (!modifiers) {
+        setMultiSelection((current) => (current?.kind === "folders" ? null : current));
+        return false;
+      }
+      event.preventDefault();
+      setMultiSelection((current) =>
+        getNextSelection(current, "folders", visibleFolderOrder, folderId, modifiers),
+      );
+      return true;
+    },
+    [visibleFolderOrder],
+  );
+
+  /** The ids to move when `itemId` is dragged: the whole selection if it is part of one. */
+  const getGroupDragIds = useCallback(
+    (kind: TagManagerSelectionKind, itemId: string): string[] | null => {
+      if (
+        !multiSelection ||
+        multiSelection.kind !== kind ||
+        multiSelection.ids.length < 2 ||
+        !multiSelection.ids.includes(itemId)
+      ) {
+        return null;
+      }
+      return getOrderedSelectionIds(multiSelection);
+    },
+    [getOrderedSelectionIds, multiSelection],
+  );
+
+  const getTaxonomyNodeName = useCallback(
+    (nodeId: string) =>
+      localTaxonomy.categoriesById[nodeId]?.name ??
+      localTaxonomy.subcategoriesById[nodeId]?.name ??
+      "",
+    [localTaxonomy],
+  );
+
+  /** Expands the tree down to `nodeId` so it and its contents are visible. */
+  const revealTaxonomyNode = useCallback(
+    (nodeId: string) => {
+      const ids: string[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined = nodeId;
+      while (cursor && !seen.has(cursor)) {
+        seen.add(cursor);
+        ids.push(cursor);
+        const folder: TaxonomyFolder | undefined = localTaxonomy.subcategoriesById[cursor];
+        cursor = folder ? folder.parentId || folder.categoryId : undefined;
+      }
+      setExpandedCategories((current) => {
+        const missing = ids.filter((id) => !current.includes(id));
+        return missing.length > 0 ? [...current, ...missing] : current;
+      });
+    },
+    [localTaxonomy.subcategoriesById],
+  );
+
+  /**
+   * Moves a group of tags or folders and keeps the moved items selected where they
+   * landed. Returns true when anything moved.
+   */
+  const applyGroupMove = useCallback(
+    (
+      kind: TagManagerSelectionKind,
+      ids: string[],
+      targetParentId: string,
+      targetIndex?: number,
+      options: { announce?: boolean } = {},
+    ): boolean => {
+      const result: TaxonomyBulkResult = kind === "tags"
+        ? moveTagsToParent(localTaxonomy, ids, targetParentId, targetIndex)
+        : moveSubcategoriesToParent(localTaxonomy, ids, targetParentId, targetIndex);
+      const targetName = getTaxonomyNodeName(targetParentId);
+      const message = buildGroupMoveMessage(kind, result, targetName);
+
+      if (result.movedIds.length > 0) {
+        commitTaxonomyUpdate(result.taxonomy);
+      }
+      if (message.isError || (options.announce && message.text)) {
+        showModalNotification(message.text, message.isError);
+      }
+
+      const landedIds = [...result.movedIds, ...result.unchangedIds];
+      if (kind === "tags" && landedIds.length > 0) {
+        const targetCategory = result.taxonomy.categoriesById[targetParentId];
+        if (targetCategory) {
+          selectCategory(targetParentId);
+        } else {
+          const targetCategoryId = result.taxonomy.subcategoriesById[targetParentId]?.categoryId;
+          if (targetCategoryId) {
+            selectSubcategory(targetCategoryId, targetParentId);
+          }
+        }
+        revealTaxonomyNode(targetParentId);
+      }
+      if (kind === "folders" && landedIds.length > 0) {
+        revealTaxonomyNode(targetParentId);
+      }
+      setMultiSelection(
+        landedIds.length > 0 ? { kind, ids: landedIds, anchorId: landedIds[0] } : null,
+      );
+      return result.movedIds.length > 0;
+    },
+    [
+      commitTaxonomyUpdate,
+      getTaxonomyNodeName,
+      localTaxonomy,
+      revealTaxonomyNode,
+      selectCategory,
+      selectSubcategory,
+      showModalNotification,
+    ],
+  );
+
+  const handleSelectionMoveTo = (targetParentId: string) => {
+    if (!multiSelection) {
+      return;
+    }
+    applyGroupMove(
+      multiSelection.kind,
+      getOrderedSelectionIds(multiSelection),
+      targetParentId,
+      undefined,
+      { announce: true },
+    );
+  };
+
+  const handleSelectionSetAccent = (accentId: TagAccentId | null) => {
+    if (multiSelection?.kind !== "tags") {
+      return;
+    }
+    const nextTaxonomy = setTagsAccent(localTaxonomy, multiSelection.ids, accentId);
+    if (nextTaxonomy !== localTaxonomy) {
+      commitTaxonomyUpdate(nextTaxonomy);
+    }
+  };
+
+  const handleSelectionDelete = () => {
+    if (multiSelection?.kind !== "tags") {
+      return;
+    }
+    const tagIds = multiSelection.ids.filter((tagId) => localTaxonomy.tagsById[tagId]);
+    if (tagIds.length === 0) {
+      return;
+    }
+    const tagLabel = tagIds.length === 1
+      ? `tag "${localTaxonomy.tagsById[tagIds[0]].name}"`
+      : `${tagIds.length} tags`;
+    const confirmed = window.confirm(
+      `Delete ${tagLabel}?\n\nThis removes ${formatDeletionReferenceSummary(
+        countTrackReferences(tracks, tagIds),
+        countEntityReferences(playlists, tagIds),
+        countEntityReferences(artists, tagIds),
+        countSavedFilterReferences(activeTagFilters, excludedTagFilters, tagIds),
+        countSmartPlaylistReferences(smartPlaylists, tagIds),
+      )}.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    commitTaxonomyUpdate(removeTags(localTaxonomy, tagIds));
+    setMultiSelection(null);
+  };
+
+  const selectionDestinations = useMemo<TagManagerMoveDestination[]>(() => {
+    if (!multiSelection) {
+      return [];
+    }
+    const selectedFolderIds = multiSelection.kind === "folders" ? multiSelectedIds : new Set<string>();
+    const destinations: TagManagerMoveDestination[] = [];
+    const appendFolders = (folders: TagSubcategory[], depth: number) => {
+      folders.forEach((folder) => {
+        if (selectedFolderIds.has(folder.id)) {
+          // A folder can't go inside itself, so skip it and everything in it.
+          return;
+        }
+        destinations.push({
+          id: folder.id,
+          name: folder.name,
+          depth,
+          isCategory: false,
+          disabledReason:
+            multiSelection.kind === "tags" && folder.id === selectedTagParentId ? "Here now" : undefined,
+        });
+        appendFolders(folder.subcategories || [], depth + 1);
+      });
+    };
+    localCategories.forEach((category) => {
+      destinations.push({
+        id: category.id,
+        name: category.name,
+        depth: 0,
+        isCategory: true,
+        disabledReason:
+          multiSelection.kind === "tags" && category.id === selectedTagParentId ? "Here now" : undefined,
+      });
+      appendFolders(category.subcategories, 1);
+    });
+    return destinations;
+  }, [localCategories, multiSelectedIds, multiSelection, selectedTagParentId]);
+
+  const selectionSharedAccentId = useMemo<TagAccentId | null>(() => {
+    if (multiSelection?.kind !== "tags") {
+      return null;
+    }
+    const accentIds = new Set(
+      multiSelection.ids.map((tagId) => localTaxonomy.tagsById[tagId]?.accentId ?? null),
+    );
+    return accentIds.size === 1 ? [...accentIds][0] : null;
+  }, [localTaxonomy.tagsById, multiSelection]);
+
+  const renderSelectionBar = (kind: TagManagerSelectionKind) =>
+    multiSelection?.kind === kind ? (
+      <TagManagerSelectionBar
+        kind={kind}
+        count={multiSelection.ids.length}
+        destinations={selectionDestinations}
+        accentGroups={accentGroups}
+        customAccentsById={localTaxonomy.customAccentsById}
+        sharedAccentId={selectionSharedAccentId}
+        onSetAccent={handleSelectionSetAccent}
+        onMoveTo={handleSelectionMoveTo}
+        onDelete={handleSelectionDelete}
+        onClear={() => setMultiSelection(null)}
+      />
+    ) : null;
+
   const handleNativeCategoryDragStart = useCallback(
     (event: React.DragEvent, categoryId: string) => {
       if (interactionLocked) {
@@ -2535,6 +3269,10 @@ const TagManager: React.FC<TagManagerProps> = ({
       event.stopPropagation();
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", buildSubcategoryDndId(subcategoryId));
+      const groupIds = getGroupDragIds("folders", subcategoryId);
+      if (groupIds) {
+        setGroupDragImage(event, "folders", groupIds.length);
+      }
       setNativeTaxonomyDragState({
         type: "subcategory",
         categoryId,
@@ -2543,7 +3281,7 @@ const TagManager: React.FC<TagManagerProps> = ({
       });
       setOpenAccentPickerTagId(null);
     },
-    [interactionLocked],
+    [getGroupDragIds, interactionLocked],
   );
 
   const handleNativeTagDragStart = useCallback(
@@ -2561,6 +3299,10 @@ const TagManager: React.FC<TagManagerProps> = ({
       event.stopPropagation();
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", buildTagDndId(tagId));
+      const groupIds = getGroupDragIds("tags", tagId);
+      if (groupIds) {
+        setGroupDragImage(event, "tags", groupIds.length);
+      }
       setNativeTaxonomyDragState({
         type: "tag",
         categoryId,
@@ -2569,7 +3311,7 @@ const TagManager: React.FC<TagManagerProps> = ({
       });
       setOpenAccentPickerTagId(null);
     },
-    [interactionLocked],
+    [getGroupDragIds, interactionLocked],
   );
 
   const handleNativeTaxonomyDragOver = useCallback(
@@ -2636,6 +3378,12 @@ const TagManager: React.FC<TagManagerProps> = ({
       }
 
       if (nativeTaxonomyDragState.type === "tag") {
+        const groupIds = getGroupDragIds("tags", nativeTaxonomyDragState.tagId);
+        if (groupIds) {
+          applyGroupMove("tags", groupIds, targetCategoryId);
+          clearNativeTaxonomyDrag();
+          return;
+        }
         const targetIndex = getTaxonomyParentChildIds(targetCategoryId).length;
         const result = moveTag(
           localTaxonomy,
@@ -2654,6 +3402,12 @@ const TagManager: React.FC<TagManagerProps> = ({
         return;
       }
 
+      const folderGroupIds = getGroupDragIds("folders", nativeTaxonomyDragState.subcategoryId);
+      if (folderGroupIds) {
+        applyGroupMove("folders", folderGroupIds, targetCategoryId);
+        clearNativeTaxonomyDrag();
+        return;
+      }
       const targetIndex = getTaxonomyParentChildIds(targetCategoryId).length;
       const result = moveSubcategory(
         localTaxonomy,
@@ -2671,8 +3425,10 @@ const TagManager: React.FC<TagManagerProps> = ({
       clearNativeTaxonomyDrag();
     },
     [
+      applyGroupMove,
       applyMoveResult,
       clearNativeTaxonomyDrag,
+      getGroupDragIds,
       getTaxonomyParentChildIds,
       interactionLocked,
       localTaxonomy,
@@ -2697,6 +3453,12 @@ const TagManager: React.FC<TagManagerProps> = ({
       event.stopPropagation();
 
       if (nativeTaxonomyDragState.type === "tag") {
+        const groupIds = getGroupDragIds("tags", nativeTaxonomyDragState.tagId);
+        if (groupIds) {
+          applyGroupMove("tags", groupIds, subcategoryId);
+          clearNativeTaxonomyDrag();
+          return;
+        }
         const targetIndex = getTaxonomyParentChildIds(subcategoryId).length;
         const result = moveTag(
           localTaxonomy,
@@ -2724,6 +3486,24 @@ const TagManager: React.FC<TagManagerProps> = ({
         { x: event.clientX, y: event.clientY },
         event.currentTarget.getBoundingClientRect(),
       );
+      const folderGroupIds = getGroupDragIds("folders", nativeTaxonomyDragState.subcategoryId);
+      if (folderGroupIds) {
+        // Refuse the whole drop when the target is a selected folder or inside one.
+        if (!isWithinAnyFolder(localTaxonomy, subcategoryId, folderGroupIds)) {
+          if (placement === "inside") {
+            applyGroupMove("folders", folderGroupIds, subcategoryId);
+          } else {
+            applyGroupMove(
+              "folders",
+              folderGroupIds,
+              parentId,
+              getRelativeInsertIndex(getTaxonomyParentChildIds(parentId), subcategoryId, placement) ?? undefined,
+            );
+          }
+        }
+        clearNativeTaxonomyDrag();
+        return;
+      }
       const shouldNestInsideTarget =
         placement === "inside" &&
         nativeTaxonomyDragState.subcategoryId !== subcategoryId;
@@ -2754,8 +3534,10 @@ const TagManager: React.FC<TagManagerProps> = ({
       clearNativeTaxonomyDrag();
     },
     [
+      applyGroupMove,
       applyMoveResult,
       clearNativeTaxonomyDrag,
+      getGroupDragIds,
       getTaxonomyParentChildIds,
       interactionLocked,
       localTaxonomy,
@@ -2792,6 +3574,14 @@ const TagManager: React.FC<TagManagerProps> = ({
         targetTagId,
         placement === "inside" ? "after" : placement,
       );
+      const groupIds = getGroupDragIds("tags", nativeTaxonomyDragState.tagId);
+      if (groupIds) {
+        if (!groupIds.includes(targetTagId)) {
+          applyGroupMove("tags", groupIds, parentId, targetIndex ?? undefined);
+        }
+        clearNativeTaxonomyDrag();
+        return;
+      }
       const result = moveTag(
         localTaxonomy,
         nativeTaxonomyDragState.tagId,
@@ -2812,8 +3602,10 @@ const TagManager: React.FC<TagManagerProps> = ({
       clearNativeTaxonomyDrag();
     },
     [
+      applyGroupMove,
       applyMoveResult,
       clearNativeTaxonomyDrag,
+      getGroupDragIds,
       getTaxonomyParentChildIds,
       interactionLocked,
       localTaxonomy,
@@ -2835,6 +3627,12 @@ const TagManager: React.FC<TagManagerProps> = ({
 
       event.preventDefault();
       event.stopPropagation();
+      const groupIds = getGroupDragIds("tags", nativeTaxonomyDragState.tagId);
+      if (groupIds) {
+        applyGroupMove("tags", groupIds, parentId);
+        clearNativeTaxonomyDrag();
+        return;
+      }
       const targetIndex = getTaxonomyParentChildIds(parentId).length;
       const result = moveTag(
         localTaxonomy,
@@ -2860,8 +3658,10 @@ const TagManager: React.FC<TagManagerProps> = ({
       clearNativeTaxonomyDrag();
     },
     [
+      applyGroupMove,
       applyMoveResult,
       clearNativeTaxonomyDrag,
+      getGroupDragIds,
       getTaxonomyParentChildIds,
       interactionLocked,
       localTaxonomy,
@@ -2984,6 +3784,52 @@ const TagManager: React.FC<TagManagerProps> = ({
     clearHoverExpandTimer();
   };
 
+  const resolveGroupDropTarget = (
+    kind: TagManagerSelectionKind,
+    groupIds: string[],
+    overData: SupportedDndData,
+  ): { parentId: string; index?: number } | null => {
+    if (overData.type === "category") {
+      return { parentId: overData.categoryId };
+    }
+    if (overData.type === "tag-end") {
+      return kind === "tags" ? { parentId: overData.subcategoryId } : null;
+    }
+    if (overData.type === "tag") {
+      if (kind !== "tags" || groupIds.includes(overData.tagId)) {
+        return null;
+      }
+      return {
+        parentId: overData.subcategoryId,
+        index:
+          getRelativeInsertIndex(
+            getTaxonomyParentChildIds(overData.subcategoryId),
+            overData.tagId,
+            "before",
+          ) ?? undefined,
+      };
+    }
+    if (
+      kind === "folders"
+        ? isWithinAnyFolder(localTaxonomy, overData.subcategoryId, groupIds)
+        : groupIds.includes(overData.subcategoryId)
+    ) {
+      return null;
+    }
+    if (kind === "tags" || dragPlacementRef.current === "inside") {
+      return { parentId: overData.subcategoryId };
+    }
+    return {
+      parentId: overData.parentId,
+      index:
+        getRelativeInsertIndex(
+          getTaxonomyParentChildIds(overData.parentId),
+          overData.subcategoryId,
+          dragPlacementRef.current,
+        ) ?? undefined,
+    };
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     clearHoverExpandTimer();
     const activeData = readDndData(event.active.data.current);
@@ -2995,6 +3841,21 @@ const TagManager: React.FC<TagManagerProps> = ({
 
     if (!activeData || !overData) {
       return;
+    }
+
+    if (activeData.type === "tag" || activeData.type === "subcategory") {
+      const kind: TagManagerSelectionKind = activeData.type === "tag" ? "tags" : "folders";
+      const groupIds = getGroupDragIds(
+        kind,
+        activeData.type === "tag" ? activeData.tagId : activeData.subcategoryId,
+      );
+      if (groupIds) {
+        const target = resolveGroupDropTarget(kind, groupIds, overData);
+        if (target) {
+          applyGroupMove(kind, groupIds, target.parentId, target.index);
+        }
+        return;
+      }
     }
 
     if (activeData.type === "category" && overData.type === "category") {
@@ -3242,6 +4103,13 @@ const TagManager: React.FC<TagManagerProps> = ({
     };
   }, [openAccentPickerTagId]);
 
+  const dragGroupCount =
+    dragState?.type === "tag"
+      ? getGroupDragIds("tags", dragState.tagId)?.length ?? 0
+      : dragState?.type === "subcategory"
+        ? getGroupDragIds("folders", dragState.subcategoryId)?.length ?? 0
+        : 0;
+
   return (
     <Portal>
       <div className={styles.overlay} onClick={handleCancel}>
@@ -3303,9 +4171,17 @@ const TagManager: React.FC<TagManagerProps> = ({
             onDragCancel={handleDragCancel}
             autoScroll
           >
-            <div className={styles.body}>
-              <div className={styles.pane}>
-                <div className={styles.paneHeader}>
+            <div ref={taxonomyBodyRef} className={styles.body}>
+              <div
+                ref={taxonomyPaneRef}
+                className={`${styles.pane} ${styles.taxonomyPane}`}
+                style={taxonomyPaneWidth === null ? undefined : { "--taxonomy-pane-width": `${taxonomyPaneWidth}px` } as React.CSSProperties}
+              >
+                <div
+                  className={`${styles.paneHeader} ${
+                    multiSelection?.kind === "folders" ? styles.paneHeaderWithSelection : ""
+                  }`}
+                >
                   <div>
                     <h3 className={styles.paneTitle}>Taxonomy</h3>
                     <p className={styles.paneSubtitle}>Categories and folders</p>
@@ -3322,6 +4198,7 @@ const TagManager: React.FC<TagManagerProps> = ({
                   >
                     {areAllCategoriesExpanded ? "Collapse All" : "Expand All"}
                   </button>
+                  {renderSelectionBar("folders")}
                 </div>
 
                 <div ref={treePaneRef} className={styles.treePane}>
@@ -3404,6 +4281,16 @@ const TagManager: React.FC<TagManagerProps> = ({
                 </div>
               </div>
 
+              <div
+                className={styles.taxonomyResizeHandle}
+                role="separator"
+                aria-label="Resize taxonomy pane"
+                aria-orientation="vertical"
+                tabIndex={0}
+                onPointerDown={handleTaxonomyResizeStart}
+                onKeyDown={handleTaxonomyResizeKeyDown}
+              />
+
               <div className={styles.pane}>
                 <div className={styles.paneHeader}>
                   {selectedCategoryForInspector && selectedTagParentId ? (
@@ -3419,6 +4306,9 @@ const TagManager: React.FC<TagManagerProps> = ({
                       </div>
                       <p className={styles.paneSubtitle}>
                         Drag tags here to reorder them, or drop them onto a folder in the tree to move them.
+                      </p>
+                      <p className={styles.paneSubtitle}>
+                        {MULTI_SELECT_KEY_LABEL}+Click or Shift+Click to select several tags or folders.
                       </p>
                     </div>
                   ) : (
@@ -3478,7 +4368,17 @@ const TagManager: React.FC<TagManagerProps> = ({
                       ) : null}
                     </div>
 
-                    <div className={styles.tagListPane}>
+                    {renderSelectionBar("tags")}
+
+                    <div
+                      className={styles.tagListPane}
+                      onClick={(event) => {
+                        // Clicking empty space in the tag list clears a tag selection.
+                        if (event.target === event.currentTarget || event.target === event.currentTarget.firstElementChild) {
+                          setMultiSelection((current) => (current?.kind === "tags" ? null : current));
+                        }
+                      }}
+                    >
                       <SortableContext
                         items={selectedTags.map((tag) => buildTagDndId(tag.id))}
                         strategy={rectSortingStrategy}
@@ -3502,6 +4402,7 @@ const TagManager: React.FC<TagManagerProps> = ({
                                   nativeTaxonomyDragState?.type === "tag" &&
                                   nativeTaxonomyDragState.tagId !== tag.id
                                 }
+                                isMultiSelected={multiSelection?.kind === "tags" && multiSelectedIds.has(tag.id)}
                                 isAccentPickerOpen={openAccentPickerTagId === tag.id}
                                 customAccentsById={localTaxonomy.customAccentsById}
                                 accentGroups={accentGroups}
@@ -3509,6 +4410,7 @@ const TagManager: React.FC<TagManagerProps> = ({
                                 onDeleteTag={handleRemoveTag}
                                 onToggleAccentPicker={handleToggleAccentPicker}
                                 onSetTagAccent={handleSetTagAccent}
+                                onSelectionClick={handleTagSelectionClick}
                                 onNativeDragStart={handleNativeTagDragStart}
                                 onNativeDragOver={handleNativeTaxonomyDragOver}
                                 onNativeDrop={handleNativeTagDrop}
@@ -3539,7 +4441,11 @@ const TagManager: React.FC<TagManagerProps> = ({
               {dragState ? (
                 <div className={styles.dragOverlayCard}>
                   <span className={styles.dragOverlayType}>{dragState.type}</span>
-                  <span className={styles.dragOverlayLabel}>{dragState.label}</span>
+                  <span className={styles.dragOverlayLabel}>
+                    {dragGroupCount
+                      ? describeSelectionCount(dragState.type === "tag" ? "tags" : "folders", dragGroupCount)
+                      : dragState.label}
+                  </span>
                 </div>
               ) : null}
             </DragOverlay>

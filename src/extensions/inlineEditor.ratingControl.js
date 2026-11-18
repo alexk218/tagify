@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 const STAR_COUNT = 5;
 
 function getStarFillWidth(starNumber, rating) {

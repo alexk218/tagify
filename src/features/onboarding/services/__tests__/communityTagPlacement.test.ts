@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { buildTaxonomyFromCategoryTree } from "@/utils/tagTaxonomy";
-import { COMMUNITY_TAGS_CATEGORY, placeCommunityTag } from "../communityTagPlacement";
+import { COMMUNITY_TAGS_CATEGORY, communityTagDestination, placeCommunityTag } from "../communityTagPlacement";
 
 const idOf = (records: Record<string, { id: string; name: string }>, name: string) =>
   Object.values(records).find((record) => record.name === name)!.id;
@@ -31,4 +31,14 @@ it("puts a tag with no matching category in From Community, made once", () => {
   const second = placeCommunityTag(first.taxonomy, "House", ["House"]);
   expect(second.taxonomy.categoryOrder.filter((id) => second.taxonomy.categoriesById[id].name === COMMUNITY_TAGS_CATEGORY)).toHaveLength(1);
   expect(second.tag.parentId).toBe(categoryId);
+});
+
+it("names where a new tag would go before it's added", () => {
+  const current = taxonomy();
+  expect(communityTagDestination(current, ["Elements / Weather / Foggy", "mood & energy / Atmosphere / Weather / Foggy"])).toBe("Mood & Energy / Atmosphere");
+  expect(communityTagDestination(current, ["Mood & Energy / Seasons / Summer"])).toBe("Mood & Energy");
+  expect(communityTagDestination(current, ["Genre / Techno"])).toBe(COMMUNITY_TAGS_CATEGORY);
+  // The name matches where placeCommunityTag actually files it.
+  const placed = placeCommunityTag(current, "Foggy", ["mood & energy / Atmosphere / Weather / Foggy"]);
+  expect(placed.taxonomy.subcategoriesById[placed.tag.parentId!].name).toBe("Atmosphere");
 });

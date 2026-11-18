@@ -20,8 +20,13 @@ import type { SendSession } from "./SpotifyLibrarySender";
 // Spotify's first refusal or while Spotify asks Tagify to wait. The loop, stops and backoff are
 // shared with the other lookup lanes (CommunityLookupLane.ts).
 
-export { LOOKUP_POLL_MS as NOW_PLAYING_LOOKUP_POLL_MS, NOT_A_FILLER_RECHECK_MS } from "./CommunityLookupLane";
+export { LOOKUP_NUDGE_MIN_GAP_MS, LOOKUP_POLL_MS as NOW_PLAYING_LOOKUP_POLL_MS, NOT_A_FILLER_RECHECK_MS } from "./CommunityLookupLane";
 export const NOW_PLAYING_LOOKUP_FEATURE = "community-now-playing-lookups";
+/**
+ * Community's broadcast on the filler's private library channel when a lookup opens (payload
+ * `{ requestedAt }`): the filler asks for it now rather than at its next poll.
+ */
+export const NOW_PLAYING_LOOKUP_REQUEST_EVENT = "now_playing_lookup_request";
 /** Song searches for Now playing lookups in an hour (the shared background reservations). */
 export const NOW_PLAYING_LOOKUP_HOURLY_SEARCHES = 60;
 /** Song searches for Now playing lookups in a UTC day on this computer. */

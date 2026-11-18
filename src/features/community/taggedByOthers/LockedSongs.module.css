@@ -1,0 +1,117 @@
+.locked {
+  display: grid;
+}
+
+.rows {
+  display: grid;
+  list-style: none;
+  margin: 0 -8px;
+  padding: 0;
+}
+
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  column-gap: 12px;
+  padding: 12px 8px;
+}
+
+.row::before {
+  position: absolute;
+  top: 0;
+  right: 8px;
+  left: 8px;
+  border-top: 1px solid rgb(255 255 255 / 7%);
+  content: "";
+}
+
+.cover {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 8%);
+  object-fit: cover;
+}
+
+/* Song and artist stay readable; only the tags are locked. */
+.body {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.songName,
+.meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.songName {
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.meta {
+  color: var(--spice-subtext);
+  font-size: 13px;
+}
+
+.lockedTags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.footer {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 14px 12px 4px;
+  border-top: 1px solid rgb(255 255 255 / 7%);
+  text-align: center;
+}
+
+.count {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--spice-text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pitch {
+  color: var(--spice-subtext);
+  font-size: 13px;
+}
+
+.action {
+  min-height: 40px;
+  max-width: 100%;
+  margin-top: 6px;
+  padding: 8px 18px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--spice-button);
+  color: var(--spice-text);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.action:hover {
+  filter: brightness(1.08);
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}

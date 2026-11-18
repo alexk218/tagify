@@ -141,12 +141,43 @@
   overflow: hidden;
 }
 
-.pane:first-child {
+.taxonomyPane {
   flex: 0 0 clamp(320px, 33vw, 392px);
   overflow-y: auto;
   overscroll-behavior: contain;
   border-right: 1px solid var(--spice-button-disabled);
   background: color-mix(in srgb, var(--spice-main) 45%, var(--spice-card) 55%);
+}
+
+.taxonomyPane {
+  flex-basis: var(--taxonomy-pane-width, clamp(320px, 33vw, 392px));
+}
+
+.taxonomyResizeHandle {
+  width: 8px;
+  margin: 0 -4px;
+  flex: 0 0 8px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.taxonomyResizeHandle::after {
+  display: block;
+  width: 2px;
+  height: 100%;
+  margin: 0 auto;
+  background: transparent;
+  content: "";
+}
+
+.taxonomyResizeHandle:hover::after,
+.taxonomyResizeHandle:focus-visible::after {
+  background: var(--spice-accent);
+}
+
+.taxonomyResizeHandle:focus-visible {
+  outline: none;
 }
 
 .paneHeader {
@@ -159,7 +190,7 @@
   flex-shrink: 0;
 }
 
-.pane:first-child .paneHeader {
+.taxonomyPane .paneHeader {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -253,6 +284,13 @@
   flex-direction: column;
   gap: 8px;
   padding: 0 12px 12px 36px;
+}
+
+.nestedSubcategoryList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 0 0 16px;
 }
 
 .subcategoryRow {
@@ -1629,11 +1667,15 @@
     flex-direction: column;
   }
 
-  .pane:first-child {
+  .taxonomyPane {
     flex: 0 0 auto;
     max-height: 44%;
     border-right: none;
     border-bottom: 1px solid var(--spice-button-disabled);
+  }
+
+  .taxonomyResizeHandle {
+    display: none;
   }
 
   .defaultPaletteGrid {
@@ -1783,5 +1825,192 @@
 
   .customColorCollection {
     display: none;
+  }
+}
+
+/* Multi-select (Ctrl/Cmd+Click, Shift+Click) */
+.tagChipSelected,
+.tagChipSelected:hover {
+  border-color: var(--spice-button);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--spice-button) 45%, transparent);
+}
+
+.subcategoryRowMultiSelected {
+  border-color: var(--spice-button);
+  box-shadow: inset 3px 0 0 var(--spice-button);
+  background: color-mix(in srgb, var(--spice-button) 14%, transparent);
+}
+
+.paneHeaderWithSelection {
+  flex-wrap: wrap;
+}
+
+.selectionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  margin: 10px 16px 0;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--spice-button) 45%, var(--spice-button-disabled) 55%);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--spice-button) 9%, transparent);
+}
+
+.paneHeader .selectionBar {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.selectionBarCount {
+  color: var(--spice-text);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.selectionBarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.selectionBarActions .secondaryButtonSmall,
+.selectionBarActions .dangerButtonSmall {
+  height: 28px;
+  padding: 0 10px;
+}
+
+.selectionBarActions .selectionBarClear {
+  width: 28px;
+  padding: 0;
+}
+
+.selectionBarMenuAnchor {
+  position: relative;
+}
+
+/* Menus open toward the inside of the sheet so they never widen the pane. */
+.selectionBarMenuAnchor .tagAccentMenu {
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 6;
+}
+
+.moveMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 6;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--spice-card) 94%, black 6%);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 24%);
+}
+
+.moveMenuSearch {
+  height: 30px;
+  border: 1px solid var(--spice-button-disabled);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--spice-main) 88%, black 12%);
+  color: var(--spice-text);
+  font-size: 12px;
+  padding: 0 8px;
+}
+
+.moveMenuList {
+  max-height: min(320px, 50vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+}
+
+.moveMenuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--spice-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.moveMenuItem:hover:not(:disabled),
+.moveMenuItem:focus-visible {
+  outline: none;
+  background: rgb(255 255 255 / 7%);
+}
+
+.moveMenuItem:disabled {
+  color: var(--spice-subtext);
+  cursor: default;
+}
+
+.moveMenuItemCategory {
+  font-weight: 700;
+}
+
+.moveMenuItemName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moveMenuItemNote {
+  flex: 0 0 auto;
+  color: var(--spice-subtext);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.moveMenuEmpty {
+  padding: 8px 10px;
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.groupDragPreview {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+  padding: 6px 10px;
+  border: 1px solid var(--spice-button);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--spice-card) 94%, black 6%);
+  color: var(--spice-text);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  /* The header stacks vertically here, so the bar goes below instead of wrapping beside it. */
+  .paneHeaderWithSelection {
+    flex-wrap: nowrap;
+  }
+
+  .paneHeader .selectionBar {
+    flex: 0 0 auto;
+  }
+
+  .selectionBar {
+    margin-left: 12px;
+    margin-right: 12px;
   }
 }

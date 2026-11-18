@@ -142,25 +142,7 @@ export function useTrackListControls({
     }
   };
 
-  const handleBpmMinChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = event.target.value === "" ? null : parseInt(event.target.value);
-    setBpmMinFilter(value);
-
-    if (value !== null && bpmMaxFilter !== null && value > bpmMaxFilter) {
-      setBpmMaxFilter(value);
-    }
-  };
-
-  const handleBpmMaxChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = event.target.value === "" ? null : parseInt(event.target.value);
-    setBpmMaxFilter(value);
-
-    if (value !== null && bpmMinFilter !== null && bpmMinFilter > value) {
-      setBpmMinFilter(value);
-    }
-  };
-
-  /** Keeps From at or below To, like the BPM range. */
+  /** Keeps From at or below To. Values come from the list or from what was typed. */
   const handleRangeChange = (
     value: number | null,
     edge: "min" | "max",
@@ -171,16 +153,18 @@ export function useTrackListControls({
     setValue(value);
     if (value !== null && other !== null && (edge === "min" ? value > other : other > value)) setOther(value);
   };
-  const selectValue = (event: React.ChangeEvent<HTMLSelectElement>) =>
-    event.target.value === "" ? null : parseInt(event.target.value, 10);
-  const handleLengthMinChange = (event: React.ChangeEvent<HTMLSelectElement>) =>
-    handleRangeChange(selectValue(event), "min", lengthMaxFilter, setLengthMinFilter, setLengthMaxFilter);
-  const handleLengthMaxChange = (event: React.ChangeEvent<HTMLSelectElement>) =>
-    handleRangeChange(selectValue(event), "max", lengthMinFilter, setLengthMaxFilter, setLengthMinFilter);
-  const handleReleaseYearMinChange = (event: React.ChangeEvent<HTMLSelectElement>) =>
-    handleRangeChange(selectValue(event), "min", releaseYearMaxFilter, setReleaseYearMinFilter, setReleaseYearMaxFilter);
-  const handleReleaseYearMaxChange = (event: React.ChangeEvent<HTMLSelectElement>) =>
-    handleRangeChange(selectValue(event), "max", releaseYearMinFilter, setReleaseYearMaxFilter, setReleaseYearMinFilter);
+  const handleBpmMinChange = (value: number | null) =>
+    handleRangeChange(value, "min", bpmMaxFilter, setBpmMinFilter, setBpmMaxFilter);
+  const handleBpmMaxChange = (value: number | null) =>
+    handleRangeChange(value, "max", bpmMinFilter, setBpmMaxFilter, setBpmMinFilter);
+  const handleLengthMinChange = (value: number | null) =>
+    handleRangeChange(value, "min", lengthMaxFilter, setLengthMinFilter, setLengthMaxFilter);
+  const handleLengthMaxChange = (value: number | null) =>
+    handleRangeChange(value, "max", lengthMinFilter, setLengthMaxFilter, setLengthMinFilter);
+  const handleReleaseYearMinChange = (value: number | null) =>
+    handleRangeChange(value, "min", releaseYearMaxFilter, setReleaseYearMinFilter, setReleaseYearMaxFilter);
+  const handleReleaseYearMaxChange = (value: number | null) =>
+    handleRangeChange(value, "max", releaseYearMinFilter, setReleaseYearMaxFilter, setReleaseYearMinFilter);
 
   const toggleCamelotKeyFilter = (camelotKey: string) => {
     const normalizedCamelotKey = normalizeCamelotKey(camelotKey);

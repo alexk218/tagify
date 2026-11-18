@@ -103,7 +103,7 @@ describe("Community publish invitation", () => {
 
     expect(invitation()).toBeInTheDocument();
     expect(invitation()).toHaveAccessibleDescription(
-      "Tagify is backing up your library, but your Community profile stays empty until you choose what to share. 2 tags on 5 songs would appear. Private notes and ratings stay private. You can hide any tag or folder first.",
+      "Tagify is backing up your library, but your Community profile stays empty until you choose what to share. 2 tags on 5 songs would appear. Your tags and star ratings would be public. Private notes stay private. You can hide any tag or folder first.",
     );
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(recordProductInteraction).toHaveBeenCalledWith("community_publish_prompt_shown");

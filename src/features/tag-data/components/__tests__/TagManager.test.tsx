@@ -179,6 +179,32 @@ describe("TagManager", () => {
     });
   });
 
+  it("shows full taxonomy names on hover and lets the taxonomy pane resize for this session", async () => {
+    renderTagManager();
+    const categoryName = (
+      await screen.findByRole("button", { name: "Select category Genre" })
+    ).querySelector("[title]");
+    const folderName = screen
+      .getByRole("button", { name: "Select subcategory Electronic" })
+      .querySelector("[title]");
+    const resizeHandle = screen.getByRole("separator", { name: "Resize taxonomy pane" });
+    const body = resizeHandle.parentElement as HTMLDivElement;
+    const pane = resizeHandle.previousElementSibling as HTMLDivElement;
+
+    expect(categoryName).toHaveAttribute("title", "Genre");
+    expect(folderName).toHaveAttribute("title", "Electronic");
+    vi.spyOn(body, "getBoundingClientRect").mockReturnValue({ width: 900 } as DOMRect);
+    vi.spyOn(pane, "getBoundingClientRect").mockReturnValue({ width: 360 } as DOMRect);
+
+    fireEvent(resizeHandle, new MouseEvent("pointerdown", { bubbles: true, clientX: 100 }));
+    fireEvent(window, new MouseEvent("pointermove", { clientX: 180 }));
+    fireEvent(window, new MouseEvent("pointerup"));
+
+    expect(pane).toHaveStyle({ "--taxonomy-pane-width": "440px" });
+    fireEvent.keyDown(resizeHandle, { key: "ArrowLeft" });
+    expect(pane).toHaveStyle({ "--taxonomy-pane-width": "416px" });
+  });
+
   it("restores collapsed categories when reopened during the session", async () => {
     const user = userEvent.setup();
     let expandedCategoryIds: string[] | undefined;
@@ -1315,6 +1341,7 @@ describe("TagManager", () => {
   });
 });
 
+
 describe("TagManager names other members use", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -1393,4 +1420,3 @@ describe("TagManager names other members use", () => {
     expect(savedNamesIn(onReplaceTaxonomy.mock.calls[0][0] as TagTaxonomy, "Electronic")).toContain("male vocals");
   });
 });
-

@@ -278,7 +278,7 @@ describe("desktop sync storage boundary", () => {
 
     ensureSyncStores(db);
 
-    expect(TAGIFY_DATABASE_VERSION).toBe(12);
+    expect(TAGIFY_DATABASE_VERSION).toBe(13);
     expect([...Object.values(SYNC_STORES)].every((store) => stores.has(store))).toBe(true);
     expect(indexes.get(SYNC_STORES.OUTBOX)).toEqual(["by-created-at", "by-entity"]);
   });

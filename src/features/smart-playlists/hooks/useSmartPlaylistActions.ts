@@ -3,6 +3,7 @@ import { storageService } from "@/services/storage/StorageService";
 import { useCallback } from "react";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { smartPlaylistSyncService } from "@/services/SmartPlaylistSyncService";
+import { requestSmartPlaylistRefresh } from "@/services/sync/SmartPlaylistCommunityList";
 import { clearConfirmedMembershipBaseline, updateSmartPlaylistsInStorage } from "@/features/smart-playlists/utils/smartPlaylist.storage";
 import { describeSmartPlaylistCheckFailure } from "@/features/smart-playlists/utils/smartPlaylist.checkFailure";
 import {
@@ -21,6 +22,7 @@ import {
 } from "@/features/smart-playlists/utils/smartPlaylist.import";
 import { SmartPlaylistCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
 import { TagTaxonomy, TrackData } from "@/types/tagData";
+import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 
 interface UseSmartPlaylistActionsOptions {
   smartPlaylists: SmartPlaylistCriteria[];
@@ -39,6 +41,7 @@ export function useSmartPlaylistActions({
   const createSmartPlaylist = useCallback(
     async (criteria: SmartPlaylistCriteria) => {
       await updateSmartPlaylistsImmediate((playlists) => [...playlists, criteria]);
+      recordProductInteraction("smart_playlist_created");
     },
     [updateSmartPlaylistsImmediate],
   );
@@ -60,12 +63,15 @@ export function useSmartPlaylistActions({
   );
 
   const syncSmartPlaylistFull = useCallback(
-    async (playlist: SmartPlaylistCriteria): Promise<void> => {
+    /** `manual` marks the Smart Playlists list's Sync Now button, which is counted once the check succeeds. */
+    async (playlist: SmartPlaylistCriteria, trigger?: "manual"): Promise<void> => {
       if (!playlist.isActive) {
         return;
       }
 
       try {
+        // Community may have changed this playlist's rules: read the shared list first.
+        await requestSmartPlaylistRefresh();
         const summary = await smartPlaylistSyncService.reconcilePlaylist(
           playlist.playlistId,
         );
@@ -75,6 +81,7 @@ export function useSmartPlaylistActions({
           showSmartPlaylistSyncErrorNotification(playlist.playlistName, summary.checkFailure);
           return;
         }
+        if (trigger === "manual") recordProductInteraction("smart_playlist_refreshed");
         showSmartPlaylistSyncSuccessNotification(
           playlist.playlistName,
           summary.addedCount,

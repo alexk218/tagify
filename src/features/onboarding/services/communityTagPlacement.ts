@@ -26,6 +26,29 @@ export function matchingTagParent(taxonomy: TagTaxonomy, path: string): string |
 }
 
 /**
+ * Where `placeCommunityTag` would file a new tag, as "Category / Folder", so the member can see it
+ * before adding: the deepest matching place people keep it, or "From Community".
+ */
+export function communityTagDestination(taxonomy: TagTaxonomy, paths: readonly string[]): string {
+  const parentId = paths.map((path) => matchingTagParent(taxonomy, path)).find(Boolean);
+  if (!parentId) return COMMUNITY_TAGS_CATEGORY;
+  const names: string[] = [];
+  let id: string | undefined = parentId;
+  // Folders nest only a few levels; the limit only guards against a malformed taxonomy.
+  for (let depth = 0; id && depth < 20; depth += 1) {
+    const folder: TagTaxonomy["subcategoriesById"][string] | undefined = taxonomy.subcategoriesById[id];
+    if (!folder) {
+      const category = taxonomy.categoriesById[id];
+      if (category) names.unshift(category.name);
+      break;
+    }
+    names.unshift(folder.name);
+    id = folder.parentId ?? folder.categoryId;
+  }
+  return names.join(" / ") || COMMUNITY_TAGS_CATEGORY;
+}
+
+/**
  * Adds another member's tag to this library: the member's own tag of that name when they have
  * one, otherwise a new tag in the first place people keep it that this library also has, or in
  * "From Community".

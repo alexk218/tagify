@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 export function getRatingUpdateForSelection(currentRatings, selectedRating) {
   const allHaveSelectedRating =
     currentRatings.length > 0 &&

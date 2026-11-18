@@ -32,6 +32,18 @@ export function releaseYearOf(value: string | null | undefined): number | null {
   return date ? Number(date.slice(0, 4)) : null;
 }
 
+/**
+ * The year the Released filter and Smart Playlists use: the earlier of the song's original release
+ * (from Tagify Community, for a linked library) and its album's, so a 2011 remaster of a 1977 song
+ * counts as 1977. Without an original date it is the album's year.
+ */
+export function filterReleaseYearOf(track: { releaseDate?: string | null; originalReleaseDate?: string | null }): number | null {
+  const album = releaseYearOf(track.releaseDate);
+  const original = releaseYearOf(track.originalReleaseDate);
+  if (album === null) return original;
+  return original === null ? album : Math.min(album, original);
+}
+
 /** Length filters are whole seconds; release year filters are years. Missing means "any". */
 export interface SongDetailFilterCriteria {
   lengthMinFilter?: number | null;
@@ -76,7 +88,7 @@ export function hasSongDetailFilters(criteria: SongDetailFilterCriteria): boolea
  * same way songs without a BPM don't match a BPM filter.
  */
 export function matchesSongDetailFilters(
-  track: { durationMs?: number; releaseDate?: string },
+  track: { durationMs?: number; releaseDate?: string; originalReleaseDate?: string },
   criteria: SongDetailFilterCriteria,
 ): boolean {
   const { lengthMinFilter, lengthMaxFilter, releaseYearMinFilter, releaseYearMaxFilter } = criteria;
@@ -89,7 +101,7 @@ export function matchesSongDetailFilters(
     if (typeof lengthMaxFilter === "number" && Math.floor(seconds) > lengthMaxFilter) return false;
   }
   if (typeof releaseYearMinFilter === "number" || typeof releaseYearMaxFilter === "number") {
-    const year = releaseYearOf(track.releaseDate);
+    const year = filterReleaseYearOf(track);
     if (year === null) return false;
     if (typeof releaseYearMinFilter === "number" && year < releaseYearMinFilter) return false;
     if (typeof releaseYearMaxFilter === "number" && year > releaseYearMaxFilter) return false;
@@ -101,6 +113,53 @@ export function matchesSongDetailFilters(
 export function formatLength(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+/**
+ * What someone typed into a From/To filter field: a value, `null` for "Any"
+ * (an empty field or the word "any"), or `undefined` when it can't be read.
+ */
+export type TypedFilterValue = number | null | undefined;
+
+function isAny(text: string): boolean {
+  return text === "" || text === "any";
+}
+
+/**
+ * A typed song length in seconds. Accepts "3:30", "1:02:00", plain minutes
+ * ("4", "3.5", "4 min") and seconds ("210s").
+ */
+export function parseLengthInput(text: string): TypedFilterValue {
+  const value = text.trim().toLowerCase();
+  if (isAny(value)) return null;
+  let seconds: number | undefined;
+  const clock = /^(?:(\d{1,2}):)?(\d{1,3}):([0-5]\d)$/.exec(value);
+  const plainSeconds = /^(\d{1,5})\s*(?:s|sec|secs|seconds?)$/.exec(value);
+  const minutes = /^(\d{1,4}(?:[.,]\d+)?)\s*(?:m|min|mins|minutes?)?$/.exec(value);
+  if (clock) seconds = Number(clock[1] ?? 0) * 3600 + Number(clock[2]) * 60 + Number(clock[3]);
+  else if (plainSeconds) seconds = Number(plainSeconds[1]);
+  else if (minutes) seconds = Math.round(Number(minutes[1].replace(",", ".")) * 60);
+  const [low, high] = SONG_DETAIL_FILTER_BOUNDS.lengthMinFilter;
+  return seconds !== undefined && seconds >= low && seconds <= high ? seconds : undefined;
+}
+
+/** A typed release year, such as "1995". */
+export function parseYearInput(text: string): TypedFilterValue {
+  const value = text.trim().toLowerCase();
+  if (isAny(value)) return null;
+  if (!/^\d{4}$/.test(value)) return undefined;
+  const year = Number(value);
+  const [low, high] = SONG_DETAIL_FILTER_BOUNDS.releaseYearMinFilter;
+  return year >= low && year <= high ? year : undefined;
+}
+
+/** A typed BPM, rounded to a whole beat ("124", "127.5", "124 bpm"). */
+export function parseBpmInput(text: string): TypedFilterValue {
+  const value = text.trim().toLowerCase().replace(/\s*bpm$/, "");
+  if (isAny(value)) return null;
+  if (!/^\d{1,3}(?:[.,]\d+)?$/.test(value)) return undefined;
+  const bpm = Math.round(Number(value.replace(",", ".")));
+  return bpm >= 1 && bpm <= 999 ? bpm : undefined;
 }
 
 function rangeLabel(

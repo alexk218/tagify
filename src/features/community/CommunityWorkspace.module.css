@@ -1,49 +1,34 @@
 .workspace {
   display: grid;
   min-height: min(560px, calc(100vh - 190px));
-  padding: 28px;
-  place-items: center;
+  padding: 56px 28px 28px;
+  place-items: start center;
 }
 
 .card {
   display: flex;
-  align-items: center;
   flex-direction: column;
   gap: 20px;
   width: min(100%, 620px);
-  padding: 44px;
-  border: 1px solid color-mix(in srgb, var(--spice-button-disabled) 82%, transparent);
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at top, rgb(30 215 96 / 10%), transparent 48%),
-    color-mix(in srgb, var(--spice-card) 96%, black 4%);
-  box-shadow: 0 20px 60px rgb(0 0 0 / 24%);
-  text-align: center;
+  padding: 28px 32px 24px;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 12px;
+  background: var(--spice-card);
 }
 
-.icon {
-  display: grid;
-  width: 64px;
-  height: 64px;
-  border: 1px solid rgb(30 215 96 / 22%);
-  border-radius: 50%;
-  background: rgb(30 215 96 / 12%);
-  color: var(--spice-button);
-  place-items: center;
+.label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .copy {
   display: grid;
-  gap: 10px;
-  max-width: 520px;
-}
-
-.eyebrow {
-  color: var(--spice-button);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  gap: 6px;
 }
 
 .copy h2,
@@ -53,17 +38,12 @@
 
 .copy h2 {
   color: var(--spice-text);
-  font-size: clamp(28px, 4vw, 40px);
-  line-height: 1.05;
-}
-
-.copy h2 span {
-  display: block;
+  font-size: 22px;
+  line-height: 1.25;
 }
 
 .copy .lead {
-  max-width: 440px;
-  margin: 6px auto 0;
+  max-width: 480px;
   color: var(--spice-subtext);
   font-size: 14px;
   line-height: 1.5;
@@ -96,7 +76,6 @@
 .actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
   gap: 10px;
 }
 
@@ -139,7 +118,6 @@
 }
 
 .connectionPanel {
-  width: min(100%, 460px);
   padding-top: 16px;
   border-top: 1px solid rgb(255 255 255 / 8%);
 }
@@ -147,18 +125,16 @@
 .connectionStatus {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
   color: var(--spice-subtext);
   font-size: 12px;
 }
 
 .connectedDot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--spice-button);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--spice-button) 60%, transparent);
 }
 
 .reconnectStatus {
@@ -166,11 +142,10 @@
 }
 
 .reconnectDot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #f1b36f;
-  box-shadow: 0 0 10px rgb(241 179 111 / 55%);
 }
 
 .connectionStatus button,
@@ -211,7 +186,6 @@
 
 .disconnectActions {
   display: flex;
-  justify-content: center;
   gap: 8px;
 }
 
@@ -247,6 +221,12 @@
   }
 
   .card {
-    padding: 32px 20px;
+    padding: 24px 20px 20px;
   }
+}
+
+/* With the Liked Songs card below, the view no longer reserves empty room under this card. */
+.workspace.followed {
+  min-height: 0;
+  padding-bottom: 0;
 }

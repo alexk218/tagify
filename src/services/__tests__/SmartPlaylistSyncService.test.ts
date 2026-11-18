@@ -335,6 +335,20 @@ describe("SmartPlaylistSyncService", () => {
     expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([a]);
   });
 
+  it("adds one copy of a linked song when one copy still carries a tag that was deleted", async () => {
+    // Alex: "This song is showing up twice in my library... Ensure that this doesn't happen for any other songs."
+    const a = `spotify:track:${"a".repeat(22)}`, b = `spotify:track:${"b".repeat(22)}`;
+    const recordingIdentity = { isrc: "USABC2400001", artistIds: ["c".repeat(22)], durationMs: 180000, name: "Song" };
+    const tagged = track({ rating: 5, energy: 6, tagIds: ["house"], recordingGroupId: "same", recordingIdentity });
+    const leftover = { ...tagged, tagIds: ["house", "deleted-tag"] };
+    savePlaylists([playlist()]);
+    mocks.storage.loadAllStrict.mockResolvedValue({ tracks: { [a]: tagged, [b]: leftover }, taxonomy: { tagsById: { house: { id: "house", name: "House" } } } });
+    mocks.storage.getTaxonomy.mockResolvedValue({ tagsById: { house: { id: "house", name: "House" } } });
+    await new SmartPlaylistSyncService().syncTracks({ [a]: tagged, [b]: leftover });
+    expect(mocks.spotifyApi.addTrackToSpotifyPlaylist).toHaveBeenCalledTimes(1);
+    expect(mocks.indexed.playlists[0].smartPlaylistTrackUris).toEqual([a]);
+  });
+
   it("keeps failed additions out of membership and explains that local edits are saved", async () => {
     const service = new SmartPlaylistSyncService();
     savePlaylists([playlist()]);

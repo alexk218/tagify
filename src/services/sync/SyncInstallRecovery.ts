@@ -1,4 +1,5 @@
 import { PRIVATE_SYNC_PROTOCOL_VERSION } from "@tagify/sync-contracts";
+import { isOnboardingPreviewActive } from "@/features/onboarding/preview/onboardingPreview";
 import packageJson from "@/package";
 import {
   getDesktopSyncConfiguration,
@@ -159,6 +160,8 @@ function clearRecoveryRetry(): void {
  * IndexedDB database or is recovered through the normal confirmed cloud flow.
  */
 export function restoreDesktopSyncConfiguration(): Promise<DesktopSyncConfiguration | null> {
+  // A brand-new user in the onboarding preview has no Community connection to restore.
+  if (isOnboardingPreviewActive()) return Promise.resolve(null);
   const existing = window.__tagifyInstallRecoveryPromise;
   if (existing) return existing;
 
@@ -167,6 +170,12 @@ export function restoreDesktopSyncConfiguration(): Promise<DesktopSyncConfigurat
   });
   window.__tagifyInstallRecoveryPromise = pending;
   return pending;
+}
+
+/** Resolves once any automatic reconnection started at launch has finished, whatever its outcome. */
+export function startupRecoverySettled(): Promise<void> {
+  const pending = window.__tagifyInstallRecoveryPromise;
+  return pending ? pending.then(() => undefined, () => undefined) : Promise.resolve();
 }
 
 /**

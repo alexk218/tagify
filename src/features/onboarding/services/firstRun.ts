@@ -38,3 +38,25 @@ export function mostUsedTag(tagData: Pick<TagDataStructure, "tracks" | "taxonomy
   for (const [id, songs] of counts) if (!best || songs > best.songs) best = { id, songs };
   return best ? { ...best, name: tagData.taxonomy.tagsById[best.id].name } : null;
 }
+
+// Moods first, then broad genres: the starter tags most songs fit at a glance.
+const QUICK_TAG_NAMES = ["Chill", "Upbeat", "Happy", "Sad", "Party", "Nostalgic", "Pop", "Rock", "Electronic", "Hip-Hop"];
+
+/**
+ * A handful of the member's own tags to add with one click on "Tag your first song": the starter
+ * moods and genres they still have, else their first tags.
+ */
+export function quickTags(taxonomy: TagDataStructure["taxonomy"], limit = 5): { id: string; name: string }[] {
+  const tags = Object.values(taxonomy.tagsById);
+  const byName = new Map(tags.map((tag) => [tag.name.toLocaleLowerCase(), tag]));
+  const picked: { id: string; name: string }[] = [];
+  for (const name of QUICK_TAG_NAMES) {
+    const tag = byName.get(name.toLocaleLowerCase());
+    if (tag && picked.length < limit) picked.push({ id: tag.id, name: tag.name });
+  }
+  for (const tag of tags) {
+    if (picked.length >= limit) break;
+    if (!picked.some((existing) => existing.id === tag.id)) picked.push({ id: tag.id, name: tag.name });
+  }
+  return picked;
+}

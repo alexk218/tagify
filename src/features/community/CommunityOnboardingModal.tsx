@@ -1,27 +1,22 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Cloud, ExternalLink, Link2, RefreshCw, ShieldAlert, ShieldCheck, UserCircle2, X } from "lucide-react";
-import { fetchCommunityProfile, hydrateSyncProfile } from "./communityDevice";
-import { COMMUNITY_ORIGIN, openCommunityUrl } from "./communityLinks";
+import React, { useEffect, useRef, useState } from "react";
+import { CheckCircle2, Cloud, ExternalLink, RefreshCw, ShieldAlert, ShieldCheck, UserCircle2, X } from "lucide-react";
+import { hydrateSyncProfile } from "./communityDevice";
+import { openCommunityUrl } from "./communityLinks";
+import { REWIND_URL, REWIND_YEAR } from "@/features/rewind/rewindPromptRules";
 import { CommunitySharePanel, communityProfileUrl } from "./CommunityShareDialog";
 import type { CommunitySharing } from "./useCommunitySharing";
 import type { TagTaxonomy, TrackData } from "@/types/tagData";
 import { getDesktopSyncConfiguration, type DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
-import { syncPairingService, type ApprovedPairing } from "@/services/sync/SyncPairingService";
 import { clearRecoveryUnavailable } from "@/services/sync/SyncInstallRecovery";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
 import { Portal } from "@/components/ui";
 // eslint-disable-next-line css-modules/no-unused-class -- shared with the sync and library-review dialogs
 import styles from "./CloudSyncModal.module.css";
 import { InitialLibraryMergeReview } from "./InitialLibraryMergeReview";
-import { communityErrorMessage, communitySyncStatusLabel } from "./communitySyncCopy";
-import {
-  recordCommunityConnectCompleted,
-  recordCommunityConnectFinishFailed,
-  recordCommunityConnectStarted,
-  recordCommunityConnectStartFailed,
-  recordCommunitySetupOpened,
-  type CommunityConnectEntry,
-} from "./communityConnectAnalytics";
+import { communitySyncStatusLabel } from "./communitySyncCopy";
+import { recordCommunitySetupOpened, type CommunityConnectEntry } from "./communityConnectAnalytics";
+import { communityPairing, useCommunityPairing } from "./communityPairing";
+import { CommunityConnectWaiting } from "./CommunityConnectWaiting";
 
 export function CommunityOnboardingModal({
   entry,
@@ -37,20 +32,21 @@ export function CommunityOnboardingModal({
   onClose: () => void;
 }) {
   const [configuration, setConfiguration] = useState(() => getDesktopSyncConfiguration());
-  const [pending, setPending] = useState(() => syncPairingService.getPending());
-  const [approvedPairing, setApprovedPairing] = useState<ApprovedPairing | null>(null);
+  const pairing = useCommunityPairing();
+  const { approvedPairing } = pairing;
+  const busy = pairing.starting || pairing.checking;
+  const error = pairing.error;
   const [status, setStatus] = useState(() => activeSyncRuntime().getStatus());
   const [mergePreview, setMergePreview] = useState(() => activeSyncRuntime().getInitialMergePreview());
   const showingMergeReview = Boolean(mergePreview && (status === "merge-required" || status === "syncing" || status === "error"));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const [finished, setFinished] = useState(false);
   const [finishedPrivately, setFinishedPrivately] = useState(false);
-  const [requiresReload, setRequiresReload] = useState(false);
-  const polling = useRef(false);
+  const [requiresReload, setRequiresReload] = useState(() => communityPairing.getState().connection?.requiresReload ?? false);
+  const autoStarted = useRef(false);
 
+  // Closing keeps a waiting code: Tagify keeps checking until it expires and finishes by itself.
   const close = () => {
-    if (pending || approvedPairing) syncPairingService.cancelPending();
+    if (approvedPairing) communityPairing.cancel();
     onClose();
   };
 
@@ -86,6 +82,25 @@ export function CommunityOnboardingModal({
     }
   }, [entry]);
 
+  // While setup is open, an expired code is replaced with a new one.
+  useEffect(() => {
+    if (getDesktopSyncConfiguration()) return;
+    communityPairing.adopt(entry);
+    const unwatch = communityPairing.watch();
+    // Opening setup is the click on Connect: it asks Community for a code and opens the browser at once.
+    if (!autoStarted.current && !communityPairing.getState().pending && !communityPairing.getState().approvedPairing) {
+      autoStarted.current = true;
+      void communityPairing.start(entry);
+    }
+    return unwatch;
+  }, [entry]);
+
+  useEffect(() => {
+    if (!pairing.connection) return;
+    setConfiguration(pairing.connection.configuration);
+    setRequiresReload(pairing.connection.requiresReload);
+  }, [pairing.connection]);
+
   useEffect(() => {
     if (!configuration?.accessToken || configuration.profile?.handle) return;
     void hydrateSyncProfile(configuration).then((next) => {
@@ -93,76 +108,8 @@ export function CommunityOnboardingModal({
     });
   }, [configuration]);
 
-  const begin = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      const next = await syncPairingService.begin(COMMUNITY_ORIGIN, deviceName(), navigator.platform || "Spotify desktop");
-      setApprovedPairing(null);
-      setPending(next);
-      recordCommunityConnectStarted(entry);
-      openCommunityUrl(next.verificationUri);
-    } catch (nextError) {
-      recordCommunityConnectStartFailed(entry);
-      setError(communityErrorMessage(nextError, "Couldn't start connecting to Community. Please try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const poll = useCallback(async () => {
-    if (polling.current) return;
-    polling.current = true;
-    let completingApproval = false;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await syncPairingService.poll();
-      if (result.status === "approved") {
-        const profile = await fetchCommunityProfile(result.approval.configuration.accessToken);
-        const approval = profile
-          ? {
-              ...result.approval,
-              configuration: { ...result.approval.configuration, profile },
-            }
-          : result.approval;
-        completingApproval = true;
-        setApprovedPairing(approval);
-        setPending(null);
-        const connection = await syncPairingService.complete(approval, {
-          confirmedAccountSwitch: approval.relationship === "account-switch",
-        });
-        recordCommunityConnectCompleted(entry, approval.relationship);
-        setConfiguration(connection.configuration);
-        setApprovedPairing(null);
-        setRequiresReload(connection.requiresReload);
-        if (!connection.requiresReload) await activeSyncRuntime().activateCurrentAccount();
-      } else {
-        setPending(syncPairingService.getPending());
-      }
-    } catch (nextError) {
-      // An expired code is an unfinished approval, not a failure.
-      if (completingApproval || syncPairingService.getPending()) recordCommunityConnectFinishFailed(entry);
-      setError(communityErrorMessage(nextError, "Couldn't finish connecting to Community. Please try again."));
-      if (!completingApproval) setPending(syncPairingService.getPending());
-    } finally {
-      polling.current = false;
-      setBusy(false);
-    }
-  }, [entry]);
-
-  const cancelPairing = () => {
-    syncPairingService.cancelPending();
-    setPending(null);
-    setApprovedPairing(null);
-    setError("");
-  };
-
-  useEffect(() => {
-    if (!pending) return;
-    const timer = window.setInterval(() => void poll(), pending.interval * 1000);
-    return () => window.clearInterval(timer);
-  }, [pending, poll]);
+  const poll = () => communityPairing.check();
+  const cancelPairing = () => communityPairing.cancel();
 
   // Once a sharing choice exists, set up or saved before, setup is done.
   useEffect(() => {
@@ -171,35 +118,24 @@ export function CommunityOnboardingModal({
     setFinished(true);
   }, [configuration, finished, showingMergeReview, sharing.state]);
 
+  const rewindButton = <button type="button" onClick={() => openCommunityUrl(REWIND_URL)}><ExternalLink size={15} /> See your Rewind {REWIND_YEAR}</button>;
   const profileHref = communityProfileUrl(configuration?.profile?.handle || sharing.handle);
 
   return <Portal><div className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="community-onboarding-title">
     <section className={`${styles.modal} ${styles.onboardingModal}`}>
       <header>
-        <div><p>Tagify 3.0</p><h2 id="community-onboarding-title"><Cloud size={20} /> Community setup</h2></div>
+        <div><h2 id="community-onboarding-title"><Cloud size={20} /> Community setup</h2></div>
         <button type="button" aria-label="Close Community setup" onClick={close}><X /></button>
       </header>
       <div className={styles.body}>
-        {!configuration && !pending && !approvedPairing ? <>
-          <div className={styles.onboardingIntro}>
-            <h3>Share your tags on Community</h3>
-            <p>Connect Tagify to your Community account. Your library is backed up, and you choose which tags appear on your profile.</p>
-          </div>
-          <div className={styles.actions}>
-            <button type="button" onClick={close} className={styles.secondary}>Cancel</button>
-            <button type="button" onClick={() => void begin()} disabled={busy} className={styles.primary}><Link2 size={16} /> {busy ? "Connecting…" : "Connect"}</button>
-          </div>
-        </> : null}
-
-        {!configuration && pending ? <>
-          <div className={styles.code}><span>Approve this code on Community</span><strong>{pending.userCode}</strong></div>
-          <p>We opened the account and approval page in your browser. Create or sign into your Community account there, approve this code, then return to Tagify.</p>
-          <div className={styles.actions}>
-            <button type="button" onClick={() => openCommunityUrl(pending.verificationUri)}><ExternalLink size={15} /> Open approval page</button>
-            <button type="button" onClick={() => void poll()} disabled={busy}><RefreshCw size={15} /> {busy ? "Checking..." : "I've approved it"}</button>
-            <button type="button" onClick={cancelPairing} className={styles.secondary}>Cancel linking</button>
-          </div>
-        </> : null}
+        {!configuration && !approvedPairing ? (
+          <CommunityConnectWaiting
+            pairing={pairing}
+            heading={entry === "rewind" ? `See your Rewind ${REWIND_YEAR} on Community` : "Finish in your browser"}
+            description={entry === "rewind" ? "Your library is backed up on Community, and Rewind is put together from it. Your tags stay private unless you choose to publish them." : undefined}
+            onCancel={() => { communityPairing.cancel(); onClose(); }}
+          />
+        ) : null}
 
         {!configuration && approvedPairing ? <>
           <div className={styles.connected} role="status">
@@ -217,6 +153,7 @@ export function CommunityOnboardingModal({
 
         {configuration && !finished ? <>
           <div className={styles.connected}><CheckCircle2 /><div><strong>Connected as {profileLabel(configuration)}</strong><span>{communitySyncStatusLabel(status)}</span></div></div>
+          {entry === "rewind" ? <div className={styles.actions}>{rewindButton}</div> : null}
           {requiresReload ? <div className={styles.warning}><ShieldCheck /><span>Reload Spotify to finish switching accounts before continuing setup.</span></div> : null}
           {status === "snapshot-required" ? <div className={styles.warning}><ShieldAlert /><span>Your library is still on this device. Try Sync now again. If it keeps stopping, save a Tagify backup and contact support.</span></div> : null}
           {showingMergeReview && mergePreview ? <InitialLibraryMergeReview review={mergePreview} onCommit={(resolutions) => activeSyncRuntime().commitInitialMerge(resolutions)} onDownloadBackup={() => activeSyncRuntime().downloadInitialMergeBackup()} /> : null}
@@ -237,17 +174,17 @@ export function CommunityOnboardingModal({
             </div>
           </div>
           <div className={styles.actions}>
+            {entry === "rewind" ? rewindButton : null}
             {!finishedPrivately ? <button type="button" onClick={() => openCommunityUrl(profileHref)}><ExternalLink size={15} /> View my profile</button> : null}
             <button type="button" className={styles.primary} onClick={close}>Done</button>
           </div>
         </> : null}
 
-        {error ? <div className={styles.error} role="alert">{error}</div> : null}
+        {error && (configuration || approvedPairing) ? <div className={styles.error} role="alert">{error}</div> : null}
       </div>
     </section>
   </div></Portal>;
 }
 
-function deviceName() { return `Tagify on ${navigator.userAgent.includes("Mac") ? "Mac" : navigator.userAgent.includes("Windows") ? "Windows" : "desktop"}`; }
 function activeSyncRuntime() { return window.TagifySync || syncRuntime; }
 function profileLabel(configuration: DesktopSyncConfiguration) { return configuration.profile?.displayName || (configuration.profile?.handle ? `@${configuration.profile.handle}` : `Community account …${configuration.accountId.slice(-6)}`); }

@@ -1,4 +1,4 @@
-import { TagTaxonomy } from "@/types/tagData";
+import { TagAccentId, TagTaxonomy } from "@/types/tagData";
 
 export type TaxonomyMoveReason =
   | "same-position"
@@ -85,6 +85,17 @@ function isDescendantOf(taxonomy: TagTaxonomy, candidateId: string, parentId: st
     taxonomy.subcategoriesById[childId]
       ? isDescendantOf(taxonomy, candidateId, childId)
       : false,
+  );
+}
+
+/** True when `nodeId` is one of `folderIds` or sits anywhere inside one of them. */
+export function isWithinAnyFolder(
+  taxonomy: TagTaxonomy,
+  nodeId: string,
+  folderIds: string[],
+): boolean {
+  return folderIds.some(
+    (folderId) => folderId === nodeId || isDescendantOf(taxonomy, nodeId, folderId),
   );
 }
 
@@ -621,4 +632,167 @@ export function moveTag(
     status: "applied",
     taxonomy: nextTaxonomy,
   };
+}
+
+export interface TaxonomyBulkResult {
+  taxonomy: TagTaxonomy;
+  /** Items that changed parent or position. */
+  movedIds: string[];
+  /** Items that were already where they were asked to go. */
+  unchangedIds: string[];
+  blocked: Array<{ id: string; reason: TaxonomyMoveReason }>;
+}
+
+function getItemParentId(taxonomy: TagTaxonomy, itemId: string): string | null {
+  const tag = taxonomy.tagsById[itemId];
+  if (tag) {
+    return tag.parentId || tag.subcategoryId || null;
+  }
+  const folder = taxonomy.subcategoriesById[itemId];
+  return folder ? folder.parentId || folder.categoryId || null : null;
+}
+
+/**
+ * Moves items one at a time into `targetParentId`, keeping their given order as a
+ * contiguous group starting at `targetIndex` (or at the end). Items that can't move
+ * (duplicate name, invalid nesting) are reported and the rest still move.
+ */
+function moveItemsToParent(
+  taxonomy: TagTaxonomy,
+  itemIds: string[],
+  targetParentId: string,
+  targetIndex: number | undefined,
+  moveOne: (
+    taxonomy: TagTaxonomy,
+    itemId: string,
+    targetParentId: string,
+    targetIndex: number,
+  ) => TaxonomyMoveResult,
+): TaxonomyBulkResult {
+  let current = taxonomy;
+  const movedIds: string[] = [];
+  const unchangedIds: string[] = [];
+  const blocked: TaxonomyBulkResult["blocked"] = [];
+  let insertAfterId: string | null = null;
+
+  for (const itemId of itemIds) {
+    const childIds = getParentChildIds(current, targetParentId);
+    let index: number;
+    if (insertAfterId && childIds.includes(insertAfterId)) {
+      index = childIds.indexOf(insertAfterId) + 1;
+    } else if (targetIndex === undefined) {
+      index = childIds.length;
+    } else {
+      index = Math.min(targetIndex, childIds.length);
+    }
+
+    const result = moveOne(current, itemId, targetParentId, index);
+    if (result.status === "applied") {
+      current = result.taxonomy;
+      movedIds.push(itemId);
+      insertAfterId = itemId;
+    } else if (result.status === "noop") {
+      unchangedIds.push(itemId);
+      insertAfterId = itemId;
+    } else {
+      blocked.push({ id: itemId, reason: result.reason });
+    }
+  }
+
+  return { taxonomy: current, movedIds, unchangedIds, blocked };
+}
+
+export function moveTagsToParent(
+  taxonomy: TagTaxonomy,
+  tagIds: string[],
+  targetParentId: string,
+  targetIndex?: number,
+): TaxonomyBulkResult {
+  return moveItemsToParent(taxonomy, tagIds, targetParentId, targetIndex, moveTag);
+}
+
+/** Returns the selected folders without any folder whose ancestor is also selected. */
+export function getTopLevelSelectedFolderIds(
+  taxonomy: TagTaxonomy,
+  folderIds: string[],
+): string[] {
+  const selected = new Set(folderIds);
+  return folderIds.filter((folderId) => {
+    const seen = new Set<string>();
+    let parentId = getItemParentId(taxonomy, folderId);
+    while (parentId && taxonomy.subcategoriesById[parentId] && !seen.has(parentId)) {
+      if (selected.has(parentId)) {
+        return false;
+      }
+      seen.add(parentId);
+      parentId = getItemParentId(taxonomy, parentId);
+    }
+    return true;
+  });
+}
+
+export function moveSubcategoriesToParent(
+  taxonomy: TagTaxonomy,
+  folderIds: string[],
+  targetParentId: string,
+  targetIndex?: number,
+): TaxonomyBulkResult {
+  return moveItemsToParent(
+    taxonomy,
+    getTopLevelSelectedFolderIds(taxonomy, folderIds),
+    targetParentId,
+    targetIndex,
+    moveSubcategory,
+  );
+}
+
+export function setTagsAccent(
+  taxonomy: TagTaxonomy,
+  tagIds: string[],
+  accentId: TagAccentId | null,
+): TagTaxonomy {
+  const changedIds = tagIds.filter(
+    (tagId) =>
+      taxonomy.tagsById[tagId] && (taxonomy.tagsById[tagId].accentId ?? null) !== accentId,
+  );
+  if (changedIds.length === 0) {
+    return taxonomy;
+  }
+
+  const nextTaxonomy = cloneTaxonomy(taxonomy);
+  changedIds.forEach((tagId) => {
+    nextTaxonomy.tagsById[tagId].accentId = accentId;
+  });
+  return nextTaxonomy;
+}
+
+/** Removes tags from the taxonomy and from their parents' child lists. */
+export function removeTags(taxonomy: TagTaxonomy, tagIds: string[]): TagTaxonomy {
+  const existingIds = tagIds.filter((tagId) => taxonomy.tagsById[tagId]);
+  if (existingIds.length === 0) {
+    return taxonomy;
+  }
+
+  const nextTaxonomy = cloneTaxonomy(taxonomy);
+  existingIds.forEach((tagId) => {
+    const parentId = getItemParentId(nextTaxonomy, tagId);
+    if (parentId) {
+      const folder = nextTaxonomy.subcategoriesById[parentId];
+      if (folder) {
+        folder.tagIds = folder.tagIds.filter((candidateId) => candidateId !== tagId);
+        folder.childIds = (folder.childIds || []).filter((candidateId) => candidateId !== tagId);
+      }
+      const category = nextTaxonomy.categoriesById[parentId];
+      if (category) {
+        category.childIds = (category.childIds || []).filter((candidateId) => candidateId !== tagId);
+      }
+      if (nextTaxonomy.childrenByParentId?.[parentId]) {
+        nextTaxonomy.childrenByParentId[parentId] = nextTaxonomy.childrenByParentId[parentId].filter(
+          (candidateId) => candidateId !== tagId,
+        );
+      }
+    }
+    delete nextTaxonomy.tagsById[tagId];
+  });
+  return nextTaxonomy;
 }

@@ -168,6 +168,29 @@ export function rangeStart(range: StatsRange, now: number): number | null {
 }
 
 /**
+ * A calendar year on this device's clock: from midnight on January 1 up to, but not including,
+ * midnight on the next January 1. Unlike the rolling ranges it has an end, so it isn't a
+ * `StatsRange` and doesn't appear in Stats' range picker.
+ */
+export function calendarYearRange(year: number): { start: number; end: number } {
+  return { start: new Date(year, 0, 1).getTime(), end: new Date(year + 1, 0, 1).getTime() };
+}
+
+/**
+ * Songs that carry a tag and were first tagged in `year`, counted on this device. It uses each
+ * song's own first-tagged date, as Community's Rewind does, so the two agree on a synced library.
+ */
+export function countSongsFirstTaggedInYear(tracks: TagDataStructure["tracks"], year: number): number {
+  const { start, end } = calendarYearRange(year);
+  let count = 0;
+  for (const track of Object.values(tracks)) {
+    const created = track.dateCreated;
+    if (track.tagIds.length > 0 && typeof created === "number" && created >= start && created < end) count += 1;
+  }
+  return count;
+}
+
+/**
  * Each track's last-updated date when Stats first opened, so a library already has a history on
  * day one. Tracks tagged after `takenAt` count from when they were first tagged. Saved once and
  * never updated, since last-updated moves with every edit.

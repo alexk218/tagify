@@ -139,8 +139,9 @@ class SpotifyApiService {
     return value;
   };
 
-  getTaggingQueuePage = async (playlistId: string | null, offset = 0, signal?: AbortSignal) => {
-    const limit = 50;
+  /** One page of a playlist or Liked Songs: 50 songs, or up to 1,000 when `pageSize` asks for more. */
+  getTaggingQueuePage = async (playlistId: string | null, offset = 0, signal?: AbortSignal, pageSize = 50) => {
+    const limit = Math.max(1, Math.min(1_000, Math.floor(pageSize)));
     if (Date.now() < this.playlistReadsBlockedUntil) throw new Error("Spotify needs a short break. Wait a moment, then check more tracks.");
     let native: any;
     try {
@@ -1419,24 +1420,29 @@ function walkRootlist<T>(items: unknown[], read: (item: Record<string, unknown>,
 
 /** A playlist in Spotify's library tree with who made it and its size, for Community's playlist picker. */
 export interface RootlistCatalogPlaylist extends Required<RootlistPlaylist> {
-  /** The member made it or can edit it; false when Spotify didn't say. */
+  /** The member made it; false for others' playlists (collaborative ones too) and when Spotify didn't say. */
   owned: boolean;
   /** The owner's display name for someone else's playlist, when Spotify gave one. */
   ownerName: string | null;
   songCount: number | null;
+  /** Spotify made it (a Daily Mix, Discover Weekly, an editorial list); only set when true. Never leaves the computer. */
+  spotifyMade?: true;
 }
 
 /**
  * Every playlist in the tree with Spotify's own ownership flags. Spotify 1.2.92's rootlist items carry
- * `isOwnedBySelf`, `canEditItems`, `owner.displayName` and `totalLength` (seen 2026-10-21). A
- * collaborative playlist the member can edit counts as theirs; unknown ownership counts as not.
+ * `isOwnedBySelf`, `canEditItems`, `owner.displayName` and `totalLength` (seen 2026-10-21). Only a
+ * playlist the member made counts as theirs; someone else's collaborative playlist they can edit does
+ * not (Alex, 2026-11-17: "it should only be playlists that THEY OWN AND CREATED"). Unknown ownership
+ * counts as not.
  */
 export function rootlistCatalog(items: unknown[]): RootlistCatalogPlaylist[] {
   return walkRootlist(items, (item, playlistId, playlistName, folders) => {
-    const owner = item.owner as { displayName?: unknown } | null | undefined;
-    const owned = item.isOwnedBySelf === true || item.canEditItems === true;
+    const owner = item.owner as { displayName?: unknown; username?: unknown; uri?: unknown } | null | undefined;
+    const owned = item.isOwnedBySelf === true;
     const ownerName = !owned && typeof owner?.displayName === "string" && owner.displayName.trim() ? owner.displayName.trim() : null;
     const songCount = Number.isSafeInteger(item.totalLength) && Number(item.totalLength) >= 0 ? Number(item.totalLength) : null;
-    return { playlistId, playlistName, folders, owned, ownerName, songCount };
+    const spotifyMade = !owned && (owner?.username === "spotify" || owner?.uri === "spotify:user:spotify");
+    return { playlistId, playlistName, folders, owned, ownerName, songCount, ...(spotifyMade ? { spotifyMade: true as const } : {}) };
   });
 }

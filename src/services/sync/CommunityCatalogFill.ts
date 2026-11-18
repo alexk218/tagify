@@ -9,6 +9,7 @@
 // a daily allowance, stopping at Spotify's first refusal or while Spotify asks Tagify to wait, and
 // slowing down after every refusal. Other desktops are never sent such work.
 import type { CatalogFillPaceV1 } from "@tagify/sync-contracts";
+import { backgroundReadBackoff, type BackgroundReadBackoff } from "@/services/backgroundReadBackoff";
 
 export const CATALOG_FILL_FEATURE = "community-catalog-fill";
 /** Background Spotify reads for music outside this library in an hour, unless Community advertises another pace. */
@@ -79,40 +80,15 @@ export function catalogFillPace(options: Options = {}): CatalogFillPaceV1 {
 }
 
 /**
- * Adaptive backoff. A Spotify pause Tagify hasn't seen before (`pauseUntil` moved forward, as
- * every 429 does through the shared background policy) doubles the wait between reads, up to
- * CATALOG_FILL_MAX_SLOWDOWN times; CATALOG_FILL_RECOVERY_READS reads without one halve it again.
- * Retry-After itself is honored by the shared pause, which the reservations respect: no read is
- * made while it holds, and nothing is retried around it. Kept across restarts.
+ * Adaptive backoff for the filler (see backgroundReadBackoff): each new Spotify pause doubles the
+ * wait between reads, up to CATALOG_FILL_MAX_SLOWDOWN times; CATALOG_FILL_RECOVERY_READS reads
+ * without one halve it again. Kept across restarts.
  */
-export function catalogFillBackoff(pauseUntil: () => number, options: Options = {}) {
-  const storage = storageOf(options);
-  const now = options.now ?? Date.now;
-  const read = () => {
-    const saved = readJson(storage, BACKOFF_KEY);
-    return {
-      factor: whole(saved?.factor, 1, CATALOG_FILL_MAX_SLOWDOWN) ? saved.factor : 1,
-      seenUntil: typeof saved?.seenUntil === "number" ? saved.seenUntil : 0,
-      streak: whole(saved?.streak, 0, Number.MAX_SAFE_INTEGER) ? saved.streak : 0,
-    };
-  };
-  return {
-    /** Called before each read: notes a new pause (slowing down) or counts a read without one (speeding up again). */
-    note(): void {
-      const state = read();
-      const until = pauseUntil();
-      if (until > now() && until > state.seenUntil) {
-        writeJson(storage, BACKOFF_KEY, { factor: Math.min(CATALOG_FILL_MAX_SLOWDOWN, state.factor * 2), seenUntil: until, streak: 0 });
-        return;
-      }
-      const streak = state.streak + 1;
-      writeJson(storage, BACKOFF_KEY, streak >= CATALOG_FILL_RECOVERY_READS && state.factor > 1
-        ? { factor: state.factor / 2, seenUntil: state.seenUntil, streak: 0 }
-        : { ...state, streak });
-    },
-    /** How many times slower than the pace reads are now. */
-    slowdown(): number { return read().factor; },
-  };
+export function catalogFillBackoff(pauseUntil: () => number, options: Options = {}): BackgroundReadBackoff {
+  return backgroundReadBackoff({
+    key: BACKOFF_KEY, pauseUntil, maxSlowdown: CATALOG_FILL_MAX_SLOWDOWN, recoveryReads: CATALOG_FILL_RECOVERY_READS,
+    storage: storageOf(options), now: options.now,
+  });
 }
 
 /**

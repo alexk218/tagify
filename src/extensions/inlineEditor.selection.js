@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 const INLINE_EDITOR_SELECTOR = ".tagify-inline-editor[data-tagify-track-uri]";
 const TRACK_ROW_SELECTOR = '[role="row"]';
 

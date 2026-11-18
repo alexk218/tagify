@@ -1,4 +1,4 @@
-import { getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
+import { getTagifyDatabaseName, noteTagMethods } from "@/services/sync/SyncLocalState";
 import { Dispatch, MutableRefObject, SetStateAction, useCallback, useRef } from "react";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { PlaylistData, TagDataStructure, TagTaxonomy } from "@/types/tagData";
@@ -129,6 +129,7 @@ export function useTagDataPlaylistActions({
         tagIds: [...entity.tagIds, tagId],
         dateModified: now,
       });
+      noteTagMethods(uri, existing?.tagIds, nextData.playlists[uri]?.tagIds, "typed");
       commitDataSnapshot(nextData);
     },
     [commitDataSnapshot, latestTagDataRef],
@@ -158,6 +159,7 @@ export function useTagDataPlaylistActions({
         withToggledPlaylistTag(playlistData, tagId, now),
       );
 
+      noteTagMethods(playlistUri, playlistData.tagIds, nextData.playlists[playlistUri]?.tagIds, "typed");
       commitDataSnapshot(nextData);
     },
     [commitDataSnapshot, getOrCreatePlaylistData],

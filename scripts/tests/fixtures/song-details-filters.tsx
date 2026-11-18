@@ -22,6 +22,17 @@ const songs: Array<[string, string, number | undefined, string | undefined, stri
   ["Long Form", "Low Tide", 728_000, "2022-05-20", [techno]],
   ["Still Looking Up", "Field Notes", undefined, undefined, [house]],
 ];
+// ?library=filling: a 3,000-song library with 1,240 songs filled so far; ?library=fresh: none yet (just updated).
+const params = new URLSearchParams(location.search);
+const LIBRARY_SIZE = 3_000;
+const filledSoFar = params.get("library") === "filling" ? 1_240 : params.get("library") === "fresh" ? 0 : null;
+const syntheticTracks = (): Record<string, TrackData> => filledSoFar === null ? {} : Object.fromEntries(
+  Array.from({ length: LIBRARY_SIZE - songs.length }, (_, index) => {
+    const filled = index < filledSoFar - 4;
+    const track: TrackData = { name: `Song ${index + 1}`, artists: "Various", rating: 3, energy: 5, bpm: 120, tagIds: [techno], dateCreated: 1710000000000 - index, dateModified: 1710000000000 - index,
+      ...(filled ? { durationMs: 150_000 + (index % 300) * 1_000, releaseDate: String(1975 + (index % 50)) } : {}) };
+    return [`spotify:track:${index.toString(36).padStart(22, "0")}`, track];
+  }));
 const uri = (index: number) => `spotify:track:${String.fromCharCode(97 + index).repeat(22)}`;
 
 function Fixture() {
@@ -38,7 +49,9 @@ function Fixture() {
         ...(durationMs ? { durationMs } : {}), ...(releaseDate ? { releaseDate } : {}) };
       await indexedDBStorage.saveTrack(uri(index), track);
     }
-    setData({ ...await indexedDBStorage.loadAllStrict(), taxonomy });
+    const saved = await indexedDBStorage.loadAllStrict();
+    if (filledSoFar === 0) for (const track of Object.values(saved.tracks)) { delete track.durationMs; delete track.releaseDate; }
+    setData({ ...saved, tracks: { ...syntheticTracks(), ...saved.tracks }, taxonomy });
   })(); }, []);
   const tracks = data && noDetails
     ? Object.fromEntries(Object.entries(data.tracks).map(([key, { durationMs: _d, releaseDate: _r, ...track }]) => [key, track]))

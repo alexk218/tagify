@@ -38,7 +38,8 @@ export function preserveLocalTaxonomyMetadata(incoming: TagTaxonomy, previous: T
     const before = previous?.tagsById?.[id];
     const name = deviceName(tag.name, before?.name, "Untitled tag");
     const source = !tag.source && before?.source ? { source: before.source } : {};
-    if (name !== tag.name || "source" in source) next.tagsById[id] = { ...tag, name, ...source };
+    const created = tag.createdAt === undefined && typeof before?.createdAt === "number" ? { createdAt: before.createdAt } : {};
+    if (name !== tag.name || "source" in source || "createdAt" in created) next.tagsById[id] = { ...tag, name, ...source, ...created };
   }
   const collectionByColorId = new Map<string, string>();
   for (const [id, collection] of Object.entries(next.colorThemesById)) {

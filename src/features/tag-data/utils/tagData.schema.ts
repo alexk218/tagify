@@ -76,7 +76,7 @@ const TRACK_FIELDS = [
   "uri", "tags", "recordingIdentity", "recordingGroupId", "recordingGroupConfirmed", "recordingReuseDisabled", "rating", "energy", "bpm",
   "camelotKey", "tagIds", "dateCreated", "dateModified", "name", "artists", "albumName", "albumUri",
   "albumImageUrl", "backfillAttempts", "audioFeaturesBackfillRevision", "albumBackfillAttempts",
-  "durationMs", "releaseDate", "songDetailsAttempts", "songDetailsCheckedAt",
+  "durationMs", "releaseDate", "originalReleaseDate", "songDetailsAttempts", "songDetailsCheckedAt",
 ] as const;
 const PLAYLIST_FIELDS = [
   "uri", "rating", "energy", "tagIds", "dateCreated", "dateModified", "name", "ownerName", "imageUrl",
@@ -156,6 +156,7 @@ function normalizeTrackData(trackData: unknown): TrackData {
       : {}),
     ...(songDurationMs(candidate.durationMs) !== null ? { durationMs: candidate.durationMs } : {}),
     ...(normalizeReleaseDate(candidate.releaseDate) ? { releaseDate: candidate.releaseDate } : {}),
+    ...(normalizeReleaseDate(candidate.originalReleaseDate) ? { originalReleaseDate: candidate.originalReleaseDate } : {}),
     ...(typeof candidate.songDetailsAttempts === "number" && Number.isInteger(candidate.songDetailsAttempts) && candidate.songDetailsAttempts > 0
       ? { songDetailsAttempts: candidate.songDetailsAttempts }
       : {}),
@@ -266,7 +267,12 @@ export function hasCustomTaxonomy(taxonomy: TagDataStructure["taxonomy"] | null 
   normalizedStarterTaxonomies ??= new Set(
     KNOWN_STARTER_TAXONOMIES.map((starter: TagDataStructure["taxonomy"]) => JSON.stringify(normalizeTaxonomy(starter))),
   );
-  return !normalizedStarterTaxonomies.has(JSON.stringify(normalizeTaxonomy(ownTags)));
+  // When a tag was created is device-only detail, not a change to the starter tags.
+  const withoutCreationTimes = {
+    ...ownTags,
+    tagsById: Object.fromEntries(Object.entries(ownTags.tagsById || {}).map(([id, { createdAt: _createdAt, ...tag }]) => [id, tag])),
+  };
+  return !normalizedStarterTaxonomies.has(JSON.stringify(normalizeTaxonomy(withoutCreationTimes)));
 }
 
 /** Whether a library holds anything the user made: saved records, Smart Playlists, or their own tags. */
@@ -328,10 +334,11 @@ export function normalizeTagDataStructure(value: unknown): TagDataStructure {
       ]),
     );
 
+    const taxonomy = normalizeTaxonomy(candidate.taxonomy);
     return {
       schemaVersion: TAG_DATA_SCHEMA_VERSION,
-      taxonomy: normalizeTaxonomy(candidate.taxonomy),
-      tracks: detachInconsistentRecordingGroups(nextTracks),
+      taxonomy,
+      tracks: detachInconsistentRecordingGroups(nextTracks, new Set(Object.keys(taxonomy.tagsById))),
       playlists: nextPlaylists,
       artists: nextArtists,
       smartPlaylists: normalizeSmartPlaylistCriteriaList(

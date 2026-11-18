@@ -2,6 +2,7 @@ import React from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityOnboardingModal } from "../CommunityOnboardingModal";
+import { communityPairing } from "../communityPairing";
 import { syncPairingService } from "@/services/sync/SyncPairingService";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import {
@@ -18,6 +19,7 @@ vi.mock("@/features/product-analytics/productAnalytics", async (importOriginal) 
 
 describe("CommunityOnboardingModal actions", () => {
   beforeEach(() => {
+    communityPairing.reset();
     vi.restoreAllMocks();
     syncPairingService.cancelPending();
     localStorage.clear();
@@ -25,7 +27,7 @@ describe("CommunityOnboardingModal actions", () => {
     vi.mocked(recordProductInteraction).mockClear();
   });
 
-  it("measures a started connection only after Community issues the approval code", async () => {
+  it("starts connecting as soon as setup opens, and measures a start only once Community issues the code", async () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const begin = vi.spyOn(syncPairingService, "begin")
       .mockRejectedValueOnce(new Error("Community is unavailable"))
@@ -34,9 +36,8 @@ describe("CommunityOnboardingModal actions", () => {
         verificationUri: "https://community.tagify.fm/device?code=ABCD-EFGH", expiresAt: Date.now() + 60_000, interval: 60,
       });
     render(<CommunityOnboardingModal entry="prompt" {...shared()} onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("ABCD-EFGH")).toBeInTheDocument();
 
     expect(begin).toHaveBeenCalledTimes(2);
@@ -51,18 +52,61 @@ describe("CommunityOnboardingModal actions", () => {
 
   afterEach(() => { delete window.TagifySync; });
 
-  it("lets users cancel setup without adding a reminder", () => {
+  it("lets users cancel setup without adding a reminder", async () => {
+    vi.spyOn(window, "open").mockReturnValue(null);
+    vi.spyOn(syncPairingService, "begin").mockImplementation(async () => {
+      const pending = {
+        apiBaseUrl: "https://community.tagify.fm", deviceCode: "device-code", verifier: "verifier", userCode: "ABCD-EFGH",
+        verificationUri: "https://community.tagify.fm/device?code=ABCD-EFGH", expiresAt: Date.now() + 600_000, interval: 10,
+      };
+      localStorage.setItem("tagify:sync:pending-pairing", JSON.stringify(pending));
+      return pending;
+    });
     const onClose = vi.fn();
     render(<CommunityOnboardingModal entry="community" {...shared()} onClose={onClose} />);
+    await screen.findByText("ABCD-EFGH");
 
-    expect(screen.getByRole("heading", { name: "Share your tags on Community" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Not now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Don't ask again" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+    // Cancel, unlike closing, stops waiting for the code.
+    expect(syncPairingService.getPending()).toBeNull();
     expect(sessionStorage.getItem("tagify:community:onboarding:snoozed-session")).toBeNull();
     expect(localStorage.getItem("tagify:community:onboarding:v1")).toBeNull();
+  });
+
+  it("keeps waiting for the browser approval after setup is closed", () => {
+    localStorage.setItem("tagify:sync:pending-pairing", JSON.stringify({
+      apiBaseUrl: "https://community.tagify.fm", deviceCode: "device-code", verifier: "verifier",
+      userCode: "ABCD-EFGH", verificationUri: "https://community.tagify.fm/device?code=ABCD-EFGH",
+      expiresAt: Date.now() + 600_000, interval: 10,
+    }));
+    const onClose = vi.fn();
+    render(<CommunityOnboardingModal entry="community" {...shared()} onClose={onClose} />);
+    expect(screen.getByText("ABCD-EFGH")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Community setup" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(syncPairingService.getPending()?.userCode).toBe("ABCD-EFGH");
+    expect(communityPairing.getState().pending?.userCode).toBe("ABCD-EFGH");
+  });
+
+  it("waits on two numbered steps, the code and a way back to the page", () => {
+    vi.spyOn(window, "open").mockReturnValue(null);
+    localStorage.setItem("tagify:sync:pending-pairing", JSON.stringify({
+      apiBaseUrl: "https://community.tagify.fm", deviceCode: "device-code", verifier: "verifier",
+      userCode: "ABCD-EFGH", verificationUri: "https://community.tagify.fm/device?code=ABCD-EFGH",
+      expiresAt: Date.now() + 600_000, interval: 10,
+    }));
+    render(<CommunityOnboardingModal entry="community" {...shared()} onClose={vi.fn()} />);
+    expect(screen.getByText("Sign in or create your free Community account")).toBeInTheDocument();
+    expect(screen.getByText("Press Connect on the page that opened")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Waiting for you to approve…");
+    expect(screen.getByText("ABCD-EFGH")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Open the page again/ }));
+    expect(window.open).toHaveBeenCalledWith("https://community.tagify.fm/device?code=ABCD-EFGH", "_blank", "noopener,noreferrer");
+    expect(screen.queryByText("Tagify 3.0")).not.toBeInTheDocument();
   });
 
   it("does not offer a redundant Finish later action after connecting", () => {

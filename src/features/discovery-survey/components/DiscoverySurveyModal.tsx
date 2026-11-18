@@ -3,19 +3,8 @@ import { Portal } from "@/components/ui";
 import styles from "./DiscoverySurveyModal.module.css";
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import {
-  faGithub,
-  faReddit,
-  faYoutube,
-  faDiscord,
-} from "@fortawesome/free-brands-svg-icons";
-import {
-  faUsers,
-  faSearch,
-  faCircleQuestion,
-  faChampagneGlasses,
-  faCartShopping,
-} from "@fortawesome/free-solid-svg-icons";
+import { faChampagneGlasses } from "@fortawesome/free-solid-svg-icons";
+import { DISCOVERY_OPTIONS } from "../discoveryOptions";
 
 interface DiscoverySurveyModalProps {
   onCompleteSurvey: (source: string, otherDetails?: string) => void;
@@ -31,80 +20,15 @@ const DiscoverySurveyModal: React.FC<DiscoverySurveyModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const isSubmittingRef = useRef(false);
 
-  const discoveryOptions = [
-    {
-      id: "marketplace",
-      label: (
-        <>
-          <FontAwesomeIcon icon={faCartShopping} /> Spicetify Marketplace
-        </>
-      ),
-      value: "marketplace",
-    },
-    {
-      id: "reddit",
-      label: (
-        <>
-          <FontAwesomeIcon icon={faReddit} /> Reddit
-        </>
-      ),
-      value: "reddit",
-    },
-    {
-      id: "youtube",
-      label: (
-        <>
-          <FontAwesomeIcon icon={faYoutube} /> YouTube
-        </>
-      ),
-      value: "youtube",
-    },
-    {
-      id: "discord",
-      label: (
-        <>
-          <FontAwesomeIcon icon={faDiscord} /> Discord
-        </>
-      ),
-      value: "discord",
-    },
-    {
-      id: "friend",
-      label: (
-        <>
-          <FontAwesomeIcon icon={faUsers} /> Friend/Word of Mouth
-        </>
-      ),
-      value: "friend",
-    },
-    {
-      id: "github",
-      label: (
-        <>
-          <FontAwesomeIcon icon={faGithub} /> GitHub
-        </>
-      ),
-      value: "github",
-    },
-    {
-      id: "search",
-      label: (
-        <>
-          <FontAwesomeIcon icon={faSearch} /> Search Engine
-        </>
-      ),
-      value: "search",
-    },
-    {
-      id: "other",
-      label: (
-        <>
-          <FontAwesomeIcon icon={faCircleQuestion} /> Other
-        </>
-      ),
-      value: "other",
-    },
-  ];
+  const discoveryOptions = DISCOVERY_OPTIONS.map(({ value, label, icon }) => ({
+    id: value,
+    label: (
+      <>
+        <FontAwesomeIcon icon={icon} /> {label}
+      </>
+    ),
+    value,
+  }));
 
   const handleSubmit = async () => {
     if (!selectedSource || isSubmittingRef.current) return;

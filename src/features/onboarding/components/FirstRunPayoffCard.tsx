@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
+// eslint-disable-next-line css-modules/no-unused-class -- shared by the first-song card and its payoff
 import styles from "./FirstSongCard.module.css";
 
 interface FirstRunPayoffCardProps {

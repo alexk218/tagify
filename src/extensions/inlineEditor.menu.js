@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 import {
   DEFAULT_TAG_SELECTOR_SORT_MODE,
   isTagSelectorSortMode,

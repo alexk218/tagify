@@ -135,6 +135,8 @@ export interface TastePackChoice {
   name: string;
   /** The first few tags, most used first, to show what the pack is. */
   sampleTags: string[];
+  /** Every tag in the pack, in the pack's order. */
+  tags: string[];
   /** How many tags adding it alone would add; 0 when the library has them all already. */
   newTagCount: number;
 }
@@ -146,6 +148,7 @@ export function tastePackChoices(taxonomy: TagTaxonomy): TastePackChoice[] {
     key: pack.key,
     name: pack.name,
     sampleTags: pack.tags.slice(0, TASTE_PACK_SAMPLE_TAGS).map((tag) => tag.name),
+    tags: pack.tags.map((tag) => tag.name),
     newTagCount: planTastePackInstall(nodes, [pack.key]).packs[0]?.added.length ?? 0,
   }));
 }

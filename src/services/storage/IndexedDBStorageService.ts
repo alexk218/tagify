@@ -1,5 +1,5 @@
 import type { LocalPrivateNote } from "@/services/sync/PrivateNotes.types";
-import { isPrivateNoteUri } from "@tagify/sync-contracts";
+import { isPrivateNoteUri, type TagMembershipMethod } from "@tagify/sync-contracts";
 import { detachInconsistentRecordingGroups, expandRecordingEdits, normalizeRecordingIdentity, recordingAnnotations, recordingConflict, sameRecording, similarRecording } from "@/features/recording-reuse/utils/recordingReuse";
 import type { RecordingChoices } from "@/features/recording-reuse/utils/recordingLibrary";
 import type { RecordingIdentity } from "@/types/tagData";
@@ -54,10 +54,13 @@ import {
   isActiveSyncDatabase,
   makeEntityDeleteIntent,
   makeEntityReplaceIntent,
+  noteRecordTagMethods,
+  noteTagMethods,
   makeSnapshotIntent,
   makeTaxonomyIntent,
   noteLocalFileChange,
   preserveDeviceAnnotation,
+  HISTORY_BACKFILL_STATE_KEY,
   STATS_BASELINE_CHANGED_EVENT,
   SYNC_STORES,
   TAGIFY_DATABASE_VERSION,
@@ -65,6 +68,19 @@ import {
   type SnapshotReplaceIntent,
   type TaxonomyReplaceIntent,
 } from "@/services/sync/SyncLocalState";
+import {
+  appendEntityHistory,
+  appendSnapshotHistory,
+  appendTaxonomyHistory,
+  ensureLibraryHistoryStore,
+  LIBRARY_HISTORY_STORE,
+  readLibraryHistory,
+  readLibraryHistoryAfter,
+  stampNewTags,
+  trimLibraryHistory,
+  withHistoryStore,
+  type LibraryHistoryRow,
+} from "@/services/storage/libraryHistory";
 
 const DB_VERSION = TAGIFY_DATABASE_VERSION;
 
@@ -115,6 +131,13 @@ const CATEGORY_DOCUMENT_KEYS = {
 } as const;
 
 const DATABASE_OPEN_TIMEOUT_MS = 10_000;
+
+/** A saved record without its key. */
+function stripUri<T>(record: (T & { uri?: string }) | undefined | null): T | null {
+  if (!record) return null;
+  const { uri: _uri, ...rest } = record;
+  return rest as T;
+}
 const UNREADABLE_LIBRARY_MESSAGE = "Your saved library could not be read. Please try again.";
 
 /**
@@ -317,6 +340,8 @@ export class IndexedDBStorageService implements IStorageService {
           }
           this.db = db;
           this.lastOpenErrorName = null;
+          // Library history keeps the current and previous calendar year.
+          trimLibraryHistory(db).catch((error) => console.warn("IndexedDB: Couldn't trim library history", error));
 
           // Handle connection errors
           db.onerror = (event) => {
@@ -378,6 +403,7 @@ export class IndexedDBStorageService implements IStorageService {
 
   static createSchema(db: IDBDatabase, transaction?: IDBTransaction): void {
     ensureSyncStores(db);
+    ensureLibraryHistoryStore(db);
     // Tracks store with indexes
     let trackStore: IDBObjectStore | null = null;
     if (!db.objectStoreNames.contains(STORES.TRACKS)) {
@@ -596,7 +622,7 @@ export class IndexedDBStorageService implements IStorageService {
     let transaction: IDBTransaction | null = null;
     try {
       transaction = this.db!.transaction(
-        [
+        withHistoryStore(this.db!, [
           STORES.TRACKS,
           STORES.PLAYLISTS,
           STORES.ARTISTS,
@@ -604,7 +630,7 @@ export class IndexedDBStorageService implements IStorageService {
           STORES.CATEGORIES,
           STORES.METADATA,
           STORES.OUTBOX,
-        ],
+        ]),
         "readwrite"
       );
       const committed = transactionCommitted(transaction, "Replacing the library");
@@ -653,6 +679,8 @@ export class IndexedDBStorageService implements IStorageService {
       metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
       metadataStore.put({ key: META_KEYS.VERSION, value: TAG_DATA_SCHEMA_VERSION });
       appendIntent(transaction, makeSnapshotIntent(snapshotReason));
+      // One history marker, so a restore never reads as a day of tagging.
+      appendSnapshotHistory(transaction, snapshotReason);
 
       return committed;
     } catch (error) {
@@ -695,6 +723,8 @@ export class IndexedDBStorageService implements IStorageService {
       const artists = transaction.objectStore(STORES.ARTISTS).getAll();
       const smartPlaylists = transaction.objectStore(STORES.SMART_PLAYLISTS).getAll();
       const statsBaseline = transaction.objectStore(STORES.METADATA).get("statsBaseline");
+      // How far the library history catch-up got; a cloud rewrite keeps it so rows aren't sent again.
+      const historyBackfill = transaction.objectStore(SYNC_STORES.STATE).get(HISTORY_BACKFILL_STATE_KEY);
       const cloudTaxonomy = transaction.objectStore(SYNC_STORES.STATE).get("taxonomy-shadow");
       const queued = options.keepQueuedEdits
         ? transaction.objectStore(SYNC_STORES.OUTBOX).index("by-created-at").getAll()
@@ -754,7 +784,7 @@ export class IndexedDBStorageService implements IStorageService {
               else records[uri] = record;
             }
           }
-          next.tracks = detachInconsistentRecordingGroups(next.tracks);
+          next.tracks = detachInconsistentRecordingGroups(next.tracks, buildValidTagIdSet(taxonomy));
 
           stores.forEach((store) => transaction.objectStore(store).clear());
           transaction.objectStore(SYNC_STORES.RECOVERY_CHECKPOINT).put({
@@ -787,6 +817,7 @@ export class IndexedDBStorageService implements IStorageService {
               : record,
           ));
           transaction.objectStore(SYNC_STORES.STATE).put(manifest);
+          if (historyBackfill.result) transaction.objectStore(SYNC_STORES.STATE).put(historyBackfill.result);
           appState.forEach((document) => transaction.objectStore(SYNC_STORES.APP_STATE).put(document));
         } catch (error) {
           console.error("IndexedDB: Atomic cloud restore failed", error);
@@ -925,10 +956,13 @@ export class IndexedDBStorageService implements IStorageService {
       try {
         let taxonomy = typeof taxonomyOrMutation === "function" ? createEmptyTaxonomy() : taxonomyOrMutation;
         const capture = options?.captureSync !== false && Boolean(makeTaxonomyIntent(taxonomy));
+        const local = options?.captureSync !== false;
         const transaction = this.db!.transaction(
-          capture ? [STORES.CATEGORIES, STORES.METADATA, STORES.OUTBOX, SYNC_STORES.STATE] : [STORES.CATEGORIES, STORES.METADATA, STORES.OUTBOX],
+          withHistoryStore(this.db!, capture ? [STORES.CATEGORIES, STORES.METADATA, STORES.OUTBOX, SYNC_STORES.STATE] : [STORES.CATEGORIES, STORES.METADATA, STORES.OUTBOX]),
           "readwrite"
         );
+        const recordHistory = local && transaction.objectStoreNames.contains(LIBRARY_HISTORY_STORE);
+        let savedTaxonomy: TagTaxonomy | null = null;
         const categoryStore = transaction.objectStore(STORES.CATEGORIES);
         const metadataStore = transaction.objectStore(STORES.METADATA);
         const write = (intent: TaxonomyReplaceIntent | null) => {
@@ -936,23 +970,25 @@ export class IndexedDBStorageService implements IStorageService {
           categoryStore.put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: taxonomy });
           metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
           metadataStore.put({ key: META_KEYS.VERSION, value: TAG_DATA_SCHEMA_VERSION });
+          if (recordHistory) appendTaxonomyHistory(transaction, savedTaxonomy, taxonomy);
           appendIntent(transaction, intent);
         };
 
         // A library saved by an older Tagify can hold only the older categories
         // document; a change must start from it, never from an empty taxonomy.
         // Sync also needs the stored tags as the starting point of an edit.
-        const readStored = typeof taxonomyOrMutation === "function" || capture;
+        // Library history and tag creation times compare against it too.
+        const readStored = typeof taxonomyOrMutation === "function" || capture || recordHistory;
         const legacyRequest = readStored
           ? categoryStore.get(CATEGORY_DOCUMENT_KEYS.LEGACY_CATEGORIES) : null;
         const currentRequest = readStored
           ? categoryStore.get(CATEGORY_DOCUMENT_KEYS.TAXONOMY) : null;
         const prepare = () => {
+          savedTaxonomy = readStored ? taxonomyFromCategoryDocuments(currentRequest?.result, legacyRequest?.result) : null;
           if (typeof taxonomyOrMutation === "function") {
-            taxonomy = taxonomyOrMutation(
-              taxonomyFromCategoryDocuments(currentRequest?.result, legacyRequest?.result) ?? createEmptyTaxonomy(),
-            );
+            taxonomy = taxonomyOrMutation(savedTaxonomy ?? createEmptyTaxonomy());
           }
+          if (local) taxonomy = stampNewTags(savedTaxonomy, taxonomy);
         };
         if (!capture) {
           if (currentRequest) currentRequest.onsuccess = () => {
@@ -1081,12 +1117,16 @@ export class IndexedDBStorageService implements IStorageService {
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.CATEGORIES, STORES.COMMUNITY_INSTALLATIONS, STORES.COMMUNITY_ROLLBACKS, STORES.METADATA],
+          withHistoryStore(this.db!, [STORES.CATEGORIES, STORES.COMMUNITY_INSTALLATIONS, STORES.COMMUNITY_ROLLBACKS, STORES.METADATA]),
           "readwrite",
         );
         const installations = transaction.objectStore(STORES.COMMUNITY_INSTALLATIONS);
+        const savedRequest = transaction.objectStore(STORES.CATEGORIES).get(CATEGORY_DOCUMENT_KEYS.TAXONOMY);
+        const legacyRequest = transaction.objectStore(STORES.CATEGORIES).get(CATEGORY_DOCUMENT_KEYS.LEGACY_CATEGORIES);
         const previousRequest = installations.get(installation.installationId);
         previousRequest.onsuccess = () => {
+          const saved = taxonomyFromCategoryDocuments(savedRequest.result, legacyRequest.result);
+          const installed = stampNewTags(saved, taxonomy);
           const rollback: CommunityRollbackRecord = {
             id: rollbackId,
             createdAt: new Date().toISOString(),
@@ -1095,7 +1135,9 @@ export class IndexedDBStorageService implements IStorageService {
             previousInstallation: (previousRequest.result as InstalledTaxonomyRecordV1 | undefined) ?? null,
           };
           transaction.objectStore(STORES.COMMUNITY_ROLLBACKS).put(rollback);
-          transaction.objectStore(STORES.CATEGORIES).put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: taxonomy });
+          transaction.objectStore(STORES.CATEGORIES).put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: installed });
+          // Tags added from another member's shared tag list.
+          appendTaxonomyHistory(transaction, saved, installed, "copied");
           installations.put(installation);
           transaction.objectStore(STORES.METADATA).put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
         };
@@ -1115,9 +1157,11 @@ export class IndexedDBStorageService implements IStorageService {
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.CATEGORIES, STORES.COMMUNITY_INSTALLATIONS, STORES.COMMUNITY_ROLLBACKS, STORES.METADATA],
+          withHistoryStore(this.db!, [STORES.CATEGORIES, STORES.COMMUNITY_INSTALLATIONS, STORES.COMMUNITY_ROLLBACKS, STORES.METADATA]),
           "readwrite",
         );
+        const savedRequest = transaction.objectStore(STORES.CATEGORIES).get(CATEGORY_DOCUMENT_KEYS.TAXONOMY);
+        const legacyRequest = transaction.objectStore(STORES.CATEGORIES).get(CATEGORY_DOCUMENT_KEYS.LEGACY_CATEGORIES);
         const request = transaction.objectStore(STORES.COMMUNITY_ROLLBACKS).get(rollbackId);
         request.onsuccess = () => {
           const rollback = request.result as CommunityRollbackRecord | undefined;
@@ -1125,7 +1169,10 @@ export class IndexedDBStorageService implements IStorageService {
             transaction.abort();
             return;
           }
-          transaction.objectStore(STORES.CATEGORIES).put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: rollback.taxonomy });
+          const saved = taxonomyFromCategoryDocuments(savedRequest.result, legacyRequest.result);
+          const restored = stampNewTags(saved, rollback.taxonomy);
+          transaction.objectStore(STORES.CATEGORIES).put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: restored });
+          appendTaxonomyHistory(transaction, saved, restored);
           const installations = transaction.objectStore(STORES.COMMUNITY_INSTALLATIONS);
           if (rollback.previousInstallation) installations.put(rollback.previousInstallation);
           else installations.delete(rollback.installationId);
@@ -1388,12 +1435,12 @@ export class IndexedDBStorageService implements IStorageService {
 
   private async mutateBulkTracks<T>(uris: string[], mutate: (
     current: Record<string, TrackData>, history: BulkUndoEntry[], taxonomy: TagTaxonomy, redo: BulkUndoEntry[],
-  ) => { changes: Record<string, TrackData | null>; history: BulkUndoEntry[]; redo?: BulkUndoEntry[]; result: T }, skipSyncUri?: string, expectedDatabaseName?: string, smartPlaylists?: SmartPlaylistTrackTransaction): Promise<T> {
+  ) => { changes: Record<string, TrackData | null>; history: BulkUndoEntry[]; redo?: BulkUndoEntry[]; result: T; tagMethod?: TagMembershipMethod }, skipSyncUri?: string, expectedDatabaseName?: string, smartPlaylists?: SmartPlaylistTrackTransaction): Promise<T> {
     if (!(await this.ensureReady())) throw new Error("Your tracks are still loading. Please try again.");
     if (expectedDatabaseName && this.db?.name !== expectedDatabaseName) throw new Error("Your account changed. Reopen the music before adding tags.");
     return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction([STORES.TRACKS, STORES.METADATA, STORES.OUTBOX, STORES.CATEGORIES,
-        ...(smartPlaylists ? [STORES.SMART_PLAYLISTS] : [])], "readwrite");
+      const tx = this.db!.transaction(withHistoryStore(this.db!, [STORES.TRACKS, STORES.METADATA, STORES.OUTBOX, STORES.CATEGORIES,
+        ...(smartPlaylists ? [STORES.SMART_PLAYLISTS] : [])]), "readwrite");
       const playlistRequest = smartPlaylists ? tx.objectStore(STORES.SMART_PLAYLISTS).getAll() : undefined;
       const tracks = tx.objectStore(STORES.TRACKS);
       const metadata = tx.objectStore(STORES.METADATA);
@@ -1418,9 +1465,16 @@ export class IndexedDBStorageService implements IStorageService {
           });
           result = mutation.result;
           const batchId = crypto.randomUUID();
+          // Tag origin, for the queued changes below (linked releases included).
+          if (mutation.tagMethod) noteRecordTagMethods(current, mutation.changes, mutation.tagMethod, this.db!.name);
           Object.entries(mutation.changes).forEach(([uri, data]) => {
             noteLocalFileChange(tx, uri, uri !== skipSyncUri);
-            if (data) { tracks.put({ uri, ...data }); appendIntent(tx, uri === skipSyncUri ? null : makeEntityReplaceIntent(uri, "track", data, batchId, current[uri] ?? null)); }
+            if (data) {
+              tracks.put({ uri, ...data });
+              // Changes from Community (skipSyncUri) aren't this device's edits.
+              if (uri !== skipSyncUri) appendEntityHistory(tx, uri, current[uri], data, mutation.tagMethod);
+              appendIntent(tx, uri === skipSyncUri ? null : makeEntityReplaceIntent(uri, "track", data, batchId, current[uri] ?? null));
+            }
             else { tracks.delete(uri); appendIntent(tx, makeEntityDeleteIntent(uri, "track", batchId, current[uri] ?? null)); }
           });
           metadata.put({ key: "bulkUndo", value: mutation.history.slice(-10) });
@@ -1510,14 +1564,19 @@ export class IndexedDBStorageService implements IStorageService {
       });
       if (!Number.isFinite(annotation.rating) || annotation.rating < 0 || annotation.rating > 5 || !Number.isFinite(annotation.energy) || annotation.energy < 0 || annotation.energy > 10) throw new Error("Choose a valid rating and energy before saving.");
       const validTags = buildValidTagIdSet(taxonomy);
-      if (annotation.tagIds.some(id => !validTags.has(id))) throw new Error("Some tags have changed. Check the recording again before linking.");
+      // A tag the person chose must still exist. A tag ID left over on one copy
+      // (no longer in the tag list, so never shown) doesn't block linking: it
+      // stays on the copy that has it and isn't spread to the others.
+      if (options?.choices && annotation.tagIds.some(id => !validTags.has(id))) throw new Error("Some tags have changed. Check the recording again before linking.");
+      const sharedTagIds = [...new Set(annotation.tagIds.filter(id => validTags.has(id)))];
       const groupId = crypto.randomUUID();
       const now = Date.now();
       const changes: Record<string, TrackData> = {};
       Object.entries(proposals).forEach(([uri, proposal]) => {
         const before = tracks[uri];
+        const leftover = (before?.tagIds || []).filter(id => !validTags.has(id));
         const after: TrackData = { ...{ rating: 0, energy: 0, bpm: null, tagIds: [] }, ...proposal.details, ...before,
-          rating: annotation.rating, energy: annotation.energy, tagIds: [...new Set(annotation.tagIds)], recordingIdentity: proposal.identity, recordingGroupId: groupId, recordingGroupConfirmed: confirmed || undefined };
+          rating: annotation.rating, energy: annotation.energy, tagIds: [...new Set([...sharedTagIds, ...leftover])], recordingIdentity: proposal.identity, recordingGroupId: groupId, recordingGroupConfirmed: confirmed || undefined };
         if (!before) { after.dateCreated = now; after.dateModified = now; }
         changes[uri] = after;
       });
@@ -1546,7 +1605,9 @@ export class IndexedDBStorageService implements IStorageService {
       const entry: BulkUndoEntry = { id: crypto.randomUUID(), createdAt: Date.now(), ...(automaticRuleIds.length ? { automaticRuleIds } : {}), changes: Object.fromEntries(
         Object.entries(changes).map(([uri, after]) => [uri, { before: tracks[uri] || null, after }]),
       ) };
-      return { changes, history: Object.keys(changes).length ? [...history, entry] : history, result: changes };
+      // Tag origin: one batch is one action; linked releases keep its method.
+      const tagMethod = automaticRuleIds.length ? "rule" : updates.find(update => update.tagMethod)?.tagMethod;
+      return { changes, history: Object.keys(changes).length ? [...history, entry] : history, result: changes, tagMethod };
     }, undefined, expectedDatabaseName);
   }
 
@@ -1576,7 +1637,7 @@ export class IndexedDBStorageService implements IStorageService {
       const redoEntry: BulkUndoEntry = { id: crypto.randomUUID(), createdAt: Date.now(), automaticRuleIds: entry.automaticRuleIds, changes: Object.fromEntries(
         Object.entries(expanded).map(([uri, after]) => [uri, { before: after, after: tracks[uri] || null }]),
       ) };
-      return { changes: expanded, history: history.slice(0, -1), redo: Object.keys(expanded).length ? [...redo, redoEntry] : redo, result: { changes: expanded, skippedFields } };
+      return { changes: expanded, history: history.slice(0, -1), redo: Object.keys(expanded).length ? [...redo, redoEntry] : redo, result: { changes: expanded, skippedFields }, tagMethod: "unknown" };
     }, undefined, expectedDatabaseName);
   }
 
@@ -1599,7 +1660,7 @@ export class IndexedDBStorageService implements IStorageService {
       const undoEntry: BulkUndoEntry = { id: crypto.randomUUID(), createdAt: Date.now(), automaticRuleIds: entry.automaticRuleIds, changes: Object.fromEntries(
         Object.entries(expanded).map(([uri, after]) => [uri, { before: tracks[uri] || null, after }]),
       ) };
-      return { changes: expanded, history: Object.keys(expanded).length ? [...history, undoEntry] : history, redo: redo.slice(0, -1), result: { changes: expanded, skippedFields } };
+      return { changes: expanded, history: Object.keys(expanded).length ? [...history, undoEntry] : history, redo: redo.slice(0, -1), result: { changes: expanded, skippedFields }, tagMethod: "unknown" };
     }, undefined, account);
   }
 
@@ -1652,7 +1713,7 @@ export class IndexedDBStorageService implements IStorageService {
    */
   async patchTracks(
     changes: Record<string, (current: TrackData | null) => TrackData | null | undefined>,
-    options?: { expectedDatabaseName?: string; undoable?: boolean; smartPlaylists?: SmartPlaylistTrackTransaction },
+    options?: { expectedDatabaseName?: string; undoable?: boolean; smartPlaylists?: SmartPlaylistTrackTransaction; tagMethod?: TagMembershipMethod },
   ): Promise<Record<string, TrackData | null>> {
     const uris = Object.keys(changes);
     if (!uris.length) return {};
@@ -1663,11 +1724,12 @@ export class IndexedDBStorageService implements IStorageService {
         if (next !== undefined) requested[uri] = next;
       }
       const expanded = expandRecordingEdits(tracks, requested);
-      if (!options?.undoable || !Object.keys(expanded).length) return { changes: expanded, history, result: expanded };
+      const tagMethod = options?.tagMethod;
+      if (!options?.undoable || !Object.keys(expanded).length) return { changes: expanded, history, result: expanded, tagMethod };
       const entry: BulkUndoEntry = { id: crypto.randomUUID(), createdAt: Date.now(), changes: Object.fromEntries(
         Object.entries(expanded).map(([uri, after]) => [uri, { before: tracks[uri] || null, after }]),
       ) };
-      return { changes: expanded, history: [...history, entry], result: expanded };
+      return { changes: expanded, history: [...history, entry], result: expanded, tagMethod };
     }, undefined, options?.expectedDatabaseName, options?.smartPlaylists);
   }
 
@@ -1688,7 +1750,8 @@ export class IndexedDBStorageService implements IStorageService {
         if (restored.restored) changes[uri] = restored.track;
       });
       // Entries include linked releases at edit time; newly linked music must not join an old undo.
-      return { changes, history, result: { changes, previous, skippedFields } };
+      // Tag origin: the method a restored tag had isn't kept, so Undo and Redo send unknown.
+      return { changes, history, result: { changes, previous, skippedFields }, tagMethod: "unknown" };
     }, undefined, account);
   }
 
@@ -1724,7 +1787,7 @@ export class IndexedDBStorageService implements IStorageService {
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.PLAYLISTS, STORES.METADATA, STORES.OUTBOX],
+          withHistoryStore(this.db!, [STORES.PLAYLISTS, STORES.METADATA, STORES.OUTBOX]),
           "readwrite"
         );
         const playlistStore = transaction.objectStore(STORES.PLAYLISTS);
@@ -1733,6 +1796,7 @@ export class IndexedDBStorageService implements IStorageService {
         const previous = playlistStore.get(uri);
         previous.onsuccess = () => {
           playlistStore.put({ uri, ...data });
+          if (options?.captureSync !== false) appendEntityHistory(transaction, uri, stripUri(previous.result), data);
           metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
           appendIntent(transaction, options?.captureSync === false ? null : makeEntityReplaceIntent(uri, "playlist", data, undefined, previous.result ?? null));
         };
@@ -1753,7 +1817,7 @@ export class IndexedDBStorageService implements IStorageService {
     if (this.db!.name !== databaseName) throw new Error("Your account changed. Reopen the music before adding tags.");
     const storeName = kind === "artist" ? STORES.ARTISTS : STORES.PLAYLISTS;
     return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction([storeName, STORES.CATEGORIES, STORES.METADATA, STORES.OUTBOX], "readwrite");
+      const tx = this.db!.transaction(withHistoryStore(this.db!, [storeName, STORES.CATEGORIES, STORES.METADATA, STORES.OUTBOX]), "readwrite");
       const store = tx.objectStore(storeName);
       const taxonomy = tx.objectStore(STORES.CATEGORIES).get(CATEGORY_DOCUMENT_KEYS.TAXONOMY);
       const request = store.get(uri);
@@ -1767,6 +1831,7 @@ export class IndexedDBStorageService implements IStorageService {
         const next = { ...previous, tagIds: nextIds, dateModified: now };
         store.put({ ...next, uri });
         tx.objectStore(STORES.METADATA).put({ key: META_KEYS.LAST_MODIFIED, value: now });
+        appendEntityHistory(tx, uri, stripUri(request.result), next);
         appendIntent(tx, makeEntityReplaceIntent(uri, kind, next, undefined, request.result ?? null));
       };
       tx.oncomplete = () => resolve();
@@ -1823,11 +1888,12 @@ export class IndexedDBStorageService implements IStorageService {
     return new Promise((resolve) => {
       try {
         const storeName = kind === "artist" ? STORES.ARTISTS : STORES.PLAYLISTS;
-        const transaction = this.db!.transaction([storeName, STORES.METADATA, STORES.OUTBOX], "readwrite");
+        const transaction = this.db!.transaction(withHistoryStore(this.db!, [storeName, STORES.METADATA, STORES.OUTBOX]), "readwrite");
         const store = transaction.objectStore(storeName);
         const batchId = crypto.randomUUID();
         const write = (uri: string, data: T, saved: T | undefined) => {
           store.put({ uri, ...data });
+          appendEntityHistory(transaction, uri, saved, data);
           appendIntent(transaction, makeEntityReplaceIntent(uri, kind, data, batchId, saved ?? null));
         };
         for (const [uri, data] of records) {
@@ -1881,7 +1947,7 @@ export class IndexedDBStorageService implements IStorageService {
     return new Promise((resolve) => {
       try {
         const transaction = this.db!.transaction(
-          [STORES.ARTISTS, STORES.METADATA, STORES.OUTBOX],
+          withHistoryStore(this.db!, [STORES.ARTISTS, STORES.METADATA, STORES.OUTBOX]),
           "readwrite"
         );
         const artistStore = transaction.objectStore(STORES.ARTISTS);
@@ -1890,6 +1956,7 @@ export class IndexedDBStorageService implements IStorageService {
         const previous = artistStore.get(uri);
         previous.onsuccess = () => {
           artistStore.put({ uri, ...data });
+          if (options?.captureSync !== false) appendEntityHistory(transaction, uri, stripUri(previous.result), data);
           metadataStore.put({ key: META_KEYS.LAST_MODIFIED, value: Date.now() });
           appendIntent(transaction, options?.captureSync === false ? null : makeEntityReplaceIntent(uri, "artist", data, undefined, previous.result ?? null));
         };
@@ -1945,7 +2012,7 @@ export class IndexedDBStorageService implements IStorageService {
   async patchEntities<T extends PlaylistData | ArtistData>(
     kind: "playlist" | "artist",
     changes: Record<string, (current: T | null) => T | null | undefined>,
-    options?: { expectedDatabaseName?: string },
+    options?: { expectedDatabaseName?: string; tagMethod?: TagMembershipMethod },
   ): Promise<Record<string, T | null>> {
     if (!(await this.ensureReady())) throw new Error("Your library is still loading. Please try again.");
     if (options?.expectedDatabaseName && this.db!.name !== options.expectedDatabaseName) {
@@ -1953,7 +2020,7 @@ export class IndexedDBStorageService implements IStorageService {
     }
     const storeName = kind === "artist" ? STORES.ARTISTS : STORES.PLAYLISTS;
     return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction([storeName, STORES.METADATA, STORES.OUTBOX], "readwrite");
+      const tx = this.db!.transaction(withHistoryStore(this.db!, [storeName, STORES.METADATA, STORES.OUTBOX]), "readwrite");
       const store = tx.objectStore(storeName);
       const batchId = crypto.randomUUID();
       const results: Record<string, T | null> = {};
@@ -1976,6 +2043,8 @@ export class IndexedDBStorageService implements IStorageService {
           const before = request.result ? saved as T : null;
           if (next) {
             store.put({ ...next, uri });
+            if (options?.tagMethod) noteTagMethods(uri, before?.tagIds, next.tagIds, options.tagMethod, this.db!.name);
+            appendEntityHistory(tx, uri, before, next, options?.tagMethod);
             appendIntent(tx, makeEntityReplaceIntent(uri, kind, next, batchId, before));
           } else {
             store.delete(uri);
@@ -2062,7 +2131,7 @@ export class IndexedDBStorageService implements IStorageService {
     checkAccount();
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction(
-        [STORES.CATEGORIES, STORES.SMART_PLAYLISTS, STORES.METADATA, STORES.OUTBOX, SYNC_STORES.STATE], "readwrite",
+        withHistoryStore(this.db!, [STORES.CATEGORIES, STORES.SMART_PLAYLISTS, STORES.METADATA, STORES.OUTBOX, SYNC_STORES.STATE]), "readwrite",
       );
       const categories = transaction.objectStore(STORES.CATEGORIES).getAll();
       const playlists = transaction.objectStore(STORES.SMART_PLAYLISTS).getAll();
@@ -2082,7 +2151,10 @@ export class IndexedDBStorageService implements IStorageService {
           const existingIds = new Set(current.map((playlist) => playlist.id));
           installed.playlists.filter((playlist) => !existingIds.has(playlist.id)).forEach((playlist) => transaction.objectStore(STORES.SMART_PLAYLISTS).add(playlist));
           if (installed.createdTagCount > 0) {
+            installed = { ...installed, taxonomy: stampNewTags(taxonomy, installed.taxonomy) };
             transaction.objectStore(STORES.CATEGORIES).put({ id: CATEGORY_DOCUMENT_KEYS.TAXONOMY, data: installed.taxonomy });
+            // Tags added with another member's shared smart playlist setups.
+            appendTaxonomyHistory(transaction, taxonomy, installed.taxonomy, "copied");
             const pending = (outbox.result as LocalSyncIntent[]).filter((intent): intent is TaxonomyReplaceIntent => intent.type === "taxonomy.replace").sort((a, b) => a.createdAt - b.createdAt)[0];
             const base = pending ? pending.base : shadow.result ? taxonomyFromShadowRecord(shadow.result as TaxonomyShadowRecord) : undefined;
             appendIntent(transaction, makeTaxonomyIntent(installed.taxonomy, undefined, base));
@@ -2160,6 +2232,26 @@ export class IndexedDBStorageService implements IStorageService {
     return this.countRecords(STORES.TRACKS);
   }
 
+  /**
+   * Songs with at least one tag (ratings and energy alone don't count). Walks the songs with a cursor, so large
+   * libraries aren't loaded into memory at once. Throws when the library can't be read; a failure is never zero.
+   */
+  async getTaggedTrackCount(): Promise<number> {
+    if (!(await this.ensureReady())) throw new Error(UNREADABLE_LIBRARY_MESSAGE);
+    return new Promise((resolve, reject) => {
+      let tagged = 0;
+      const request = this.db!.transaction(STORES.TRACKS, "readonly").objectStore(STORES.TRACKS).openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) { resolve(tagged); return; }
+        const tagIds = (cursor.value as Partial<TrackData> | undefined)?.tagIds;
+        if (Array.isArray(tagIds) && tagIds.length > 0) tagged += 1;
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error ?? new Error(UNREADABLE_LIBRARY_MESSAGE));
+    });
+  }
+
   /** Throws when the count can't be read; a failure is never reported as zero. */
   async getPlaylistCount(): Promise<number> {
     return this.countRecords(STORES.PLAYLISTS);
@@ -2179,6 +2271,24 @@ export class IndexedDBStorageService implements IStorageService {
     });
   }
 
+  /** This device's library history (see libraryHistory.ts), oldest first. */
+  async getLibraryHistory(): Promise<LibraryHistoryRow[]> {
+    if (!(await this.ensureReady())) throw new Error(UNREADABLE_LIBRARY_MESSAGE);
+    return readLibraryHistory(this.db!);
+  }
+
+  /** Up to `limit` history rows saved after the row `afterId`, oldest first. */
+  async getLibraryHistoryAfter(afterId: number, limit: number): Promise<LibraryHistoryRow[]> {
+    if (!(await this.ensureReady())) throw new Error(UNREADABLE_LIBRARY_MESSAGE);
+    return readLibraryHistoryAfter(this.db!, afterId, limit);
+  }
+
+  /** Deletes library history from before the previous calendar year; also runs when the library opens. */
+  async trimLibraryHistory(now = Date.now()): Promise<number> {
+    if (!(await this.ensureReady())) return 0;
+    return trimLibraryHistory(this.db!, now);
+  }
+
   async clearAll(): Promise<boolean> {
     if (!(await this.ensureReady())) return false;
 
@@ -2190,17 +2300,18 @@ export class IndexedDBStorageService implements IStorageService {
     let transaction: IDBTransaction | null = null;
     try {
       transaction = this.db!.transaction(
-        [
+        withHistoryStore(this.db!, [
           STORES.TRACKS,
           STORES.PLAYLISTS,
           STORES.ARTISTS,
           STORES.SMART_PLAYLISTS,
           STORES.CATEGORIES,
           STORES.METADATA,
-        ],
+        ]),
         "readwrite"
       );
       const committed = transactionCommitted(transaction, "Clearing the library");
+      appendSnapshotHistory(transaction, "reset");
 
       transaction.objectStore(STORES.TRACKS).clear();
       transaction.objectStore(STORES.PLAYLISTS).clear();

@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, vi } from "vitest";
+import { IDBKeyRange as FakeIDBKeyRange } from "fake-indexeddb";
+
+// Tests stub `indexedDB` with fake-indexeddb factories; key ranges come from the same library.
+globalThis.IDBKeyRange ??= FakeIDBKeyRange as typeof IDBKeyRange;
 
 // Test files that never touch the DOM opt into the faster node environment with a
 // `// @vitest-environment node` comment. They get the same storage and Spicetify mocks, without

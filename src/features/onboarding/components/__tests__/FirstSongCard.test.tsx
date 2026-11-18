@@ -1,8 +1,8 @@
 import React from "react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { FirstSongCard } from "../FirstSongCard";
+import { FirstSongCard as Card } from "../FirstSongCard";
 const { getTaggingQueuePage, recordProductInteraction } = vi.hoisted(() => ({ getTaggingQueuePage: vi.fn(), recordProductInteraction: vi.fn() }));
 vi.mock("@/services/SpotifyApiService", () => ({ spotifyApiService: { getTaggingQueuePage } }));
 vi.mock("@/features/product-analytics/productAnalytics", () => ({ recordProductInteraction }));
@@ -11,27 +11,62 @@ const page = (tracks: unknown[]) => ({ tracks, checked: tracks.length, unavailab
 const playing = { uri: "spotify:track:playing", name: "Playing Song", artists: [{ name: "Band" }], album: { name: "Album" }, duration_ms: 100 };
 beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
 
-it("offers up to six Liked Songs and opens the picked one for tagging", async () => {
+const quickTags = [{ id: "chill", name: "Chill" }, { id: "happy", name: "Happy" }];
+type CardProps = React.ComponentProps<typeof Card>;
+/** The card with no one-click tags added yet, unless a test says otherwise. */
+const FirstSongCard = (props: Partial<CardProps> & Pick<CardProps, "currentTrack" | "onPick">) => (
+  <Card quickTags={quickTags} tagIdsOf={() => []} onQuickTag={vi.fn().mockResolvedValue(undefined)} taggedSongs={0} {...props} />
+);
+
+it("offers three Liked Songs, each tagged with one click, and More tags opens the picker", async () => {
   const liked = Array.from({ length: 8 }, (_, index) => song(`s${index}`, `Song ${index}`));
   getTaggingQueuePage.mockResolvedValue(page([...liked, { ...song("local", "Local"), uri: "spotify:local:a:b:c:1" }]));
   const onPick = vi.fn();
-  render(<FirstSongCard currentTrack={playing} onPick={onPick} />);
-  expect(await screen.findByText("From your Liked Songs")).toBeVisible();
+  const onQuickTag = vi.fn().mockResolvedValue(undefined);
+  render(<FirstSongCard currentTrack={playing} onPick={onPick} onQuickTag={onQuickTag} taggedSongs={1} />);
+  expect(await screen.findByRole("group", { name: "Tags for Song 0" })).toBeVisible();
   expect(getTaggingQueuePage).toHaveBeenCalledWith(null, 0, expect.any(AbortSignal));
-  expect(screen.getAllByRole("button")).toHaveLength(6);
+  expect(screen.getAllByRole("group")).toHaveLength(3);
   expect(screen.queryByText("Playing Song")).toBeNull();
-  await userEvent.click(screen.getByRole("button", { name: /Song 1/ }));
-  expect(onPick).toHaveBeenCalledWith("spotify:track:s1");
+  expect(screen.getByText("1 of 3 tagged")).toBeVisible();
+
+  const songTwo = within(screen.getByRole("group", { name: "Tags for Song 1" }));
+  await userEvent.click(songTwo.getByRole("button", { name: "Chill" }));
+  expect(onQuickTag).toHaveBeenCalledWith(expect.objectContaining({ uri: "spotify:track:s1" }), "chill", true);
+  await userEvent.click(songTwo.getByRole("button", { name: "Happy" }));
+  // A song counts as picked once, however many tags it gets.
+  expect(recordProductInteraction.mock.calls.filter(([event]) => event === "first_run_song_picked")).toEqual([["first_run_song_picked", { first_run_source: "liked" }]]);
+
+  await userEvent.click(within(screen.getByRole("group", { name: "Tags for Song 2" })).getByRole("button", { name: "More tags" }));
+  expect(onPick).toHaveBeenCalledWith("spotify:track:s2");
   expect(recordProductInteraction).toHaveBeenCalledWith("first_run_shown", { liked_songs: "1+" });
-  expect(recordProductInteraction).toHaveBeenCalledWith("first_run_song_picked", { first_run_source: "liked" });
+});
+
+it("removes a one-click tag the song already has", async () => {
+  getTaggingQueuePage.mockResolvedValue(page([song("s1", "Song 1")]));
+  const onQuickTag = vi.fn().mockResolvedValue(undefined);
+  render(<FirstSongCard currentTrack={null} onPick={vi.fn()} onQuickTag={onQuickTag} tagIdsOf={(uri) => (uri === "spotify:track:s1" ? ["chill"] : [])} />);
+  const chill = await screen.findByRole("button", { name: "Chill" });
+  expect(chill).toHaveAttribute("aria-pressed", "true");
+  await userEvent.click(chill);
+  expect(onQuickTag).toHaveBeenCalledWith(expect.objectContaining({ uri: "spotify:track:s1" }), "chill", false);
+  expect(recordProductInteraction).not.toHaveBeenCalledWith("first_run_song_picked", expect.anything());
+});
+
+it("shows why a one-click tag didn't stick", async () => {
+  getTaggingQueuePage.mockResolvedValue(page([song("s1", "Song 1")]));
+  render(<FirstSongCard currentTrack={null} onPick={vi.fn()} onQuickTag={vi.fn().mockRejectedValue(new Error("Your tags are still loading. Please try again."))} />);
+  await userEvent.click(await screen.findByRole("button", { name: "Chill" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Your tags are still loading. Please try again.");
+  expect(screen.getByRole("button", { name: "Chill" })).toBeEnabled();
 });
 
 it("offers the song Spotify is playing when Liked Songs is empty or unreadable", async () => {
   getTaggingQueuePage.mockRejectedValue(new Error("offline"));
-  const onPick = vi.fn();
-  render(<FirstSongCard currentTrack={playing} onPick={onPick} />);
-  await userEvent.click(await screen.findByRole("button", { name: /Tag this song/ }));
-  expect(onPick).toHaveBeenCalledWith("spotify:track:playing");
+  const onQuickTag = vi.fn().mockResolvedValue(undefined);
+  render(<FirstSongCard currentTrack={playing} onPick={vi.fn()} onQuickTag={onQuickTag} />);
+  await userEvent.click(within(await screen.findByRole("group", { name: "Tags for Playing Song" })).getByRole("button", { name: "Chill" }));
+  expect(onQuickTag).toHaveBeenCalledWith(expect.objectContaining({ uri: "spotify:track:playing" }), "chill", true);
   expect(recordProductInteraction).toHaveBeenCalledWith("first_run_shown", { liked_songs: "0" });
   expect(recordProductInteraction).toHaveBeenCalledWith("first_run_song_picked", { first_run_source: "playing" });
 });
@@ -47,31 +82,12 @@ it("asks for any song when there is nothing to suggest, and reports the card onc
   expect(recordProductInteraction.mock.calls.filter(([event]) => event === "first_run_shown")).toHaveLength(1);
 });
 
-it("asks what the person listens to below the songs, without moving them", async () => {
+it("goes straight to the songs: no question about what the person listens to", async () => {
   getTaggingQueuePage.mockResolvedValue(page([song("s1", "Song 1")]));
-  const onPick = vi.fn();
-  render(<FirstSongCard currentTrack={null} onPick={onPick} tastePacks={<button type="button">Metal &amp; Heavy</button>} />);
-  const packs = screen.getByRole("group", { name: /What do you listen to\?/ });
-  expect(packs).toHaveTextContent("we'll add tags for it to Genre & Style");
-  const songRow = await screen.findByRole("button", { name: /Song 1/ });
-  expect(songRow.compareDocumentPosition(packs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  await userEvent.click(songRow);
-  expect(onPick).toHaveBeenCalledWith("spotify:track:s1");
-});
-
-it("reports the taste pack row once per session, only when it is drawn", async () => {
-  vi.resetModules();
-  const { FirstSongCard: Card } = await import("../FirstSongCard");
-  getTaggingQueuePage.mockResolvedValue(page([]));
-  const first = render(<Card currentTrack={null} onPick={vi.fn()} />);
-  await screen.findByText(/Play any song in Spotify/);
+  render(<FirstSongCard currentTrack={null} onPick={vi.fn()} />);
+  await screen.findByRole("group", { name: "Tags for Song 1" });
+  expect(screen.queryByText(/What do you listen to/)).toBeNull();
   expect(recordProductInteraction).not.toHaveBeenCalledWith("taste_packs_shown");
-  first.rerender(<Card currentTrack={null} onPick={vi.fn()} tastePacks={<button type="button">Metal</button>} />);
-  expect(recordProductInteraction).toHaveBeenCalledWith("taste_packs_shown");
-  first.unmount();
-  render(<Card currentTrack={null} onPick={vi.fn()} tastePacks={<button type="button">Metal</button>} />);
-  await screen.findByText(/Play any song in Spotify/);
-  expect(recordProductInteraction.mock.calls.filter(([event]) => event === "taste_packs_shown")).toHaveLength(1);
 });
 
 const { findCommunityMatches } = vi.hoisted(() => ({ findCommunityMatches: vi.fn() }));
@@ -88,7 +104,7 @@ it("shows Liked Songs members already tagged and adds their tags in one tap", as
   const onAddMembersTags = vi.fn().mockResolvedValue(undefined);
   render(<FirstSongCard currentTrack={null} onPick={vi.fn()} onAddMembersTags={onAddMembersTags} />);
   expect(await screen.findByText("Members already tagged 1 of your song")).toBeVisible();
-  // The whole page goes to the lookup, not just the six shown.
+  // The whole page goes to the lookup, not just the three shown.
   expect(findCommunityMatches.mock.calls[0][0]).toHaveLength(8);
   expect(recordProductInteraction).toHaveBeenCalledWith("first_run_members_checked", { members_matches: "1-4" });
   await userEvent.click(screen.getByRole("button", { name: "Add Dark to Song 2" }));
@@ -101,11 +117,27 @@ it("shows Liked Songs members already tagged and adds their tags in one tap", as
   expect(recordProductInteraction).toHaveBeenCalledWith("first_run_members_tag_added", { members_add: "all" });
 });
 
+it("offers the whole library's check under the members' rows, and only there", async () => {
+  getTaggingQueuePage.mockResolvedValue(page([song("s1", "Song 1")]));
+  findCommunityMatches.mockResolvedValue([match("s1", "Song 1", ["Dark"])]);
+  const onSeeAll = vi.fn();
+  const { unmount } = render(<FirstSongCard currentTrack={null} onPick={vi.fn()} onAddMembersTags={vi.fn()} onSeeAllMembersTags={onSeeAll} />);
+  await userEvent.click(await screen.findByRole("button", { name: "See all" }));
+  expect(onSeeAll).toHaveBeenCalledTimes(1);
+  unmount();
+
+  // No rows, no line.
+  findCommunityMatches.mockResolvedValue([]);
+  render(<FirstSongCard currentTrack={null} onPick={vi.fn()} onAddMembersTags={vi.fn()} onSeeAllMembersTags={onSeeAll} />);
+  expect(await screen.findByRole("group", { name: "Tags for Song 1" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "See all" })).toBeNull();
+});
+
 it("keeps today's card when members haven't tagged any of the songs", async () => {
   getTaggingQueuePage.mockResolvedValue(page([song("s1", "Song 1")]));
   findCommunityMatches.mockResolvedValue([]);
   render(<FirstSongCard currentTrack={null} onPick={vi.fn()} onAddMembersTags={vi.fn()} />);
-  expect(await screen.findByText("From your Liked Songs")).toBeVisible();
+  expect(await screen.findByRole("group", { name: "Tags for Song 1" })).toBeVisible();
   await vi.waitFor(() => expect(recordProductInteraction).toHaveBeenCalledWith("first_run_members_checked", { members_matches: "0" }));
   expect(screen.queryByText(/Members already tagged/)).toBeNull();
 });

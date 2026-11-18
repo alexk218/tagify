@@ -1,4 +1,5 @@
 import { spotifyFailureHistory } from "@/utils/spotifyFailureHistory";
+import { assertNotInOnboardingPreview } from "@/features/onboarding/preview/onboardingPreview";
 import { assertSpotifyEndpoint, classifySpotifyFailure, spotifyEndpointLabel, spotifyLocalPause, spotifyQuotaReason, type SpotifyFailure } from "@/utils/spotifyRequestFailure";
 import { graphqlRateLimiter, type RequestOptions } from "@/utils/RateLimiter";
 import { spotifyBackgroundPolicy } from "./SpotifyBackgroundPolicy";
@@ -123,6 +124,8 @@ export async function spotifyRead<T>(key: string, run: (signal: AbortSignal) => 
 
 let mutationId = 0;
 export async function spotifyWrite<T>(run: (signal: AbortSignal) => Promise<T>, options: RequestOptions & { resource?: string } = {}): Promise<T> {
+  // The onboarding preview never changes the member's real Spotify library or playlists.
+  assertNotInOnboardingPreview("A change to Spotify");
   options = { ...options, feature: options.feature ?? requestFeature(options.resource ?? "") };
   const account = spotifyAccountKey();
   const resource = options.resource && `${account}:${normalizeResource(options.resource)}`;

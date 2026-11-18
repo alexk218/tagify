@@ -34,6 +34,9 @@ type Runtime = {
   backupHealth: unknown;
   ownBatchIds?: Set<string>;
   taxonomyRefreshRequested: boolean;
+  historyBackfillDue: boolean | null;
+  historyBackfillRetryAt: number;
+  historyBackfillRunning: Promise<void> | null;
 };
 const runtime = syncRuntime as unknown as Runtime;
 
@@ -798,7 +801,8 @@ describe.skipIf(!enabled)("Tagify and the Community website editing one library"
 
     /**
      * Every computer holds exactly Community's tag tree, order and colors, and every item exactly
-     * Community's tags. Each item keeps its original time unless listed in `edited`.
+     * Community's tags. Each item keeps its original time unless listed in `edited`. An item
+     * Community leaves with no tags is removed from the computer, so it has no time there.
      */
     async function expectAgreement(world: World, step: string, expected: { outline?: string; tags?: string[][]; edited?: string[] } = {}): Promise<string> {
       const { library, items } = world;
@@ -834,8 +838,13 @@ describe.skipIf(!enabled)("Tagify and the Community website editing one library"
           if (localTags !== (cloudTags.get(item.providerId) ?? "")) differences.push(`item ${index + 1} tags: ${install.name} ${localTags || "-"}, Community ${cloudTags.get(item.providerId) || "-"}`);
           shownTags.push((local?.tagIds ?? []).map((tagId) => nodes[tagId]?.name ?? `deleted:${tagId.slice(4, 12)}`).sort());
           if (expected.edited?.includes(item.uri)) continue;
-          if (local?.dateModified !== item.modifiedAt) differences.push(`item ${index + 1} time on ${install.name}: ${local?.dateModified}`);
           if (Number(cloudTimes.get(item.providerId)) !== item.modifiedAt) differences.push(`item ${index + 1} time on Community: ${cloudTimes.get(item.providerId)}`);
+          // These items have no rating or energy, so one Community leaves with no tags is removed, as when it is cleared on the computer itself.
+          if (!cloudTags.get(item.providerId)) {
+            if (local) differences.push(`item ${index + 1} on ${install.name}: kept a blank record`);
+            continue;
+          }
+          if (local?.dateModified !== item.modifiedAt) differences.push(`item ${index + 1} time on ${install.name}: ${local?.dateModified}`);
         }
         expect(differences, `${step}: ${install.name} holds Community's tags on every item, each keeping its time`).toEqual([]);
         if (expected.tags) expect(shownTags, `${step}: ${install.name} item tags`).toEqual(expected.tags.map((names) => [...names].sort()));
@@ -1024,6 +1033,7 @@ describe.skipIf(!enabled)("Tagify and the Community website editing one library"
       expect(await deletePreview(member, ids.chill)).toMatchObject({ tags: 2, songs: 2, albums: 1, artists: 2 });
       const deleted = await studioDelete(member, ids.chill);
       expect(deleted.status).toBe("applied");
+      // The artist that only had Calm is left with nothing, so both computers remove it; restoring brings it back with its time.
       await syncAndExpect(world, "delete", "Mood(Bright), Genre(House, Disco, Deep(Dub))",
         [["House"], ["House"], ["House"], ["House"], ["House"], []]);
 
@@ -1288,6 +1298,58 @@ describe.skipIf(!enabled)("Tagify and the Community website editing one library"
         expect((await indexedDBStorage.getTrack(world.detailsUri))?.energy).toBe(7);
       }
     }, 180_000);
+  });
+
+  // Library history catch-up (Rewind 2027, slice 3): needs Community's history log (migration 0570)
+  // and the catch-up route (the pending backfill migration, which adds library_history_start).
+  const hasHistoryBackfill = enabled && sql("select to_regclass('tagify_sync.library_history_start') is not null") === "t";
+  describe.skipIf(!hasHistoryBackfill)("library history kept before connecting", () => {
+    beforeEach(() => {
+      // A fresh local stack has the history log switched off; Community then tells Tagify to keep its rows.
+      sql(`update public.community_feature_flags set enabled=true where key='library_history'`);
+      runtime.historyBackfillDue = null;
+      runtime.historyBackfillRetryAt = 0;
+    });
+    const historyRows = (library: string, surface: string) => sql(`select coalesce(string_agg(kind || ':' || coalesce(tag_id, '') || ':' || (extract(epoch from occurred_at) * 1000)::bigint, E'\n' order by occurred_at, kind, tag_id), '')
+      from tagify_sync.library_history where library_id='${library}' and surface='${surface}' and kind <> 'snapshot'`).split("\n").filter(Boolean);
+
+    it("reaches Community once with the computer's own times, a restore sends nothing again, and a live edit is logged once", async () => {
+      const member = await createMember();
+      const { ids, nodes } = startingLibrary();
+      // A computer that isn't connected: its first tag list (not a change), a new tag and three tagged songs.
+      expect(await storageService.saveTaxonomy(expandSyncTaxonomy({ taxonomy: nodes, colors: [], collections: [] }), { captureSync: false })).toBe(true);
+      const lofi = id("tag");
+      await editTaxonomy((items) => items.set(lofi, node(lofi, "tag", ids.chill, "Lofi", 1)));
+      const songs = [songId(), songId(), songId()];
+      for (const [index, providerId] of songs.entries()) {
+        expect(await indexedDBStorage.saveTrack(`spotify:track:${providerId}`, track([index === 0 ? lofi : ids.calm]))).toBe(true);
+      }
+      const kept = await indexedDBStorage.getLibraryHistory();
+      expect(kept.map((row) => [row.kind, row.live])).toEqual([["tag_created", false], ["tag_added", false], ["tag_added", false], ["tag_added", false]]);
+      const expected = kept.map((row) => `${row.kind}:${row.tagId ?? ""}:${row.occurredAt}`)
+        .sort((left, right) => Number(left.split(":").at(-1)) - Number(right.split(":").at(-1)) || left.localeCompare(right));
+      const datesBefore = await Promise.all(songs.map((providerId) => indexedDBStorage.getTrack(`spotify:track:${providerId}`).then((item) => item?.dateModified)));
+
+      const configuration = await link(member);
+      expect(await syncTagify()).toEqual([]);
+      await runtime.historyBackfillRunning;
+      const library = configuration.libraryId;
+      expect(historyRows(library, "backfill"), "each row once, with the computer's times").toEqual(expected);
+
+      // A live edit is logged as it syncs, and never sent again by the catch-up.
+      await editTrack(`spotify:track:${songs[0]}`, (current) => ({ ...current, tagIds: [...current.tagIds, ids.house] }));
+      expect(await syncTagify()).toEqual([]);
+      expect(historyRows(library, "desktop").filter((row) => row.startsWith(`tag_added:${ids.house}:`))).toHaveLength(1);
+
+      // Restoring this computer's copy onto Community asks for the catch-up again; nothing is new.
+      syncRuntime.armCloudReplacement();
+      await syncRuntime.replaceCloudWithCurrentLocalState();
+      await runtime.historyBackfillRunning;
+      expect(historyRows(library, "backfill")).toEqual(expected);
+      expect(historyRows(library, "desktop").filter((row) => row.startsWith(`tag_added:${ids.house}:`))).toHaveLength(1);
+      // The catch-up never touches the songs' saved dates.
+      expect(await Promise.all(songs.slice(1).map((providerId) => indexedDBStorage.getTrack(`spotify:track:${providerId}`).then((item) => item?.dateModified)))).toEqual(datesBefore.slice(1));
+    }, 120_000);
   });
 
   describe("random edits from two computers and the website", () => {

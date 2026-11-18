@@ -1,0 +1,175 @@
+/* Other members' tags and ratings on one song, opened under its track-list row. */
+.panel {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 22%);
+  color: var(--spice-text);
+  font-size: 13px;
+}
+
+/* One line of their tags, wrapping when the window is narrow. */
+.tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.trayLabel {
+  margin-right: 4px;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--spice-text);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.chip:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 45%);
+  background: rgb(255 255 255 / 8%);
+}
+
+.chip:focus-visible,
+.link:focus-visible,
+.handle:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
+}
+
+.chip:disabled {
+  cursor: default;
+}
+
+.chipOn {
+  border-color: rgb(255 255 255 / 10%);
+  color: var(--spice-subtext);
+}
+
+.count {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 12%);
+  color: var(--spice-subtext);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.newTag {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgb(255 107 107 / 18%);
+  color: rgb(255 160 150);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* "Open on Community" at the end of the people line. */
+.linkEnd {
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.link:hover {
+  color: var(--spice-text);
+  text-decoration: underline;
+}
+
+/* Who tagged it, their ratings and the average, on one line under the tags. */
+.whoLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 10px 0 0;
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.separator {
+  margin: 0 6px;
+  color: var(--spice-subtext);
+}
+
+.handle {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--spice-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.handle:hover {
+  text-decoration: underline;
+}
+
+.stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 5px;
+  color: #ffd700;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* The dash stays with the average when the line wraps. */
+.averageGroup {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.average {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--spice-subtext);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.average svg {
+  color: #ffd700;
+}
+
+.error {
+  margin: 8px 0 0;
+  color: #ff8a80;
+  font-size: 12px;
+}

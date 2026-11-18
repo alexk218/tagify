@@ -18,6 +18,26 @@ describe("artist identities and request budgets", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(storage.setItem).toHaveBeenCalled();
   });
+  it("leaves the cache alone when a playlist read brings the same artists again", async () => {
+    const storage = { getItem: () => null, setItem: vi.fn() };
+    const store = new TrackArtistIdentitiesStore(vi.fn(), storage);
+    const listener = vi.fn();
+    store.subscribe(listener);
+    store.rememberMany([["spotify:track:one", artists]]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const snapshot = store.getSnapshot();
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    store.rememberMany([["spotify:track:one", artists.map((artist) => ({ ...artist }))]]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(store.getSnapshot()).toBe(snapshot);
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    store.rememberMany([["spotify:track:one", [artists[0]]]]);
+    expect(store.getSnapshot()["spotify:track:one"].artists).toEqual([artists[0]]);
+  });
   it("rejects name-only associations and pauses failed checks instead of cascading through a library", async () => {
     const lookup = vi.fn().mockResolvedValueOnce([{ name: "Artist" }]).mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValue(artists);

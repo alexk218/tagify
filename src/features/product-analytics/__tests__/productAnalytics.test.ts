@@ -1,7 +1,8 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import { webcrypto } from "node:crypto";
-import { recordProductEvent, setAnalyticsSharing, isAnalyticsSharing, flushProductEvents, canLinkInstallation, presenceRecordedToday, savedSongsBucket, songsBucket, spotifyReleaseVersion, recordTastePacksAdded } from "../productAnalytics";
+import { recordProductEvent, setAnalyticsSharing, isAnalyticsSharing, flushProductEvents, canLinkInstallation, presenceRecordedToday, savedSongsBucket, taggedSongsBucket, songsBucket, spotifyReleaseVersion, recordTastePacksAdded, sortDetail } from "../productAnalytics";
 import { TASTE_PACKS } from "@tagify/community-contracts";
+import { SORT_OPTIONS } from "@/constants/trackList";
 const account = "0".repeat(64);
 const key = "tagify:product-analytics:v1:" + account;
 const installationId = "ad824ac0-c441-4f56-85a7-ff1434d865bc";
@@ -234,6 +235,8 @@ describe("automatic Tagify product analytics", () => {
   });
   it("buckets library size and keeps only Spotify's release number", () => {
     expect([0, 1, 9, 10, 99, 100, 999, 1000, 25000].map(savedSongsBucket)).toEqual(["0", "1-9", "1-9", "10-99", "10-99", "100-999", "100-999", "1000+", "1000+"]);
+    expect([0, 999, 1000, 2499, 2500, 4999, 5000, 9999, 10000, 250000].map(taggedSongsBucket)).toEqual(["0", "100-999", "1000-2499", "1000-2499", "2500-4999", "2500-4999", "5000-9999", "5000-9999", "10000+", "10000+"]);
+    expect(taggedSongsBucket(-1)).toBeUndefined();
     expect(savedSongsBucket(-1)).toBeUndefined();
     expect(savedSongsBucket(Number.NaN)).toBeUndefined();
     expect(spotifyReleaseVersion("1.2.74.477.g8bc3e1a9")).toBe("1.2.74.477");
@@ -271,15 +274,49 @@ describe("automatic Tagify product analytics", () => {
     expect(queue().events.map((event: any) => event.event)).toEqual(["update_banner_dismissed"]);
   });
   it("accepts every taste pack Community offers, and nothing else", () => {
-    for (const pack of TASTE_PACKS) recordProductEvent(account, "taste_pack_added", { taste_pack: pack.key as any, surface: "first_run" });
-    recordProductEvent(account, "taste_pack_added", { taste_pack: "my-private-tag" as any, surface: "first_run" });
+    for (const pack of TASTE_PACKS) recordProductEvent(account, "taste_pack_added", { taste_pack: pack.key as any, surface: "tag_manager" });
+    recordProductEvent(account, "taste_pack_added", { taste_pack: "my-private-tag" as any, surface: "tag_manager" });
     recordProductEvent(account, "taste_pack_added", { taste_pack: "metal", surface: "workspace" as any });
     expect(queue().events.map((event: any) => event.properties.taste_pack)).toEqual(TASTE_PACKS.map(pack => pack.key));
+  });
+  it("keeps the tagged-tracks Community details and drops values outside them", () => {
+    recordProductEvent(account, "track_list_others_opened");
+    recordProductEvent(account, "track_list_members_tag_added", { members_add: "all", new_to_library: "yes" });
+    recordProductEvent(account, "track_list_community_link_opened", { target: "member" });
+    recordProductEvent(account, "track_list_sort_changed", { sort: "community_people", after_highlight: "no" });
+    recordProductEvent(account, "track_list_community_link_opened", { target: "https://tagify.fm/@ana" as any });
+    recordProductEvent(account, "track_list_others_opened", { target: "song" });
+    expect(queue().events.map((event: any) => ({ event: event.event, ...Object.fromEntries(Object.entries(event.properties).filter(([key]) => ["members_add", "new_to_library", "target", "sort", "after_highlight"].includes(key))) }))).toEqual([
+      { event: "track_list_others_opened" },
+      { event: "track_list_members_tag_added", members_add: "all", new_to_library: "yes" },
+      { event: "track_list_community_link_opened", target: "member" },
+      { event: "track_list_sort_changed", sort: "community_people", after_highlight: "no" },
+    ]);
   });
   it("keeps sharing and taste pack surfaces apart", () => {
     recordProductEvent(account, "community_share_opened", { surface: "first_run" });
     recordProductEvent(account, "community_share_opened", { surface: "workspace" });
     expect(queue().events.map((event: any) => event.properties.surface)).toEqual(["workspace"]);
+  });
+  it("accepts every track list sort on tag_filter_used, and nothing else", () => {
+    const sorts = Object.values(SORT_OPTIONS).map(sortDetail);
+    expect(sorts).not.toContain(undefined);
+    for (const sort of sorts) recordProductEvent(account, "tag_filter_used", { sort });
+    recordProductEvent(account, "tag_filter_used", { sort: "title" as any });
+    recordProductEvent(account, "tag_filter_used", { songs: "1" });
+    recordProductEvent(account, "track_list_sort_changed", { sort: "rating", after_highlight: "no" });
+    expect(queue().events.map((event: any) => event.properties.sort)).toEqual(sorts);
+  });
+  it("sends feature-use events with only their fixed details", () => {
+    for (const event of ["smart_playlist_created", "smart_playlist_refreshed", "note_saved", "suggested_tag_used", "auto_tags_applied", "album_apply_to_tracks"] as const) recordProductEvent(account, event);
+    recordProductEvent(account, "bulk_tag_applied", { songs: "25-49" });
+    recordProductEvent(account, "energy_set", { edit_surface: "spotify_views" });
+    recordProductEvent(account, "note_saved", { songs: "1" });
+    recordProductEvent(account, "bulk_tag_applied", { songs: "37" as any });
+    recordProductEvent(account, "energy_set", { sort: "energy" } as any);
+    const { events } = queue();
+    expect(events.map((event: any) => event.event)).toEqual(["smart_playlist_created", "smart_playlist_refreshed", "note_saved", "suggested_tag_used", "auto_tags_applied", "album_apply_to_tracks", "bulk_tag_applied", "energy_set"]);
+    expect(events.slice(-2).map((event: any) => ({ songs: event.properties.songs, edit_surface: event.properties.edit_surface }))).toEqual([{ songs: "25-49", edit_surface: undefined }, { songs: undefined, edit_surface: "spotify_views" }]);
   });
   it("records one taste_pack_added per pack with the surface it was added from", async () => {
     recordTastePacksAdded(["metal", "jazz-soul", "metal"], "tag_manager");

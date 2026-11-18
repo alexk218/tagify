@@ -1,3 +1,6 @@
+import { assertOptionalTagMembershipMethod, type TagMembershipMethod } from "./tagMethods";
+import type { LibraryHistoryBackfillCapabilityV1 } from "./libraryHistoryBackfill";
+
 export const LEGACY_PRIVATE_SYNC_PROTOCOL_VERSION = 1 as const;
 export const PRIVATE_SYNC_PROTOCOL_VERSION = 2 as const;
 export const PUBLICATION_POLICY_VERSION = 2 as const;
@@ -12,7 +15,9 @@ export * from "./webEdits";
 export * from "./artistCredits";
 export * from "./songReleases";
 export * from "./songDetails";
+export * from "./originalReleaseDates";
 export * from "./playlistWrites";
+export * from "./smartPlaylists";
 export * from "./songNames";
 export * from "./spotifyListChoice";
 export * from "./catalogFill";
@@ -20,6 +25,8 @@ export * from "./catalogFillRuns";
 export * from "./nowPlayingLookups";
 export * from "./spotifySearchLookups";
 export * from "./starterTags";
+export * from "./tagMethods";
+export * from "./libraryHistoryBackfill";
 
 export const DURABLE_APP_STATE_DOMAINS = [
   "smart-playlists",
@@ -48,6 +55,14 @@ export interface RevisionedValueV1<T> {
   revision: number;
 }
 
+/**
+ * One tag on an item in a snapshot. `method` (tag origin) is how its latest change was made; Community
+ * leaves it out when it's unknown, and Tagify desktop ignores it.
+ */
+export interface TagMembershipSnapshotV1 extends RevisionedValueV1<boolean> {
+  method?: TagMembershipMethod;
+}
+
 export interface AnnotationSnapshotV1 {
   entity: SyncEntityRefV1;
   fields: {
@@ -56,7 +71,7 @@ export interface AnnotationSnapshotV1 {
     bpm: RevisionedValueV1<number | null>;
     key: RevisionedValueV1<string | null>;
   };
-  tagMemberships: Record<string, RevisionedValueV1<boolean>>;
+  tagMemberships: Record<string, TagMembershipSnapshotV1>;
   entityRevision: number;
   deleted: boolean;
   /** When Tagify first saved the item on any device (ISO). Older peers omit it. */
@@ -145,6 +160,11 @@ export interface TagMembershipMutationV1 extends MutationBaseV1, AnnotationTimes
   tagId: string;
   present: boolean;
   expectedRevision: number;
+  /**
+   * How this change was made (tag origin, private to the member). Older peers send none and ignore
+   * it; Community stores a missing or unknown value as `unknown`.
+   */
+  method?: TagMembershipMethod;
 }
 
 export interface AnnotationDeleteMutationV1 extends MutationBaseV1 {
@@ -267,6 +287,8 @@ export interface SyncCapabilitiesV2 extends SyncCapabilitiesV1 {
     compression: "gzip";
     immutableByRevision: boolean;
   };
+  /** Present on servers that accept the library history catch-up (Community migration 9002). */
+  historyBackfill?: LibraryHistoryBackfillCapabilityV1;
 }
 
 export interface PublicationEntityRuleV2 {
@@ -367,7 +389,8 @@ export function assertSyncMutationV1(value: unknown): asserts value is SyncMutat
       assertOptionalTimestamps(value);
       return;
     case "annotation.tag-membership":
-      assertEntity(value.entity); assertSafeId(value.tagId, "tagId"); assertBoolean(value.present, "present"); assertRevision(value.expectedRevision); assertOptionalTimestamps(value); return;
+      assertEntity(value.entity); assertSafeId(value.tagId, "tagId"); assertBoolean(value.present, "present"); assertRevision(value.expectedRevision); assertOptionalTimestamps(value);
+      assertOptionalTagMembershipMethod(value.method); return;
     case "annotation.delete":
       assertEntity(value.entity); assertRevision(value.expectedEntityRevision); return;
     case "taxonomy.upsert":
@@ -514,6 +537,7 @@ function assertAnnotationSnapshot(value: unknown) {
     assertSafeId(tagId, "tagId");
     if (!isRecord(membership)) fail("Invalid membership state");
     assertBoolean(membership.value, "membership"); assertRevision(membership.revision);
+    assertOptionalTagMembershipMethod(membership.method);
   });
   assertRevision(value.entityRevision); assertBoolean(value.deleted, "deleted");
   assertOptionalTimestamps(value);

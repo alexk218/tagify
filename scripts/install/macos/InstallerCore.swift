@@ -627,7 +627,8 @@ final class TagifyInstaller {
                 throw InstallerFailure(message: "Your installed Tagify version couldn't be identified. Nothing has changed. View details for help before replacing it.")
             }
             var tagifyRelease: Release?
-            var keepTagify = intent != .update && installedTagify != nil || installedTagify?.prerelease != nil
+            // An update replaces an installed beta only when the stable release is newer (checked below).
+            var keepTagify = intent != .update && installedTagify != nil
             if !keepTagify {
                 let latest = try release("alexk218/tagify")
                 _ = try latest.asset(repository: "alexk218/tagify", architecture: architecture)

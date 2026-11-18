@@ -1,0 +1,285 @@
+.rows {
+  display: grid;
+  list-style: none;
+  margin: 0 -8px;
+  padding: 0;
+}
+
+/* Cover beside the song; a thin rule between songs instead of a block per row. */
+.row {
+  border-radius: 6px;
+  column-gap: 14px;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  padding: 12px 8px;
+  position: relative;
+}
+
+/* Clicking a row locks it in the editor above, as in Tagged Tracks. */
+.rowLockable {
+  cursor: pointer;
+}
+
+/* Locked in the editor: the same blue as the locked song in Tagged Tracks. */
+.rowActive,
+.rowActive:hover {
+  background: rgb(30 144 255 / 12%);
+  box-shadow: inset 0 0 0 1px rgb(30 144 255 / 40%);
+  cursor: default;
+}
+
+.rowActive .songName {
+  color: #1e90ff;
+}
+
+.rowActive + .row::before,
+.row:has(+ .rowActive)::before {
+  border-top-color: transparent;
+}
+
+.hide:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
+.titleLine {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rating {
+  align-items: center;
+  color: #f5c518;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  gap: 3px;
+}
+
+.hide {
+  align-items: center;
+  align-self: start;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  width: 28px;
+}
+
+.row:hover .hide,
+.rowActive .hide,
+.hide:focus-visible {
+  opacity: 1;
+}
+
+.hide:hover {
+  background: rgb(255 255 255 / 10%);
+  color: var(--spice-text);
+}
+
+.row + .row::before {
+  border-top: 1px solid rgb(255 255 255 / 7%);
+  content: "";
+  left: 8px;
+  position: absolute;
+  right: 8px;
+  top: 0;
+}
+
+.row:hover {
+  background: rgb(255 255 255 / 3%);
+}
+
+.cover {
+  background: rgb(255 255 255 / 8%);
+  border-radius: 4px;
+  height: 48px;
+  object-fit: cover;
+  width: 48px;
+}
+
+.body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.song {
+  justify-self: start;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.songButton {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.songButton:hover .songName {
+  text-decoration: underline;
+}
+
+.songButton:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
+.songName {
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "Evanescence · Tagged by @ana, @sam +7" on one line. */
+.meta {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artist {
+  color: var(--spice-text);
+  opacity: 0.8;
+}
+
+/* Tag chips match Tagged Tracks' own tag pills: dark fill, no outline; on the song = the accented green tint. */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 8px;
+  min-width: 0;
+}
+
+.tag,
+.more {
+  align-items: center;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 4px;
+  height: 22px;
+  max-width: 200px;
+  padding: 0 8px 0 6px;
+}
+
+.tag {
+  background: rgb(0 0 0 / 30%);
+  border: 0;
+  border-radius: 12px;
+  color: var(--spice-subtext);
+}
+
+.tag:hover:not(:disabled),
+.tag:focus-visible {
+  background: rgb(255 255 255 / 10%);
+  color: var(--spice-text);
+}
+
+.tag:disabled {
+  cursor: progress;
+}
+
+/* Not connected: the tag shows but can't be added. */
+.tagReadOnly {
+  cursor: default;
+  padding: 0 8px;
+}
+
+.tag.tagReadOnly:hover:not(:disabled) {
+  background: rgb(0 0 0 / 30%);
+  color: var(--spice-subtext);
+}
+
+/* On the song: tinted green, so on and off read at a glance; clicking again takes it off. */
+.tagOn {
+  background: color-mix(in srgb, rgb(0 0 0 / 24%) 68%, rgb(30 215 96 / 30%) 32%);
+  box-shadow: inset 0 0 0 1px rgb(30 215 96 / 45%);
+  color: var(--spice-text);
+}
+
+.tagOn svg {
+  color: var(--spice-button);
+}
+
+.tagOn:hover:not(:disabled) {
+  background: rgb(241 94 108 / 12%);
+  box-shadow: inset 0 0 0 1px rgb(241 94 108 / 45%);
+}
+
+.tagOn:hover:not(:disabled) svg {
+  color: #f15e6c;
+}
+
+.tag[aria-busy="true"] {
+  opacity: 0.6;
+}
+
+.tag svg {
+  flex: 0 0 auto;
+  height: 11px;
+  width: 11px;
+}
+
+.tagName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* How many members used the tag. */
+.count {
+  color: var(--spice-subtext);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.more {
+  background: transparent;
+  border: 0;
+  color: var(--spice-subtext);
+  padding: 0 6px;
+}
+
+.more:hover {
+  color: var(--spice-text);
+}
+
+.tag:focus-visible,
+.more:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
+.error {
+  color: var(--spice-notification-error, #f15e6c);
+  font-size: 13px;
+  margin: 0;
+}

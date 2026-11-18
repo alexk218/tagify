@@ -126,6 +126,22 @@ describe("Keeping Community playlists in Spotify", () => {
     expect(playlistWriteNotice(run)).toBeNull();
   });
 
+  it("leaves a smart playlist Tagify fills itself to that fill, so it isn't written twice", async () => {
+    const { writer } = spotify();
+    const own = spotifyId(42);
+    const { reports, request } = community([playlist(1, { spotifyPlaylistId: own }), playlist(2)]);
+    const desktopFills = vi.fn(async (communityId: string) => (communityId === entity(1) ? own : null));
+    const run = await runPlaylistWrites(session, writer, capability, memoryCreated(), request, undefined, desktopFills);
+    expect(run).toEqual({ written: 2, failed: 0, created: ["Playlist 2"] });
+    // Only the playlist Tagify doesn't fill is touched in Spotify.
+    expect(writer.updatePlaylistDetails).not.toHaveBeenCalled();
+    expect(writer.replacePlaylistTracks).toHaveBeenCalledTimes(1);
+    expect(reports[0]).toEqual([
+      { id: entity(1), result: "written", spotifyPlaylistId: own, fingerprint: "0123456789abcdef" },
+      { id: entity(2), result: "written", spotifyPlaylistId: spotifyId(1), fingerprint: "0123456789abcdef" },
+    ]);
+  });
+
   it("empties a playlist whose songs all fell out of its rules", async () => {
     const { playlists, writer } = spotify();
     const id = await writer.createPrivatePlaylist("Playlist 1", "");

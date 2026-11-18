@@ -1,0 +1,138 @@
+.popover {
+  position: fixed;
+  z-index: 10000;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 18px;
+  background: #181818;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgb(0 0 0 / 55%);
+  animation: phoneIn 140ms ease-out;
+}
+
+@keyframes phoneIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.title {
+  margin: 0;
+  color: var(--spice-text);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.lead,
+.hint {
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.hint {
+  font-size: 12px;
+}
+
+.app {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.qr {
+  flex: none;
+  border-radius: 8px;
+}
+
+.appCopy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.appName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.android {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.notified {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: #1ed760;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.storeLink {
+  align-self: flex-start;
+  padding: 7px 12px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--spice-text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.storeLink:hover {
+  background: rgb(255 255 255 / 8%);
+  border-color: rgb(255 255 255 / 35%);
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  color: var(--spice-subtext);
+  font-size: 12px;
+}
+
+.hideLink {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--spice-text);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+

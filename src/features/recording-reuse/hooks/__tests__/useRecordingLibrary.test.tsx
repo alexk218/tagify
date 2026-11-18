@@ -8,6 +8,7 @@ import { spotifyApiService } from "@/services/SpotifyApiService";
 import { trackEditHistory } from "@/services/TrackEditHistory";
 import { defaultTagData } from "@/constants/defaultTagData";
 import type { TrackData } from "@/types/tagData";
+import { collapseRecordingEntries, recordingDisplayKeys } from "../../utils/recordingLibrary";
 const uri = (index: number) => `spotify:track:${String(index).padStart(22, "0")}`;
 const identity = { isrc: "USABC2400001", artistIds: ["a".repeat(22)], durationMs: 180000, name: "Song" };
 const song = { name: "Song", rating: 3, energy: 4, bpm: 120, tagIds: [], dateModified: 20 };
@@ -116,3 +117,21 @@ it("checks duplicate titles gradually in a 50,000-song library without loading t
   for (let index = 0; index < 12; index++) expect(view.result.current[uri(index)].dateModified).toBe(index + 1);
   view.unmount();
 }, 90_000);
+
+it("links copies of one song when a copy still carries a tag that is no longer in the tag list, and shows the song once", async () => {
+  const tag = Object.values(defaultTagData.taxonomy.tagsById)[0].id;
+  const tracks = {
+    [uri(1)]: { ...song, tagIds: [tag], recordingIdentity: identity, dateCreated: 1, dateModified: 20 },
+    [uri(2)]: { ...song, tagIds: [tag, "removed-elsewhere"], recordingIdentity: { ...identity, durationMs: 180400 }, dateCreated: 2, dateModified: 30 },
+  };
+  const view = await preview(tracks);
+  await waitFor(() => expect(view.result.current.tracks[uri(1)].recordingGroupId).toBeTruthy());
+  const linked = view.result.current.tracks;
+  expect(linked[uri(2)].recordingGroupId).toBe(linked[uri(1)].recordingGroupId);
+  // The leftover stays on its own copy; it isn't spread to the other one.
+  expect(linked[uri(1)].tagIds).toEqual([tag]);
+  expect(linked[uri(2)].tagIds).toEqual([tag, "removed-elsewhere"]);
+  expect([linked[uri(1)].dateModified, linked[uri(2)].dateModified]).toEqual([20, 30]);
+  const keys = recordingDisplayKeys(linked, new Set(Object.keys(defaultTagData.taxonomy.tagsById)));
+  expect(collapseRecordingEntries(Object.entries(linked), keys)).toHaveLength(1);
+});

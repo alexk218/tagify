@@ -12,11 +12,11 @@ interface UseFirstRunOptions {
 export function useFirstRun({ tagData, isLoading, isMultiTagging }: UseFirstRunOptions) {
   const taggedTrackCount = Object.keys(tagData.tracks).length;
   const [firstSongPicked, setFirstSongPicked] = useState(false);
-  // Adding members' tags keeps the card open for more songs until the payoff can show.
-  const [addingMembersTags, setAddingMembersTags] = useState(false);
+  // Tagging on the card (one-click tags or members' tags) keeps it open until the payoff can show.
+  const [taggingOnCard, setTaggingOnCard] = useState(false);
   // Tag data is empty until it loads, so only a loaded library can count as having nothing tagged.
   const showFirstSongCard = !isLoading && !firstSongPicked && !isMultiTagging &&
-    (taggedTrackCount === 0 || (addingMembersTags && taggedTrackCount < PAYOFF_MIN_TAGGED));
+    (taggedTrackCount === 0 || (taggingOnCard && taggedTrackCount < PAYOFF_MIN_TAGGED));
   const [inProgress, setInProgress] = useState(isFirstRunInProgress);
 
   const startFirstRun = useCallback(() => {
@@ -24,11 +24,16 @@ export function useFirstRun({ tagData, isLoading, isMultiTagging }: UseFirstRunO
     markFirstRunStarted();
     setInProgress(isFirstRunInProgress());
   }, []);
-  const startWithMembersTags = useCallback(() => {
-    setAddingMembersTags(true);
+  const startTaggingOnCard = useCallback(() => {
+    setTaggingOnCard(true);
     markFirstRunStarted();
     setInProgress(isFirstRunInProgress());
   }, []);
+  // Tags added from Community's "Your songs, tagged by others": only a library still on "Tag your
+  // first song" starts a first run there; a library that is past it never gets the payoff from that list.
+  const startFromCommunityList = useCallback(() => {
+    if (showFirstSongCard) startTaggingOnCard();
+  }, [showFirstSongCard, startTaggingOnCard]);
   const finishFirstRun = useCallback(() => {
     markFirstRunDone();
     setInProgress(false);
@@ -39,5 +44,5 @@ export function useFirstRun({ tagData, isLoading, isMultiTagging }: UseFirstRunO
     [inProgress, isLoading, taggedTrackCount, tagData],
   );
 
-  return { showFirstSongCard, payoffTag, startFirstRun, startWithMembersTags, finishFirstRun };
+  return { showFirstSongCard, payoffTag, startFirstRun, startTaggingOnCard, startFromCommunityList, finishFirstRun };
 }

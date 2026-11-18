@@ -37,3 +37,19 @@ test('the shared contracts parse with the esbuild that builds Tagify', () => {
   }
   assert.deepEqual(failures, []);
 });
+
+// The same old esbuild bundles Tagify's own source, so a `satisfies` there passes tsc and Vitest
+// but stops every build (it happened twice by 2026-11-14).
+test("Tagify's own source parses with the esbuild that builds it", () => {
+  const files = shippedFiles(join(packageRoot, 'src')).filter((file) => !file.includes('__tests__'));
+  assert.ok(files.length > 100, `expected the app sources, found ${files.length} files`);
+  const failures = [];
+  for (const file of files) {
+    try {
+      esbuild.transformSync(readFileSync(file, 'utf8'), { loader: file.endsWith('x') ? 'tsx' : 'ts', sourcefile: file, logLevel: 'silent' });
+    } catch (error) {
+      failures.push(`${file}: ${error.errors?.map((entry) => `${entry.location?.line}:${entry.location?.column} ${entry.text}`).join('; ') ?? error.message}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});

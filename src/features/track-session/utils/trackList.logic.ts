@@ -3,7 +3,7 @@ import { TagTaxonomy } from "@/types/tagData";
 import { parseLocalFileUri } from "@/utils/LocalFileParser";
 import { normalizeCamelotKey, sortCamelotKeys } from "@/utils/camelotKey";
 import { evaluateTagFilterFormula } from "@/utils/tagFilterGroups";
-import { compactSongDetailFilters, matchesSongDetailFilters, releaseYearOf, songDurationMs } from "@/utils/songDetails";
+import { compactSongDetailFilters, filterReleaseYearOf, matchesSongDetailFilters, songDurationMs } from "@/utils/songDetails";
 import {
   buildDuplicateTagNameSet,
   buildResolvedTagLookup,
@@ -140,7 +140,7 @@ export function sortResolvedTags(
 export function sortTrackEntries(
   tracksToSort: TrackListEntry[],
   trackInfo: Record<string, TrackListTrackInfo>,
-  { sortBy, sortOrder }: TrackListSortInputs,
+  { sortBy, sortOrder, communityPeople }: TrackListSortInputs,
 ): TrackListEntry[] {
   return [...tracksToSort].sort((a, b) => {
     const [uriA, dataA] = a;
@@ -176,12 +176,28 @@ export function sortTrackEntries(
         comparison = (dataA.bpm || 0) - (dataB.bpm || 0);
         break;
       }
+      case SORT_OPTIONS.COMMUNITY_PEOPLE: {
+        // Ties (most songs, while Community is still answering) keep Last updated order.
+        comparison = (communityPeople?.get(uriA) ?? 0) - (communityPeople?.get(uriB) ?? 0) ||
+          (dataA.dateModified || 0) - (dataB.dateModified || 0);
+        break;
+      }
       default:
         return 0;
     }
 
     return sortOrder === SORT_ORDERS.DESC ? -comparison : comparison;
   });
+}
+
+/**
+ * Songs listed under Tagged tracks: those with a rating, energy or tag. A
+ * linked release keeps its saved link after its last annotation is cleared,
+ * but it isn't tagged and stays out of the list.
+ */
+export function listedTaggedTrackEntries(trackEntries: TrackListEntry[]): TrackListEntry[] {
+  return trackEntries.filter(([, trackData]) =>
+    trackData.rating > 0 || trackData.energy > 0 || getTrackTagIds(trackData).length > 0);
 }
 
 function getTrackTagIds(trackData: TrackListTrackData): string[] {
@@ -303,7 +319,7 @@ export function collectTrackFilterData(
 
   trackEntries.forEach(([, track]) => {
     if (!hasSongLengths && songDurationMs(track.durationMs) !== null) hasSongLengths = true;
-    const releaseYear = releaseYearOf(track.releaseDate);
+    const releaseYear = filterReleaseYearOf(track);
     if (releaseYear !== null) releaseYears.add(releaseYear);
     if (track.rating > 0) {
       ratings.add(track.rating);

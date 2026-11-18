@@ -540,13 +540,14 @@ describe("PlaylistDetails", () => {
       albumImageUrl: null,
     };
     expect(props.onApplyTrackUpdates).toHaveBeenCalledWith([
-      { trackUri: "spotify:track:rated", toAdd: ["ambient"], toRemove: [], albumDetails },
+      { trackUri: "spotify:track:rated", toAdd: ["ambient"], toRemove: [], albumDetails, tagMethod: "bulk" },
       {
         trackUri: "spotify:track:new-a",
         toAdd: ["rock", "ambient"],
         toRemove: [],
         newRating: 4,
         albumDetails,
+        tagMethod: "bulk",
       },
       {
         trackUri: "spotify:track:new-b",
@@ -554,6 +555,7 @@ describe("PlaylistDetails", () => {
         toRemove: [],
         newRating: 4,
         albumDetails,
+        tagMethod: "bulk",
       },
     ]);
     expect(Spicetify.showNotification).toHaveBeenCalledWith(

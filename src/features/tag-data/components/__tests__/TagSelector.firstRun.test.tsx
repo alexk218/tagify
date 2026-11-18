@@ -33,14 +33,14 @@ const withMetal = buildCategoryTree(planTastePacksForTaxonomy(defaultTagData.tax
 it("opens taste packs added while a new library's picker is open, keeping what the person closed", async () => {
   const { rerender } = render(<TagSelector {...props} expandForFirstRun />);
   expect(await screen.findByRole("button", { name: "Rock" })).toBeVisible();
-  // The person closes Era & Decade, then adds a pack.
-  fireEvent.click(screen.getByText("Era & Decade"));
-  expect(screen.queryByRole("button", { name: "2010s" })).toBeNull();
+  // The person closes Era & Feel, then adds a pack.
+  fireEvent.click(screen.getByText("Era & Feel"));
+  expect(screen.queryByRole("button", { name: "Retro" })).toBeNull();
 
   rerender(<TagSelector {...props} categories={withMetal} expandForFirstRun />);
 
   expect(await screen.findByRole("button", { name: "Nu Metal" })).toBeVisible();
-  expect(screen.queryByRole("button", { name: "2010s" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retro" })).toBeNull();
 });
 
 it("opens taste packs added with every group closed, and only them", async () => {

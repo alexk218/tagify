@@ -1,9 +1,10 @@
-import type { SyncEntityRefV1 } from "@tagify/sync-contracts";
+import type { SyncEntityRefV1, TagMembershipMethod } from "@tagify/sync-contracts";
 import type { ArtistData, PlaylistData, TagTaxonomy, TrackData } from "@/types/tagData";
 import { normalizeCamelotKey } from "@/utils/camelotKey";
 import { withoutUntouchedTastePacks } from "@/utils/tastePackTaxonomy";
+import { isOnboardingPreviewActive, onboardingPreviewDatabaseName } from "@/features/onboarding/preview/onboardingPreview";
 
-export const TAGIFY_DATABASE_VERSION = 12;
+export const TAGIFY_DATABASE_VERSION = 13;
 export const SYNC_STORES = {
   OUTBOX: "sync-outbox",
   STATE: "sync-state",
@@ -13,6 +14,8 @@ export const SYNC_STORES = {
   RECOVERY_CHECKPOINT: "sync-recovery-checkpoint",
   PRIVATE_NOTES: "private-notes",
 } as const;
+/** The sync-state record of how far the library history catch-up got (LibraryHistoryBackfill.ts). */
+export const HISTORY_BACKFILL_STATE_KEY = "history-backfill";
 export const STATS_BASELINE_CHANGED_EVENT = "tagify:statsBaselineChanged";
 export const SYNC_OUTBOX_CHANGED_EVENT = "tagify:syncOutboxChanged";
 /** Local-file tracks have no outbox intent; this asks sync to back them up. */
@@ -149,6 +152,12 @@ export interface EntityReplaceIntent {
   desired: SyncAnnotationValues & {
     /** Tagify's own first-saved and last-changed times (ISO), so a restore keeps Last Updated order. */
     createdAt?: string; modifiedAt?: string;
+    /**
+     * Tag origin: how this edit changed each tag it added or removed (typed,
+     * bulk, copied...). Only sent to Community, never stored on the record or
+     * in backups. A tag without one is sent without a method (`unknown`).
+     */
+    tagMethods?: Record<string, TagMembershipMethod>;
   };
   /**
    * The annotation just before this edit. Only fields and tags that differ
@@ -238,8 +247,23 @@ export function getActiveSyncAccountId(): string | null {
 }
 
 export function getTagifyDatabaseName(): string {
+  // The onboarding preview opens its own empty library, never the real one.
+  if (isOnboardingPreviewActive()) return onboardingPreviewDatabaseName("tagify-db");
   const accountId = getActiveSyncAccountId();
   return accountId ? `tagify-db:${accountId}` : "tagify-db";
+}
+
+/**
+ * Whether this computer still holds a library from a Community account. Losing the saved
+ * connection leaves that library behind, which tells a lost connection apart from a new user.
+ */
+export async function hasCommunityLibraryOnThisComputer(): Promise<boolean> {
+  try {
+    if (typeof indexedDB?.databases !== "function" || isOnboardingPreviewActive()) return false;
+    return (await indexedDB.databases()).some((database) => database.name?.startsWith("tagify-db:"));
+  } catch {
+    return false;
+  }
 }
 
 export function isActiveSyncDatabase(database: Pick<IDBDatabase, "name"> | null): boolean {
@@ -357,20 +381,118 @@ export function preserveDeviceAnnotation<T extends SyncableEntityData>(incoming:
  * none) so only this edit's changes are sent. Leaving it out sends the whole
  * annotation, as older versions did.
  */
-export function createEntityReplaceIntent(uri: string, storageKind: "track" | "playlist" | "artist", data: SyncableEntityData, batchId: string = crypto.randomUUID(), previous?: SyncableEntityData | null): EntityReplaceIntent | null {
+export function createEntityReplaceIntent(uri: string, storageKind: "track" | "playlist" | "artist", data: SyncableEntityData, batchId: string = crypto.randomUUID(), previous?: SyncableEntityData | null, tagMethods?: Record<string, TagMembershipMethod>): EntityReplaceIntent | null {
   const entity = entityFromUri(uri, storageKind);
   if (!entity) return null;
+  const methods = Object.entries(tagMethods ?? {}).filter(([tagId]) => isSyncSafeId(tagId));
   return {
     id: crypto.randomUUID(), batchId, createdAt: Date.now(), type: "entity.replace", entity,
-    desired: { ...syncAnnotationValues(data, storageKind), ...syncTimestamps(data) },
+    desired: { ...syncAnnotationValues(data, storageKind), ...syncTimestamps(data), ...(methods.length ? { tagMethods: Object.fromEntries(methods) } : {}) },
     ...(previous === undefined ? {} : { base: syncAnnotationValues(previous, storageKind) }),
   };
 }
 
+/** Queues a saved record's change, with the tag methods noted for it (see noteTagMethods). */
 export function makeEntityReplaceIntent(uri: string, storageKind: "track" | "playlist" | "artist", data: SyncableEntityData, batchId: string = crypto.randomUUID(), previous?: SyncableEntityData | null): EntityReplaceIntent | null {
-  return isSyncCaptureEnabled()
-    ? createEntityReplaceIntent(uri, storageKind, data, batchId, previous)
-    : null;
+  if (!isSyncCaptureEnabled()) return null;
+  return createEntityReplaceIntent(uri, storageKind, data, batchId, previous, takeTagMethods(uri, previous?.tagIds, data.tagIds));
+}
+
+/**
+ * Tag origin (tagify-community `docs/TAG_ORIGIN_2026-11.md`). Edits are saved
+ * later and in other places than where the member made them (the editors save
+ * after a short delay, linked releases copy edits), so the place that knows
+ * how a tag changed notes it here and the saved change picks it up. A note
+ * only applies to the same change (same item, tag and on/off) on the same
+ * account, is used once and expires, so it can't label a later edit.
+ */
+interface TagMethodNote { method: TagMembershipMethod; present: boolean; at: number }
+
+const TAG_METHOD_NOTE_TTL_MS = 10 * 60_000;
+const MAX_TAG_METHOD_NOTES = 20_000;
+
+declare global {
+  interface Window { __tagifyTagMethodNotes?: Map<string, TagMethodNote> }
+}
+
+// Shared through the window like the persistence flushers: the Tagify page
+// and the background extension are separate bundles.
+function tagMethodNotes(): Map<string, TagMethodNote> {
+  return (window.__tagifyTagMethodNotes ??= new Map());
+}
+
+function tagMethodKey(database: string, uri: string, tagId: string): string {
+  return `${database}\u0000${uri}\u0000${tagId}`;
+}
+
+function changedTags(before: readonly string[] | undefined, after: readonly string[] | undefined): Array<{ tagId: string; present: boolean }> {
+  const was = new Set(before ?? []);
+  const now = new Set(after ?? []);
+  return [
+    ...[...now].filter((tagId) => !was.has(tagId)).map((tagId) => ({ tagId, present: true })),
+    ...[...was].filter((tagId) => !now.has(tagId)).map((tagId) => ({ tagId, present: false })),
+  ];
+}
+
+/** Notes how the tags that differ between `before` and `after` on one item were changed. */
+export function noteTagMethods(uri: string, before: readonly string[] | undefined, after: readonly string[] | undefined, method: TagMembershipMethod, database = getTagifyDatabaseName(), now = Date.now()): void {
+  const notes = tagMethodNotes();
+  for (const { tagId, present } of changedTags(before, after)) {
+    const key = tagMethodKey(database, uri, tagId);
+    notes.delete(key);
+    notes.set(key, { method, present, at: now });
+  }
+  while (notes.size > MAX_TAG_METHOD_NOTES) notes.delete(notes.keys().next().value!);
+}
+
+/** noteTagMethods for every record that changed between two sets of records (null: removed). */
+export function noteRecordTagMethods(before: Record<string, { tagIds?: string[] } | null | undefined>, after: Record<string, { tagIds?: string[] } | null | undefined>, method: TagMembershipMethod, database = getTagifyDatabaseName()): void {
+  for (const [uri, record] of Object.entries(after)) {
+    if (record !== before[uri]) noteTagMethods(uri, before[uri]?.tagIds, record?.tagIds, method, database);
+  }
+}
+
+function readTagMethods(uri: string, before: readonly string[] | undefined, after: readonly string[] | undefined, database: string, now: number, use: boolean): Record<string, TagMembershipMethod> | undefined {
+  const notes = tagMethodNotes();
+  if (!notes.size) return undefined;
+  const methods: Record<string, TagMembershipMethod> = {};
+  for (const { tagId, present } of changedTags(before, after)) {
+    const key = tagMethodKey(database, uri, tagId);
+    const note = notes.get(key);
+    if (!note) continue;
+    if (use) notes.delete(key);
+    if (note.present === present && now - note.at <= TAG_METHOD_NOTE_TTL_MS) methods[tagId] = note.method;
+  }
+  return Object.keys(methods).length ? methods : undefined;
+}
+
+/** The noted methods for this change to one item's tags, used up as they're read. */
+export function takeTagMethods(uri: string, before: readonly string[] | undefined, after: readonly string[] | undefined, database = getTagifyDatabaseName(), now = Date.now()): Record<string, TagMembershipMethod> | undefined {
+  return readTagMethods(uri, before, after, database, now, true);
+}
+
+/** takeTagMethods without using the notes up, for the device's library history. */
+export function peekTagMethods(uri: string, before: readonly string[] | undefined, after: readonly string[] | undefined, database = getTagifyDatabaseName(), now = Date.now()): Record<string, TagMembershipMethod> | undefined {
+  return readTagMethods(uri, before, after, database, now, false);
+}
+
+/**
+ * The latest method for each tag across one item's queued intents (oldest
+ * first). A later change to a tag that carries no method clears an earlier
+ * one, so a typed add followed by an undo isn't sent as typed.
+ */
+export function mergedTagMethods(intents: ReadonlyArray<EntityReplaceIntent | EntityDeleteIntent>): Record<string, TagMembershipMethod> | undefined {
+  const methods: Record<string, TagMembershipMethod> = {};
+  for (const intent of intents) {
+    const own = intent.type === "entity.replace" ? intent.desired.tagMethods ?? {} : {};
+    if (intent.base) {
+      const after = intent.type === "entity.replace" ? intent.desired.tagIds : [];
+      for (const { tagId } of changedTags(intent.base.tagIds, after)) {
+        if (own[tagId]) methods[tagId] = own[tagId]; else delete methods[tagId];
+      }
+    } else Object.assign(methods, own);
+  }
+  return Object.keys(methods).length ? methods : undefined;
 }
 
 export function createEntityDeleteIntent(uri: string, storageKind: "track" | "playlist" | "artist", batchId: string = crypto.randomUUID(), previous?: SyncableEntityData | null): EntityDeleteIntent | null {
@@ -514,9 +636,17 @@ export function classifyLocalReplica(
     Object.keys(ownTags.subcategoriesById).length > 0 ||
     Object.keys(ownTags.tagsById).length > 0;
   const starters = Array.isArray(starterTaxonomies) ? starterTaxonomies as readonly TagTaxonomy[] : [starterTaxonomies as TagTaxonomy];
-  const taxonomy = taxonomyHasNodes ? stableJson(ownTags) : "";
+  // When a tag was created is device-only detail, not a change to the starter tags.
+  const taxonomy = taxonomyHasNodes ? stableJson(withoutTagCreationTimes(ownTags)) : "";
   const taxonomyIsFresh = !taxonomyHasNodes || starters.some((starter) => stableJson(starter) === taxonomy);
   return !hasAnnotations && taxonomyIsFresh ? "fresh-default" : "meaningful-unlinked";
+}
+
+function withoutTagCreationTimes(taxonomy: TagTaxonomy): TagTaxonomy {
+  return {
+    ...taxonomy,
+    tagsById: Object.fromEntries(Object.entries(taxonomy.tagsById).map(([id, { createdAt: _createdAt, ...tag }]) => [id, tag])),
+  };
 }
 
 function stableJson(value: unknown): string {

@@ -1,0 +1,71 @@
+/* In place of other members' tags under a track-list row, for a member who doesn't share theirs. */
+.gate {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 22%);
+  color: var(--spice-text);
+  font-size: 13px;
+}
+
+.text {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--spice-subtext);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.share,
+.later {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.share {
+  border: 1px solid transparent;
+  background: var(--spice-button);
+  color: var(--spice-text);
+}
+
+.share:hover {
+  filter: brightness(1.08);
+}
+
+.later {
+  border: 1px solid var(--spice-button-disabled);
+  background: transparent;
+  color: var(--spice-text);
+}
+
+.later:hover {
+  background: rgb(255 255 255 / 6%);
+}
+
+.share:focus-visible,
+.later:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}

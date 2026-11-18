@@ -1,8 +1,10 @@
 import { recordMeaningfulAction } from "@/features/discovery-survey";
+import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import { trackEditHistory, type EditSession } from "@/services/TrackEditHistory";
 import { expandRecordingEdits } from "@/features/recording-reuse/utils/recordingReuse";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
-import { flushLocalPersistence, getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
+import { flushLocalPersistence, getTagifyDatabaseName, noteRecordTagMethods } from "@/services/sync/SyncLocalState";
+import type { TagMembershipMethod } from "@tagify/sync-contracts";
 import { Dispatch, MutableRefObject, SetStateAction, useCallback, useRef } from "react";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { spotifyService } from "@/services/SpotifyService";
@@ -63,10 +65,13 @@ export function useTagDataTrackActions({
   emitUserTrackAddedEvent,
 }: UseTagDataTrackActionsOptions) {
   const commitDataSnapshot = useCallback(
-    (nextData: TagDataStructure, session: EditSession | null = null): void => {
+    (nextData: TagDataStructure, session: EditSession | null = null, tagMethod?: TagMembershipMethod): void => {
       const current = latestTagDataRef.current.tracks;
       const edits = Object.fromEntries(Object.entries(nextData.tracks).filter(([uri, track]) => track !== current[uri]));
-      nextData = { ...nextData, tracks: { ...nextData.tracks, ...expandRecordingEdits(current, edits) } as Record<string, TrackData> };
+      const expanded = expandRecordingEdits(current, edits);
+      nextData = { ...nextData, tracks: { ...nextData.tracks, ...expanded } as Record<string, TrackData> };
+      // Linked releases keep the method of the edit they copy.
+      if (tagMethod) noteRecordTagMethods(current, { ...edits, ...expanded }, tagMethod);
       trackEditHistory.record(session, current, nextData.tracks, "saved");
       latestTagDataRef.current = nextData;
       setTagData(nextData);
@@ -201,6 +206,11 @@ export function useTagDataTrackActions({
           playlists: withoutRemovedTags(currentData.playlists, removed, isPlaylistEmpty),
           artists: withoutRemovedTags(currentData.artists, removed, isArtistEmpty),
         };
+        // Deleting a tag takes it off everything at once.
+        if (removed.size) for (const key of ["tracks", "playlists", "artists"] as const) {
+          const before: Record<string, { tagIds?: string[] } | undefined> = currentData[key];
+          noteRecordTagMethods(before, Object.fromEntries(Object.keys(before).map((uri) => [uri, (nextData[key] as Record<string, { tagIds?: string[] } | undefined>)[uri] ?? null])), "bulk");
+        }
 
         latestTagDataRef.current = nextData;
         return nextData;
@@ -325,6 +335,8 @@ export function useTagDataTrackActions({
       trackUri: string,
       tagId: string,
       metadata?: TrackMetadata,
+      // Tag origin when this adds the tag: typed in the editor, or copied from other members' tags.
+      tagMethod: TagMembershipMethod = "typed",
     ) => {
       const session = trackEditHistory.capture("single", [trackUri]);
       if (session && isHistoryBusy()) return;
@@ -343,7 +355,7 @@ export function useTagDataTrackActions({
         withToggledTrackTag(trackData, tagId, now),
       );
 
-      commitDataSnapshot(nextData, session);
+      commitDataSnapshot(nextData, session, tagMethod);
       void recordMeaningfulAction("tagging", undefined, 1);
       syncTrackAfterDelay(trackUri);
 
@@ -424,6 +436,7 @@ export function useTagDataTrackActions({
       );
 
       commitDataSnapshot(nextData, session);
+      if ((trackData.energy ?? 0) !== energy) recordProductInteraction("energy_set", { edit_surface: "tagify_page" });
       syncTrackAfterDelay(trackUri);
 
       if (createdTrack && finalTrackData !== null) {

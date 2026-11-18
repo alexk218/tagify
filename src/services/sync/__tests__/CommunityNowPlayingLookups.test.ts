@@ -2,7 +2,7 @@ import { assertNowPlayingLookupAnswers } from "@tagify/sync-contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { SpotifyTrackSearchResult } from "@/services/SpotifyTrackSearch";
 import {
-  NOT_A_FILLER_RECHECK_MS, NOW_PLAYING_LOOKUP_DAILY_SEARCHES, NOW_PLAYING_LOOKUP_POLL_MS, NowPlayingLookupScheduler, newNowPlayingLookupMemory,
+  LOOKUP_NUDGE_MIN_GAP_MS, NOT_A_FILLER_RECHECK_MS, NOW_PLAYING_LOOKUP_DAILY_SEARCHES, NOW_PLAYING_LOOKUP_POLL_MS, NowPlayingLookupScheduler, newNowPlayingLookupMemory,
   runNowPlayingLookups, withinLookupDailyCap, type NowPlayingLookupRun, type NowPlayingLookupSources,
 } from "../CommunityNowPlayingLookups";
 
@@ -200,5 +200,116 @@ describe("Now playing lookup scheduling", () => {
     await value.pending;
     expect(run).toHaveBeenCalledTimes(1);
     expect(waits).toEqual([]);
+  });
+});
+
+describe("Now playing lookup nudges", () => {
+  // A scheduler on a hand-turned clock, whose runs finish only when the test says so.
+  function nudged() {
+    let clock = 1_000_000;
+    let armed: { fire: () => void; at: number } | null = null;
+    const waits: number[] = [];
+    const finishes: Array<(run: Partial<NowPlayingLookupRun>) => void> = [];
+    const run = vi.fn(() => new Promise<NowPlayingLookupRun>((resolve) => {
+      finishes.push((result) => resolve({ filler: true, lookups: 0, answered: 0, searches: 0, ...result }));
+    }));
+    const value = new NowPlayingLookupScheduler({
+      run, now: () => clock,
+      setTimer: (fire, ms) => { armed = { fire, at: clock + ms }; waits.push(ms); return armed; },
+      clearTimer: (timer) => { if (armed === timer) armed = null; },
+    });
+    const finish = async (result: Partial<NowPlayingLookupRun> = {}) => { finishes.shift()!(result); await value.pending; };
+    /** Moves the clock on, firing the timer when it comes due. */
+    const advance = async (ms: number) => {
+      clock += ms;
+      if (armed && armed.at <= clock) { const { fire } = armed; armed = null; fire(); }
+      await Promise.resolve();
+    };
+    const armedIn = () => (armed ? armed.at - clock : null);
+    return { value, run, waits, finish, advance, armedIn };
+  }
+
+  it("asks at once, instead of at the next poll, when a filler between polls hears of a request", async () => {
+    const { value, run, waits, finish, advance, armedIn } = nudged();
+    value.poll();
+    await finish();
+    expect(armedIn()).toBe(NOW_PLAYING_LOOKUP_POLL_MS);
+    await advance(3_000);
+    value.nudge();
+    // The 15-second poll is replaced by a run right away.
+    expect(armedIn()).toBe(0);
+    await advance(0);
+    expect(run).toHaveBeenCalledTimes(2);
+    await finish();
+    expect(waits).toEqual([NOW_PLAYING_LOOKUP_POLL_MS, 0, NOW_PLAYING_LOOKUP_POLL_MS]);
+  });
+
+  it("follows a run in progress with exactly one more, however many requests arrive during it", async () => {
+    const { value, run, finish, advance, armedIn } = nudged();
+    value.poll();
+    await advance(1_500);
+    value.nudge();
+    value.nudge();
+    value.nudge();
+    expect(run).toHaveBeenCalledTimes(1);
+    await finish();
+    expect(armedIn()).toBe(0);
+    await advance(0);
+    expect(run).toHaveBeenCalledTimes(2);
+    await finish();
+    // Nothing more was announced, so the ordinary poll follows.
+    expect(armedIn()).toBe(NOW_PLAYING_LOOKUP_POLL_MS);
+  });
+
+  it("starts a nudge's run at least a second after the previous run", async () => {
+    const { value, run, finish, advance, armedIn } = nudged();
+    value.poll();
+    await finish();
+    value.nudge();
+    // The first run started just now: the nudge's run waits out the second.
+    expect(armedIn()).toBe(LOOKUP_NUDGE_MIN_GAP_MS);
+    await advance(400);
+    value.nudge();
+    expect(armedIn()).toBe(600);
+    await advance(600);
+    expect(run).toHaveBeenCalledTimes(2);
+    // A nudge during that run, which finishes quickly, also waits out the second.
+    value.nudge();
+    await advance(100);
+    await finish();
+    expect(armedIn()).toBe(900);
+  });
+
+  it("leaves back-offs, Spotify's pauses, the allowance and non-filler desktops alone", async () => {
+    const stops: Array<Partial<NowPlayingLookupRun>> = [
+      { stopped: "spotify_paused", retryAfterSeconds: 90 }, { stopped: "spotify_paused" }, { stopped: "budget" }, { stopped: "network" },
+      { stopped: "throttled" }, { stopped: "unsupported" }, { stopped: "signed_out" }, { stopped: "paused" }, { stopped: "spotify" },
+      { stopped: "search_unavailable" }, { filler: false },
+    ];
+    for (const stop of stops) {
+      const { value, run, finish, armedIn } = nudged();
+      value.poll();
+      // Heard during the run, and again after it.
+      value.nudge();
+      await finish(stop);
+      const wait = armedIn();
+      expect(wait).toBeGreaterThanOrEqual(NOW_PLAYING_LOOKUP_POLL_MS);
+      value.nudge();
+      expect(armedIn()).toBe(wait);
+      expect(run).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("ignores nudges before sync starts and after it stops", async () => {
+    const { value, run, finish, armedIn } = nudged();
+    value.nudge();
+    expect(run).not.toHaveBeenCalled();
+    expect(armedIn()).toBeNull();
+    value.poll();
+    await finish();
+    value.stop();
+    value.nudge();
+    expect(armedIn()).toBeNull();
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });

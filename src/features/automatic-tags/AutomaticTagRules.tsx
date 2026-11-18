@@ -10,6 +10,7 @@ import { planRule, ruleCandidates, spotifyScope, type AutomaticTagRule, type Tag
 import { readRules, subscribeRules, writeRules } from "./store";
 import { useRuleContext } from "./useAutomaticTags";
 import { checkRuleDetails, readRuleFacts } from "./facts";
+import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import styles from "./AutomaticTagRules.module.css";
 
 interface Props { data: TagDataStructure; onApply: (updates: BatchTagUpdate[]) => Promise<void>; onUndo: () => Promise<void> }
@@ -106,7 +107,7 @@ function RuleDialog({ data, onApply, onUndo, onClose }: Props & { onClose: () =>
       const context = { ...latest.current.context, facts: Object.fromEntries([...new Set([...Object.keys(latest.current.context.facts), ...Object.keys(publicFacts)])].map(uri => [uri, { ...latest.current.context.facts[uri], ...publicFacts[uri] }])) };
       const plan = planRule(saved, latest.current.data, context);
       if (JSON.stringify(plan.updates) !== JSON.stringify(preview.plan.updates)) throw new Error("Your songs or their details changed. Preview again to see the current changes.");
-      if (plan.updates.length) await onApply(plan.updates);
+      if (plan.updates.length) { await onApply(plan.updates); recordProductInteraction("auto_tags_applied"); }
       checkAccount();
       writeRules(readRules().map(r => r.id === saved.id ? { ...r, enabled: keepApplying } : r));
       setMessage(`${plan.updates.length} song${plan.updates.length === 1 ? "" : "s"} updated.${keepApplying ? " This rule will keep applying as song details become available." : " The rule is saved and paused."}`);

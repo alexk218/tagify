@@ -24,9 +24,7 @@ import {
   faMusic,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
-import {
-  findDisplayTagName,
-} from "@/utils/tagTaxonomy";
+import { createDisplayTagNameResolver } from "@/utils/tagTaxonomy";
 import { formatTagFilterFormula } from "@/utils/tagFilterGroups";
 import {
   parsePersonalSmartPlaylistBackup,
@@ -37,6 +35,22 @@ import {
 import { parseSmartPlaylistShare, type SmartPlaylistRecipeSelection } from "@/features/smart-playlists/utils/smartPlaylist.recipes";
 import type { SmartPlaylistRecipeBundle } from "../model/smartPlaylist.types";
 import SmartPlaylistSharingDialog from "./SmartPlaylistSharingDialog";
+import {
+  COMMUNITY_MADE_ID_PREFIX,
+  communityPlaylistCriteria,
+  CommunitySmartPlaylistRow,
+  minPeopleLabel,
+  NewFromCommunityBadge,
+  sourceLabel,
+  useCommunityOnlySmartPlaylists,
+  useNewFromCommunity,
+} from "./CommunitySmartPlaylists";
+import {
+  removeCommunitySmartPlaylist,
+  requestSmartPlaylistRefresh,
+  type CommunityOnlySmartPlaylist,
+} from "@/services/sync/SmartPlaylistCommunityList";
+import { openPhoneStore } from "@/features/phone-app";
 import {
   clearExplicitSmartPlaylistClear,
   markSmartPlaylistsExplicitlyCleared,
@@ -59,7 +73,19 @@ type PlaylistSortOption =
   (typeof PLAYLIST_SORT_OPTIONS)[keyof typeof PLAYLIST_SORT_OPTIONS];
 type SortOrder = (typeof SORT_ORDERS)[keyof typeof SORT_ORDERS];
 
+/** One row of the list: Tagify's own playlist, or one Community fills. */
+type ListedPlaylist =
+  | { kind: "local"; playlist: SmartPlaylistCriteria; name: string; createdAt: number }
+  | { kind: "community"; playlist: CommunityOnlySmartPlaylist; name: string; createdAt: number };
+
 const DATA_UPDATE_RECHECK_DELAY_MS = 2_000;
+
+/** Lets clicks, hovers and typing through between pieces of a long check. */
+const yieldToBrowser = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+/** Identifies a setup's rules, so a count is reused only while the rules are the same. */
+const matchCountKey = (playlist: SmartPlaylistCriteria) =>
+  `${playlist.id ?? playlist.createdAt}:${JSON.stringify(playlist.criteria)}`;
 
 interface SmartPlaylistModalProps {
   smartPlaylists: SmartPlaylistCriteria[];
@@ -67,7 +93,7 @@ interface SmartPlaylistModalProps {
   tracks?: Record<string, TrackData>;
   onEditPlaylist: (playlist: SmartPlaylistCriteria) => void;
   onUpdateSmartPlaylists: (value: React.SetStateAction<SmartPlaylistCriteria[]>) => Promise<void>;
-  onSyncPlaylist: (playlist: SmartPlaylistCriteria) => Promise<void>;
+  onSyncPlaylist: (playlist: SmartPlaylistCriteria, trigger?: "manual") => Promise<void>;
   onExportSmartPlaylists: (selected?: SmartPlaylistCriteria[], personalBackup?: boolean) => Promise<void> | void;
   onImportSmartPlaylists: (
     data: unknown,
@@ -118,6 +144,14 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
   const [checkFailures, setCheckFailures] = useState<Record<string, SmartPlaylistCheckFailure>>({});
   const [reconnecting, setReconnecting] = useState<Set<string>>(new Set());
   useEffect(() => { if (!sharing) mainDialog.current?.focus(); }, [sharing]);
+  // Smart playlists are one list with Community: read it again whenever the window opens.
+  useEffect(() => { void requestSmartPlaylistRefresh(); }, []);
+  // Playlists Community fills (everyone's tags, one person's tag, Community-only rules) sit in the same list.
+  const communityPlaylists = useCommunityOnlySmartPlaylists();
+  const newFromCommunity = useNewFromCommunity(useMemo(() => [
+    ...communityPlaylists.map((playlist) => playlist.id),
+    ...smartPlaylists.flatMap((playlist) => playlist.id?.startsWith(COMMUNITY_MADE_ID_PREFIX) ? [playlist.id] : []),
+  ], [communityPlaylists, smartPlaylists]));
   const getSyncStatus = (
     playlist: SmartPlaylistCriteria,
   ): "synced" | "needsSync" | "unknown" => {
@@ -172,43 +206,60 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     reader.readAsText(file);
   };
 
-  // Matching every playlist against a large library takes a while, so do it
-  // only when the songs or playlists change, not on every render.
-  const matchingSongCounts = useMemo(() => {
-    const counts = new Map<SmartPlaylistCriteria, number>();
-    if (!tracks) return counts;
-    const recordingKeys = recordingDisplayKeys(tracks);
-    smartPlaylists.forEach((playlist) => {
-      counts.set(playlist, collectMatchingTrackUris(tracks, playlist.criteria, [], recordingKeys)
-        .filter((uri) => uri.startsWith("spotify:track:")).length);
-    });
-    return counts;
-  }, [tracks, smartPlaylists]);
+  // "N songs match" is shown only on setups that aren't connected to a Spotify
+  // playlist. Matching against a large library takes a while, so count only
+  // those, a piece at a time, and keep the last counts on screen meanwhile.
+  const [matchingSongCounts, setMatchingSongCounts] = useState<Map<string, number>>(new Map());
+  useEffect(() => {
+    const unconnected = smartPlaylists.filter((playlist) => !playlist.playlistId);
+    if (!tracks || unconnected.length === 0) return;
+    let active = true;
+    void (async () => {
+      await yieldToBrowser();
+      if (!active) return;
+      const recordingKeys = recordingDisplayKeys(tracks, taxonomy?.tagsById && new Set(Object.keys(taxonomy.tagsById)));
+      const counts = new Map<string, number>();
+      for (const playlist of unconnected) {
+        await yieldToBrowser();
+        if (!active) return;
+        counts.set(matchCountKey(playlist), collectMatchingTrackUris(tracks, playlist.criteria, [], recordingKeys)
+          .filter((uri) => uri.startsWith("spotify:track:")).length);
+      }
+      setMatchingSongCounts(counts);
+    })();
+    return () => { active = false; };
+  }, [tracks, smartPlaylists, taxonomy]);
+  const displayTagName = useMemo(
+    () => createDisplayTagNameResolver(taxonomy, { disambiguate: true }),
+    [taxonomy],
+  );
 
   const filteredAndSortedPlaylists = useMemo(() => {
-    const filtered = smartPlaylists.filter((playlist) =>
-      playlist.playlistName.toLowerCase().includes(searchQuery.toLowerCase()),
-    );
+    const query = searchQuery.toLowerCase();
+    const items: ListedPlaylist[] = [
+      ...smartPlaylists.map((playlist) => ({ kind: "local" as const, playlist, name: playlist.playlistName, createdAt: playlist.createdAt || 0 })),
+      ...communityPlaylists.map((playlist) => ({ kind: "community" as const, playlist, name: playlist.name, createdAt: Date.parse(playlist.createdAt) || 0 })),
+    ];
+    const filtered = items.filter((item) => item.name.toLowerCase().includes(query));
+    const statusOf = (item: ListedPlaylist) => item.kind === "local" ? getSyncStatus(item.playlist) : "synced";
 
     return [...filtered].sort((a, b) => {
       let comparison = 0;
 
       switch (sortBy) {
         case PLAYLIST_SORT_OPTIONS.ALPHABETICAL: {
-          comparison = a.playlistName.localeCompare(b.playlistName);
+          comparison = a.name.localeCompare(b.name);
           break;
         }
 
         case PLAYLIST_SORT_OPTIONS.DATE_CREATED: {
-          const dateA = a.createdAt || 0;
-          const dateB = b.createdAt || 0;
-          comparison = dateA - dateB;
+          comparison = a.createdAt - b.createdAt;
           break;
         }
 
         case PLAYLIST_SORT_OPTIONS.NEEDS_SYNC: {
-          const syncStatusA = getSyncStatus(a);
-          const syncStatusB = getSyncStatus(b);
+          const syncStatusA = statusOf(a);
+          const syncStatusB = statusOf(b);
 
           if (syncStatusA === "needsSync" && syncStatusB !== "needsSync") {
             comparison = -1;
@@ -218,7 +269,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
           ) {
             comparison = 1;
           } else {
-            comparison = a.playlistName.localeCompare(b.playlistName);
+            comparison = a.name.localeCompare(b.name);
           }
           break;
         }
@@ -233,7 +284,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
 
       return comparison;
     });
-  }, [smartPlaylists, searchQuery, sortBy, sortOrder, playlistTrackCounts, verifiedStatuses]);
+  }, [smartPlaylists, communityPlaylists, searchQuery, sortBy, sortOrder, playlistTrackCounts, verifiedStatuses]);
 
   useEffect(() => {
     return () => {
@@ -273,28 +324,50 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
   useEffect(() => {
     let active = true;
     let recheck: ReturnType<typeof setTimeout> | undefined;
-    const fetchCounts = async () => {
+    type PlaylistRead = { playlist: SmartPlaylistCriteria; actual?: string[]; failure?: SmartPlaylistCheckFailure };
+    // Spotify's copies change only when a sync writes them, and a sync updates
+    // the saved playlists, which restarts this check. Other library saves
+    // compare against the copies already read instead of reading every
+    // playlist from Spotify again.
+    let lastReads: PlaylistRead[] | null = null;
+    const fetchCounts = async (readSpotify = true) => {
       clearTimeout(recheck);
-      setIsLoadingCounts(true);
-      setVerifiedStatuses({});
+      const reuseReads = !readSpotify && lastReads !== null;
+      if (!reuseReads) {
+        setIsLoadingCounts(true);
+        setVerifiedStatuses({});
+      }
       const connected = smartPlaylists.filter((p) => p.playlistId);
       let failures: Record<string, SmartPlaylistCheckFailure> = {};
       try {
         const data = await storageService.loadAllStrict();
         if (!active) return;
-        const recordingKeys = recordingDisplayKeys(data.tracks);
-        const results = await Promise.all(connected.map(async (playlist) => {
+        const reads: PlaylistRead[] = reuseReads && lastReads ? lastReads : await Promise.all(connected.map(async (playlist) => {
           try {
-            const actual = await spotifyApiService.getAllTrackUrisInPlaylistStrict(playlist.playlistId);
-            const actualSet = new Set(actual);
-            // Matching local files must be added manually, so their absence isn't a sync failure.
-            const expected = new Set(collectMatchingTrackUris(data.tracks, playlist.criteria, [], recordingKeys).filter((uri) => !uri.startsWith("spotify:local:") || actualSet.has(uri)));
-            const matches = actual.length === expected.size && new Set(actual).size === actual.length && actual.every((uri) => expected.has(uri));
-            return { id: playlist.playlistId, count: actual.length, status: matches ? "synced" as const : "needsSync" as const };
+            return { playlist, actual: await spotifyApiService.getAllTrackUrisInPlaylistStrict(playlist.playlistId) };
           } catch (error) {
-            return { id: playlist.playlistId, status: "unknown" as const, failure: describeSmartPlaylistCheckFailure(error) };
+            return { playlist, failure: describeSmartPlaylistCheckFailure(error) };
           }
         }));
+        if (!active) return;
+        // Only complete reads are reused; a failed one is read again next time.
+        lastReads = reads.every((read) => read.actual) ? reads : null;
+        const recordingKeys = recordingDisplayKeys(data.tracks, data.taxonomy?.tagsById && new Set(Object.keys(data.taxonomy.tagsById)));
+        const results: Array<{ id: string; count?: number; status: "synced" | "needsSync" | "unknown"; failure?: SmartPlaylistCheckFailure }> = [];
+        // Compare one playlist at a time so the window stays responsive.
+        for (const { playlist, actual, failure } of reads) {
+          await yieldToBrowser();
+          if (!active) return;
+          if (!actual) {
+            results.push({ id: playlist.playlistId, status: "unknown", failure });
+            continue;
+          }
+          const actualSet = new Set(actual);
+          // Matching local files must be added manually, so their absence isn't a sync failure.
+          const expected = new Set(collectMatchingTrackUris(data.tracks, playlist.criteria, [], recordingKeys).filter((uri) => !uri.startsWith("spotify:local:") || actualSet.has(uri)));
+          const matches = actual.length === expected.size && actualSet.size === actual.length && actual.every((uri) => expected.has(uri));
+          results.push({ id: playlist.playlistId, count: actual.length, status: matches ? "synced" : "needsSync" });
+        }
         if (active) {
           failures = Object.fromEntries(results.flatMap((result) => result.failure ? [[result.id, result.failure]] : []));
           setPlaylistTrackCounts(Object.fromEntries(results.flatMap((result) => result.count === undefined ? [] : [[result.id, result.count]])));
@@ -317,12 +390,11 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
       if (delay !== undefined) recheck = setTimeout(() => { void fetchCounts(); }, Math.min(delay, 2 ** 31 - 1));
     };
     void fetchCounts();
-    // Saves and syncs arrive in bursts; reading every playlist from Spotify
-    // again for each one makes large libraries unusable, so wait for a pause.
+    // Saves arrive in bursts, so re-check once they pause.
     let pendingRefresh: ReturnType<typeof setTimeout> | undefined;
     const refresh = () => {
       clearTimeout(pendingRefresh);
-      pendingRefresh = setTimeout(() => { void fetchCounts(); }, DATA_UPDATE_RECHECK_DELAY_MS);
+      pendingRefresh = setTimeout(() => { void fetchCounts(false); }, DATA_UPDATE_RECHECK_DELAY_MS);
     };
     window.addEventListener("tagify:dataUpdated", refresh);
     return () => { active = false; clearTimeout(recheck); clearTimeout(pendingRefresh); window.removeEventListener("tagify:dataUpdated", refresh); };
@@ -388,7 +460,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     setSyncingPlaylists((prev) => new Set(prev).add(playlist.playlistId));
 
     try {
-      await onSyncPlaylist(playlist);
+      await onSyncPlaylist(playlist, "manual");
     } catch (error) {
       console.error("Manual sync failed:", error);
       Spicetify.showNotification("Sync failed", true);
@@ -401,10 +473,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
     }
   };
 
-  const handleRemoveSmartPlaylistTracking = async (target: SmartPlaylistCriteria) => {
-    const playlistId = target.playlistId;
-    const samePlaylist = (item: SmartPlaylistCriteria) => target.id ? item.id === target.id : item === target;
-    let confirmed = true;
+  const confirmStopTracking = (): boolean => {
     const isJsdomEnvironment =
       typeof navigator !== "undefined" &&
       /jsdom/i.test(navigator.userAgent || "");
@@ -417,14 +486,26 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
           "Are you sure you want to stop tracking this smart playlist? This action cannot be undone.",
         );
         if (typeof confirmationResult === "boolean") {
-          confirmed = confirmationResult;
+          return confirmationResult;
         }
       } catch {
-        confirmed = true;
+        return true;
       }
     }
+    return true;
+  };
 
-    if (!confirmed) {
+  /** Remove Tracking on a playlist Community fills: it leaves the list here and on Community; the Spotify playlist stays. */
+  const handleRemoveCommunityPlaylist = (target: CommunityOnlySmartPlaylist) => {
+    if (!confirmStopTracking()) return;
+    void removeCommunitySmartPlaylist(target.id);
+  };
+
+  const handleRemoveSmartPlaylistTracking = async (target: SmartPlaylistCriteria) => {
+    const playlistId = target.playlistId;
+    const samePlaylist = (item: SmartPlaylistCriteria) => target.id ? item.id === target.id : item === target;
+
+    if (!confirmStopTracking()) {
       return;
     }
 
@@ -539,7 +620,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
             <div className={styles.modalHeader}>
               <div className={styles.titleBlock}>
                 <h2 className={styles.modalTitle}>
-                  Smart Playlists ({smartPlaylists.length})
+                  Smart Playlists ({smartPlaylists.length + communityPlaylists.length})
                 </h2>
                 <p className={styles.modalSubtitle}>
                   Create, organize, and share playlists that stay up to date automatically.
@@ -551,7 +632,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                   type="button"
                   className={styles.headerButton}
                   onClick={() => setManualMobileTaggingIntro(true)}
-                  title="Learn how to tag songs from your phone"
+                  title="Tag songs from your phone, with the iPhone app or playlist shortcuts"
                 >
                   <FontAwesomeIcon icon={faMobileScreenButton} size="sm" />
                   Mobile tagging
@@ -721,35 +802,59 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                 </div>
               ) : (
                 <div className={styles.playlistList}>
-                  {filteredAndSortedPlaylists.map((playlist) => {
+                  {filteredAndSortedPlaylists.map((item) => {
+                    const criteria = item.kind === "local" ? item.playlist.criteria : communityPlaylistCriteria(item.playlist);
                     const includeTagFormula = formatTagFilterFormula(
                       {
-                        clauses: playlist.criteria.includeTagClauses,
-                        connectors: playlist.criteria.clauseConnectors,
+                        clauses: criteria.includeTagClauses,
+                        connectors: criteria.clauseConnectors,
                       },
-                      (tagId) =>
-                        findDisplayTagName(taxonomy, tagId, { disambiguate: true }),
+                      displayTagName,
                     );
                     const ratingText = formatRatingFilters(
-                      playlist.criteria.ratingFilters,
+                      criteria.ratingFilters,
                     );
                     const energyText = formatEnergyRange(
-                      playlist.criteria.energyMinFilter,
-                      playlist.criteria.energyMaxFilter,
+                      criteria.energyMinFilter,
+                      criteria.energyMaxFilter,
                     );
                     const bpmText = formatBpmRange(
-                      playlist.criteria.bpmMinFilter,
-                      playlist.criteria.bpmMaxFilter,
+                      criteria.bpmMinFilter,
+                      criteria.bpmMaxFilter,
                     );
                     const camelotFilterText = formatCamelotKeyFilters(
-                      playlist.criteria.camelotKeyFilters,
+                      criteria.camelotKeyFilters,
                     );
                     const camelotText =
                       camelotFilterText ||
                       formatCamelotRange(
-                        playlist.criteria.camelotMinFilter ?? null,
-                        playlist.criteria.camelotMaxFilter ?? null,
+                        criteria.camelotMinFilter ?? null,
+                        criteria.camelotMaxFilter ?? null,
                       );
+                    // Keep all criteria text compact while preserving exact wording.
+                    const criteriaTokens: string[] = [];
+                    if (ratingText) criteriaTokens.push(ratingText);
+                    if (energyText) criteriaTokens.push(energyText);
+                    if (bpmText) criteriaTokens.push(bpmText);
+                    if (camelotText) criteriaTokens.push(`Key: ${camelotText}`);
+                    criteriaTokens.push(...songDetailFilterParts(criteria).map(({ label, value }) => `${label}: ${value}`));
+
+                    if (item.kind === "community") {
+                      const from = sourceLabel(item.playlist);
+                      const people = minPeopleLabel(item.playlist);
+                      return (
+                        <CommunitySmartPlaylistRow
+                          key={item.playlist.id}
+                          playlist={item.playlist}
+                          isNew={newFromCommunity.has(item.playlist.id)}
+                          includeTagFormula={includeTagFormula}
+                          criteriaTokens={[...(from ? [`From: ${from}`] : []), ...(people ? [people] : []), ...criteriaTokens]}
+                          onOpenInSpotify={navigateToPlaylist}
+                          onRemove={handleRemoveCommunityPlaylist}
+                        />
+                      );
+                    }
+                    const playlist = item.playlist;
                     const syncStatus = getSyncStatus(playlist);
                     const notChecked = !isLoadingCounts && !!checkFailures[playlist.playlistId];
                     const currentTrackCount = !playlist.playlistId
@@ -758,15 +863,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                       ? "..."
                       : (playlistTrackCounts[playlist.playlistId] ?? "—");
 
-                    const matchingCount = tracks ? matchingSongCounts.get(playlist) ?? null : null;
-
-                    // Keep all criteria text compact while preserving exact wording.
-                    const criteriaTokens: string[] = [];
-                    if (ratingText) criteriaTokens.push(ratingText);
-                    if (energyText) criteriaTokens.push(energyText);
-                    if (bpmText) criteriaTokens.push(bpmText);
-                    if (camelotText) criteriaTokens.push(`Key: ${camelotText}`);
-                    criteriaTokens.push(...songDetailFilterParts(playlist.criteria).map(({ label, value }) => `${label}: ${value}`));
+                    const matchingCount = tracks && !playlist.playlistId ? matchingSongCounts.get(matchCountKey(playlist)) ?? null : null;
 
                     return (
                       <div
@@ -786,6 +883,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                             >
                               {playlist.playlistName}
                             </h3>
+                            {playlist.id && newFromCommunity.has(playlist.id) ? <NewFromCommunityBadge /> : null}
                             {!playlist.isActive && (
                               <span className={styles.inactiveLabel}>
                                 {playlist.playlistId ? "Inactive" : playlist.source ? "Saved setup" : "Not Connected"}
@@ -968,7 +1066,6 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
             >
               <div className={styles.mobileTaggingIntroHeader}>
                 <div>
-                  <span className={styles.mobileTaggingKicker}>New in Tagify 3.0</span>
                   <h2 id="mobile-tagging-intro-title">
                     <FontAwesomeIcon icon={faMobileScreenButton} />
                     Tag songs from your phone
@@ -1006,6 +1103,18 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
 
               <p className={styles.mobileTaggingNote}>
                 BPM and key stay unchanged because they belong to the recording.
+              </p>
+
+              <p className={styles.mobileTaggingAppNote}>
+                On iPhone? Tagify for iPhone lets you tag and rate songs straight
+                from Spotify&apos;s Share button.{" "}
+                <button
+                  type="button"
+                  className={styles.mobileTaggingAppLink}
+                  onClick={() => openPhoneStore("app_store")}
+                >
+                  Get the app
+                </button>
               </p>
 
               <button

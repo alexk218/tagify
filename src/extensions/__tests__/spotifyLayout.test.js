@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildSpotifyColumnTemplate,
+  buildTagifyGridTemplate,
   getRowItemUri,
   getSpotifyPlayerAnchor,
   getSpotifyRowLayout,
   getSpotifyTracklistHeader,
   getSpotifyTracklists,
   getSpotifyTrackRows,
+  getTagifyColumnWidth,
   insertSpotifyColumn,
+  parseGridTracks,
+  planTagifyColumn,
 } from "../spotifyLayout";
 
 afterEach(() => document.body.replaceChildren());
@@ -83,7 +87,7 @@ describe("Spotify tracklist layouts", () => {
     // jsdom does not inherit custom properties, unlike the real Spotify browser.
     layout.container.style.setProperty("--grid-template-columns", native);
     const template = buildSpotifyColumnTemplate(layout);
-    expect(template).toBe(native.replace("[last]", "[tagify] 150px [last]"));
+    expect(template).toBe(native.replace("[last]", "[tagify] 124px [last]"));
     const previousStyle = layout.container.style.cssText;
     const restore = insertSpotifyColumn(layout, document.createElement("div"), template);
     restore();
@@ -95,20 +99,69 @@ describe("Spotify tracklist layouts", () => {
     const layout = getSpotifyRowLayout(getSpotifyTrackRows(grid)[0]);
     layout.container.style.gridTemplateColumns = "[first] 4fr [var1] 2fr [last] 80px";
     layout.container.style.setProperty("--grid-template-columns", "[index] 16px [first] 4fr [last] 120px");
-    expect(buildSpotifyColumnTemplate(layout)).toBe("[first] 4fr [var1] 2fr [tagify] 150px [last] 80px");
+    expect(buildSpotifyColumnTemplate(layout)).toBe("[first] 4fr [var1] 2fr [tagify] 124px [last] 80px");
   });
 
   it.each(["main-trackList-rowSectionStart", "hashedCell"])("gives unnumbered recommendation titles flexible space without native widths (%s)", (className) => {
     const row = document.createElement("div");
     row.innerHTML = `<div role="gridcell" aria-colindex="1" class="${className}"><a href="/track/song">Not A Lot Left</a></div><div role="gridcell" aria-colindex="2">Album</div><div role="gridcell" aria-colindex="3">Add</div>`;
-    expect(buildSpotifyColumnTemplate(getSpotifyRowLayout(row))).toBe("[first] minmax(0,3fr) [var1] minmax(0,2fr) [tagify] 150px [last] minmax(120px,1fr)");
+    expect(buildSpotifyColumnTemplate(getSpotifyRowLayout(row))).toBe("[first] minmax(0,3fr) [var1] minmax(0,2fr) [tagify] 124px [last] minmax(120px,1fr)");
   });
 
   it("retains track-number spacing for a numbered playlist without native widths", () => {
     const grid = tracklist("legacy");
     const layout = getSpotifyRowLayout(getSpotifyTrackRows(grid)[0]);
     layout.columns[0].className = "main-trackList-rowSectionStart";
-    expect(buildSpotifyColumnTemplate(layout)).toBe("[index] 16px [first] minmax(0,3fr) [var1] minmax(0,2fr) [tagify] 150px [last] minmax(120px,1fr)");
+    expect(buildSpotifyColumnTemplate(layout)).toBe("[index] 16px [first] minmax(0,3fr) [var1] minmax(0,2fr) [tagify] 124px [last] minmax(120px,1fr)");
+  });
+});
+
+describe("Tagify column fitting", () => {
+  // Spotify's resolved widths in Liked Songs at three window sizes (2026-11-15).
+  const wide = "[index] 16px [first] minmax(180px, 4fr) [var1] minmax(120px, 2fr) [var2] minmax(120px, 2fr) [last] minmax(120px, 1fr)";
+  const medium = "[index] 16px [first] minmax(180px, 4fr) [var1] minmax(120px, 2fr) [last] minmax(120px, 1fr)";
+  const narrow = "[index] 16px [first] minmax(180px, 4fr) [last] minmax(120px, 1fr)";
+  const plan = (resolvedTemplate, availableWidth) =>
+    planTagifyColumn({ resolvedTemplate, availableWidth, gap: 16, columnWidth: 124 });
+
+  it("sizes the column to each display mode", () => {
+    expect(getTagifyColumnWidth("combined")).toBe(124);
+    expect(getTagifyColumnWidth("stars")).toBe(84);
+    expect(getTagifyColumnWidth("energy")).toBe(100);
+    expect(getTagifyColumnWidth("tags")).toBe(124);
+    expect(getTagifyColumnWidth(undefined)).toBe(124);
+  });
+
+  it("parses named tracks, including nested functions", () => {
+    expect(parseGridTracks("[index] var(--a, 16px) [first] minmax(var(--b), var(--c, 4fr)) [last] 1fr")).toEqual([
+      { name: "index", size: "var(--a, 16px)" },
+      { name: "first", size: "minmax(var(--b), var(--c, 4fr))" },
+      { name: "last", size: "1fr" },
+    ]);
+  });
+
+  it("keeps every Spotify column when there is room", () => {
+    expect(plan(wide, 1150)).toEqual({ show: true, trackNames: ["index", "first", "var1", "var2", "last"], hiddenVariables: [] });
+  });
+
+  it("hides Date added before Album when space runs short", () => {
+    // Needs 16+180+120+120+120+124 + 5 gaps = 760.
+    expect(plan(wide, 712)).toEqual({ show: true, trackNames: ["index", "first", "var1", "last"], hiddenVariables: [1] });
+    expect(plan(medium, 569)).toEqual({ show: true, trackNames: ["index", "first", "last"], hiddenVariables: [0] });
+    expect(plan(wide, 520)).toEqual({ show: true, trackNames: ["index", "first", "last"], hiddenVariables: [1, 0] });
+  });
+
+  it("hides Tagify only when title and duration alone fill the row", () => {
+    expect(plan(narrow, 488)).toMatchObject({ show: true, hiddenVariables: [] });
+    expect(plan(narrow, 351)).toEqual({ show: false, trackNames: ["index", "first", "last"], hiddenVariables: [] });
+  });
+
+  it("builds the template from Spotify's own sizes so its variables stay live", () => {
+    const native = "[index] var(--index-column-width, 16px) [first] minmax(var(--first-min-width), 4fr) [var1] minmax(var(--var1-min-width), 2fr) [last] minmax(var(--last-min-width), 1fr)";
+    expect(buildTagifyGridTemplate(native, { show: true, trackNames: ["index", "first", "last"], columnWidth: 124 }))
+      .toBe("[index] var(--index-column-width, 16px) [first] minmax(var(--first-min-width), 4fr) [tagify] 124px [last] minmax(var(--last-min-width), 1fr)");
+    expect(buildTagifyGridTemplate(native, { show: false, trackNames: ["index", "first", "var1", "last"], columnWidth: 124 }))
+      .toBe("[index] var(--index-column-width, 16px) [first] minmax(var(--first-min-width), 4fr) [var1] minmax(var(--var1-min-width), 2fr) [last] minmax(var(--last-min-width), 1fr)");
   });
 });
 

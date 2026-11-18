@@ -1,7 +1,7 @@
 import { IDBFactory } from "fake-indexeddb";
 import { vi } from "vitest";
-import type { AnnotationSnapshotV1, DurableAppStateDocumentV2, LibrarySnapshotV2, SyncMutationV2, TaxonomyNodeSnapshotV1 } from "@tagify/sync-contracts";
-import { entityKeyV1 } from "@tagify/sync-contracts";
+import type { AnnotationSnapshotV1, DurableAppStateDocumentV2, LibraryHistoryBackfillRowV1, LibraryHistoryBackfillWindowV1, LibrarySnapshotV2, SyncMutationV2, TaxonomyNodeSnapshotV1 } from "@tagify/sync-contracts";
+import { assertLibraryHistoryBackfill, entityKeyV1, LIBRARY_HISTORY_BACKFILL_PATH, LIBRARY_HISTORY_BACKFILL_PROTOCOL_VERSION } from "@tagify/sync-contracts";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { storageService } from "@/services/storage/StorageService";
 import { setDesktopSyncConfiguration, type DesktopSyncConfiguration } from "../SyncLocalState";
@@ -29,6 +29,55 @@ export class FakeCommunity {
   beforeNextPush: (() => void) | null = null;
   /** Called with the new head after another device or the website commits (a Realtime announcement). */
   onForeignCommit: ((headCursor: number) => void) | null = null;
+  /**
+   * The library history catch-up (Community migration 9002), offered when set: the window it
+   * answers and the page size it advertises. Rows are kept once per entity, kind, tag and time.
+   */
+  historyBackfill: (LibraryHistoryBackfillWindowV1 & { maxRows: number }) | null = null;
+  readonly historyRows = new Map<string, LibraryHistoryBackfillRowV1>();
+  /** Every history catch-up request, in order: "GET", or "POST" with the rows sent. */
+  readonly historyRequests: Array<{ method: "GET" } | { method: "POST"; rows: LibraryHistoryBackfillRowV1[] }> = [];
+  /** Answers the next history page with this status instead of saving it. */
+  failNextHistoryPage: number | null = null;
+
+  capabilities() {
+    return {
+      supportedProtocolVersions: [1, 2],
+      ...(this.historyBackfill ? { historyBackfill: { path: LIBRARY_HISTORY_BACKFILL_PATH, protocolVersion: LIBRARY_HISTORY_BACKFILL_PROTOCOL_VERSION, maxRows: this.historyBackfill.maxRows } } : {}),
+    };
+  }
+
+  /** The history catch-up route: GET answers the window, POST saves one page (Community's rules). */
+  private history(method: string, body: unknown) {
+    const window = this.historyBackfill;
+    if (!window) return { status: 404, value: { error: { code: "not_found" } } };
+    if (method === "GET") {
+      this.historyRequests.push({ method: "GET" });
+      const { maxRows: _maxRows, ...answer } = window;
+      return { status: 200, value: answer };
+    }
+    assertLibraryHistoryBackfill(body);
+    this.historyRequests.push({ method: "POST", rows: body.rows });
+    if (this.failNextHistoryPage !== null) {
+      const status = this.failNextHistoryPage;
+      this.failNextHistoryPage = null;
+      return { status, value: { error: { code: "history_unavailable", message: "Try again shortly" } } };
+    }
+    if (body.rows.length > window.maxRows) return { status: 413, value: { error: { code: "too_many_rows" } } };
+    if (!window.enabled) return { status: 200, value: { stored: 0, duplicate: 0, skipped: body.rows.length, disabled: true } };
+    if (body.rows.some((row) => row.occurredAt < Date.parse(window.earliest) || row.occurredAt > Date.parse(window.latest))) {
+      return { status: 422, value: { error: { code: "history_outside_window" } } };
+    }
+    let stored = 0;
+    let duplicate = 0;
+    for (const row of body.rows) {
+      const key = JSON.stringify([row.entity ? entityKeyV1(row.entity) : null, row.kind, row.tagId ?? null, row.occurredAt]);
+      if (this.historyRows.has(key)) { duplicate++; continue; }
+      this.historyRows.set(key, row);
+      stored++;
+    }
+    return { status: 200, value: { stored, duplicate, skipped: 0 } };
+  }
 
   annotation(entity: AnnotationSnapshotV1["entity"]): AnnotationSnapshotV1 {
     const key = entityKeyV1(entity);
@@ -142,7 +191,7 @@ export class FakeCommunity {
   /** Answers the client's requests; install it with `vi.spyOn(globalThis, "fetch")`. */
   readonly fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input));
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
     if (url.pathname === "/api/v2/sync/pull") {
       const after = Number(url.searchParams.get("after") || 0);
@@ -156,6 +205,13 @@ export class FakeCommunity {
     if (url.pathname === "/api/v2/sync/push") return json(this.push(body));
     if (url.pathname === "/api/v2/sync/ack") return json({ acknowledged: true });
     if (url.pathname === "/api/v2/sync/snapshot") return json({ snapshot: this.snapshot() });
+    if (url.pathname === "/api/v2/sync/capabilities") return json(this.capabilities());
+    if (url.pathname === LIBRARY_HISTORY_BACKFILL_PATH) {
+      const answer = this.history(init?.method ?? "GET", body);
+      return json(answer.value, answer.status);
+    }
+    // A reset (backup restored onto Community) only needs to be accepted here.
+    if (url.pathname === "/api/v2/sync/replace") return json({ projection: { complete: true } });
     throw new Error(`The test server does not handle ${url.pathname}`);
   };
 }

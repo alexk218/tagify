@@ -54,7 +54,7 @@ describe("CommunityWorkspace", () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     const { onConnectCommunity, onOpenCloudSync } = renderWorkspace({ connected: false, status: "unlinked" });
 
-    expect(screen.getByRole("heading", { name: "Discover tags. Share your own." })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Share your tags on Community" })).toBeInTheDocument();
     // Local files never publish, so only the three Spotify songs count.
     expect(screen.getByText("3 tags on 3 songs are ready to share.")).toBeInTheDocument();
     expect(screen.getAllByRole("button")).toHaveLength(2);
@@ -70,7 +70,8 @@ describe("CommunityWorkspace", () => {
 
   it("asks to finish connecting while an approval waits in the browser", () => {
     const { onConnectCommunity } = renderWorkspace({ connected: false, status: "unlinked", connectionPending: true });
-    expect(screen.getByText("Finish connecting in your browser, then come back here.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Finish connecting in your browser" })).toBeInTheDocument();
+    expect(screen.getByText("Approve the connection there, then come back here.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Finish connecting" }));
     expect(onConnectCommunity).toHaveBeenCalledTimes(1);
   });
@@ -78,7 +79,8 @@ describe("CommunityWorkspace", () => {
   it("shows how many tags would appear and opens sharing for a member who never chose", () => {
     const { onOpenSharing, onOpenCloudSync } = renderWorkspace({ status: "publication-review-required", sharing: sharingStub(policyFixture({ reviewedAt: null })) });
 
-    expect(screen.getByText("Your tags aren't public yet. 3 tags on 3 songs would appear.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your tags aren't public yet" })).toBeInTheDocument();
+    expect(screen.getByText("3 tags on 3 songs would appear on your profile if you publish.")).toBeInTheDocument();
     expect(screen.getByText("Not public yet · Backed up")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Publish my tags" }));
     expect(onOpenSharing).toHaveBeenCalledTimes(1);
@@ -88,7 +90,8 @@ describe("CommunityWorkspace", () => {
 
   it("counts only what isn't hidden for a member who keeps tags private", () => {
     renderWorkspace({ sharing: sharingStub(policyFixture({ enabled: false, hiddenNodeIds: ["workout"] })) });
-    expect(screen.getByText("You're keeping your tags private. 2 tags on 2 songs would appear if you publish.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your tags are private" })).toBeInTheDocument();
+    expect(screen.getByText("2 tags on 2 songs would appear on your profile if you publish.")).toBeInTheDocument();
     expect(screen.getByText("Private · Backed up")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish my tags" })).toBeInTheDocument();
   });
@@ -97,6 +100,7 @@ describe("CommunityWorkspace", () => {
     const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
     const { onOpenSharing } = renderWorkspace();
 
+    expect(screen.getByRole("heading", { name: "Your tags are public" })).toBeInTheDocument();
     expect(screen.getByText("Public · Backed up")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View my profile" }));
     expect(openSpy).toHaveBeenCalledWith("https://tagify.fm/@alex", "_blank", "noopener,noreferrer");
@@ -111,6 +115,7 @@ describe("CommunityWorkspace", () => {
     vi.spyOn(syncRuntime, "notePublicationReviewed").mockImplementation(() => undefined);
     renderWorkspace({ sharing: sharingStub(paused) });
 
+    expect(screen.getByRole("heading", { name: "Updates are paused" })).toBeInTheDocument();
     expect(screen.getByText("Updates paused · Backed up")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Resume updates" }));
     expect(await screen.findByText("Updates resumed. Your profile catches up within a minute.")).toBeInTheDocument();
@@ -165,6 +170,7 @@ describe("CommunityWorkspace", () => {
   it("shows a revoked device as requiring reconnection instead of connected", () => {
     const { onOpenCloudSync } = renderWorkspace({ status: "reauthorize", sharing: sharingStub(null, { phase: "idle" }) });
 
+    expect(screen.getByRole("heading", { name: "Reconnect this computer" })).toBeInTheDocument();
     expect(screen.getByText("Device revoked · Reconnect required")).toBeInTheDocument();
     expect(screen.queryByText(/Backed up/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Sync" })).not.toBeInTheDocument();

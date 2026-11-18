@@ -141,3 +141,27 @@ describe("rating several new songs at once", () => {
     fetchAudioFeatures.mockRestore();
   });
 });
+
+// Tag origin: the editor notes how a tag changed so the delayed save can send it to Community.
+describe("tag origin from the song editor and tag delete", () => {
+  afterEach(() => { window.__tagifyTagMethodNotes?.clear(); });
+
+  it("notes a tag picked for one song as typed and a deleted tag as bulk, without storing either on the song", async () => {
+    const { takeTagMethods } = await import("@/services/sync/SyncLocalState");
+    const uri = `spotify:track:${"b".repeat(22)}`;
+    const song = { name: "Song", artists: "Artist", rating: 1, energy: 0, bpm: null, tagIds: ["tag_old"], dateCreated: 10, dateModified: 20 };
+    const latestTagDataRef = { current: { ...defaultTagData, tracks: { [uri]: song } } as TagDataStructure };
+    const setTagData = vi.fn((update: TagDataStructure | ((current: TagDataStructure) => TagDataStructure)) => {
+      latestTagDataRef.current = typeof update === "function" ? update(latestTagDataRef.current) : update;
+    });
+    const { result } = renderHook(() => useTagDataTrackActions({ tagData: latestTagDataRef.current, latestTagDataRef, setTagData, emitUserTrackAddedEvent: vi.fn(), onSyncTrack: undefined, onSyncMultipleTracks: undefined }));
+
+    await act(async () => { await result.current.toggleTagSingleTrack(uri, "tag_house"); });
+    expect(latestTagDataRef.current.tracks[uri]).not.toHaveProperty("tagMethods");
+    expect(takeTagMethods(uri, ["tag_old"], ["tag_old", "tag_house"])).toEqual({ tag_house: "typed" });
+
+    act(() => { result.current.replaceTaxonomy(latestTagDataRef.current.taxonomy, ["tag_old"]); });
+    expect(latestTagDataRef.current.tracks[uri].tagIds).toEqual(["tag_house"]);
+    expect(takeTagMethods(uri, ["tag_old", "tag_house"], ["tag_house"])).toEqual({ tag_old: "bulk" });
+  });
+});

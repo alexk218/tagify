@@ -2,6 +2,7 @@ import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityOnboardingModal } from "../CommunityOnboardingModal";
+import { communityPairing } from "../communityPairing";
 import { CloudSyncModal as CloudSyncDialog } from "../CloudSyncModal";
 import { PENDING_PAIRING_STORAGE_KEY, syncPairingService, type ApprovedPairing, type PairingRelationship } from "@/services/sync/SyncPairingService";
 import { setDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
@@ -39,6 +40,7 @@ describe.each([
   let activateCurrentAccount: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    communityPairing.reset();
     syncPairingService.cancelPending();
     localStorage.clear();
     sessionStorage.clear();
@@ -65,6 +67,12 @@ describe.each([
     syncPairingService.cancelPending();
   });
 
+  // Setup checks by itself while it waits; Cloud Sync also has an "I've approved it" button.
+  function checkApproval() {
+    if (Modal === CommunitySetup) act(() => { void communityPairing.check(); });
+    else fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+  }
+
   function approve(relationship: PairingRelationship = "first-link") {
     const approval: ApprovedPairing = { configuration, relationship, previousAccount: null };
     vi.spyOn(syncPairingService, "poll").mockResolvedValue({ status: "approved", approval });
@@ -78,7 +86,7 @@ describe.each([
   it.each(["first-link", "reconnect", "account-switch"] as const)("connects a %s automatically without another confirmation", async (relationship) => {
     const complete = approve(relationship);
     render(<Modal onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+    checkApproval();
 
     if (relationship === "account-switch") expect(await screen.findByText(/Reload Spotify to finish switching accounts/)).toBeInTheDocument();
     else expect(await screen.findByText("Your tags: Not public yet")).toBeInTheDocument();
@@ -106,7 +114,7 @@ describe.each([
     localStorage.setItem("tagify:community-connect-attempt:v1", JSON.stringify({ entry: "prompt" }));
     approve("reconnect");
     render(<Modal onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+    checkApproval();
     expect(await screen.findByText("Your tags: Not public yet")).toBeInTheDocument();
 
     expect(connectEvents()).toEqual([
@@ -118,7 +126,7 @@ describe.each([
   it("measures a failed finish once, then the completed retry", async () => {
     approve().mockRejectedValueOnce(new Error("Connection failed"));
     render(<Modal onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+    checkApproval();
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Your tags: Not public yet")).toBeInTheDocument();
 
@@ -133,9 +141,23 @@ describe.each([
       syncPairingService.cancelPending();
       throw new Error("The device code expired. Start linking again.");
     });
+    const begin = vi.spyOn(syncPairingService, "begin").mockResolvedValue({
+      apiBaseUrl: configuration.apiBaseUrl, deviceCode: "device-code-2", verifier: "verifier-2",
+      userCode: "WXYZ-2345", verificationUri: "https://community.tagify.fm/device?code=WXYZ-2345",
+      expiresAt: Date.now() + 600_000, interval: 60,
+    });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
     render(<Modal onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    checkApproval();
+    if (Modal === CommunitySetup) {
+      // Setup replaces the expired code while it waits, without opening the browser again.
+      expect(await screen.findByText("WXYZ-2345")).toBeInTheDocument();
+      expect(begin).toHaveBeenCalledTimes(1);
+      expect(open).not.toHaveBeenCalled();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    } else {
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+    }
 
     expect(connectEvents()).toEqual([["community_setup_opened", { entry }]]);
   });
@@ -143,7 +165,7 @@ describe.each([
   it("keeps the approval available to retry when connecting fails", async () => {
     const complete = approve().mockRejectedValueOnce(new Error("Connection failed"));
     render(<Modal onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+    checkApproval();
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
 
     expect(await screen.findByText("Your tags: Not public yet")).toBeInTheDocument();
@@ -169,11 +191,16 @@ describe.each([
       finish = () => resolve({ configuration: { ...configuration, profile: { handle: "alex-b", displayName: "Alex B" } }, requiresReload: false });
     }));
     render(<Modal onClose={vi.fn()} />);
-    const approved = screen.getByRole("button", { name: "I've approved it" });
-    fireEvent.click(approved);
-    fireEvent.click(approved);
+    if (Modal === CommunitySetup) {
+      checkApproval();
+      checkApproval();
+    } else {
+      const approved = screen.getByRole("button", { name: "I've approved it" });
+      fireEvent.click(approved);
+      fireEvent.click(approved);
+    }
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Connecting as Alex B…");
+    expect(await screen.findByText("Connecting as Alex B…")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
     expect(complete).toHaveBeenCalledTimes(1);
     await act(async () => { finish?.(); });

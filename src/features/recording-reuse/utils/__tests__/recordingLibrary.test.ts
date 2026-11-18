@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { expect, it } from "vitest";
 import { collapseRecordingEntries, confirmedRecordingSets, hasRecordingConflict, recordingCandidates, recordingDisplayKeys } from "../recordingLibrary";
+import { detachInconsistentRecordingGroups } from "../recordingReuse";
 import { collectMatchingTrackUris } from "@/features/smart-playlists/utils/smartPlaylist.syncUtils";
 const a = `spotify:track:${"a".repeat(22)}`, b = `spotify:track:${"b".repeat(22)}`, c = `spotify:track:${"c".repeat(22)}`;
 const identity = { isrc: "USABC2400001", artistIds: ["d".repeat(22)], durationMs: 180000, name: "Song" };
@@ -27,4 +28,13 @@ it("new playlists use one confirmed copy and full sync prefers a copy already in
   const tracks = { [a]: song, [b]: song, [c]: { ...song, recordingGroupId: undefined } };
   expect(collectMatchingTrackUris(tracks, criteria)).toEqual([a, c]);
   expect(collectMatchingTrackUris(tracks, criteria, [b])).toEqual([b, c]);
+});
+it("shows linked copies once when they differ only by a tag that is no longer in the tag list", () => {
+  const valid = new Set(["house", "latin"]);
+  const leftover = { [a]: song, [b]: { ...song, tagIds: ["house", "removed-elsewhere"] } };
+  expect(collapseRecordingEntries(Object.entries(leftover), recordingDisplayKeys(leftover, valid))).toHaveLength(1);
+  const visible = { [a]: song, [b]: { ...song, tagIds: ["house", "latin"] } };
+  expect(collapseRecordingEntries(Object.entries(visible), recordingDisplayKeys(visible, valid))).toHaveLength(2);
+  expect(detachInconsistentRecordingGroups(leftover, valid)[b].recordingGroupId).toBe("group");
+  expect(detachInconsistentRecordingGroups(visible, valid)[b].recordingGroupId).toBeUndefined();
 });

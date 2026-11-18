@@ -1,13 +1,13 @@
 import { recordProductInteraction, type ProductEventDetails } from "@/features/product-analytics/productAnalytics";
 import type { PairingRelationship } from "@/services/sync/SyncPairingService";
 
-/** Where the member chose to connect from: the invitation banner, the Community screen, the Sync dialog or the Invite panel. */
+/** Where the member chose to connect from: the invitation banner, the Community screen, the Sync dialog, the Invite panel, the Rewind prompt or the "Your songs, tagged by others" card. */
 export type CommunityConnectEntry = NonNullable<ProductEventDetails["entry"]>;
 
 const PROMPT_SHOWN_PREFIX = "tagify:community-connect-prompt-shown:";
 /** The attempt in progress. Approval happens in the browser, so it can finish in a later Tagify session. */
 const ATTEMPT_KEY = "tagify:community-connect-attempt:v1";
-const ENTRIES: readonly CommunityConnectEntry[] = ["prompt", "community", "sync", "invite"];
+const ENTRIES: readonly CommunityConnectEntry[] = ["prompt", "community", "sync", "invite", "rewind", "library_check", "teaser_tab", "teaser_rows", "teaser_track_details"];
 const RELATIONSHIPS: Record<PairingRelationship, NonNullable<ProductEventDetails["relationship"]>> = {
   "first-link": "first_link",
   reconnect: "reconnect",

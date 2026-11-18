@@ -1,5 +1,6 @@
 import { normalizePrivateNotesBackup, type PrivateNotesBackup } from "@/services/sync/PrivateNotes";
 import packageJson from "@/package";
+import { isOnboardingPreviewActive } from "@/features/onboarding/preview/onboardingPreview";
 import type { TagDataStructure } from "@/types/tagData";
 import type {
   InstalledTaxonomyRecordV1,
@@ -428,6 +429,7 @@ function automaticBackupNotDueReason(
  * may still skip an unchanged or empty library.
  */
 export function isAutomaticFileBackupDue(now = Date.now(), frequency = readAutoFileBackupFrequency()): boolean {
+  if (isOnboardingPreviewActive()) return false;
   return automaticBackupNotDueReason(getAutoFileBackupFrequencyIntervalMs(frequency), now, regularBackupGapMs) === null;
 }
 
@@ -452,6 +454,8 @@ function createAutomaticFileBackup(
   options: AutomaticFileBackupOptions,
   minimumGapMs: (intervalMs: number) => number,
 ): AutomaticFileBackupResult {
+  // The onboarding preview's sample library is never downloaded as a backup file.
+  if (isOnboardingPreviewActive()) return { status: "skipped", reason: "disabled" };
   const frequency = options.frequency ?? readAutoFileBackupFrequency();
   const intervalMs =
     options.intervalMs ?? getAutoFileBackupFrequencyIntervalMs(frequency);

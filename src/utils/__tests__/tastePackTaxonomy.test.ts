@@ -92,7 +92,11 @@ describe("taste packs in a Tagify library", () => {
     const starter = buildStarterTaxonomy(2);
     const choices = tastePackChoices(starter);
     expect(choices.map((choice) => choice.name)).toEqual(TASTE_PACKS.map((pack) => pack.name));
-    expect(choices[0]).toEqual({ key: "metal", name: "Metal & Heavy", sampleTags: ["Nu Metal", "Hard Rock", "Doom Metal", "Metalcore"], newTagCount: 11 });
+    expect(choices[0]).toEqual({
+      key: "metal", name: "Metal & Heavy", sampleTags: ["Nu Metal", "Hard Rock", "Doom Metal", "Metalcore"], newTagCount: 11,
+      tags: findTastePack("metal")!.tags.map((tag) => tag.name),
+    });
+    expect(choices[0].tags).toHaveLength(11);
     // Version 1 starter tags already have Lo-fi.
     expect(tastePackChoices(buildStarterTaxonomy(1)).find((choice) => choice.key === "chill")!.newTagCount).toBe(7);
     // A pack already added has nothing new.

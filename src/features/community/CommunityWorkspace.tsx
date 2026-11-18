@@ -12,6 +12,8 @@ import { communityProfileUrl } from "./CommunityShareDialog";
 import styles from "./CommunityWorkspace.module.css";
 import { backupLabel, communityErrorMessage } from "./communitySyncCopy";
 import type { CommunitySharing } from "./useCommunitySharing";
+import type { CommunityMatch, CommunityMatchTag } from "@/features/onboarding/services/communityMatches";
+import { TaggedByOthersSection } from "./taggedByOthers/TaggedByOthersSection";
 
 interface Action {
   label: string;
@@ -33,6 +35,9 @@ export function CommunityWorkspace({
   connectedAccountId,
   connectedDeviceId,
   onDisconnect,
+  onAddMembersTags,
+  onConnectFromLibraryCheck,
+  onOpenSong,
 }: {
   onConnectCommunity: () => void;
   onOpenCloudSync: () => void;
@@ -47,6 +52,12 @@ export function CommunityWorkspace({
   connectedAccountId: string | null;
   connectedDeviceId: string | null;
   onDisconnect: () => Promise<void>;
+  /** Adds other members' tags to a song in this library; without it the Liked Songs check isn't offered. */
+  onAddMembersTags?: (match: CommunityMatch, tags: CommunityMatchTag[]) => Promise<void>;
+  /** Connecting from that card's invitation, so its share of connections can be told apart. */
+  onConnectFromLibraryCheck?: () => void;
+  /** Opens a song from that card for tagging. */
+  onOpenSong?: (uri: string) => void;
 }) {
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -91,30 +102,36 @@ export function CommunityWorkspace({
   };
 
   const visit: Action = { label: "Visit Community", icon: <ExternalLink size={16} />, onClick: () => openCommunityUrl(COMMUNITY_PAGES_ORIGIN) };
+  // The title says what's going on; the lead says what that means or what to do next.
+  let title = "Tagify Community";
   let lead: React.ReactNode;
   let primary: Action;
   let secondary: Action | null = visit;
   if (!connected) {
-    lead = connectionPending ? "Finish connecting in your browser, then come back here."
+    title = connectionPending ? "Finish connecting in your browser" : "Share your tags on Community";
+    lead = connectionPending ? "Approve the connection there, then come back here."
       : summary.songs > 0 ? `${amounts} are ready to share.`
-      : "Tag a few songs, then share them on your Community profile.";
+      : "Tag a few songs, then share them on your profile.";
     primary = { label: connectionPending ? "Finish connecting" : "Share my tags", icon: connectionPending ? <Link2 size={16} /> : <Globe size={16} />, onClick: onConnectCommunity };
   } else if (reconnectRequired) {
-    lead = "Reconnect this computer to keep backing up and sharing your tags.";
+    title = "Reconnect this computer";
+    lead = "Backing up and sharing your tags stop until you reconnect.";
     primary = { label: "Reconnect device", icon: <ShieldAlert size={16} />, onClick: onOpenCloudSync };
   } else if (status === "merge-required") {
+    title = "Combine your libraries";
     lead = "Choose how to combine this computer's library with Community before sharing.";
     primary = { label: "Combine libraries", icon: <GitMerge size={16} />, onClick: onOpenCloudSync };
   } else if (state === "review" || state === "private") {
-    lead = state === "review"
-      ? `Your tags aren't public yet.${summary.songs > 0 ? ` ${amounts} would appear.` : ""}`
-      : `You're keeping your tags private.${summary.songs > 0 ? ` ${amounts} would appear if you publish.` : ""}`;
+    title = state === "review" ? "Your tags aren't public yet" : "Your tags are private";
+    lead = summary.songs > 0 ? `${amounts} would appear on your profile if you publish.` : "Nothing is shared until you publish.";
     primary = { label: "Publish my tags", icon: <Globe size={16} />, onClick: onOpenSharing };
   } else if (state === "paused") {
+    title = "Updates are paused";
     lead = <>Your profile shows your tags from before you paused. New changes stay private until you resume. <ChooseLink onClick={onOpenSharing} /></>;
     primary = { label: resuming ? "Resuming…" : "Resume updates", icon: <RefreshCw size={16} />, onClick: () => void resume(), disabled: resuming };
   } else if (state === "public") {
-    lead = <>Your tags are on your profile. <ChooseLink onClick={onOpenSharing} /></>;
+    title = "Your tags are public";
+    lead = <>Anyone can see them on your profile. <ChooseLink onClick={onOpenSharing} /></>;
     primary = visit;
     secondary = { label: "View my profile", icon: <UserCircle2 size={16} />, onClick: () => openCommunityUrl(communityProfileUrl(sharing.handle)) };
   } else if (sharing.phase === "error") {
@@ -125,22 +142,19 @@ export function CommunityWorkspace({
     primary = { label: "Share my tags", icon: <Globe size={16} />, onClick: onOpenSharing };
   }
 
+  const showsLikedSongs = !!onAddMembersTags && !reconnectRequired;
+
   return (
-    <section className={styles.workspace} aria-labelledby="community-title">
+    <>
+    <section className={`${styles.workspace} ${showsLikedSongs ? styles.followed : ""}`} aria-labelledby="community-title">
       <div className={styles.card}>
-        <div className={styles.icon} aria-hidden="true">
-          <Users size={32} />
-        </div>
+        <p className={styles.label}>
+          <Users size={16} aria-hidden="true" />
+          Tagify Community
+        </p>
 
         <div className={styles.copy}>
-          <p className={styles.eyebrow}>Tagify Community</p>
-          <h2
-            id="community-title"
-            aria-label="Discover tags. Share your own."
-          >
-            <span>Discover tags.</span>
-            <span>Share your own.</span>
-          </h2>
+          <h2 id="community-title">{title}</h2>
           <p className={styles.lead}>{lead}</p>
         </div>
 
@@ -208,6 +222,20 @@ export function CommunityWorkspace({
         ) : null}
       </div>
     </section>
+    {/* A revoked device is handled by the card above; nothing is checked until it reconnects. */}
+    {showsLikedSongs ? (
+      <TaggedByOthersSection
+        connected={connected}
+        connectionPending={connectionPending}
+        accountId={connectedAccountId}
+        tracks={tracks}
+        taxonomy={taxonomy}
+        onConnectCommunity={onConnectFromLibraryCheck ?? onConnectCommunity}
+        onAddMembersTags={onAddMembersTags!}
+        onOpenSong={onOpenSong}
+      />
+    ) : null}
+    </>
   );
 }
 

@@ -1,0 +1,61 @@
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  margin: 0 0 12px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 7%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  color: var(--spice-text);
+  font-size: 13px;
+}
+
+.label {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  color: var(--spice-subtext);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.button {
+  border: 1px solid rgb(255 255 255 / 15%);
+  background: rgb(255 255 255 / 8%);
+  color: var(--spice-text);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: rgb(255 255 255 / 12%);
+}
+
+.primary {
+  background: var(--spice-text);
+  border-color: var(--spice-text);
+  color: var(--spice-main);
+}
+
+.primary:hover {
+  background: var(--spice-text);
+  opacity: 0.9;
+}
+
+@media (width <= 640px) {
+  .banner {
+    flex-wrap: wrap;
+  }
+}

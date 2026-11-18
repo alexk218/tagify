@@ -14,17 +14,18 @@ import {
   isRevisionConflict,
   keepTagsPrivate,
   plural,
+  PUBLISH_RATINGS_LINE,
   publicTagSummary,
   publishTags,
   savePublicationPolicy,
-  sharesRatings,
   type SharingSurface,
 } from "./communityPublication";
 import { CommunitySharingChoices, sameChoices, type SharingChoices } from "./CommunitySharingChoices";
 import { communityErrorMessage } from "./communitySyncCopy";
 import type { CommunitySharing } from "./useCommunitySharing";
 
-type Notice = { tone: "success" | "error"; text: string };
+/** `tasteLink`: a publish confirmation, which offers people who tag like the member. */
+type Notice = { tone: "success" | "error"; text: string; tasteLink?: boolean };
 
 const LEADS = {
   private: "You're keeping your tags private. Tagify keeps backing up your library.",
@@ -35,6 +36,9 @@ const LEADS = {
 export function communityProfileUrl(handle: string | null): string {
   return handle ? `${COMMUNITY_PAGES_ORIGIN}/@${handle}` : COMMUNITY_PAGES_ORIGIN;
 }
+
+/** Community's Following page, which leads with people who tag like the member. */
+export const COMMUNITY_FOLLOWING_URL = `${COMMUNITY_PAGES_ORIGIN}/feed`;
 
 /**
  * What appears on the member's Community profile, with one step to publish.
@@ -55,7 +59,6 @@ export function CommunitySharePanel({ surface, sharing, tracks, taxonomy, waitin
   const [choosing, setChoosing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [confirmingStop, setConfirmingStop] = useState(false);
   const opened = useRef(false);
 
   useEffect(() => {
@@ -77,14 +80,13 @@ export function CommunitySharePanel({ surface, sharing, tracks, taxonomy, waitin
     return <div className={styles.sharePanel}><p>{phase === "idle" ? "Connect Tagify to Community to share your tags." : "Checking what's public…"}</p></div>;
   }
 
-  const apply = async (change: (current: PublicationPolicyV2) => Promise<PublicationPolicyV2>, successText: string, failureText: string) => {
+  const apply = async (change: (current: PublicationPolicyV2) => Promise<PublicationPolicyV2>, successText: string, failureText: string, tasteLink = false) => {
     setSaving(true);
     setNotice(null);
     try {
       const saved = await change({ ...policy, ...choices });
       setDraft(null);
-      setConfirmingStop(false);
-      setNotice({ tone: "success", text: successText });
+      setNotice({ tone: "success", text: successText, tasteLink });
       onSaved?.(saved);
       void syncRuntime.syncNow();
     } catch (error) {
@@ -100,10 +102,9 @@ export function CommunitySharePanel({ surface, sharing, tracks, taxonomy, waitin
     }
   };
 
-  const publish = () => apply((current) => publishTags(current, surface), "Publishing your tags. Your profile updates within a minute.", "Your tags couldn't be published. Please try again.");
+  const publish = () => apply((current) => publishTags(current, surface), "Publishing your tags. Your profile updates within a minute.", "Your tags couldn't be published. Please try again.", true);
   const saveChoices = () => apply((current) => savePublicationPolicy(current), "Saved. Your profile updates within a minute.", "Couldn't save your choices. Please try again.");
   const keepPrivate = () => apply(keepTagsPrivate, "Your tags stay private. You can publish them from Community in Tagify any time.", "Couldn't save your choice. Please try again.");
-  const stopSharing = () => apply((current) => changePublication(current, "unpublish"), "Your profile is no longer public. Backup keeps running.", "Couldn't take down your profile. Please try again.");
   const resume = () => apply((current) => changePublication(current, "resume"), "Updates resumed. Your profile catches up within a minute.", "Couldn't resume updates. Please try again.");
 
   const notPublicYet = state === "review" || state === "private";
@@ -114,7 +115,7 @@ export function CommunitySharePanel({ surface, sharing, tracks, taxonomy, waitin
     {notPublicYet ? <p className={styles.shareLead}>{summary.songs > 0
       ? <><strong>{plural(summary.tags, "tag")}</strong> on <strong>{plural(summary.songs, "song")}</strong> would appear on your profile.</>
       : "None of your songs have tags to share yet. Songs you tag later will appear."}</p> : null}
-    {notPublicYet ? <p>{sharesRatings(policy) ? "Private notes stay private, and your ratings would show too." : "Private notes and ratings stay private."}</p> : null}
+    {notPublicYet ? <p>{PUBLISH_RATINGS_LINE}</p> : null}
     {hiddenNames.length ? <p>{hiddenLine(hiddenNames)}</p> : null}
     {waitingForLibrary ? <p className={styles.warningText}>Choose how to combine this computer's library with Community in Sync before sharing.</p> : null}
 
@@ -125,22 +126,22 @@ export function CommunitySharePanel({ surface, sharing, tracks, taxonomy, waitin
       <CommunitySharingChoices taxonomy={taxonomy} choices={choices} published={state === "public" || state === "paused"} disabled={saving} onChange={setDraft} />
     </div> : null}
 
-    {confirmingStop ? <div className={styles.visibilityConfirm} role="group" aria-labelledby="community-stop-sharing-title">
-      <div><strong id="community-stop-sharing-title">Take down your public profile?</strong><span>Your private cloud backup keeps running.</span></div>
-      <div className={styles.visibilityActions}>
-        <button type="button" className={styles.secondary} onClick={() => setConfirmingStop(false)} disabled={saving}>Cancel</button>
-        <button type="button" className={styles.primary} onClick={() => void stopSharing()} disabled={saving}>{saving ? "Taking down…" : "Stop sharing"}</button>
-      </div>
-    </div> : <div className={styles.visibilityActions}>
+    {/* Alex, 2026-11-16: "Let's remove the stop sharing button there. They could do that elsewhere." Stop sharing lives on Community (profile and Settings > Privacy). */}
+    <div className={styles.visibilityActions}>
       {notPublicYet ? <button type="button" className={styles.primary} onClick={() => void publish()} disabled={busy}>{saving ? "Publishing…" : "Publish my tags"}</button> : null}
       {state === "review" ? <button type="button" className={styles.quietAction} onClick={() => void keepPrivate()} disabled={busy}>Keep my tags private</button> : null}
       {state === "private" && unsaved ? <button type="button" className={styles.secondary} onClick={() => void saveChoices()} disabled={busy}>Save without publishing</button> : null}
       {state === "paused" ? <button type="button" className={styles.primary} onClick={() => void resume()} disabled={busy}>{saving ? "Resuming…" : "Resume updates"}</button> : null}
       {(state === "public" || state === "paused") && unsaved ? <button type="button" className={state === "public" ? styles.primary : styles.secondary} onClick={() => void saveChoices()} disabled={busy}>{saving && state === "public" ? "Saving…" : "Save changes"}</button> : null}
       {(state === "public" || state === "paused") && !unsaved ? <button type="button" className={styles.secondary} onClick={() => openCommunityUrl(communityProfileUrl(sharing.handle))}><ExternalLink size={15} /> View my profile</button> : null}
-      {state === "public" || state === "paused" ? <button type="button" className={styles.quietAction} onClick={() => setConfirmingStop(true)} disabled={busy}>Stop sharing</button> : null}
-    </div>}
-    {notice ? <div className={notice.tone === "success" ? styles.success : styles.error} role="status">{notice.text}</div> : null}
+    </div>
+    {notice ? <div className={notice.tone === "success" ? styles.success : styles.error} role="status">
+      {notice.text}
+      {/* Alex, 2026-10-30: "Link to Following (Recommended)", on the website and in the desktop app. */}
+      {notice.tasteLink ? <button type="button" className={styles.noticeLink} onClick={() => openCommunityUrl(COMMUNITY_FOLLOWING_URL)}>
+        See people who tag like you <ExternalLink size={13} aria-hidden="true" />
+      </button> : null}
+    </div> : null}
   </div>;
 }
 

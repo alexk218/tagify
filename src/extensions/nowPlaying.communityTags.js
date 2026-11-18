@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 import { attachTagPopover } from "./inlineEditor.tagIndicator";
 
 const SVG_NS = "http://www.w3.org/2000/svg";

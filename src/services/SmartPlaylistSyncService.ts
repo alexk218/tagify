@@ -420,7 +420,8 @@ export class SmartPlaylistSyncService {
     try {
       saved = await indexedDBStorage.patchTracks(
         Object.fromEntries(memberTrackUris.map((trackUri) => [trackUri, applyToSavedTrack(trackUri)])),
-        { expectedDatabaseName, smartPlaylists: {
+        // Tag origin: added or removed because of a smart playlist.
+        { expectedDatabaseName, tagMethod: "smart_playlist", smartPlaylists: {
           prepare: (current) => {
             this.assertAccount();
             eligiblePlaylists = playlists.filter(playlist => sameSmartPlaylistRules(playlist,
@@ -644,7 +645,7 @@ export class SmartPlaylistSyncService {
     const pendingPlaylists = latestState.playlists;
     playlists = playlists.filter(playlist => sameSmartPlaylistRules(playlist,
       pendingPlaylists.find(item => item.playlistId === playlist.playlistId)));
-    const libraryRecordingKeys = recordingDisplayKeys(allTagData.tracks);
+    const libraryRecordingKeys = recordingDisplayKeys(allTagData.tracks, allTagData.taxonomy?.tagsById && new Set(Object.keys(allTagData.taxonomy.tagsById)));
     for (const playlist of playlists) {
       if (!successfullyFetched.has(playlist.playlistId)) {
         continue;
@@ -849,7 +850,7 @@ export class SmartPlaylistSyncService {
               if (sameTagIds(tagIds, base.tagIds)) return base === current ? undefined : base;
               return { ...base, tagIds, dateModified: Date.now() };
             },
-          }, { expectedDatabaseName: databaseName });
+          }, { expectedDatabaseName: databaseName, tagMethod: "smart_playlist" });
         } catch (error) {
           if (filtersChanged) throw new Error("The playlist filters have changed. Please review your choice again.");
           console.error("Tagify: Smart Playlist tag choice could not be saved", error);
@@ -915,12 +916,21 @@ export class SmartPlaylistSyncService {
       ]),
     );
     const groups = [...new Set(Object.values(trackUpdates).flatMap(data => data?.recordingGroupId ? [data.recordingGroupId] : []))];
-    const recordingTracks = !groups.length ? {} : groups.length > 100
-      ? (await storageService.loadAllStrict()).tracks
-      : await indexedDBStorage.getRecordingGroupTracksStrict(groups, getTagifyDatabaseName());
+    // Linked copies count as one song only when their visible tagging matches, so read the tag
+    // list once with them: a tag left over on one copy then doesn't add the song twice.
+    let recordingTracks: Record<string, TrackData> = {};
+    let tagsById: Record<string, unknown> | undefined;
+    if (groups.length > 100) {
+      const library = await storageService.loadAllStrict();
+      recordingTracks = library.tracks;
+      tagsById = library.taxonomy?.tagsById;
+    } else if (groups.length) {
+      recordingTracks = await indexedDBStorage.getRecordingGroupTracksStrict(groups, getTagifyDatabaseName());
+      tagsById = (await storageService.getTaxonomy())?.tagsById;
+    }
     this.assertAccount();
     Object.entries(trackUpdates).forEach(([uri, data]) => { if (data) recordingTracks[uri] = data; else delete recordingTracks[uri]; });
-    const recordingKeys = recordingDisplayKeys(recordingTracks);
+    const recordingKeys = recordingDisplayKeys(recordingTracks, tagsById && new Set(Object.keys(tagsById)));
     const updates = Object.entries(trackUpdates);
     const addedByPlaylistId = new Map<string, Set<string>>();
     const removedByPlaylistId = new Map<string, Set<string>>();

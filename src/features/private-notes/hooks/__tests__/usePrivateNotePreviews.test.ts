@@ -80,3 +80,16 @@ it("ignores an obsolete request when filtering changes the visible songs", async
   await act(async () => { finish([{ ...emptyPrivateNote(uri), text: "Obsolete note" }]); });
   expect(result.current.texts).toEqual({ [other]: "Visible local note" });
 });
+
+it("shows no previews and reads nothing while private notes are off in Settings", async () => {
+  const { setPrivateNotesShown } = await import("../../privateNotesSetting");
+  await savePrivateNote(uri, "My note", "");
+  const read = vi.spyOn(indexedDBStorage, "getPrivateNotesForUris");
+  setPrivateNotesShown(false);
+  const { result } = renderHook(() => usePrivateNotePreviews([uri]));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(read).not.toHaveBeenCalled();
+  expect(result.current.texts).toEqual({});
+  act(() => setPrivateNotesShown(true));
+  await waitFor(() => expect(result.current.texts).toEqual({ [uri]: "My note" }));
+});

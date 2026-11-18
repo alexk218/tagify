@@ -1,5 +1,15 @@
 import { beforeEach, expect, it } from "vitest";
-import { isFirstRunInProgress, markFirstRunDone, markFirstRunStarted, mostUsedTag } from "../firstRun";
+import { isFirstRunInProgress, markFirstRunDone, markFirstRunStarted, mostUsedTag, quickTags } from "../firstRun";
+import { defaultTagData } from "@/constants/defaultTagData";
+
+it("offers starter moods the library still has for one-click tagging, else its first tags", () => {
+  expect(quickTags(defaultTagData.taxonomy).map((tag) => tag.name)).toEqual(["Chill", "Upbeat", "Happy", "Sad", "Party"]);
+  const own = { ...defaultTagData.taxonomy, tagsById: {
+    a: { id: "a", name: "Late night", subcategoryId: "s" },
+    b: { id: "b", name: "chill", subcategoryId: "s" },
+  } };
+  expect(quickTags(own)).toEqual([{ id: "b", name: "chill" }, { id: "a", name: "Late night" }]);
+});
 
 beforeEach(() => localStorage.clear());
 

@@ -129,7 +129,8 @@ const ApplyToTracksDialog: React.FC<ApplyToTracksDialogProps> = ({
     setIsApplying(true);
     setApplyError(null);
     try {
-      await onApply(updates);
+      // Tag origin: one action applied to many songs.
+      await onApply(updates.map((update) => ({ ...update, tagMethod: "bulk" })));
       Spicetify.showNotification(`Updated ${pluralizeTracks(updates.length)} from ${name}`);
       onClose();
     } catch {

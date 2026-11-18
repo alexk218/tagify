@@ -9,11 +9,6 @@
   padding: 18px 20px;
 }
 
-.header {
-  display: grid;
-  gap: 4px;
-}
-
 .title {
   font-size: 20px;
   font-weight: 700;
@@ -22,40 +17,42 @@
 }
 
 .description,
-.footer,
-.listLabel {
+.footer {
   color: var(--spice-subtext);
   font-size: 13px;
   line-height: 1.4;
   margin: 0;
 }
 
+/* One line under the members' rows, closer to them than to what follows. */
+.seeAll {
+  color: var(--spice-subtext);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: -6px 0 0;
+}
+
+.seeAllLink {
+  background: transparent;
+  border: 0;
+  color: var(--spice-text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.seeAllLink:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
 .list {
   display: grid;
   gap: 4px;
-}
-
-.row,
-.playing {
-  background: transparent;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-
-.row {
-  align-items: center;
-  border-radius: 6px;
-  display: flex;
-  gap: 12px;
-  padding: 6px 8px;
-}
-
-.row:hover,
-.row:focus-visible {
-  background: rgb(255 255 255 / 8%);
 }
 
 .rowCover {
@@ -97,51 +94,6 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-.primary,
-.secondary {
-  border-radius: 500px;
-  flex: 0 0 auto;
-  font-size: 13px;
-  font-weight: 700;
-  padding: 6px 14px;
-}
-
-.primary {
-  background: var(--spice-text);
-  color: var(--spice-main);
-}
-
-.secondary {
-  border: 1px solid rgb(255 255 255 / 18%);
-}
-
-.row:hover .secondary {
-  border-color: rgb(255 255 255 / 40%);
-}
-
-.playing {
-  align-items: center;
-  background: rgb(255 255 255 / 6%);
-  border-radius: 8px;
-  display: flex;
-  gap: 14px;
-  padding: 10px 14px 10px 10px;
-}
-
-.playing:hover,
-.playing:focus-visible {
-  background: rgb(255 255 255 / 10%);
-}
-
-.playingCover {
-  background: rgb(255 255 255 / 8%);
-  border-radius: 4px;
-  flex: 0 0 auto;
-  height: 56px;
-  object-fit: cover;
-  width: 56px;
 }
 
 .skeleton {
@@ -210,22 +162,82 @@
   opacity: 0.6;
 }
 
-/* Taste packs: a row at the bottom of "Tag your first song". */
-.tastePacks {
-  border-top: 1px solid rgb(255 255 255 / 10%);
-  display: grid;
-  gap: 10px;
-  padding-top: 14px;
+
+/* "N of 3 tagged" beside the title. */
+.progress {
+  color: var(--spice-subtext);
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 25px;
 }
 
-.tastePacksLabel {
-  color: var(--spice-subtext);
-  font-size: 13px;
+.error {
+  color: #ffb0b5;
+  font-size: 12px;
   line-height: 1.4;
   margin: 0;
 }
 
-.tastePacksLabel strong {
+.tagRow {
+  align-items: center;
+  border-radius: 6px;
+  display: grid;
+  gap: 4px 12px;
+  grid-template-columns: 40px minmax(0, 1fr);
+  padding: 8px;
+}
+
+.tagRow + .tagRow {
+  border-top: 1px solid rgb(255 255 255 / 6%);
+}
+
+.tagRow .chips {
+  grid-column: 2;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip,
+.moreChip {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 500px;
   color: var(--spice-text);
-  font-weight: 700;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  min-height: 28px;
+  padding: 3px 12px;
+}
+
+.chip:hover:not(:disabled),
+.moreChip:hover {
+  border-color: rgb(255 255 255 / 40%);
+}
+
+.chip:disabled {
+  cursor: progress;
+}
+
+.chipOn {
+  background: var(--spice-text);
+  border-color: var(--spice-text);
+  color: var(--spice-main);
+}
+
+.moreChip {
+  border-style: dashed;
+  color: var(--spice-subtext);
+}
+
+.chip:focus-visible,
+.moreChip:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
 }

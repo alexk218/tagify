@@ -58,12 +58,13 @@ describe("CommunitySharePanel", () => {
     render(<Harness />);
 
     expect(await screen.findByText((_, node) => node?.textContent === "3 tags on 3 songs would appear on your profile.")).toBeInTheDocument();
-    expect(screen.getByText("Private notes and ratings stay private.")).toBeInTheDocument();
+    expect(screen.getByText("Your tags and star ratings would be public. Private notes stay private.")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Choose which tags are public" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Publish my tags" }));
 
     expect(await screen.findByText("Publishing your tags. Your profile updates within a minute.")).toBeInTheDocument();
     expect(lastBody()).toMatchObject({ expectedRevision: 0, policy: { enabled: true, paused: false, hiddenTagIds: [], hiddenNodeIds: [] } });
+    expect(lastBody().policy.entities).toEqual({ track: { tags: true, rating: true }, album: { tags: true, rating: true }, artist: { tags: true, rating: false } });
     expect(lastBody().policy.reviewedAt).toEqual(expect.any(String));
     expect(events()).toEqual([
       ["community_share_opened", { surface: "workspace", sharing_state: "review" }],
@@ -97,6 +98,26 @@ describe("CommunitySharePanel", () => {
     expect(lastBody().policy).toMatchObject({ enabled: true, hiddenNodeIds: ["workout"] });
   });
 
+  it("offers people who tag like the member once their tags are published", async () => {
+    serve(policyFixture({ reviewedAt: null }));
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole("button", { name: "Publish my tags" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "See people who tag like you" }));
+    expect(open).toHaveBeenCalledWith("https://tagify.fm/feed", "_blank", "noopener,noreferrer");
+    open.mockRestore();
+  });
+
+  it("offers people who tag alike only after publishing, not after other saves", async () => {
+    serve(policyFixture({ reviewedAt: null }));
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole("button", { name: "Keep my tags private" }));
+
+    await screen.findByText("Your tags stay private. You can publish them from Community in Tagify any time.");
+    expect(screen.queryByRole("button", { name: "See people who tag like you" })).not.toBeInTheDocument();
+  });
+
   it("keeps tags private as a reviewed choice without publishing", async () => {
     serve(policyFixture({ reviewedAt: null }));
     render(<Harness />);
@@ -107,6 +128,29 @@ describe("CommunitySharePanel", () => {
     expect(events().map(([event]) => event)).toEqual(["community_share_opened", "community_publish_kept_private"]);
     expect(screen.getByText("You're keeping your tags private. Tagify keeps backing up your library.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish my tags" })).toBeInTheDocument();
+  });
+
+  it("shares ratings too when a member who kept tags private publishes later, and says so first", async () => {
+    serve(policyFixture({ enabled: false }));
+    render(<Harness />);
+    expect(await screen.findByText("Your tags and star ratings would be public. Private notes stay private.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Publish my tags" }));
+
+    await screen.findByText("Publishing your tags. Your profile updates within a minute.");
+    expect(lastBody().policy).toMatchObject({ enabled: true, entities: { track: { rating: true }, album: { rating: true }, artist: { rating: false } } });
+    expect(screen.queryByText("Your tags and star ratings would be public. Private notes stay private.")).not.toBeInTheDocument();
+  });
+
+  it("sends a public member's rating choice unchanged when they change what's hidden", async () => {
+    serve(policyFixture());
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole("button", { name: "Choose what's hidden" }));
+    expect(screen.queryByText("Your tags and star ratings would be public. Private notes stay private.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hide Workout from your profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await screen.findByText("Saved. Your profile updates within a minute.");
+    expect(lastBody().policy).toMatchObject({ enabled: true, hiddenNodeIds: ["workout"], entities: policyFixture().entities });
   });
 
   it("never republishes a member who keeps tags private when they change what's hidden", async () => {
@@ -122,19 +166,11 @@ describe("CommunitySharePanel", () => {
     expect(events().map(([event]) => event)).toEqual(["community_share_opened"]);
   });
 
-  it("asks before taking a public profile down", async () => {
+  it("leaves stopping sharing to Community", async () => {
     serve(policyFixture({ revision: 5 }));
     render(<Harness />);
-    fireEvent.click(await screen.findByRole("button", { name: "Stop sharing" }));
-    expect(screen.getByText("Take down your public profile?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(mocks.communityRequest).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "Stop sharing" }));
-    fireEvent.click(screen.getAllByRole("button", { name: "Stop sharing" }).at(-1)!);
-    expect(await screen.findByText("Your profile is no longer public. Backup keeps running.")).toBeInTheDocument();
-    expect(mocks.communityRequest).toHaveBeenLastCalledWith("/api/v2/publication-policy/unpublish", { method: "POST", body: { expectedRevision: 5 } });
-    expect(events().map(([event]) => event)).toContain("community_sharing_stopped");
+    expect(await screen.findByRole("button", { name: "View my profile" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop sharing" })).not.toBeInTheDocument();
   });
 
   it("resumes paused updates", async () => {

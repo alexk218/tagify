@@ -120,6 +120,30 @@
   border-color: rgb(88 101 242 / 50%);
 }
 
+.pillButton.phoneButton {
+  position: relative;
+  border: 1px solid rgb(255 255 255 / 15%);
+  background: rgb(255 255 255 / 5%);
+}
+
+.pillButton.phoneButton:hover,
+.pillButton.phoneButton[aria-expanded="true"] {
+  background: rgb(255 255 255 / 16%);
+  border-color: rgb(255 255 255 / 40%);
+}
+
+/* "New" until the phone apps panel is opened once. */
+.newDot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--spice-main, #121212);
+  border-radius: 50%;
+  background: #1ed760;
+}
+
 /* ! Right side - Backup status & settings */
 .settingsButton {
   width: 32px;

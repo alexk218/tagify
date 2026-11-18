@@ -1,3 +1,4 @@
+import "../features/onboarding/preview/installSandbox";
 import { buildResolvedTagLookup } from "../utils/tagTaxonomy";
 
 export function buildExtensionTagLookup(categories, taxonomy) {

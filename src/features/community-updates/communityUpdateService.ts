@@ -36,8 +36,34 @@ export function parseCommunityUpdates(value: unknown): CommunityUpdate[] {
     .sort((a, b) => b.revision - a.revision);
 }
 
+/** Sent on `window` after each check of Community's update feed, answered or not. */
+export const COMMUNITY_UPDATES_CHECKED_EVENT = "tagify:communityUpdatesChecked";
+
+/**
+ * The year whose Rewind Community says is open, from the feed's optional `rewind` field
+ * (`{ "year": 2026, "open": true }`). Anything else, including a feed without the field, means
+ * Rewind isn't open: Tagify never sends people to a page that isn't there.
+ */
+export function parseCommunityRewindYear(value: unknown): number | null {
+  const rewind = (value as { rewind?: { year?: unknown; open?: unknown } | null } | null)?.rewind;
+  return rewind && rewind.open === true && Number.isSafeInteger(rewind.year) ? rewind.year as number : null;
+}
+
+/**
+ * Whether Community says the Tagify Android app is out, from the feed's optional `android` field
+ * (`{ "released": true }`). Its store link is always tagify.fm/android, so the feed never carries
+ * a URL. Anything else means not released yet.
+ */
+export function parseCommunityAndroidReleased(value: unknown): boolean {
+  const android = (value as { android?: { released?: unknown } | null } | null)?.android;
+  return android?.released === true;
+}
+
 export class CommunityUpdateService {
   private releases: CommunityUpdate[] = [];
+  private rewindYear: number | null = null;
+  private androidReleased = false;
+  private checked = false;
   private nextCheckAt = 0;
   private inFlight: Promise<CommunityUpdate[]> | null = null;
   private seenInSession = 0;
@@ -60,15 +86,35 @@ export class CommunityUpdateService {
     try {
       const response = await fetch(FEED_URL, { signal: controller.signal, credentials: "omit" });
       if (!response.ok) throw new Error(`Community updates: ${response.status}`);
-      this.releases = parseCommunityUpdates(await response.json());
+      const feed: unknown = await response.json();
+      this.releases = parseCommunityUpdates(feed);
+      this.rewindYear = parseCommunityRewindYear(feed);
+      this.androidReleased = parseCommunityAndroidReleased(feed);
       this.nextCheckAt = Date.now() + COMMUNITY_UPDATE_INTERVAL_MS;
     } catch {
       // An unavailable or not-yet-deployed feed must never block tagging.
       this.nextCheckAt = Date.now() + RETRY_MS;
     } finally {
       clearTimeout(timeout);
+      this.checked = true;
+      if (typeof window !== "undefined") window.dispatchEvent(new Event(COMMUNITY_UPDATES_CHECKED_EVENT));
     }
     return this.unseen();
+  }
+
+  /** Whether the feed has been asked this session, whatever came back. */
+  hasChecked(): boolean {
+    return this.checked;
+  }
+
+  /** Whether the latest feed said that year's Rewind is open. False until a feed has answered. */
+  isRewindOpen(year: number): boolean {
+    return this.rewindYear === year;
+  }
+
+  /** Whether the latest feed said the Android app is out. False until a feed has answered. */
+  isAndroidAppReleased(): boolean {
+    return this.androidReleased;
   }
 
   private seenRevision(): number {

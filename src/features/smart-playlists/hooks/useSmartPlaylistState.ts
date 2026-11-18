@@ -50,6 +50,41 @@ export interface UseSmartPlaylistStateResult {
   resetSmartPlaylists: () => Promise<void>;
 }
 
+function sameSavedValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (typeof left !== "object" || typeof right !== "object" || left === null || right === null) return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  if (Array.isArray(left)) {
+    const other = right as unknown[];
+    return left.length === other.length && left.every((item, index) => sameSavedValue(item, other[index]));
+  }
+  const leftKeys = Object.keys(left);
+  const rightRecord = right as Record<string, unknown>;
+  return leftKeys.length === Object.keys(rightRecord).length &&
+    leftKeys.every((key) => Object.prototype.hasOwnProperty.call(rightRecord, key) &&
+      sameSavedValue((left as Record<string, unknown>)[key], rightRecord[key]));
+}
+
+/**
+ * Every library save reloads the saved playlists. Keep the playlists that
+ * didn't change (and the whole list when nothing did), so the Smart Playlists
+ * window doesn't redo its checks for every unrelated tag edit.
+ */
+export function keepUnchangedSmartPlaylists(
+  previous: SmartPlaylistCriteria[],
+  next: SmartPlaylistCriteria[],
+): SmartPlaylistCriteria[] {
+  if (previous === next) return previous;
+  let unchanged = previous.length === next.length;
+  const kept = next.map((playlist, index) => {
+    const earlier = previous[index];
+    if (earlier && sameSavedValue(earlier, playlist)) return earlier;
+    unchanged = false;
+    return playlist;
+  });
+  return unchanged ? previous : kept;
+}
+
 export function useSmartPlaylistState(): UseSmartPlaylistStateResult {
   const [smartPlaylists, setSmartPlaylistsState] = useState<
     SmartPlaylistCriteria[]
@@ -69,8 +104,8 @@ export function useSmartPlaylistState(): UseSmartPlaylistStateResult {
       async () => {
         const saved = preserveMembership ? await loadSmartPlaylistsFromStorage() : next;
         if (smartPlaylistsRef.current === next) {
-          smartPlaylistsRef.current = saved;
-          setSmartPlaylistsState(saved);
+          smartPlaylistsRef.current = keepUnchangedSmartPlaylists(next, saved);
+          setSmartPlaylistsState(smartPlaylistsRef.current);
         }
         dispatchSmartPlaylistsUpdated(saved);
       },
@@ -123,8 +158,8 @@ export function useSmartPlaylistState(): UseSmartPlaylistStateResult {
   const refreshSmartPlaylists = useCallback(async () => {
     await saveQueueRef.current;
     const restored = await loadSmartPlaylistsFromStorage();
-    smartPlaylistsRef.current = restored;
-    setSmartPlaylistsState(restored);
+    smartPlaylistsRef.current = keepUnchangedSmartPlaylists(smartPlaylistsRef.current, restored);
+    setSmartPlaylistsState(smartPlaylistsRef.current);
   }, []);
 
   const resetSmartPlaylists = useCallback(async () => {
@@ -154,8 +189,8 @@ export function useSmartPlaylistState(): UseSmartPlaylistStateResult {
         event as CustomEvent<{ playlists?: SmartPlaylistCriteria[] }>
       )?.detail?.playlists;
       if (Array.isArray(eventPlaylists)) {
-        smartPlaylistsRef.current = eventPlaylists;
-        setSmartPlaylistsState(eventPlaylists);
+        smartPlaylistsRef.current = keepUnchangedSmartPlaylists(smartPlaylistsRef.current, eventPlaylists);
+        setSmartPlaylistsState(smartPlaylistsRef.current);
         return;
       }
       void refreshSmartPlaylists().catch((error) => {

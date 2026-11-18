@@ -159,8 +159,10 @@ struct SetupStatus {
         return available > installed
     }
 
+    // A beta is offered the stable release once that release has reached or passed it
+    // (3.0.1-beta → 3.0.1 or later); a beta ahead of the latest stable release is kept.
     func needsTagifyUpdate(latest: String?) -> Bool {
-        guard let installed = tagifyVersion.flatMap(InstalledVersion.init), installed.prerelease == nil, let available = latest.flatMap(InstalledVersion.init) else { return false }
+        guard let installed = tagifyVersion.flatMap(InstalledVersion.init), let available = latest.flatMap(InstalledVersion.init) else { return false }
         return available > installed
     }
 }

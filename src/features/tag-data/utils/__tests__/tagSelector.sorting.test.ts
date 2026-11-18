@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { TagCategory } from "@/types/tagData";
 import {
+  countTagUses,
   filterTagSelectorCategories,
   sortTagSelectorCategories,
   type TagSelectorSortMode,
@@ -143,5 +144,51 @@ describe("tagSelector.sorting", () => {
         (tag) => tag.name,
       ),
     ).toEqual(["Zulu", "Alpha", "Mike"]);
+  });
+
+  describe("most-used", () => {
+    const uses = countTagUses({
+      tracks: {
+        "spotify:track:1": { tagIds: ["alpha", "late", "drive"] } as never,
+        "spotify:track:2": { tagIds: ["alpha", "drive", "drive"] } as never,
+        "spotify:track:3": { tagIds: ["drive", "mike"] } as never,
+      },
+      playlists: { "spotify:album:1": { tagIds: ["drive"] } as never },
+      artists: { "spotify:artist:1": { tagIds: ["late"] } as never },
+    });
+
+    it("counts each song, playlist, album and artist once per tag", () => {
+      expect(Object.fromEntries(uses)).toEqual({ alpha: 2, late: 2, drive: 4, mike: 1 });
+    });
+
+    it("lists the most used tags first, then by name", () => {
+      const result = sortTagSelectorCategories(createCategories(), "most-used", uses);
+
+      expect(getTagNames(result, "genre", "electronic")).toEqual(["Alpha", "Mike", "Zulu"]);
+      expect(getTagNames(result, "genre", "mood")).toEqual(["Late", "Early"]);
+    });
+
+    it("lists folders by how much their tags are used together", () => {
+      const result = sortTagSelectorCategories(createCategories(), "most-used", uses);
+
+      // Genre's tags are used 5 times, Energy's 4; Electronic 3, Mood 2.
+      expect(result.map((category) => category.id)).toEqual(["genre", "energy"]);
+      expect(result[0].subcategories.map((subcategory) => subcategory.id)).toEqual([
+        "electronic",
+        "mood",
+      ]);
+
+      const busierEnergy = new Map(uses).set("drive", 9);
+      expect(
+        sortTagSelectorCategories(createCategories(), "most-used", busierEnergy).map(
+          (category) => category.id,
+        ),
+      ).toEqual(["energy", "genre"]);
+    });
+
+    it("keeps the custom order until the counts are known", () => {
+      const categories = createCategories();
+      expect(sortTagSelectorCategories(categories, "most-used")).toBe(categories);
+    });
   });
 });

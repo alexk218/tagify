@@ -1,5 +1,5 @@
 import type { TrackData } from "@/types/tagData";
-import { compatibleRecordingLinks, normalizeRecordingIdentity, recordingAnnotations, recordingConflict, recordingName, sameRecording } from "./recordingReuse";
+import { compatibleRecordingLinks, normalizeRecordingIdentity, recordingConflict, recordingName, sameRecording, visibleRecordingAnnotations } from "./recordingReuse";
 
 export type RecordingSet = { key: string; entries: [string, TrackData][] };
 export type RecordingChoices = Pick<TrackData, "tagIds" | "rating" | "energy">;
@@ -35,8 +35,11 @@ export function confirmedRecordingSets(tracks: Record<string, TrackData>): Recor
 
 export const hasRecordingConflict = (set: RecordingSet) => set.entries.some(([, a]) => set.entries.some(([, b]) => recordingConflict(a, b)));
 
-/** Only confirmed, consistent links collapse. Unreviewed choices remain visible. */
-export function recordingDisplayKeys(tracks: Record<string, TrackData>) {
+/**
+ * Only confirmed, consistent links collapse. Unreviewed choices remain visible.
+ * Pass the tag list's IDs so a tag left over on one copy doesn't show the song twice.
+ */
+export function recordingDisplayKeys(tracks: Record<string, TrackData>, validTagIds?: ReadonlySet<string>) {
   const keys = new Map<string, string>();
   const groups = new Map<string, [string, TrackData][]>();
   for (const entry of Object.entries(tracks)) {
@@ -45,7 +48,7 @@ export function recordingDisplayKeys(tracks: Record<string, TrackData>) {
     const members = groups.get(group) || []; members.push(entry); groups.set(group, members);
   }
   for (const [group, members] of groups) {
-    if (!members.every(([, a]) => members.every(([, b]) => compatibleRecordingLinks(a, b) && recordingAnnotations(a) === recordingAnnotations(b)))) continue;
+    if (!members.every(([, a]) => members.every(([, b]) => compatibleRecordingLinks(a, b) && visibleRecordingAnnotations(a, validTagIds) === visibleRecordingAnnotations(b, validTagIds)))) continue;
     members.forEach(([uri]) => keys.set(uri, group));
   }
   return keys;

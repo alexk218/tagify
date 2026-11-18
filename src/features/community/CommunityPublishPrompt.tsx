@@ -11,9 +11,9 @@ import {
   fetchPublicationPolicy,
   keepTagsPrivate,
   plural,
+  PUBLISH_RATINGS_LINE,
   publicationState,
   publicTagSummary,
-  sharesRatings,
 } from "./communityPublication";
 import {
   canAskToPublish,
@@ -210,7 +210,7 @@ export function CommunityPublishPrompt({ enabled, connected, status, taggedTrack
         <p id="community-publish-prompt-description" className={styles.description}>
           Tagify is backing up your library, but your Community profile stays empty until you choose what to share.
           {" "}{plural(invitation.tags, "tag")} on {plural(invitation.songs, "song")} would appear.
-          {" "}{sharesRatings(invitation.policy) ? "Private notes stay private, and your ratings would show too." : "Private notes and ratings stay private."}
+          {" "}{PUBLISH_RATINGS_LINE}
           {" "}You can hide any tag or folder first.
         </p>
       </div>

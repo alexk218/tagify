@@ -15,8 +15,8 @@ import type { SendSession } from "./SpotifyLibrarySender";
 // (and Tagify in it) is open, a filler asks Community every 15 seconds for open searches (the text
 // and kind only, never who searched), runs each through Spotify's in-app search (GraphQL, through
 // the shared wrapper, never the Web API) and sends one page (at most 10) of what it found, or an
-// empty list when Spotify found nothing. Kinds this Tagify can't search yet (slice 1 searches songs;
-// albums and artists come later) are left for Community to expire, never guessed at. Its searches
+// empty list when Spotify found nothing. It searches songs (slice 1), albums and artists (slice 2);
+// a kind this Tagify can't search is left for Community to expire, never guessed at. Its searches
 // have an allowance of their own, apart from the catalog filler's and Now playing's, and stop at
 // Spotify's first refusal or while Spotify asks Tagify to wait (CommunityLookupLane.ts).
 

@@ -15,11 +15,16 @@ import {
 } from "../utils/tagData.backup";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
+import { startOnboardingPreview } from "@/features/onboarding/preview/onboardingPreview";
+import { useOnboardingPreviewAccess } from "@/features/onboarding/preview/onboardingPreviewAccess";
+import { setPrivateNotesShown, usePrivateNotesShown } from "@/features/private-notes/privateNotesSetting";
 
 interface MainSettingsModalProps {
   onClose: () => void;
   showOptionalButtons: boolean;
   onToggleOptionalButtons: (showOptionalButtons: boolean) => void;
+  showPhoneButton: boolean;
+  onTogglePhoneButton: (show: boolean) => void;
   onOpenInfoModal?: (section: string) => void;
   onRetryMigration?: () => Promise<OrchestratorResult>;
   onResetTagifyData?: () => Promise<void>;
@@ -60,10 +65,14 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
   onClose,
   showOptionalButtons,
   onToggleOptionalButtons,
+  showPhoneButton,
+  onTogglePhoneButton,
   onOpenInfoModal,
   onRetryMigration,
   onResetTagifyData,
 }) => {
+  const showOnboardingPreview = useOnboardingPreviewAccess();
+  const privateNotesShown = usePrivateNotesShown();
   const [storedExtensionSettings, setExtensionSettings] =
     useLocalStorage<ExtensionSettings>(
       "tagify:extensionSettings",
@@ -379,6 +388,43 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
 
               <div className={styles.toggleItem}>
                 <div className={styles.toggleInfo}>
+                  <label className={styles.toggleLabel}>Phone App Button</label>
+                  <span className={styles.toggleDescription}>
+                    Show the button to get Tagify on your iPhone or Android phone in the top menu
+                  </span>
+                </div>
+                <label className={styles.toggleSwitch}>
+                  <input
+                    aria-label="Show phone app button"
+                    type="checkbox"
+                    checked={showPhoneButton}
+                    onChange={(e) => onTogglePhoneButton(e.target.checked)}
+                  />
+                  <span className={styles.slider}></span>
+                </label>
+              </div>
+
+              <div className={styles.toggleItem}>
+                <div className={styles.toggleInfo}>
+                  <label className={styles.toggleLabel}>Private Notes</label>
+                  <span className={styles.toggleDescription}>
+                    Show your private notes on songs, albums and artists. When
+                    this is off, your notes are kept but hidden
+                  </span>
+                </div>
+                <label className={styles.toggleSwitch}>
+                  <input
+                    aria-label="Show private notes"
+                    type="checkbox"
+                    checked={privateNotesShown}
+                    onChange={(e) => setPrivateNotesShown(e.target.checked)}
+                  />
+                  <span className={styles.slider}></span>
+                </label>
+              </div>
+
+              <div className={styles.toggleItem}>
+                <div className={styles.toggleInfo}>
                   <label className={styles.toggleLabel}>
                     Reset Tagify Data
                   </label>
@@ -395,6 +441,24 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
                   {isResettingData ? "Resetting..." : "Reset"}
                 </button>
               </div>
+
+              {showOnboardingPreview && (
+                <div className={styles.toggleItem}>
+                  <div className={styles.toggleInfo}>
+                    <label className={styles.toggleLabel}>Onboarding Preview</label>
+                    <span className={styles.toggleDescription}>
+                      Go through onboarding as a brand-new user. Your library,
+                      settings and Community account stay as they are. Only you see this.
+                    </span>
+                  </div>
+                  <button
+                    className={styles.actionButton}
+                    onClick={() => startOnboardingPreview()}
+                  >
+                    Start preview
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

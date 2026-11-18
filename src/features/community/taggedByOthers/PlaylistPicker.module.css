@@ -1,0 +1,219 @@
+.overlay {
+  background: rgb(0 0 0 / 72%);
+  box-sizing: border-box;
+  display: grid;
+  inset: 0;
+  padding: 24px;
+  place-items: center;
+  position: fixed;
+  z-index: 10010;
+}
+
+.dialog {
+  background: var(--spice-main, #181818);
+  border: 1px solid #414141;
+  border-radius: 16px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 45%);
+  box-sizing: border-box;
+  color: var(--spice-text, #fff);
+  display: grid;
+  gap: 12px;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  max-height: 85vh;
+  outline: none;
+  padding: 24px 28px;
+  width: min(520px, 100%);
+}
+
+.title {
+  font-size: 22px;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.lead,
+.status {
+  color: var(--spice-subtext, #b3b3b3);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.bulk {
+  display: flex;
+  gap: 8px;
+}
+
+.bulkButton {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 25%);
+  border-radius: 999px;
+  color: var(--spice-text, #fff);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  min-height: 30px;
+  padding: 0 14px;
+}
+
+.bulkButton:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 60%);
+}
+
+.bulkButton:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.treeRoot {
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.item {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+  min-height: 34px;
+  padding-right: 10px;
+}
+
+.item:hover {
+  background: rgb(255 255 255 / 5%);
+}
+
+.twisty {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--spice-subtext, #b3b3b3);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  transition: transform 0.15s ease;
+  width: 20px;
+}
+
+.twistyOpen {
+  transform: rotate(90deg);
+}
+
+.label {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  flex: 1 1 auto;
+  font-size: 14px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.label input {
+  accent-color: var(--spice-button, #1ed760);
+  cursor: pointer;
+  flex: 0 0 auto;
+  height: 16px;
+  margin: 0;
+  width: 16px;
+}
+
+.icon {
+  color: var(--spice-subtext, #b3b3b3);
+  flex: 0 0 auto;
+}
+
+.name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  color: var(--spice-subtext, #b3b3b3);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.footer {
+  align-items: center;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  padding-top: 14px;
+}
+
+.cost {
+  color: var(--spice-subtext, #b3b3b3);
+  font-size: 13px;
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.cancel,
+.primary {
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  min-height: 36px;
+  padding: 0 18px;
+}
+
+.cancel {
+  background: transparent;
+  border: 0;
+  color: var(--spice-text, #fff);
+}
+
+.cancel:hover {
+  text-decoration: underline;
+}
+
+.primary {
+  background: var(--spice-button, #1ed760);
+  border: 0;
+  color: #000;
+}
+
+.primary:hover:not(:disabled) {
+  transform: scale(1.03);
+}
+
+.primary:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.twisty:focus-visible,
+.bulkButton:focus-visible,
+.cancel:focus-visible,
+.primary:focus-visible,
+.label input:focus-visible {
+  outline: 2px solid var(--spice-button, #1ed760);
+  outline-offset: 2px;
+}

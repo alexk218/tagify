@@ -37,7 +37,9 @@ it("starts an unlinked library without account setup and keeps connecting option
 
   // Connecting stays one choice away, and setup opens only when the listener chooses it.
   fireEvent.click(screen.getByRole("button", { name: "Open the Tagify Community workspace" }));
-  expect(screen.queryByRole("region", { name: "Share your tags on Community" })).not.toBeInTheDocument();
+  // The Community tab's own title invites sharing; the separate invitation card stays hidden.
+  expect(screen.getAllByRole("region", { name: "Share your tags on Community" })).toHaveLength(1);
+  expect(document.getElementById("community-connect-prompt-title")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Share my tags" }));
   expect(screen.getByRole("dialog", { name: "Community setup" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

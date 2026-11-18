@@ -62,7 +62,7 @@ interface InfoModalProps {
   initialSection?: string;
 }
 
-const LATEST_WHATS_NEW_VERSION = "3.3.5";
+const LATEST_WHATS_NEW_VERSION = "3.4.0";
 const WHATS_NEW_SEEN_VERSION_KEY = "tagify:info-modal:whats-new-seen-version";
 
 const hasSeenLatestWhatsNew = () => {
@@ -243,6 +243,29 @@ const InfoModal: React.FC<InfoModalProps> = ({
               {activeSection === "whats-new" && (
                 <div className={styles.section}>
                   <div className={styles.whatsNewHeader}>
+                    <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.4.0")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.4.0</a></h3>
+                  </div>
+                  <ul className={styles.compactUpdates}>
+                    {[
+                      { title: "Tagged by others", description: "songs in your library other members tagged, right in your track list.", icon: faPeopleGroup },
+                      { title: "Album covers in your track list", description: 'covers next to every song; sort by "Most tagged by others" or filter to songs others tagged.', icon: faCompactDisc },
+                      { title: "Smart Playlists with Community", description: "one list with Community when you're connected.", icon: faUsers },
+                      { title: "Tag Manager and more", description: "select many tags at once, see long names, Most Used sort.", icon: faFolderTree },
+                    ].map(({ title, description, icon }) => (
+                      <li key={title} className={styles.compactUpdate}>
+                        <FontAwesomeIcon icon={icon} className={styles.compactUpdateIcon} aria-hidden="true" />
+                        <div className={styles.compactUpdateCopy}>
+                          <h4 className={styles.compactUpdateTitle}>{title}</h4>
+                          <p className={styles.compactUpdateDescription}>{description}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <details className={styles.releaseAccordion}>
+                    <summary className={styles.releaseSummary}><span>What's New in Tagify 3.3.5</span></summary>
+                    <div>
+                  {/* TAGIFY 3.3.5 */}
+                  <div className={styles.whatsNewHeader}>
                     <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.3.5")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.3.5</a></h3>
                   </div>
                   <ul className={styles.compactUpdates}>
@@ -260,6 +283,8 @@ const InfoModal: React.FC<InfoModalProps> = ({
                       </li>
                     ))}
                   </ul>
+                    </div>
+                  </details>
                   <details className={styles.releaseAccordion}>
                     <summary className={styles.releaseSummary}><span>What's New in Tagify 3.3.4</span></summary>
                     <div>

@@ -445,4 +445,30 @@ describe("MigrationOrchestrator", () => {
     );
     expect(result.migrationsRun).toContain("cleanupInlineEditorEmptyTracks");
   });
+
+  it("quietly removes blank songs found after the first cleanup already ran", async () => {
+    const blankTrack = { rating: 0, energy: 0, bpm: null, tagIds: [], name: "Rating cleared on Community", dateModified: 1_000 };
+    const retainedTrack = { ...blankTrack, rating: 3, name: "Still rated" };
+    const storedData = {
+      ...defaultTagData,
+      tracks: { "spotify:track:blank": blankTrack, "spotify:track:retained": retainedTrack },
+    };
+    window.localStorage.setItem(
+      "tagify:migrations",
+      JSON.stringify({ version: "3.3.0", migrations: { cleanupEmptyTracks: true, cleanupInlineEditorEmptyTracks: true, addTrackMetadata: true, removeTrackInfoCache: true, storageToIndexedDB: true } }),
+    );
+    indexedDBStorageMock.init.mockResolvedValue(true);
+    indexedDBStorageMock.getTrackCount.mockResolvedValue(2);
+    indexedDBStorageMock.getPlaylistCount.mockResolvedValue(0);
+    indexedDBStorageMock.getArtistCount.mockResolvedValue(0);
+    indexedDBStorageMock.getTaxonomy.mockResolvedValue(storedData.taxonomy);
+    indexedDBStorageMock.loadAllStrict.mockResolvedValue(storedData);
+
+    const result = await migrationOrchestrator.initialize();
+
+    expect(result.success).toBe(true);
+    expect(result.data.tracks).toEqual({ "spotify:track:retained": retainedTrack });
+    expect(indexedDBStorageMock.saveTrackChanges).toHaveBeenCalledWith(new Map([["spotify:track:blank", null]]));
+    expect(result.migrationsRun).toEqual([]);
+  });
 });

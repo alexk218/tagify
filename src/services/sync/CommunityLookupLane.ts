@@ -12,6 +12,8 @@ import { syncClientHeaders } from "./SyncClientHeaders";
 
 /** How often a filler asks Community for requests. */
 export const LOOKUP_POLL_MS = 15_000;
+/** The least time between a run and a run a nudge starts after it. */
+export const LOOKUP_NUDGE_MIN_GAP_MS = 1_000;
 /** How often a desktop Community says isn't a filler asks again. */
 export const NOT_A_FILLER_RECHECK_MS = 6 * 60 * 60_000;
 /** Answers kept to send again after Community couldn't take them, and requests whose search failed. */
@@ -232,24 +234,53 @@ export interface LookupSchedulerOptions<Memory> {
   run: (memory: Memory) => Promise<LookupRun>;
   setTimer?: (callback: () => void, ms: number) => unknown;
   clearTimer?: (timer: unknown) => void;
+  now?: () => number;
 }
 
 /**
  * Runs a lane: once when sync starts, then every 15 seconds while Community says this desktop is a
  * filler, every few hours while it says it isn't, and after a quiet, growing wait when Community or
- * Spotify can't be asked. One run at a time; nothing after sync stops.
+ * Spotify can't be asked. A nudge (Community announcing a new request) asks sooner, but only in place
+ * of an ordinary filler poll. One run at a time; nothing after sync stops.
  */
 export class LookupScheduler<Memory> {
   private running: Promise<void> | null = null;
   private timer: unknown = null;
   private stopped = true;
   private failures: Partial<Record<"unsupported" | "network" | "spotify", number>> = {};
+  /** The last run finished cleanly as a filler, so the wait is the ordinary poll and not a back-off. */
+  private nudgeable = false;
+  /** A nudge arrived during a run: one more run follows it. */
+  private followUp = false;
+  private lastRunAt = Number.NEGATIVE_INFINITY;
+  /** When the armed timer fires. */
+  private timerDueAt = 0;
   private readonly setTimer: (callback: () => void, ms: number) => unknown;
   private readonly clearTimer: (timer: unknown) => void;
+  private readonly now: () => number;
 
   constructor(private readonly options: LookupSchedulerOptions<Memory>, private readonly memory: Memory) {
     this.setTimer = options.setTimer ?? ((callback, ms) => setTimeout(callback, ms));
     this.clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>));
+    this.now = options.now ?? Date.now;
+  }
+
+  /**
+   * Community announced a new request: asks now instead of at the next poll. Ignored before the
+   * first run starts, after sync stops, on a desktop that isn't a filler and during any back-off or pause
+   * (those waits stand). During a run, exactly one more run follows it. A nudge's run starts at least
+   * LOOKUP_NUDGE_MIN_GAP_MS after the previous run started, and still takes every search from the
+   * lane's allowance.
+   */
+  nudge(): void {
+    if (this.stopped) return;
+    // Whether it is heard depends on how the run ends (see trigger).
+    if (this.running) { this.followUp = true; return; }
+    if (!this.nudgeable) return;
+    const due = Math.max(this.now(), this.lastRunAt + LOOKUP_NUDGE_MIN_GAP_MS);
+    // A timer that fires by then (an earlier nudge's) already covers this one.
+    if (this.timer && this.timerDueAt <= due) return;
+    this.arm(due - this.now());
   }
 
   /** After each pull: starts the lane if it isn't already running or waiting. */
@@ -265,22 +296,38 @@ export class LookupScheduler<Memory> {
     if (this.timer) this.clearTimer(this.timer);
     this.timer = null;
     this.failures = {};
+    this.nudgeable = false;
+    this.followUp = false;
   }
 
   /** The current run, for tests. */
   get pending(): Promise<void> | null { return this.running; }
 
+  private arm(ms: number): void {
+    if (this.timer) this.clearTimer(this.timer);
+    const wait = Math.max(0, ms);
+    this.timerDueAt = this.now() + wait;
+    this.timer = this.setTimer(() => this.trigger(), wait);
+  }
+
   private trigger(): void {
     if (this.running || this.stopped) return;
     this.timer = null;
+    this.followUp = false;
+    this.nudgeable = false;
+    this.lastRunAt = this.now();
     this.running = (async () => {
       let wait: number = LOOKUP_POLL_MS;
       try {
         const run = await this.options.run(this.memory).catch((): LookupRun => ({ filler: false, lookups: 0, answered: 0, searches: 0, stopped: "network" }));
         wait = this.waitAfter(run);
+        this.nudgeable = run.filler && run.stopped === undefined;
       } finally {
         this.running = null;
-        if (!this.stopped) this.timer = this.setTimer(() => this.trigger(), wait);
+        // A nudge heard during the run asks once more, unless the run ended in a back-off or pause.
+        if (this.followUp && this.nudgeable) wait = Math.min(wait, this.lastRunAt + LOOKUP_NUDGE_MIN_GAP_MS - this.now());
+        this.followUp = false;
+        if (!this.stopped) this.arm(wait);
       }
     })();
   }

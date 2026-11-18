@@ -16,6 +16,7 @@ import {
   faDownload,
   faInfo,
   faLightbulb,
+  faMobileScreenButton,
   faShieldHalved,
   faUpload,
   faUserPlus,
@@ -25,6 +26,19 @@ import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
 import { useProductAnalyticsView } from "@/features/product-analytics/useProductAnalyticsView";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import { InviteFriendsPopover } from "@/features/invite";
+import {
+  PhoneAppPanel,
+  PhoneAppPopover,
+  openPhoneStore,
+  recordAndroidNotifyRequested,
+  recordPhoneAppButtonHidden,
+  recordPhoneAppPanelOpened,
+  recordPhoneAppStoreClicked,
+  updatePhoneAppState,
+  useAndroidReleased,
+  usePhoneAppButton,
+  usePhoneAppState,
+} from "@/features/phone-app";
 
 interface DataManagerProps {
   onExportTagData: () => Promise<void>;
@@ -92,6 +106,19 @@ const DataManager: React.FC<DataManagerProps> = ({
   const inviteButtonRef = useRef<HTMLButtonElement>(null);
   const [showInvite, setShowInvite] = useState(false);
   const closeInvite = useCallback(() => setShowInvite(false), []);
+  const phoneButton = usePhoneAppButton(showOptionalButtons);
+  const phoneState = usePhoneAppState();
+  const androidReleased = useAndroidReleased();
+  const phoneButtonRef = useRef<HTMLButtonElement>(null);
+  const [showPhone, setShowPhone] = useState(false);
+  const closePhone = useCallback(() => setShowPhone(false), []);
+  const togglePhone = () => {
+    if (!showPhone) {
+      recordPhoneAppPanelOpened(!showOptionalButtons);
+      phoneButton.markOpened();
+    }
+    setShowPhone((open) => !open);
+  };
 
   const handleOpenInfoModal = (section: string) => {
     setInfoModalSection(section);
@@ -194,6 +221,20 @@ const DataManager: React.FC<DataManagerProps> = ({
         >
           <FontAwesomeIcon icon={faInfo} />
         </button>
+        {phoneButton.visible && (
+          <button
+            ref={phoneButtonRef}
+            className={`${styles.pillButton} ${styles.phoneButton}`}
+            onClick={togglePhone}
+            title="Get Tagify on your phone"
+            aria-label={phoneButton.showDot ? "Get Tagify on your phone (new)" : "Get Tagify on your phone"}
+            aria-haspopup="dialog"
+            aria-expanded={showPhone}
+          >
+            <FontAwesomeIcon icon={faMobileScreenButton} />
+            {phoneButton.showDot && <span className={styles.newDot} aria-hidden="true" />}
+          </button>
+        )}
         {showOptionalButtons && (
           <>
             <button
@@ -252,6 +293,29 @@ const DataManager: React.FC<DataManagerProps> = ({
         )}
       </div>
 
+      {showPhone && phoneButton.visible && (
+        <PhoneAppPopover anchor={phoneButtonRef.current} onClose={closePhone}>
+          <PhoneAppPanel
+            androidReleased={androidReleased}
+            androidNotify={Boolean(phoneState.androidNotify)}
+            onStore={(store) => {
+              recordPhoneAppStoreClicked(store, "panel");
+              openPhoneStore(store);
+            }}
+            onNotifyAndroid={() => {
+              recordAndroidNotifyRequested();
+              updatePhoneAppState({ androidNotify: true });
+            }}
+            onHide={() => {
+              recordPhoneAppButtonHidden();
+              setShowPhone(false);
+              phoneButton.hide();
+              Spicetify.showNotification("Phone app button hidden. You can bring it back in Settings.");
+            }}
+          />
+        </PhoneAppPopover>
+      )}
+
       {showInvite && showOptionalButtons && (
         <InviteFriendsPopover
           anchor={inviteButtonRef.current}
@@ -282,6 +346,8 @@ const DataManager: React.FC<DataManagerProps> = ({
           onClose={() => setShowMainSettings(false)}
           showOptionalButtons={showOptionalButtons}
           onToggleOptionalButtons={setShowOptionalButtons}
+          showPhoneButton={phoneButton.visible}
+          onTogglePhoneButton={phoneButton.setShown}
           onOpenInfoModal={handleOpenInfoModal}
           onResetTagifyData={onResetTagifyData}
           onRetryMigration={onRetryMigration}

@@ -34,6 +34,15 @@ function writeShownPackFolders(keys: string[]): void {
   } catch { /* The picker may then open these folders again next time. */ }
 }
 
+// Takes the categories and target only so callers recount when either changes.
+function countUsesFor(
+  _categories: TagCategory[],
+  _usageTarget: string,
+  getTagUses: (() => ReadonlyMap<string, number>) | undefined,
+): ReadonlyMap<string, number> | undefined {
+  return getTagUses?.();
+}
+
 interface TagSelectorProps {
   categories: TagCategory[];
   customAccentsById: Record<string, CustomTagAccent>;
@@ -46,6 +55,10 @@ interface TagSelectorProps {
   isLockedTrack: boolean;
   // A library with no tags yet opens every group, unless the person already chose what's open.
   expandForFirstRun?: boolean;
+  /** Counts how much music carries each tag, for the "Most Used" sort. */
+  getTagUses?: () => ReadonlyMap<string, number>;
+  /** What is being tagged. "Most Used" recounts when it changes, so tags hold still while tagging. */
+  usageTarget?: string;
 }
 
 const TagSelector: React.FC<TagSelectorProps> = ({
@@ -59,6 +72,8 @@ const TagSelector: React.FC<TagSelectorProps> = ({
   isMultiTagging = false,
   isLockedTrack = false,
   expandForFirstRun = false,
+  getTagUses,
+  usageTarget = "",
 }) => {
   const [expandedCategoryIds, setExpandedCategoryIds] = useLocalStorage<string[]>(
     "tagify:expandedCategories",
@@ -84,9 +99,17 @@ const TagSelector: React.FC<TagSelectorProps> = ({
   const sortMode = isTagSelectorSortMode(storedSortMode)
     ? storedSortMode
     : DEFAULT_TAG_SELECTOR_SORT_MODE;
+  // Counted when "Most Used" is chosen, the tags change or another song is opened, and kept while
+  // tagging, so a tag doesn't jump away from the pointer right after it is clicked.
+  const getTagUsesRef = useRef(getTagUses);
+  getTagUsesRef.current = getTagUses;
+  const tagUses = useMemo(
+    () => (sortMode === "most-used" ? countUsesFor(categories, usageTarget, getTagUsesRef.current) : undefined),
+    [categories, sortMode, usageTarget],
+  );
   const sortedCategories = useMemo(
-    () => sortTagSelectorCategories(categories, sortMode),
-    [categories, sortMode],
+    () => sortTagSelectorCategories(categories, sortMode, tagUses),
+    [categories, sortMode, tagUses],
   );
   const visibleCategories = useMemo(
     () => filterTagSelectorCategories(sortedCategories, searchTerm),

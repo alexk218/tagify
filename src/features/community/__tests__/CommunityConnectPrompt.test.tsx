@@ -2,10 +2,10 @@ import React from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityConnectPrompt } from "../CommunityConnectPrompt";
-import { COMMUNITY_CONNECT_PROMPT_PREFIX } from "../communityConnectPromptHistory";
+import { COMMUNITY_CONNECT_PROMPT_PREFIX, COMMUNITY_RECONNECT_PROMPT_PREFIX } from "../communityConnectPromptHistory";
 import { getUsageAccountDigest } from "@/features/discovery-survey/services/tagifyUsage";
 import { PENDING_PAIRING_STORAGE_KEY } from "@/services/sync/SyncPairingService";
-import { setDisconnectedSyncProvenance } from "@/services/sync/SyncLocalState";
+import { hasCommunityLibraryOnThisComputer, setDisconnectedSyncProvenance } from "@/services/sync/SyncLocalState";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 
 vi.mock("@/features/product-analytics/productAnalytics", async (importOriginal) => ({
@@ -13,6 +13,10 @@ vi.mock("@/features/product-analytics/productAnalytics", async (importOriginal) 
   recordProductInteraction: vi.fn(),
 }));
 
+vi.mock("@/services/sync/SyncLocalState", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/sync/SyncLocalState")>()),
+  hasCommunityLibraryOnThisComputer: vi.fn(),
+}));
 vi.mock("@/features/discovery-survey/services/tagifyUsage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/discovery-survey/services/tagifyUsage")>()),
   getUsageAccountDigest: vi.fn(),
@@ -30,8 +34,9 @@ beforeEach(() => {
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
   vi.mocked(getUsageAccountDigest).mockResolvedValue(ACCOUNT_A);
   vi.mocked(recordProductInteraction).mockClear();
+  vi.mocked(hasCommunityLibraryOnThisComputer).mockResolvedValue(false);
 });
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); delete window.__tagifyInstallRecoveryPromise; localStorage.clear(); });
 
 describe("Community connection invitation", () => {
   it("measures the invitation being seen and declined, without counting it while hidden", async () => {
@@ -143,5 +148,46 @@ describe("Community connection invitation", () => {
     render(<CommunityConnectPrompt enabled connected={false} onConnect={vi.fn()} />);
     await advance(2000);
     expect(prompt()).toBeNull();
+  });
+
+  it("waits for automatic reconnection at launch before inviting anyone", async () => {
+    let finishRecovery!: () => void;
+    window.__tagifyInstallRecoveryPromise = new Promise((resolve) => { finishRecovery = () => resolve(null); });
+    render(<CommunityConnectPrompt enabled connected={false} onConnect={vi.fn()} />);
+    await settle();
+    expect(prompt()).toBeNull();
+
+    await act(async () => { finishRecovery(); });
+    await settle();
+    expect(prompt()).toBeInTheDocument();
+  });
+
+  it("asks a computer that lost its connection to reconnect, and Not now pauses it for a week", async () => {
+    vi.mocked(hasCommunityLibraryOnThisComputer).mockResolvedValue(true);
+    const onConnect = vi.fn();
+    const first = render(<CommunityConnectPrompt enabled connected={false} onConnect={onConnect} />);
+    await settle();
+
+    const reminder = screen.getByRole("region", { name: "Reconnect this computer" });
+    expect(reminder).toHaveAccessibleDescription(expect.stringContaining("lost its connection to your Community account"));
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    expect(onConnect).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(screen.queryByRole("region", { name: "Reconnect this computer" })).toBeNull();
+    const until = Number(localStorage.getItem(`${COMMUNITY_RECONNECT_PROMPT_PREFIX}${ACCOUNT_A}`));
+    expect(until - Date.now()).toBe(7 * 24 * 60 * 60 * 1000);
+    // The reminder isn't the new-member invitation, so it doesn't count toward that funnel.
+    expect(recordProductInteraction).not.toHaveBeenCalled();
+    first.unmount();
+
+    render(<CommunityConnectPrompt enabled connected={false} onConnect={onConnect} />);
+    await settle();
+    expect(screen.queryByRole("region", { name: "Reconnect this computer" })).toBeNull();
+
+    localStorage.setItem(`${COMMUNITY_RECONNECT_PROMPT_PREFIX}${ACCOUNT_A}`, String(Date.now() - 1));
+    render(<CommunityConnectPrompt enabled connected={false} onConnect={onConnect} />);
+    await settle();
+    expect(screen.getByRole("region", { name: "Reconnect this computer" })).toBeInTheDocument();
   });
 });

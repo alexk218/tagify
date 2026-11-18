@@ -3,13 +3,13 @@
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.31
+    1.0.33
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
 #>
 
-$SCRIPT_VERSION = "1.0.31"
+$SCRIPT_VERSION = "1.0.33"
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -23,6 +23,14 @@ $script:USER_LOG = ""
 $script:INSTALLATION_FAILED = $false
 $script:INSTALLATION_ACTION = "Unknown"
 $script:INSTALL_START_TIME = $null
+# GitHub's API allows 60 unsigned requests an hour per internet address. Each run reads the two
+# release records once and reuses them; the rate-limit message is kept so later steps can show it.
+$script:GITHUB_API_CACHE = @{}
+$script:GITHUB_RATE_LIMIT_MESSAGE = $null
+# Set when Windows runs every program as administrator (UAC off, built-in Administrator account).
+$script:SPICETIFY_BYPASS_ADMIN = $false
+$script:TAGIFY_RELEASE_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
+$script:SPICETIFY_RELEASE_URL = 'https://api.github.com/repos/spicetify/cli/releases/latest'
 $spicetifyFolderPath = "$env:LOCALAPPDATA\spicetify"
 $spicetifyOldFolderPath = "$HOME\spicetify-cli"
 # Windows can give TEMP as an 8.3 short path such as C:\Users\HOMEPC~1\... when the user name has a space.
@@ -404,6 +412,113 @@ function Expand-ZipFile {
 }
 #endregion Logging
 
+#region GitHub API
+function Get-GitHubRateLimitMessage {
+    param([Nullable[long]]$ResetEpoch)
+
+    $when = "in up to an hour"
+    if ($ResetEpoch) {
+        $reset = [DateTimeOffset]::FromUnixTimeSeconds([long]$ResetEpoch).LocalDateTime
+        $minutes = [math]::Max(1, [math]::Ceiling(($reset - (Get-Date)).TotalMinutes))
+        $when = "after $($reset.ToString('t')) (about $minutes minute$(if ($minutes -ne 1) { 's' }))"
+    }
+
+    # One line: Tagify Manager shows only the line that follows "ERROR:".
+    return "GitHub, where Tagify downloads from, is temporarily limiting your internet connection, so setup can't continue right now (your internet itself is working). GitHub allows 60 checks an hour per internet address, and shared connections like work, school, VPNs or some mobile networks, or several tries in a row, can use them up. Try again $when, or switch connections (turn off your VPN or use your phone's hotspot) and try again right away."
+}
+
+function Get-HttpErrorDetails {
+    param($ErrorRecord)
+
+    # Windows PowerShell 5.1 gives an HttpWebResponse; PowerShell 7 an HttpResponseMessage.
+    $details = @{ HasResponse = $false; StatusCode = 0; Remaining = $null; Reset = $null; Body = "" }
+    $response = $null
+    try { $response = $ErrorRecord.Exception.Response } catch { }
+    if ($response) {
+        $details.HasResponse = $true
+        try { $details.StatusCode = [int]$response.StatusCode } catch { }
+        foreach ($name in 'X-RateLimit-Remaining', 'X-RateLimit-Reset') {
+            $value = $null
+            try {
+                if ($response.Headers -is [System.Net.WebHeaderCollection]) { $value = $response.Headers[$name] }
+                else { $values = $null; if ($response.Headers.TryGetValues($name, [ref]$values)) { $value = @($values)[0] } }
+            }
+            catch { }
+            if ($value -match '^\d+$') {
+                if ($name -eq 'X-RateLimit-Remaining') { $details.Remaining = [long]$value } else { $details.Reset = [long]$value }
+            }
+        }
+    }
+    try { if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) { $details.Body = [string]$ErrorRecord.ErrorDetails.Message } } catch { }
+    return $details
+}
+
+function Test-GitHubRateLimited {
+    param($Details)
+
+    return ($Details.StatusCode -eq 429 -or
+        ($Details.StatusCode -eq 403 -and ($Details.Remaining -eq 0 -or $Details.Body -match 'rate limit')))
+}
+
+function Invoke-GitHubApi {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [int]$TimeoutSec = 15
+    )
+
+    if ($script:GITHUB_API_CACHE.ContainsKey($Uri)) {
+        return $script:GITHUB_API_CACHE[$Uri]
+    }
+    try {
+        $result = Invoke-RestMethod -Uri $Uri -TimeoutSec $TimeoutSec
+    }
+    catch {
+        $details = Get-HttpErrorDetails $_
+        if (Test-GitHubRateLimited $details) {
+            $script:GITHUB_RATE_LIMIT_MESSAGE = Get-GitHubRateLimitMessage -ResetEpoch $details.Reset
+            Write-Log "GitHub rate limit reached for $Uri (HTTP $($details.StatusCode), resets at epoch $($details.Reset))"
+            throw $script:GITHUB_RATE_LIMIT_MESSAGE
+        }
+        throw
+    }
+    $script:GITHUB_API_CACHE[$Uri] = $result
+    return $result
+}
+
+# Confirms GitHub can be reached and that this connection has enough GitHub API requests left
+# for setup. GitHub doesn't count /rate_limit requests against the limit.
+function Test-GitHubAccess {
+    [CmdletBinding()]
+    param()
+
+    $status = $null
+    try {
+        $status = Invoke-RestMethod -Uri 'https://api.github.com/rate_limit' -TimeoutSec 10
+    }
+    catch {
+        $details = Get-HttpErrorDetails $_
+        if (-not $details.HasResponse) {
+            Write-Log "GitHub could not be reached: $_"
+            Write-ErrorAndExit "Tagify setup couldn't reach GitHub (api.github.com), where Tagify downloads from. Check that you're connected to the internet. If you are, a firewall, antivirus, VPN or network filter may be blocking GitHub: allow github.com and api.github.com, or try another connection."
+        }
+        # GitHub answered, so the connection works; the release checks below report anything else.
+        Write-Log "GitHub answered the connection check with HTTP $($details.StatusCode)"
+        if (Test-GitHubRateLimited $details) {
+            Write-ErrorAndExit (Get-GitHubRateLimitMessage -ResetEpoch $details.Reset)
+        }
+        return
+    }
+
+    $core = $status.resources.core
+    Write-Log "Internet connection OK (GitHub API requests left this hour: $($core.remaining) of $($core.limit))"
+    $needed = @($script:TAGIFY_RELEASE_URL, $script:SPICETIFY_RELEASE_URL | Where-Object { -not $script:GITHUB_API_CACHE.ContainsKey($_) }).Count
+    if ($null -ne $core.remaining -and [long]$core.remaining -lt $needed) {
+        Write-ErrorAndExit (Get-GitHubRateLimitMessage -ResetEpoch $core.reset)
+    }
+}
+#endregion GitHub API
+
 #region Prerequisites and Validation
 function Test-Paths {
     Write-Log "=== DIAGNOSTIC TEST START ===" -ForegroundColor Cyan
@@ -429,6 +544,103 @@ function Test-Paths {
     Write-Log "=== DIAGNOSTIC TEST END ===" -ForegroundColor Cyan
 }
 
+function Get-ElevationState {
+    <#
+    .SYNOPSIS
+        Says whether setup runs as administrator, and whether Windows leaves the person any other way to run it.
+    .NOTES
+        With User Account Control turned off, or on the built-in Administrator account (which Windows doesn't
+        prompt for), every program the person opens runs as administrator, Spotify included. Telling them to
+        open Tagify Manager "normally" can't work there, so setup runs Spicetify with --bypass-admin instead.
+        Anywhere else, administrator rights came from "Run as administrator" (or a program that was), and
+        Spicetify would patch Spotify from a different context than the one Spotify runs in.
+    #>
+    $state = @{
+        IsAdmin            = $false
+        Unavoidable        = $false
+        Reason             = ''
+        AccountName        = ''
+        DesktopAccountName = ''
+    }
+
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        $state.IsAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        $state.AccountName = $identity.Name
+    }
+    catch {
+        return $state
+    }
+    if (-not $state.IsAdmin) { return $state }
+
+    $policy = $null
+    try {
+        $policy = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction Stop
+    }
+    catch { }
+
+    if ($policy -and ($policy.PSObject.Properties.Name -contains 'EnableLUA') -and [int]$policy.EnableLUA -eq 0) {
+        $state.Unavoidable = $true
+        $state.Reason = 'User Account Control is turned off, so every program runs as administrator'
+    }
+    elseif ($identity.User -and $identity.User.Value -match '-500$') {
+        $filtered = $policy -and ($policy.PSObject.Properties.Name -contains 'FilterAdministratorToken') -and [int]$policy.FilterAdministratorToken -eq 1
+        if (-not $filtered) {
+            $state.Unavoidable = $true
+            $state.Reason = "signed in to Windows' built-in Administrator account, where every program runs as administrator"
+        }
+    }
+
+    # The account that owns the desktop (explorer.exe) is the one Spotify runs under.
+    try {
+        $explorer = Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction Stop |
+            Where-Object { $_.SessionId -eq (Get-Process -Id $PID).SessionId } |
+            Select-Object -First 1
+        if ($explorer) {
+            $owner = Invoke-CimMethod -InputObject $explorer -MethodName GetOwner -ErrorAction Stop
+            if ($owner -and $owner.User) {
+                $state.DesktopAccountName = if ($owner.Domain) { "$($owner.Domain)\$($owner.User)" } else { $owner.User }
+            }
+        }
+    }
+    catch { }
+
+    return $state
+}
+
+function Test-Elevation {
+    $elevation = Get-ElevationState
+    if (-not $elevation.IsAdmin) {
+        Write-Log "Running as normal user (not Administrator)"
+        return
+    }
+
+    Write-Log "Running as Administrator (account: $($elevation.AccountName); desktop account: $(if ($elevation.DesktopAccountName) { $elevation.DesktopAccountName } else { 'unknown' }))"
+
+    # Tagify Manager shows only the line after "ERROR:", so each message below is one line.
+    # Compare user names only: the domain part can be written differently for the same account.
+    $runningUser = ($elevation.AccountName -split '\\')[-1]
+    $desktopUser = ($elevation.DesktopAccountName -split '\\')[-1]
+    if ($runningUser -and $desktopUser -and ($runningUser -ne $desktopUser)) {
+        Write-ErrorAndExit "Tagify Manager is running as a different Windows account ($($elevation.AccountName)) than the one you're signed in to ($($elevation.DesktopAccountName)), so Tagify would be set up for the wrong account. Close Tagify Manager and open it again by double-clicking it, without 'Run as administrator' and without entering another account's password."
+    }
+
+    if ($elevation.Unavoidable) {
+        Write-Log "Continuing as Administrator: $($elevation.Reason). Spotify runs as administrator here too, so Spicetify runs with --bypass-admin." -ForegroundColor Yellow
+        $script:SPICETIFY_BYPASS_ADMIN = $true
+        return
+    }
+
+    Write-ErrorAndExit "Tagify Manager was opened as administrator, and Spicetify can't set up Spotify that way. Close Tagify Manager and open it again by double-clicking it (not right-click > 'Run as administrator', and not from another program or installer that's running as administrator). If it keeps happening: right-click Tagify Manager > Properties > Compatibility, untick 'Run this program as an administrator', then click OK."
+}
+
+function Get-SpicetifyArguments {
+    param([string[]]$Arguments)
+    if ($script:SPICETIFY_BYPASS_ADMIN) { return @('--bypass-admin') + $Arguments }
+    return $Arguments
+}
+
 function Test-Prerequisites {
     [CmdletBinding()]
     param()
@@ -442,24 +654,11 @@ function Test-Prerequisites {
     }
     Write-Log "PowerShell $($PSVersionTable.PSVersion) is compatible"
     
-    # Check admin privileges
-    $currentUser = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    $isAdmin = $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    
-    if ($isAdmin) {
-        Write-ErrorAndExit "This script is running as Administrator, which will cause permission issues with Spicetify.`n`nPlease run this script as a normal user (without 'Run as Administrator')."
-    }
-    Write-Log "Running as normal user (not Administrator)"
+    Test-Elevation
     
     
     # Test internet connection
-    try {
-        Invoke-WebRequest -Uri "https://api.github.com" -UseBasicParsing -TimeoutSec 10 | Out-Null
-        Write-Log "Internet connection OK"
-    }
-    catch {
-        Write-ErrorAndExit "No internet connection. Please connect to the internet and try again."
-    }
+    Test-GitHubAccess
 
     # Check Spotify installation
     Write-Log "Verifying Spotify installation..."
@@ -574,7 +773,7 @@ function Get-LatestSpicetifyReleaseInfo {
         [int]$TimeoutSec = 15
     )
 
-    $latestRelease = Invoke-RestMethod -Uri 'https://api.github.com/repos/spicetify/cli/releases/latest' -TimeoutSec $TimeoutSec
+    $latestRelease = Invoke-GitHubApi -Uri $script:SPICETIFY_RELEASE_URL -TimeoutSec $TimeoutSec
     return @{
         Version = $latestRelease.tag_name -replace '^v', ''
         Body    = [string]$latestRelease.body
@@ -613,8 +812,7 @@ function Get-LatestTagifyVersion {
     param()
 
     try {
-        $apiUrl = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
-        $latestRelease = Invoke-RestMethod -Uri $apiUrl -TimeoutSec 15
+        $latestRelease = Invoke-GitHubApi -Uri $script:TAGIFY_RELEASE_URL -TimeoutSec 15
         
         $version = $latestRelease.tag_name -replace 'v', ''
         $downloadUrl = $null
@@ -739,7 +937,7 @@ function Get-SpicetifyVersion {
             return $null
         }
     
-        $versionOutput = & $spicetifyExe -v 2>&1
+        $versionOutput = & $spicetifyExe @(Get-SpicetifyArguments @('-v')) 2>&1
         return ($versionOutput | Out-String).Trim()
     }
     catch {
@@ -754,7 +952,7 @@ function Get-SpicetifyConfigPath {
             return $null
         }
         
-        $configPath = & $spicetifyExe -c 2>&1
+        $configPath = & $spicetifyExe @(Get-SpicetifyArguments @('-c')) 2>&1
         $exitCode = $LASTEXITCODE
         
         if ($exitCode -eq 0 -and $configPath -and (Test-Path $configPath)) {
@@ -779,6 +977,9 @@ function Get-SystemState {
     # Get current versions
     $currentTagify = Get-InstalledTagifyVersion
     $latestTagifyInfo = Get-LatestTagifyVersion
+    if (-not $latestTagifyInfo.Success -and $script:GITHUB_RATE_LIMIT_MESSAGE) {
+        Write-ErrorAndExit $script:GITHUB_RATE_LIMIT_MESSAGE
+    }
     $spicetifyState = Test-SpicetifyState
     
     $systemState = @{
@@ -960,6 +1161,7 @@ function Install-SpicetifyCore {
         Write-Log 'Spicetify installation completed'
     }
     catch {
+        if ($script:GITHUB_RATE_LIMIT_MESSAGE) { Write-ErrorAndExit $script:GITHUB_RATE_LIMIT_MESSAGE }
         Write-ErrorAndExit "Failed to install Spicetify: $_"
     }
 }
@@ -1115,7 +1317,7 @@ function Download-TagifyRelease {
     $zipPath = Join-Path $tempDir "tagify.zip"
     
     try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" -TimeoutSec 15
+        $release = Invoke-GitHubApi -Uri $script:TAGIFY_RELEASE_URL -TimeoutSec 15
         $asset = $release.assets | Where-Object { $_.browser_download_url -eq $DownloadUrl -and $_.name -eq "tagify-$($release.tag_name).zip" } | Select-Object -First 1
         if (-not $asset -or $asset.digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or $DownloadUrl -ne "https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$($release.tag_name)/$($asset.name)") { throw "The Tagify download could not be verified. Check again before installing." }
         Write-Log "Download URL: $DownloadUrl"
@@ -1139,6 +1341,7 @@ function Download-TagifyRelease {
     }
     catch {
         Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        if ($script:GITHUB_RATE_LIMIT_MESSAGE) { Write-ErrorAndExit $script:GITHUB_RATE_LIMIT_MESSAGE }
         Write-ErrorAndExit "Failed to download Tagify: $_"
     }
 }
@@ -1241,7 +1444,7 @@ function Set-SpicetifyTagifyConfiguration {
         }
         
         # Add Tagify to custom apps
-        & $spicetifyExe config custom_apps tagify 2>&1 | ForEach-Object { Write-Log $_ }
+        & $spicetifyExe @(Get-SpicetifyArguments @('config', 'custom_apps', 'tagify')) 2>&1 | ForEach-Object { Write-Log $_ }
         Write-Log "Tagify added to Spicetify config"
     }
     catch {
@@ -1321,6 +1524,7 @@ function Invoke-Spicetify {
         }
     }
     
+    if ($script:SPICETIFY_BYPASS_ADMIN) { $Arguments = "--bypass-admin $Arguments" }
     Write-Log "Running: spicetify $Arguments"
     
     try {

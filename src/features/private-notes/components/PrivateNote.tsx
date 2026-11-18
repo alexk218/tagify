@@ -1,11 +1,19 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MAX_PRIVATE_NOTE_LENGTH } from "@tagify/sync-contracts";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
+import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import { emptyPrivateNote, privateNoteBackupStatus, PRIVATE_NOTES_CHANGED_EVENT, savePrivateNote } from "@/services/sync/PrivateNotes";
 import type { LocalPrivateNote } from "@/services/sync/PrivateNotes.types";
 import { getDesktopSyncConfiguration, getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
+import { usePrivateNotesShown } from "../privateNotesSetting";
 import styles from "./PrivateNote.module.css";
-export function PrivateNote({ uri, inline = false }: { uri: string; inline?: boolean }) {
+
+/** The note box, unless private notes are turned off in Settings (an unsaved draft is kept either way). */
+export function PrivateNote(props: { uri: string; inline?: boolean }) {
+  return usePrivateNotesShown() ? <PrivateNoteEditor {...props} /> : null;
+}
+
+function PrivateNoteEditor({ uri, inline = false }: { uri: string; inline?: boolean }) {
   const account = getTagifyDatabaseName();
   const key = `tagify:private-note-draft:${account}:${uri}`;
   const readDraft = () => {
@@ -65,6 +73,7 @@ export function PrivateNote({ uri, inline = false }: { uri: string; inline?: boo
     try {
       if (account !== getTagifyDatabaseName()) throw new Error("Your connected account changed. Reopen this note before saving.");
       await savePrivateNote(uri, text, resolve ? note.text : editBase.current, resolve, note.conflict?.revision ?? note.revision);
+      recordProductInteraction("note_saved");
       if (mounted.current && account === getTagifyDatabaseName()) { localStorage.removeItem(key); setChangedCopy(null); editBase.current = text; setDraft(text); await refresh(); }
     } catch (failure) { if (mounted.current) { setError(failure instanceof Error ? failure.message : "Your note couldn't be saved. Your draft is kept; please try again."); await refresh(); } }
     finally { saving.current = false; if (mounted.current) setBusy(false); }

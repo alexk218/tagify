@@ -77,9 +77,26 @@ export async function savePublicationPolicy(
   return announce(saved);
 }
 
-/** "Publish my tags": public with the member's hidden tags, and updates running again if they were paused. */
+/** What a member reads before publishing: their star ratings go public with their tags. */
+export const PUBLISH_RATINGS_LINE = "Your tags and star ratings would be public. Private notes stay private.";
+
+/**
+ * "Publish my tags": public with the member's hidden tags, and updates running again if they were paused.
+ * For a member who isn't public yet it also shares their song and album ratings with their tags, as
+ * PUBLISH_RATINGS_LINE says. A member who is already public keeps their saved rating choice.
+ */
 export function publishTags(policy: PublicationPolicyV2, surface: SharingSurface): Promise<PublicationPolicyV2> {
-  return savePublicationPolicy(policy, { enabled: true, paused: false }, surface);
+  const state = publicationState(policy);
+  const notPublicYet = state === "review" || state === "private";
+  const next: PublicationPolicyV2 = notPublicYet ? {
+    ...policy,
+    entities: {
+      ...policy.entities,
+      track: { ...policy.entities.track, rating: true },
+      album: { ...policy.entities.album, rating: true },
+    },
+  } : policy;
+  return savePublicationPolicy(next, { enabled: true, paused: false }, surface);
 }
 
 /** "Keep my tags private": a reviewed choice, so Tagify stops asking and backup keeps running. */
@@ -192,10 +209,6 @@ export function hiddenBranchNames(taxonomy: TagTaxonomy, policy: HiddenChoices):
   };
   buildVisibilityTree(taxonomy).forEach(visit);
   return names;
-}
-
-export function sharesRatings(policy: PublicationPolicyV2): boolean {
-  return Boolean(policy.entities.track.rating || policy.entities.album.rating || policy.entities.artist.rating);
 }
 
 export function plural(count: number, noun: string): string {

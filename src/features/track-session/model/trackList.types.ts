@@ -7,7 +7,7 @@ import type {
 } from "@/utils/tagFilterGroups";
 import type { SongDetailFilterCriteria } from "@/utils/songDetails";
 
-export interface TrackListTrackData extends Pick<TrackData, "recordingIdentity" | "recordingGroupId" | "recordingGroupConfirmed" | "recordingReuseDisabled" | "durationMs" | "releaseDate"> {
+export interface TrackListTrackData extends Pick<TrackData, "recordingIdentity" | "recordingGroupId" | "recordingGroupConfirmed" | "recordingReuseDisabled" | "durationMs" | "releaseDate" | "originalReleaseDate" | "albumImageUrl"> {
   rating: number;
   energy: number;
   bpm: number | null;
@@ -52,6 +52,8 @@ export interface TrackListFilterInputs extends SongDetailFilterCriteria {
 export interface TrackListSortInputs {
   sortBy: SortOption;
   sortOrder: SortOrder;
+  /** Other Community members who tagged each song, by URI; a missing song counts 0. */
+  communityPeople?: ReadonlyMap<string, number>;
 }
 
 export interface BuildSmartPlaylistCriteriaInputs extends SongDetailFilterCriteria {

@@ -1,6 +1,6 @@
 import React from "react";
 import { IDBFactory } from "fake-indexeddb";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PrivateNote } from "../PrivateNote";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
@@ -54,4 +54,15 @@ it("keeps an inline draft after a failed blur save and makes retry available", a
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"));
   expect((await indexedDBStorage.getPrivateNote(uri))!.text).toBe("Keep this draft");
   failure.mockRestore();
+});
+
+it("hides the note box while private notes are off in Settings and keeps the draft for when they're back", async () => {
+  const { setPrivateNotesShown } = await import("../../privateNotesSetting");
+  render(<PrivateNote uri={uri} inline />);
+  await waitFor(() => expect(screen.getByLabelText("Private note")).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("Private note"), { target: { value: "Half-written" } });
+  act(() => setPrivateNotesShown(false));
+  expect(screen.queryByLabelText("Private note")).not.toBeInTheDocument();
+  act(() => setPrivateNotesShown(true));
+  await waitFor(() => expect(screen.getByLabelText("Private note")).toHaveValue("Half-written"));
 });

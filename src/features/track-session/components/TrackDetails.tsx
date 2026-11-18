@@ -1,5 +1,5 @@
 import { PrivateNote } from "@/features/private-notes/components/PrivateNote";
-import { getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
+import { getDesktopSyncConfiguration, getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
 import React, { useCallback, useMemo, useState } from "react";
 import styles from "./TrackDetails.module.css";
 import communityLinkStyles from "../../community/CommunityEntityLink.module.css";
@@ -21,7 +21,11 @@ import {
   organizeTrackTagsByCategory,
 } from "@/features/track-session/utils/trackDetails.tags";
 import { buildTagAccentCssVars } from "@/features/tag-data";
-import { CommunityEntityLens, getCommunityEntityUrl } from "@/features/community";
+import { getCommunityEntityUrl } from "@/features/community";
+import type { CommunityMatchTag } from "@/features/onboarding/services/communityMatches";
+import { communityTagDestination } from "@/features/onboarding/services/communityTagPlacement";
+import { sameTagNameKey } from "@tagify/community-contracts";
+import { TrackDetailsCommunity } from "./TrackDetailsCommunity";
 import { AlbumProgressLine } from "@/features/playlist-state";
 
 interface TrackDetailsProps {
@@ -49,6 +53,10 @@ interface TrackDetailsProps {
     taggedTrackCount: number;
     knownTrackCount: number | null;
   } | null;
+  /** Adds members' tags from Community to the song, filed the same way as the track list's Tagged by others. */
+  onAddCommunityTags?: (uri: string, tags: CommunityMatchTag[]) => Promise<void>;
+  /** Not connected to Community: members' tags stay read-only and a line asks them to connect. */
+  onConnectCommunity?: () => void;
 }
 
 const TrackDetails: React.FC<TrackDetailsProps> = ({
@@ -70,6 +78,8 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   onToggleLock,
   onSwitchToCurrentTrack,
   albumProgress,
+  onAddCommunityTags,
+  onConnectCommunity,
 }: TrackDetailsProps) => {
   const artistNames = useMemo(
     () =>
@@ -102,12 +112,22 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   const [isEditingBpm, setIsEditingBpm] = useState(false);
   const [editBpmValue, setEditBpmValue] = useState<string>("");
   const communityUrl = getCommunityEntityUrl(displayedTrack.uri || "");
-  // Known once the Community perspectives below have been opened for this track in this session.
+  // Known once Community has answered for this track (the From Community section below asks).
   const [communityPage, setCommunityPage] = useState<{ entityUri: string; found: boolean } | null>(null);
   const handleCommunityAvailability = useCallback((entityUri: string, _hasPerspectives: boolean, found: boolean) => {
     setCommunityPage({ entityUri, found });
   }, []);
   const hasCommunityEntity = communityPage?.entityUri === displayedTrack.uri && communityPage.found;
+  const songTagKeys = useMemo(
+    () => new Set(trackData.tagIds.map((id) => taxonomy.tagsById?.[id]?.name).filter((name): name is string => Boolean(name)).map(sameTagNameKey)),
+    [taxonomy, trackData.tagIds],
+  );
+  const libraryTagKeys = useMemo(
+    () => new Set(Object.values(taxonomy.tagsById ?? {}).map((tag) => sameTagNameKey(tag.name))),
+    [taxonomy],
+  );
+  const ownCommunityHandle = getDesktopSyncConfiguration()?.profile?.handle ?? null;
+  const destinationOf = useCallback((tag: CommunityMatchTag) => communityTagDestination(taxonomy, tag.paths), [taxonomy]);
 
   const handleBpmClick = () => {
     setIsEditingBpm(true);
@@ -677,7 +697,17 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
           </div>
         )}
       </div>
-      <CommunityEntityLens entityUri={displayedTrack.uri || ""} onAvailabilityChange={handleCommunityAvailability} />
+      <TrackDetailsCommunity
+        uri={displayedTrack.uri || ""}
+        songName={displayedTrack.name}
+        songTagKeys={songTagKeys}
+        libraryTagKeys={libraryTagKeys}
+        destinationOf={destinationOf}
+        ownHandle={ownCommunityHandle}
+        onAvailabilityChange={handleCommunityAvailability}
+        onAdd={onAddCommunityTags ? (tags) => onAddCommunityTags(displayedTrack.uri, tags) : undefined}
+        onConnect={onConnectCommunity}
+      />
     </div>
   );
 };

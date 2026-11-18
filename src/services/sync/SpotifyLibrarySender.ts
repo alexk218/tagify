@@ -41,7 +41,7 @@ export interface CommunitySpotifyList {
 
 /** What the sender needs from Spotify's desktop APIs (SpotifyApiService). */
 export interface LibraryReader {
-  getTaggingQueuePage(playlistId: string | null, offset?: number, signal?: AbortSignal): Promise<{ tracks: SpotifyTrack[]; nextOffset: number | null }>;
+  getTaggingQueuePage(playlistId: string | null, offset?: number, signal?: AbortSignal, pageSize?: number): Promise<{ tracks: SpotifyTrack[]; nextOffset: number | null }>;
   getAllUserPlaylistReferencesStrict(signal?: AbortSignal): Promise<Array<{ playlistId: string; playlistName: string; folders?: CommunitySpotifyFolder[] }>>;
   readPlaylistTracks(playlistId: string, options?: { signal?: AbortSignal; pageSize?: number; timeoutMs?: number }): Promise<SpotifyTrack[]>;
 }
@@ -130,6 +130,79 @@ export async function readSpotifyLibrary(reader: LibraryReader, signal?: AbortSi
   }
   return lists;
 }
+
+/** Songs read from one of the member's lists: a page of Liked Songs, or a whole playlist. */
+export interface SpotifyLibraryChunk {
+  kind: "liked" | "playlist";
+  /** Playlists read so far, and how many the library has (known once Liked Songs has been read). */
+  playlistsRead: number;
+  playlists: number | null;
+  tracks: SpotifyTrack[];
+  /** The playlist these songs came from; absent for Liked Songs and the step that counts playlists. */
+  playlistId?: string;
+  /** Spotify couldn't read this playlist; the next one follows. */
+  skipped?: true;
+}
+
+/** An error a reader throws to end `streamSpotifyLibrary` at once, as a Spotify slow-down does, instead of passing over the playlist. */
+export const endsLibraryStream = (error: unknown) => (error as { endsLibraryStream?: unknown } | null)?.endsLibraryStream === true;
+
+/**
+ * The member's library a piece at a time, for checks that show results as they go: Liked Songs
+ * newest first, a page per step, then every playlist in library order, one per step, up to
+ * LISTS_MAX lists. Nothing is read until the caller asks for the next piece, and a read Spotify
+ * refuses throws; the caller decides what to do with what it already has. With `likedOnly`, it
+ * ends after Liked Songs without reading the playlist list. With `playlists`, it reads only those
+ * playlists, in that order: no Liked Songs and no playlist list.
+ */
+export async function* streamSpotifyLibrary(reader: LibraryReader, signal?: AbortSignal, { likedOnly = false, playlists: chosen, likedPageSize }: {
+  likedOnly?: boolean;
+  playlists?: Array<{ playlistId: string }>;
+  /** Songs per Liked Songs page; Spotify's desktop library answers 500 as fast as 50. */
+  likedPageSize?: number;
+} = {}): AsyncGenerator<SpotifyLibraryChunk, void, void> {
+  const cancelled = () => { if (signal?.aborted) throw new DOMException("Cancelled", "AbortError"); };
+  for (let offset: number | null = chosen ? null : 0; offset !== null;) {
+    cancelled();
+    const page: { tracks: SpotifyTrack[]; nextOffset: number | null } = likedPageSize
+      ? await reader.getTaggingQueuePage(null, offset, signal, likedPageSize)
+      : await reader.getTaggingQueuePage(null, offset, signal);
+    yield { kind: "liked", playlistsRead: 0, playlists: null, tracks: page.tracks };
+    // A page that doesn't move forward would never end.
+    offset = page.nextOffset !== null && page.nextOffset > offset ? page.nextOffset : null;
+  }
+  if (likedOnly) return;
+  cancelled();
+  const playlists = (chosen ?? await reader.getAllUserPlaylistReferencesStrict(signal)).filter((playlist) => SPOTIFY_ID.test(playlist.playlistId)).slice(0, LISTS_MAX - 1);
+  // Known before the first playlist is read, so a check can say how many there are.
+  yield { kind: "playlist", playlistsRead: 0, playlists: playlists.length, tracks: [] };
+  let unreadableInARow = 0;
+  for (const [index, playlist] of playlists.entries()) {
+    cancelled();
+    let tracks: SpotifyTrack[] | null = null;
+    try {
+      tracks = await reader.readPlaylistTracks(playlist.playlistId, { signal, pageSize: READ_PAGE_SONGS, timeoutMs: READ_PAGE_TIMEOUT_MS });
+      unreadableInARow = 0;
+    } catch (error) {
+      // Spotify asking Tagify to wait ends the read, and so does a run of playlists nothing can be
+      // read from (Spotify is likely offline). One playlist Spotify can't read is passed over.
+      const aborted = signal?.aborted || (error instanceof DOMException && error.name === "AbortError");
+      if (aborted || isSpotifyBusy(error) || endsLibraryStream(error) || ++unreadableInARow >= STREAM_UNREADABLE_IN_A_ROW) throw error;
+    }
+    yield { kind: "playlist", playlistsRead: index + 1, playlists: playlists.length, playlistId: playlist.playlistId, tracks: tracks ?? [], ...(tracks ? {} : { skipped: true as const }) };
+  }
+}
+/**
+ * Tagify's own request guard holding desktop reads back while an earlier one is still running: a
+ * local wait, never Spotify asking Tagify to slow down, and nothing was sent.
+ */
+export function isLocalStall(error: unknown): boolean {
+  const value = error as { recoveryRequired?: unknown; spotifyRequestStopped?: unknown } | null;
+  return value?.recoveryRequired === true && value?.spotifyRequestStopped === true && spotifyWaitMs(error) === null;
+}
+
+/** This many playlists in a row that can't be read end `streamSpotifyLibrary`, as they end a list send. */
+const STREAM_UNREADABLE_IN_A_ROW = 5;
 
 /**
  * The request bodies for one list: parts of `size` songs (a multiple of Community's 1,000-song

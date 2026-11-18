@@ -191,6 +191,12 @@ export async function runPlaylistWrites(
   created: CreatedPlaylists,
   request: typeof fetch = fetch,
   maxRounds = MAX_ROUNDS,
+  /**
+   * The Spotify playlist Tagify's own smart playlist fill keeps for this Community playlist, if any
+   * (SmartPlaylistCommunityList.ts). One writer per Spotify playlist: Tagify's fill keeps it, and the
+   * write is reported done there without writing it a second time.
+   */
+  desktopFills: (communityId: string) => Promise<string | null> = async () => null,
 ): Promise<PlaylistWriteRun> {
   const run: PlaylistWriteRun = { written: 0, failed: 0, created: [] };
   const call = async (method: "POST" | "PUT", body: Record<string, unknown>) => {
@@ -215,7 +221,12 @@ export async function runPlaylistWrites(
       if (!taken) break;
       const results: Array<PlaylistWriteResultV1 & { created?: boolean }> = [];
       // One playlist at a time, so Spotify sees a steady few writes rather than a burst.
-      for (const playlist of claimed.playlists) results.push(await writeClaimedPlaylist(writer, playlist, created));
+      for (const playlist of claimed.playlists) {
+        const filled = await desktopFills(playlist.id).catch(() => null);
+        results.push(filled
+          ? { id: playlist.id, result: "written", spotifyPlaylistId: filled, fingerprint: playlist.fingerprint }
+          : await writeClaimedPlaylist(writer, playlist, created));
+      }
       for (const id of claimed.unreadable) results.push({ id, result: "failed", failure: "unknown" });
       await call("PUT", { results: results.map(({ created: _created, ...result }) => result) });
       for (const result of results) {
