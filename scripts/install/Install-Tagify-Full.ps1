@@ -1,15 +1,15 @@
-﻿<#
+<#
 .SYNOPSIS
     Tagify Installer for Windows - Full installation of Spicetify & Tagify
 
 .VERSION
-    1.0.33
+    1.0.34
 
 .DESCRIPTION
     Automates installation and updates for Spicetify CLI and Tagify custom app.
 #>
 
-$SCRIPT_VERSION = "1.0.33"
+$SCRIPT_VERSION = "1.0.34"
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -1047,7 +1047,7 @@ function Get-RequiredOperations {
     elseif ($SystemState.TagifyUpdateAvailable) {
         $operations += @{
             Type              = "UpdateTagify"
-            Description       = "Update Tagify v$($SystemState.TagifyVersion) → v$($SystemState.LatestTagifyVersion)"
+            Description       = "Update Tagify v$($SystemState.TagifyVersion) -> v$($SystemState.LatestTagifyVersion)"
             TagifyDownloadUrl = $SystemState.TagifyDownloadUrl
             Priority          = 5
         }

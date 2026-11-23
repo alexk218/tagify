@@ -1,3 +1,6 @@
+import type { TagTaxonomy } from "@/types/tagData";
+import { collectTagIdsForParent, normalizeTaxonomyTree } from "@/utils/tagTaxonomy";
+
 export const TAG_FILTER_OPERATORS = {
   AND: "AND",
   OR: "OR",
@@ -15,6 +18,144 @@ export interface TagFilterClause {
 export interface TagFilterFormula {
   clauses: TagFilterClause[];
   connectors: TagFilterOperator[];
+}
+
+/**
+ * A filter term can name a whole category or folder instead of one tag:
+ * `group:<id>` in a clause's tag lanes. As a match it means "any tag in it",
+ * as a NOT it means "no tag in it". It is resolved against the taxonomy each
+ * time the filter runs, so tags added to the category later count too.
+ */
+export const TAG_GROUP_FILTER_PREFIX = "group:";
+
+export function toTagGroupFilterId(groupId: string): string {
+  return `${TAG_GROUP_FILTER_PREFIX}${groupId}`;
+}
+
+export function getTagGroupFilterGroupId(termId: string): string | null {
+  return termId.startsWith(TAG_GROUP_FILTER_PREFIX) &&
+    termId.length > TAG_GROUP_FILTER_PREFIX.length
+    ? termId.slice(TAG_GROUP_FILTER_PREFIX.length)
+    : null;
+}
+
+export function getTagGroupName(
+  taxonomy: TagTaxonomy | null | undefined,
+  groupId: string,
+): string | null {
+  if (!taxonomy) return null;
+  return (
+    taxonomy.categoriesById[groupId]?.name ??
+    taxonomy.foldersById?.[groupId]?.name ??
+    taxonomy.subcategoriesById[groupId]?.name ??
+    null
+  );
+}
+
+/** Every category and folder that can be used as a filter term, as `group:<id>`. */
+export function buildTagGroupFilterIdSet(taxonomy: TagTaxonomy): Set<string> {
+  return new Set(
+    [
+      ...Object.keys(taxonomy.categoriesById),
+      ...Object.keys(taxonomy.foldersById ?? {}),
+      ...Object.keys(taxonomy.subcategoriesById),
+    ].map(toTagGroupFilterId),
+  );
+}
+
+export interface TagGroupFilterOption {
+  /** `group:<id>`, the term stored in a filter. */
+  termId: string;
+  groupId: string;
+  name: string;
+  /** Category first, then folders, ending with this group's own name. */
+  path: string[];
+  /** 0 for a category, 1 for a folder directly inside it, and so on. */
+  depth: number;
+  /** Every tag inside, folders included. */
+  tagIds: string[];
+}
+
+/**
+ * Categories and their folders in library order, for choosing a category
+ * term. Groups without any tags are left out.
+ */
+export function buildTagGroupFilterOptions(taxonomy: TagTaxonomy): TagGroupFilterOption[] {
+  const tree = normalizeTaxonomyTree(taxonomy);
+  const children = tree.childrenByParentId ?? {};
+  const options: TagGroupFilterOption[] = [];
+  const visit = (groupId: string, name: string, path: string[], seen: Set<string>): string[] => {
+    const index = options.length;
+    const tagIds: string[] = [];
+    options.push({ termId: toTagGroupFilterId(groupId), groupId, name, path, depth: path.length - 1, tagIds });
+    for (const childId of children[groupId] ?? []) {
+      if (tree.tagsById[childId]) tagIds.push(childId);
+      else if (!seen.has(childId) && tree.subcategoriesById[childId]) {
+        tagIds.push(...visit(childId, tree.subcategoriesById[childId].name, [...path, tree.subcategoriesById[childId].name], new Set([...seen, childId])));
+      }
+    }
+    if (tagIds.length === 0) options.splice(index, 1);
+    return tagIds;
+  };
+  tree.categoryOrder.forEach((categoryId) => {
+    const category = tree.categoriesById[categoryId];
+    if (category) visit(categoryId, category.name, [category.name], new Set([categoryId]));
+  });
+  return options;
+}
+
+/** A tag that exists, or a category term whose category or folder exists. */
+export function isKnownTagFilterTerm(taxonomy: TagTaxonomy, termId: string): boolean {
+  const groupId = getTagGroupFilterGroupId(termId);
+  return groupId === null ? Boolean(taxonomy.tagsById[termId]) : getTagGroupName(taxonomy, groupId) !== null;
+}
+
+/** Each category term replaced by the tags it covers right now. */
+export function expandTagGroupTerms(taxonomy: TagTaxonomy | null, termIds: string[]): string[] {
+  return [...new Set(termIds.flatMap((termId) => {
+    const groupId = getTagGroupFilterGroupId(termId);
+    return groupId === null ? [termId] : resolveTagGroupTagIds(taxonomy, groupId);
+  }))];
+}
+
+/** True when any clause names a whole category or folder. */
+export function tagFilterFormulaUsesGroups(formula: Partial<TagFilterFormula> | null | undefined): boolean {
+  return (formula?.clauses ?? []).some((clause) =>
+    [...(clause?.tagIds ?? []), ...(clause?.excludedTagIds ?? [])].some(
+      (termId) => getTagGroupFilterGroupId(termId) !== null,
+    ),
+  );
+}
+
+/** The tags a category term covers right now, or [] for a category that no longer exists. */
+export function resolveTagGroupTagIds(
+  taxonomy: TagTaxonomy | null | undefined,
+  groupId: string,
+): string[] {
+  return [...(getTagGroupResolver(taxonomy)(groupId) ?? [])];
+}
+
+type TagGroupResolver = (groupId: string) => ReadonlySet<string> | null;
+const groupResolverCache = new WeakMap<TagTaxonomy, TagGroupResolver>();
+
+function getTagGroupResolver(taxonomy: TagTaxonomy | null | undefined): TagGroupResolver {
+  if (!taxonomy) return () => null;
+  const cached = groupResolverCache.get(taxonomy);
+  if (cached) return cached;
+  const groups = new Map<string, ReadonlySet<string> | null>();
+  const resolver: TagGroupResolver = (groupId) => {
+    if (!groups.has(groupId)) {
+      groups.set(
+        groupId,
+        getTagGroupName(taxonomy, groupId) === null
+          ? null
+          : new Set(collectTagIdsForParent(taxonomy, groupId)),
+      );
+    }
+    return groups.get(groupId)!;
+  };
+  groupResolverCache.set(taxonomy, resolver);
+  return resolver;
 }
 
 function dedupeTagIds(tagIds: string[]): string[] {
@@ -168,32 +309,46 @@ export function flattenExcludedTagFilterFormula(formula: TagFilterFormula): stri
 }
 
 function evaluateClause(
+  trackTagIds: string[],
   trackTagIdSet: Set<string>,
   clause: TagFilterClause,
+  resolveGroup: TagGroupResolver,
 ): boolean {
+  const hasTerm = (termId: string) => {
+    const groupId = getTagGroupFilterGroupId(termId);
+    if (groupId === null) return trackTagIdSet.has(termId);
+    const groupTagIds = resolveGroup(groupId);
+    return !!groupTagIds && trackTagIds.some((tagId) => groupTagIds.has(tagId));
+  };
   const matchesPositiveTags =
     clause.tagIds.length === 0
       ? true
       : clause.operator === TAG_FILTER_OPERATORS.AND
-        ? clause.tagIds.every((tagId) => trackTagIdSet.has(tagId))
-        : clause.tagIds.some((tagId) => trackTagIdSet.has(tagId));
+        ? clause.tagIds.every(hasTerm)
+        : clause.tagIds.some(hasTerm);
   const matchesExcludedTags = clause.excludedTagIds.every(
-    (tagId) => !trackTagIdSet.has(tagId),
+    (tagId) => !hasTerm(tagId),
   );
 
   return matchesPositiveTags && matchesExcludedTags;
 }
 
+/**
+ * The taxonomy resolves category terms (`group:<id>`). Pass null only where a
+ * formula can't hold them; there a category matches no tags.
+ */
 export function evaluateTagFilterFormula(
   trackTagIds: string[],
   formula: TagFilterFormula,
+  taxonomy: TagTaxonomy | null,
 ): boolean {
-  return compileTagFilterFormula(formula)(trackTagIds);
+  return compileTagFilterFormula(formula, taxonomy)(trackTagIds);
 }
 
 /** Prepares a formula once so it can be checked against many songs quickly. */
 export function compileTagFilterFormula(
   formula: TagFilterFormula,
+  taxonomy: TagTaxonomy | null,
 ): (trackTagIds: string[]) => boolean {
   const normalizedFormula = normalizeTagFilterFormula(formula);
 
@@ -201,10 +356,12 @@ export function compileTagFilterFormula(
     return () => true;
   }
 
+  const resolveGroup = getTagGroupResolver(taxonomy);
+
   return (trackTagIds) => {
     const trackTagIdSet = new Set(trackTagIds);
     const clauseResults = normalizedFormula.clauses.map((clause) =>
-      evaluateClause(trackTagIdSet, clause),
+      evaluateClause(trackTagIds, trackTagIdSet, clause, resolveGroup),
     );
 
     const andGroups: boolean[] = [clauseResults[0]];
@@ -411,20 +568,26 @@ export function countTagFilterFormulaReferences(
 
 function formatClause(
   clause: TagFilterClause,
-  resolveTagName: (tagId: string) => string,
+  resolveName: (tagId: string) => string,
 ): {
   text: string;
   needsGroupingWhenOrSeparated: boolean;
 } {
   const operatorLabel = clause.operator;
+  const resolveTagName = (termId: string) =>
+    getTagGroupFilterGroupId(termId) === null
+      ? resolveName(termId)
+      : `Any ${resolveName(termId)}`;
   const positiveText =
     clause.tagIds.length === 0
       ? ""
       : clause.tagIds.length > 1
         ? `(${clause.tagIds.map((tagId) => resolveTagName(tagId)).join(` ${operatorLabel} `)})`
         : resolveTagName(clause.tagIds[0]);
-  const negativeTerms = clause.excludedTagIds.map(
-    (tagId) => `NOT ${resolveTagName(tagId)}`,
+  const negativeTerms = clause.excludedTagIds.map((tagId) =>
+    getTagGroupFilterGroupId(tagId) === null
+      ? `NOT ${resolveName(tagId)}`
+      : `No ${resolveName(tagId)}`,
   );
   const terms = [
     ...(positiveText ? [positiveText] : []),
@@ -437,11 +600,21 @@ function formatClause(
   };
 }
 
+/**
+ * Writes a formula out in words. Category terms read "Any Genre" and
+ * "No Mood"; their names come from the taxonomy when it is given.
+ */
 export function formatTagFilterFormula(
   formula: TagFilterFormula,
-  resolveTagName: (tagId: string) => string = (tagId) => tagId,
+  resolveName: (tagId: string) => string = (tagId) => tagId,
+  taxonomy?: TagTaxonomy | null,
 ): string {
   const normalizedFormula = normalizeTagFilterFormula(formula);
+  const resolveTagName = (termId: string) => {
+    const groupId = getTagGroupFilterGroupId(termId);
+    if (groupId === null) return resolveName(termId);
+    return getTagGroupName(taxonomy, groupId) ?? resolveName(termId);
+  };
 
   if (normalizedFormula.clauses.length === 0) {
     return "";

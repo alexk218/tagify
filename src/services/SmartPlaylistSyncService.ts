@@ -36,8 +36,8 @@ import {
   isLocalPersistencePaused,
 } from "@/services/sync/SyncLocalState";
 import { smartPlaylistTagChoices, applyTagChoice, type TagChoice } from "@/features/smart-playlists/utils/smartPlaylist.tagChoices";
-import { evaluateTagFilterFormula } from "@/utils/tagFilterGroups";
-import { TrackData } from "@/types/tagData";
+import { evaluateTagFilterFormula, tagFilterFormulaUsesGroups } from "@/utils/tagFilterGroups";
+import type { TagTaxonomy, TrackData } from "@/types/tagData";
 
 const RECONCILIATION_INTERVAL_MS = 5 * 60_000;
 type BackgroundSchedule = { checkedAt: number; cursor: number };
@@ -181,6 +181,16 @@ function sameTagIds(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((tagId, index) => tagId === right[index]);
 }
 
+
+const playlistUsesTagGroups = (playlist: SmartPlaylistCriteria) => tagFilterFormulaUsesGroups({
+  clauses: playlist.criteria.includeTagClauses, connectors: playlist.criteria.clauseConnectors,
+});
+
+/** Category rules ("No Mood") need the current tag list; other playlists skip reading it. */
+async function taxonomyForPlaylists(playlists: SmartPlaylistCriteria[]): Promise<TagTaxonomy | null> {
+  return playlists.some(playlistUsesTagGroups) ? storageService.getTaxonomy() : null;
+}
+
 export class SmartPlaylistSyncService {
   constructor(
     private readonly lockManager: SmartPlaylistSyncLockManager | undefined = defaultLockManager(),
@@ -303,9 +313,10 @@ export class SmartPlaylistSyncService {
     trackData: TrackData,
     playlists: SmartPlaylistCriteria[],
     now: number,
+    taxonomy: TagTaxonomy | null,
   ): TrackData {
     const updated = playlists.reduce(
-      (current, playlist) => applySmartPlaylistCriteriaToTrack(current, playlist.criteria, now),
+      (current, playlist) => applySmartPlaylistCriteriaToTrack(current, playlist.criteria, now, taxonomy),
       trackData,
     );
 
@@ -362,6 +373,7 @@ export class SmartPlaylistSyncService {
       }
     }
 
+    const taxonomy = await taxonomyForPlaylists(playlists);
     this.assertAccount();
     const memberSets = new Map(
       Array.from(membershipByPlaylistId, ([playlistId, uris]) => [playlistId, new Set(uris)]),
@@ -388,9 +400,9 @@ export class SmartPlaylistSyncService {
       const initial = current
         ? withMissingDetails(current, details.get(trackUri))
         : newTrackRecord(trackUri, details.get(trackUri), now);
-      const updated = this.applyCriteriaForMemberships(initial, trackPlaylists, now);
+      const updated = this.applyCriteriaForMemberships(initial, trackPlaylists, now, taxonomy);
       const undecided = trackPlaylists.filter((playlist) => {
-        const choices = smartPlaylistTagChoices(updated.tagIds, playlist.criteria);
+        const choices = smartPlaylistTagChoices(updated.tagIds, playlist.criteria, taxonomy);
         return !choices || choices.length > 1;
       });
       undecided.forEach((playlist) => {
@@ -657,10 +669,11 @@ export class SmartPlaylistSyncService {
       const matchingTrackUris = collectMatchingTrackUris(
         allTagData.tracks,
         playlist.criteria,
+        allTagData.taxonomy ?? null,
         currentMembership,
         libraryRecordingKeys,
       );
-      const matchesCriteria = compileTrackCriteria(playlist.criteria);
+      const matchesCriteria = compileTrackCriteria(playlist.criteria, allTagData.taxonomy ?? null);
 
       const pending = new Set(pendingPlaylists.find(item => item.playlistId === playlist.playlistId)?.pendingTagChoices ?? []);
       const removals = hasConfirmedMembershipBaseline(playlist) ? currentMembership.filter(uri =>
@@ -736,7 +749,7 @@ export class SmartPlaylistSyncService {
           const pendingTagChoices = playlist.pendingTagChoices?.filter((uri) => confirmedSet.has(uri) &&
             (!allTagData.tracks[uri] || !evaluateTagFilterFormula(allTagData.tracks[uri].tagIds, {
               clauses: playlist.criteria.includeTagClauses, connectors: playlist.criteria.clauseConnectors,
-            })));
+            }, allTagData.taxonomy ?? null)));
           const choicesChanged = pendingTagChoices?.length !== playlist.pendingTagChoices?.length;
           const membershipChanged = previous.length !== confirmed.length ||
             previous.some((uri, index) => uri !== confirmed[index]);
@@ -828,6 +841,7 @@ export class SmartPlaylistSyncService {
       this.assertAccount();
       if (members.includes(trackUri)) {
         const formula = { clauses: playlist.criteria.includeTagClauses, connectors: playlist.criteria.clauseConnectors };
+        const taxonomy = await taxonomyForPlaylists([playlist]);
         // Look up a new song first; the save then starts from the current saved record.
         const details = (await storageService.getTracks([trackUri])).has(trackUri)
           ? undefined
@@ -843,7 +857,7 @@ export class SmartPlaylistSyncService {
                 ? withMissingDetails(current, details)
                 : newTrackRecord(trackUri, details, Date.now());
               const tagIds = applyTagChoice(base.tagIds, choice);
-              if (!evaluateTagFilterFormula(tagIds, formula)) {
+              if (!evaluateTagFilterFormula(tagIds, formula, taxonomy)) {
                 filtersChanged = true;
                 throw new Error("The chosen tags no longer match the playlist filters");
               }
@@ -877,12 +891,13 @@ export class SmartPlaylistSyncService {
     return async (uris: string[], action: "add" | "remove") => {
       check();
       const current = await indexedDBStorage.getSmartPlaylistSyncState(uris, account);
+      const taxonomy = await taxonomyForPlaylists([playlist]);
       check();
       const latest = current.playlists.find(item => item.playlistId === playlist.playlistId);
       const pending = new Set(latest?.pendingTagChoices ?? []);
       if (isLocalPersistencePaused() || !sameSmartPlaylistRules(playlist, latest) || uris.some(uri => {
         const track = current.tracks[uri];
-        const matches = !!track && evaluateTrackMatchesCriteria(track, playlist.criteria);
+        const matches = !!track && evaluateTrackMatchesCriteria(track, playlist.criteria, taxonomy);
         return action === "add" ? !matches : matches || pending.has(uri);
       })) throw Object.assign(new DOMException("Your songs or Smart Playlist changed. The next check will use your latest edits.", "AbortError"), { spotifyRequestStopped: true });
     };
@@ -901,7 +916,7 @@ export class SmartPlaylistSyncService {
       return;
     }
     const cancelsChoice = (playlist: SmartPlaylistCriteria, uri: string) => Object.prototype.hasOwnProperty.call(trackUpdates, uri) &&
-      (!trackUpdates[uri] || !evaluateTrackMatchesCriteria(trackUpdates[uri]!, { ...playlist.criteria, includeTagClauses: [], clauseConnectors: [] }));
+      (!trackUpdates[uri] || !evaluateTrackMatchesCriteria(trackUpdates[uri]!, { ...playlist.criteria, includeTagClauses: [], clauseConnectors: [] }, null));
     if (playlists.some((playlist) => playlist.pendingTagChoices?.some((uri) => cancelsChoice(playlist, uri)))) {
       await this.updateSmartPlaylists((current) => current.map((playlist) => ({
         ...playlist, ...(playlist.pendingTagChoices ? { pendingTagChoices: playlist.pendingTagChoices.filter((uri) => !cancelsChoice(playlist, uri)) } : {}),
@@ -938,13 +953,14 @@ export class SmartPlaylistSyncService {
       changes.set(playlistId, (changes.get(playlistId) ?? new Set()).add(trackUri));
     };
     let playlistUpdateFailed = false;
+    const taxonomy = await taxonomyForPlaylists(playlists);
 
     for (const playlist of playlists) {
       const membership = new Set(membershipByPlaylistId.get(playlist.playlistId) ?? []);
       const pendingChoices = new Set(playlist.pendingTagChoices ?? []);
       const confirmedMembership = hasConfirmedMembershipBaseline(playlist);
       const matchingRecordings = new Set<string>();
-      const matchesCriteria = compileTrackCriteria(playlist.criteria);
+      const matchesCriteria = compileTrackCriteria(playlist.criteria, taxonomy);
       if (recordingKeys.size > 0) for (const uri of membership) {
         const recording = recordingKeys.get(uri);
         if (recording && recordingTracks[uri] && matchesCriteria(recordingTracks[uri])) matchingRecordings.add(recording);

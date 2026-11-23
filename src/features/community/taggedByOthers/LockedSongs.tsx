@@ -1,8 +1,10 @@
 import React from "react";
 import { Lock } from "lucide-react";
 import type { CommunityMatch } from "@/features/onboarding/services/communityMatches";
+import connectStyles from "./ConnectButton.module.css";
 import styles from "./LockedSongs.module.css";
 import { mergeSameTags } from "./TaggedByOthersRows";
+import { ALL_HIDDEN_LOCK, useSharingLockReason } from "@/features/community/sharingLockReason";
 
 /** Locked songs shown as a preview before the call to share tags. */
 export const PREVIEW_ROWS = 3;
@@ -31,8 +33,11 @@ const count = (value: number) => value.toLocaleString();
  */
 export function LockedSongs({
   matches, total, coverOf, onShare, countText,
-  pitch = "Others get to see your tags in return.", actionLabel = `Share your tags on Community to see all ${count(total)}`,
+  pitch: pitchProp, actionLabel: actionLabelProp,
 }: LockedSongsProps) {
+  const allHidden = useSharingLockReason() === "all-hidden";
+  const pitch = pitchProp !== undefined ? pitchProp : allHidden ? ALL_HIDDEN_LOCK : "Others get to see your tags in return.";
+  const actionLabel = actionLabelProp ?? (allHidden ? `Show some of your tags to see all ${count(total)}` : `Share your tags on Community to see all ${count(total)}`);
   if (!matches.length && !countText) return null;
   const rows = matches.slice(0, PREVIEW_ROWS);
   return (
@@ -63,7 +68,7 @@ export function LockedSongs({
           {countText ?? `${matches.length === 1 ? "1 more song" : `${count(matches.length)} more songs`} tagged by others`}
         </span>
         {pitch ? <span className={styles.pitch}>{pitch}</span> : null}
-        <button type="button" className={styles.action} onClick={onShare}>
+        <button type="button" className={`${styles.action} ${connectStyles.button} ${connectStyles.connect}`} onClick={onShare}>
           {actionLabel}
         </button>
       </div>

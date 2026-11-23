@@ -103,6 +103,8 @@ export interface TrackData {
   recordingGroupId?: string;
   recordingGroupConfirmed?: boolean;
   recordingReuseDisabled?: boolean;
+  /** Songs the person said are not the same song as this one; Tagify doesn't ask about them again. */
+  recordingNotSameAs?: string[];
   rating: number;
   energy: number;
   bpm: number | null;
@@ -140,6 +142,8 @@ export interface RecordingIdentity {
   artistIds: string[];
   durationMs: number;
   name: string;
+  /** The first artist Spotify lists (artistIds is sorted). Absent on identities saved before 3.4.1. */
+  leadArtistId?: string;
 }
 
 export interface AlbumTrackTagCoverage {

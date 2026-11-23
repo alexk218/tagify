@@ -19,6 +19,10 @@ vi.mock("@/services/sync/SyncLocalState", async (importOriginal) => ({
   getDesktopSyncConfiguration: () => sync.configuration,
 }));
 vi.mock("@/services/sync/SyncRuntime", () => ({ syncRuntime: { communityRequest: sync.communityRequest } }));
+const taggedByOthers = vi.hoisted(() => ({ saved: null as null | { outcome: { matches: unknown[] } } }));
+vi.mock("@/features/community/taggedByOthers/taggedByOthersStore", () => ({
+  taggedByOthersStore: { load: async () => taggedByOthers.saved },
+}));
 
 function createTaxonomy(): TagTaxonomy {
   const taxonomy = buildTaxonomyFromCategoryTree([
@@ -316,6 +320,48 @@ describe("TagManager", () => {
     expect(savedTaxonomy.childrenByParentId?.[moodCategoryId!]).toContain(
       reflectiveTag?.id,
     );
+  });
+
+  it("marks community tags you already have with where they live instead of offering Import", async () => {
+    const user = userEvent.setup();
+    renderTagManager();
+    mockCommunityCatalog([
+      { key: "house", name: "house", songCount: 90, contributorCount: 9, assignmentCount: 95 },
+      { key: "organic", name: "Organic", songCount: 42, contributorCount: 5, assignmentCount: 51 },
+    ]);
+
+    await user.click(screen.getByRole("tab", { name: "Community" }));
+    const houseRow = (await screen.findByText("house")).closest("article")!;
+    expect(within(houseRow).getByText("You have this in Genre / Electronic")).toBeInTheDocument();
+    expect(within(houseRow).queryByRole("button", { name: "Import" })).toBeNull();
+    const organicRow = screen.getByText("Organic").closest("article")!;
+    expect(within(organicRow).getByRole("button", { name: "Import" })).toBeInTheDocument();
+  });
+
+  it("opens Community on the tags others put on your songs once your songs have been checked", async () => {
+    const user = userEvent.setup();
+    sync.configuration = { accountId: "account-1", deviceId: "device-1" };
+    taggedByOthers.saved = {
+      outcome: {
+        matches: [
+          { tags: [{ label: "dreamy", paths: ["Mood / Atmosphere / dreamy"], people: 3 }] },
+          { tags: [{ label: "dreamy", paths: [], people: 1 }] },
+        ],
+      },
+    };
+    try {
+      renderTagManager();
+      mockCommunityCatalog([{ key: "organic", name: "Organic", songCount: 42, contributorCount: 5, assignmentCount: 51 }]);
+
+      await user.click(screen.getByRole("tab", { name: "Community" }));
+      const dreamyRow = (await screen.findByText("dreamy")).closest("article")!;
+      expect(within(dreamyRow).getByText("Others put this on 2 of your songs")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("For your songs")).toBeInTheDocument();
+      expect(screen.queryByText("Organic")).toBeNull();
+    } finally {
+      sync.configuration = null;
+      taggedByOthers.saved = null;
+    }
   });
 
   it("imports community tags directly into the selected top-level category", async () => {

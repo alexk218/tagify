@@ -13,8 +13,10 @@ import {
   downloadTagDataBackup,
 } from "@/features/tag-data/utils/tagData.backup";
 import { isTrackEmpty } from "@/features/tag-data/utils/tagData.helpers";
+import { blankAutomaticRecordingCopies } from "@/features/recording-reuse/utils/recordingReuse";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { setLibraryChoicePending } from "@/services/storage/libraryChoice";
+import { markTasteQuestionOffered } from "@/features/onboarding/services/tasteQuestion";
 import { restoreDesktopSyncConfiguration } from "@/services/sync/SyncInstallRecovery";
 import {
   captureTrackDateModified,
@@ -392,9 +394,8 @@ class MigrationOrchestrator {
       // Older inline controls and older Community sync could keep them as
       // blank entries, so remove any that are found on every start. Only the
       // first cleanup is reported to the user.
-      const emptyTrackUris = Object.entries(data.tracks)
-        .filter(([, trackData]) => isTrackEmpty(trackData))
-        .map(([trackUri]) => trackUri);
+      // Copies of a song linked automatically, all left blank, are removed too.
+      const emptyTrackUris = this.emptyTrackUris(data.tracks);
 
       if (emptyTrackUris.length > 0) {
         data = enforceMigrationDateModifiedPolicy(
@@ -513,6 +514,8 @@ class MigrationOrchestrator {
             if (!startedFresh) {
               migrationsRun.push(restoredOlderCopy ? "restoredOlderCopy" : "storageToIndexedDB");
             }
+            // Only a new library is asked "What do you listen to?".
+            if (dataSource === "default" && !startedFresh) markTasteQuestionOffered();
             console.log(
               `[Orchestrator] Storage migration complete: ${verifyCount} tracks`,
             );
@@ -686,12 +689,20 @@ class MigrationOrchestrator {
 
   // ===== Data Migration Functions =====
 
+  private emptyTrackUris(tracks: TagDataStructure["tracks"]): string[] {
+    return [...new Set([
+      ...Object.entries(tracks).filter(([, trackData]) => isTrackEmpty(trackData)).map(([trackUri]) => trackUri),
+      ...blankAutomaticRecordingCopies(tracks),
+    ])];
+  }
+
   private cleanupEmptyTracks(data: TagDataStructure): TagDataStructure {
+    const empty = new Set(this.emptyTrackUris(data.tracks));
     const cleanedTracks: { [uri: string]: TrackData } = {};
     let removedCount = 0;
 
     Object.entries(data.tracks).forEach(([uri, trackData]) => {
-      if (isTrackEmpty(trackData)) {
+      if (empty.has(uri)) {
         removedCount++;
       } else {
         cleanedTracks[uri] = trackData;

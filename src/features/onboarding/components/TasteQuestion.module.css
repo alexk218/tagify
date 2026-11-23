@@ -1,0 +1,145 @@
+/* "What do you listen to?": Tagify's own dialog, buttons and tag pills, nothing new. */
+.overlay {
+  background: rgb(0 0 0 / 72%);
+  box-sizing: border-box;
+  display: grid;
+  inset: 0;
+  padding: 24px;
+  place-items: center;
+  position: fixed;
+  z-index: 10010;
+}
+
+.dialog {
+  background: var(--spice-main, #181818);
+  border: 1px solid #414141;
+  border-radius: 16px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 45%);
+  box-sizing: border-box;
+  color: var(--spice-text, #fff);
+  max-height: 85vh;
+  overflow: auto;
+  padding: 24px 28px;
+  width: min(600px, 100%);
+}
+
+.title {
+  font-size: 22px;
+  line-height: 1.25;
+  margin: 0 0 6px;
+  outline: none;
+}
+
+.lead {
+  color: var(--spice-subtext, #b3b3b3);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
+.choices {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+.choice {
+  align-items: center;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  font-weight: 600;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.choice:hover {
+  border-color: rgb(255 255 255 / 28%);
+}
+
+.choice input {
+  accent-color: var(--spice-text, #fff);
+  cursor: pointer;
+  margin: 0;
+}
+
+.chosen,
+.chosen:hover {
+  border-color: var(--spice-text, #fff);
+}
+
+.preview {
+  margin-top: 14px;
+}
+
+.note {
+  color: var(--spice-subtext, #b3b3b3);
+  font-size: 13px;
+  margin: 14px 0 0;
+}
+
+.preview .note {
+  margin: 0;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 8px 0 0;
+  max-height: 120px;
+  overflow: auto;
+  padding: 0;
+}
+
+.tag {
+  background: rgb(255 255 255 / 8%);
+  border-radius: 500px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+}
+
+.actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.primaryButton,
+.secondaryButton {
+  border-radius: 500px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 8px 20px;
+}
+
+.primaryButton {
+  background: var(--spice-text, #fff);
+  border: 1px solid var(--spice-text, #fff);
+  color: var(--spice-main, #121212);
+}
+
+.secondaryButton {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 18%);
+  color: var(--spice-text, #fff);
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.problem {
+  color: #f87171;
+  font-size: 13px;
+}

@@ -6,11 +6,16 @@ import { collectMatchingTrackUris } from "@/features/smart-playlists/utils/smart
 const a = `spotify:track:${"a".repeat(22)}`, b = `spotify:track:${"b".repeat(22)}`, c = `spotify:track:${"c".repeat(22)}`;
 const identity = { isrc: "USABC2400001", artistIds: ["d".repeat(22)], durationMs: 180000, name: "Song" };
 const song = { name: "Song", rating: 3, energy: 4, bpm: null, tagIds: ["house"], recordingIdentity: identity, recordingGroupId: "group", dateModified: 10 };
-it("only uses titles to find candidates, then requires confirmed identity and every duration pair", () => {
-  const tracks = { [a]: song, [b]: { ...song, recordingIdentity: { ...identity, durationMs: 180800 } }, [c]: { ...song, recordingIdentity: { ...identity, durationMs: 181600 } }, "spotify:local:a": song };
+it("only uses titles and known ISRCs to find candidates, then requires confirmed identity and every duration pair", () => {
+  const tracks = { [a]: song, [b]: { ...song, recordingIdentity: { ...identity, durationMs: 180800 } }, [c]: { ...song, recordingIdentity: { ...identity, durationMs: 185500 } }, "spotify:local:a": song };
   expect(recordingCandidates(tracks)).toEqual([[a, b, c]]);
   expect(confirmedRecordingSets(tracks).map(set => set.entries.map(([uri]) => uri))).toEqual([[a, b]]);
   expect(confirmedRecordingSets({ [a]: song, [b]: { ...song, recordingIdentity: { ...identity, isrc: "USABC2400002", durationMs: 180001 } } })).toEqual([]);
+});
+it("finds copies with a different title or a credit by their shared ISRC", () => {
+  const tracks = { [a]: song, [b]: { ...song, name: "Uta", recordingIdentity: { ...identity, name: "Uta", durationMs: 182100 } }, [c]: { ...song, name: "Song (feat. Guest)", recordingIdentity: undefined } };
+  expect(recordingCandidates(tracks)).toEqual([[a, b, c]]);
+  expect(confirmedRecordingSets(tracks).map(set => set.entries.map(([uri]) => uri))).toEqual([[a, b]]);
 });
 it("leaves conflicting, unconfirmed, and opted-out copies visible and collapses after filtering/sorting", () => {
   const tracks = { [a]: song, [b]: { ...song, albumName: "Other album", dateModified: 20 } };
@@ -26,8 +31,8 @@ it("leaves conflicting, unconfirmed, and opted-out copies visible and collapses 
 it("new playlists use one confirmed copy and full sync prefers a copy already in the playlist", () => {
   const criteria = { includeTagClauses: [], clauseConnectors: [], ratingFilters: [], energyMinFilter: null, energyMaxFilter: null, bpmMinFilter: null, bpmMaxFilter: null };
   const tracks = { [a]: song, [b]: song, [c]: { ...song, recordingGroupId: undefined } };
-  expect(collectMatchingTrackUris(tracks, criteria)).toEqual([a, c]);
-  expect(collectMatchingTrackUris(tracks, criteria, [b])).toEqual([b, c]);
+  expect(collectMatchingTrackUris(tracks, criteria, null)).toEqual([a, c]);
+  expect(collectMatchingTrackUris(tracks, criteria, null, [b])).toEqual([b, c]);
 });
 it("shows linked copies once when they differ only by a tag that is no longer in the tag list", () => {
   const valid = new Set(["house", "latin"]);

@@ -81,6 +81,26 @@ export function withCamelotKey(
   return nextTrackData;
 }
 
+/**
+ * Fills BPM and key only where the song has none yet, keeping `dateModified`:
+ * a lookup Tagify does on its own isn't an edit, so it must not move the song
+ * in Last Updated sorting. Returns the same object when nothing was missing.
+ */
+export function withMissingAudioFeatures(
+  trackData: TrackData,
+  features: { bpm: number | null; camelotKey: string | null },
+): TrackData {
+  const fillBpm = trackData.bpm == null && features.bpm != null;
+  const camelotKey = normalizeCamelotKey(features.camelotKey);
+  const fillKey = normalizeCamelotKey(trackData.camelotKey) === null && camelotKey !== null;
+  if (!fillBpm && !fillKey) return trackData;
+  return {
+    ...trackData,
+    ...(fillBpm ? { bpm: features.bpm } : {}),
+    ...(fillKey ? { camelotKey } : {}),
+  } as TrackData;
+}
+
 export function withRating(
   trackData: TrackData,
   rating: number,

@@ -75,7 +75,7 @@ function createFilterInputs(overrides: Partial<TrackListFilterInputs> = {}) {
 describe("filterTrackEntries", () => {
   it("returns all tracks when filters are empty", () => {
     expect(
-      filterTrackEntries(trackEntries, trackInfo, createFilterInputs()),
+      filterTrackEntries(trackEntries, trackInfo, createFilterInputs(), null),
     ).toHaveLength(3);
   });
 
@@ -91,7 +91,7 @@ describe("filterTrackEntries", () => {
             operator: "AND",
           },
         ],
-      }),
+      }), null,
     );
 
     expect(filtered.map(([uri]) => uri)).toEqual(["spotify:track:rock-sfw"]);
@@ -115,7 +115,7 @@ describe("filterTrackEntries", () => {
           },
         ],
         clauseConnectors: ["AND"],
-      }),
+      }), null,
     );
 
     expect(filtered.map(([uri]) => uri)).toEqual([
@@ -136,7 +136,7 @@ describe("filterTrackEntries", () => {
             operator: "OR",
           },
         ],
-      }),
+      }), null,
     );
 
     expect(filtered.map(([uri]) => uri)).toEqual([

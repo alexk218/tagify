@@ -198,7 +198,7 @@ describe("DataManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Invite a friend to Tagify" }));
     // Not connected on this computer: the general link, with Community setup to add a name.
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Invite link" })).toHaveTextContent("https://tagify.fm/join"));
-    fireEvent.click(screen.getByRole("button", { name: "Connect Community" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create account or sign in" }));
     expect(onConnectCommunity).toHaveBeenCalledOnce();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

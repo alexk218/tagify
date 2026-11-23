@@ -2,7 +2,7 @@ import { SORT_OPTIONS, SORT_ORDERS } from "@/constants/trackList";
 import { TagTaxonomy } from "@/types/tagData";
 import { parseLocalFileUri } from "@/utils/LocalFileParser";
 import { normalizeCamelotKey, sortCamelotKeys } from "@/utils/camelotKey";
-import { evaluateTagFilterFormula } from "@/utils/tagFilterGroups";
+import { compileTagFilterFormula } from "@/utils/tagFilterGroups";
 import { compactSongDetailFilters, filterReleaseYearOf, matchesSongDetailFilters, songDurationMs } from "@/utils/songDetails";
 import {
   buildDuplicateTagNameSet,
@@ -219,9 +219,14 @@ export function filterTrackEntries(
     searchTerm,
     ...songDetailFilters
   }: TrackListFilterInputs,
+  taxonomy: TagTaxonomy | null,
 ): TrackListEntry[] {
   const resolvedIncludeTagClauses = includeTagClauses ?? [];
   const resolvedClauseConnectors = clauseConnectors ?? [];
+  const matchesTagFormula = compileTagFilterFormula({
+    clauses: resolvedIncludeTagClauses,
+    connectors: resolvedClauseConnectors,
+  }, taxonomy);
 
   return trackEntries.filter(([uri, trackData]) => {
     const info = trackInfo[uri];
@@ -236,10 +241,7 @@ export function filterTrackEntries(
 
     const matchesIncludeTags =
       resolvedIncludeTagClauses.length === 0 ||
-      evaluateTagFilterFormula(trackTagIds, {
-        clauses: resolvedIncludeTagClauses,
-        connectors: resolvedClauseConnectors,
-      });
+      matchesTagFormula(trackTagIds);
 
     const matchesRating =
       ratingFilters.length === 0 ||

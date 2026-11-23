@@ -18,3 +18,12 @@ it("advances by all items including unavailable tracks and distinguishes an unfi
   expect(() => normalizeQueuePage({ items: [], total: 3 }, 2)).toThrow();
   expect(() => normalizeQueuePage({}, 0)).toThrow();
 });
+
+it("keeps when each song was added, as Spotify's desktop library reports it", () => {
+  const page = normalizeQueuePage({ items: [
+    { type: "track", uri: "spotify:track:a", name: "Liked", addedAt: "2026-11-15T10:00:00.000Z" },
+    { uid: "x", addedAt: { timestamp: 1_700_000_000_000 }, type: "track", uri: "spotify:track:b", name: "Playlist" },
+    { type: "track", uri: "spotify:track:c", name: "Undated", addedAt: "not a date" },
+  ], total: 3 }, 0);
+  expect(page.tracks.map(track => track.addedAt)).toEqual([Date.parse("2026-11-15T10:00:00.000Z"), 1_700_000_000_000, undefined]);
+});

@@ -19,6 +19,7 @@ export * from "./originalReleaseDates";
 export * from "./playlistWrites";
 export * from "./smartPlaylists";
 export * from "./songNames";
+export * from "./restoreDetails";
 export * from "./spotifyListChoice";
 export * from "./catalogFill";
 export * from "./catalogFillRuns";

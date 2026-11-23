@@ -7,8 +7,9 @@ import { LISTS_MAX_SONGS } from "@/services/sync/SpotifyLibrarySender";
 import type { TagTaxonomy, TrackData } from "@/types/tagData";
 import { plural } from "../communityPublication";
 import { communitySwitchOn } from "../communitySwitches";
-import { PREVIEW_SONGS_ASKED, recordCommunityTeaserViewed } from "./communityTeaserPreview";
+import { PREVIEW_SONGS_SHOWN, recordCommunityTeaserViewed } from "./communityTeaserPreview";
 import type { TaggedByOthersMatch, TaggedByOthersOutcome, TaggedByOthersStop } from "./taggedByOthersScan";
+import connectStyles from "./ConnectButton.module.css";
 import { LockedSongs } from "./LockedSongs";
 import { TaggedByOthersRows, type MergedTag } from "./TaggedByOthersRows";
 import { hiddenSongsStore, type HiddenSongsStore } from "./taggedByOthersHidden";
@@ -25,8 +26,9 @@ import {
 export const ROWS_PER_STEP = 50;
 /** Search and sort appear once there are more songs than fit at a glance. */
 const CONTROLS_FROM = 2;
-/** Songs fully usable in the track list before the member shares their tags on Community. */
-export const USABLE_BEFORE_SHARING = 5;
+/** Songs fully usable in the track list before the member shares their tags on Community: as many as
+ * the preview shows before connecting, so connecting never shows fewer. */
+export const USABLE_BEFORE_SHARING = PREVIEW_SONGS_SHOWN;
 
 interface TaggedByOthersSectionProps {
   connected: boolean;
@@ -71,6 +73,8 @@ interface TaggedByOthersSectionProps {
    * never who), shown as a preview with adding locked until they connect (switch `communityTeasers`).
    */
   preview?: TaggedByOthersPreview;
+  /** Not connected: the preview is still being looked up, so the invitation waits instead of flashing first. */
+  previewLoading?: boolean;
 }
 
 /** A song in the preview for people who aren't connected: no member handles. */
@@ -85,6 +89,15 @@ export interface TaggedByOthersPreview {
   total: number;
   /** How many of the newest Liked Songs were asked about. */
   asked?: number;
+  /** Every Liked Song was asked about, so `total` covers the whole of Liked Songs. */
+  complete?: boolean;
+}
+
+/** "742 of your Liked Songs", or "of your 5,000 newest Liked Songs" when only the newest were asked about. */
+export function previewFoundText(preview: Pick<TaggedByOthersPreview, "total" | "asked" | "complete">, shown = 0): string {
+  const total = Math.max(preview.total, shown);
+  const newest = !preview.complete && (preview.asked ?? 0) > 0 ? `${preview.asked!.toLocaleString()} newest ` : "";
+  return `${total.toLocaleString()} of your ${newest}${total === 1 && !newest ? "Liked Song" : "Liked Songs"}`;
 }
 
 
@@ -198,7 +211,7 @@ export function topArtists(matches: readonly CommunityMatch[]): { name: string; 
 const folded = (text: string) => text.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase();
 
 /** The songs in the member's Liked Songs that other members tagged, with those tags one tap from their own library. */
-export function TaggedByOthersSection({ connected, connectionPending = false, onConnectCommunity, store = taggedByOthersStore, preview, ...rest }: TaggedByOthersSectionProps) {
+export function TaggedByOthersSection({ connected, connectionPending = false, onConnectCommunity, store = taggedByOthersStore, preview, previewLoading = false, ...rest }: TaggedByOthersSectionProps) {
   // Disconnecting ends the list: nothing of it is kept in memory or on this computer.
   useEffect(() => {
     if (connected) return;
@@ -211,18 +224,23 @@ export function TaggedByOthersSection({ connected, connectionPending = false, on
   if (preview && preview.songs.length > 0 && !connectionPending && communitySwitchOn("communityTeasers")) {
     return <Preview preview={preview} inTrackList={!!rest.inTrackList} onConnect={onConnectCommunity} onPlaySong={rest.onPlaySong} />;
   }
+  const looking = previewLoading && !connectionPending && communitySwitchOn("communityTeasers");
   return (
     <section className={`${styles.section} ${rest.inTrackList ? styles.inTrackList : ""}`} aria-labelledby="tagged-by-others-title">
       <div className={styles.card}>
         <div className={styles.header}>
           <h3 id="tagged-by-others-title" className={styles.title}>Your songs, tagged by others</h3>
-          <p className={styles.lead}>
+          <p className={styles.lead} role={looking ? "status" : undefined}>
             {connectionPending
               ? "Finish connecting in your browser to see which of your Liked Songs other members already tagged."
-              : "Connect to Tagify Community to see which of your Liked Songs other members already tagged, and add the tags that fit."}
+              : looking
+                ? "Looking for songs in your Liked Songs that other members tagged…"
+                : "Create a free Tagify account or sign in to see which of your Liked Songs other members already tagged, and add the tags that fit."}
           </p>
         </div>
-        <button type="button" className={styles.action} onClick={onConnectCommunity}>{connectionPending ? "Finish connecting" : "Connect to see them"}</button>
+        {looking ? null : (
+          <button type="button" className={`${styles.action} ${connectStyles.button} ${connectStyles.connect}`} onClick={onConnectCommunity}>{connectionPending ? "Finish connecting" : "Create account or sign in"}</button>
+        )}
       </div>
     </section>
   );
@@ -232,7 +250,6 @@ const previewDetail = (match: CommunityMatch) => {
   const song = match as TaggedByOthersPreviewSong;
   return `Tagged by ${plural(song.people, "member")}${song.peopleCapped ? " or more" : ""}`;
 };
-const PREVIEW_PITCH = "Free. Your tags stay private until you choose to share them.";
 
 /**
  * For people who aren't connected to Community: a taste of how others tagged their songs, without
@@ -247,10 +264,9 @@ function Preview({ preview, inTrackList, onConnect, onPlaySong }: {
   // Most members first, as the connected list starts.
   const songs = useMemo(() => [...preview.songs].sort((a, b) => b.people - a.people), [preview.songs]);
   const total = Math.max(preview.total, songs.length);
-  const newest = (preview.asked ?? 0) >= PREVIEW_SONGS_ASKED ? `${preview.asked!.toLocaleString()} newest ` : "";
-  const found = `Other members tagged ${total.toLocaleString()} of your ${newest}${total === 1 && !newest ? "Liked Song" : "Liked Songs"}`;
-  // Same ladder as members who connected but don't share yet: a few songs to try, the rest locked.
-  const usable = songs.slice(0, USABLE_BEFORE_SHARING);
+  const found = `Other members tagged ${previewFoundText(preview, songs.length)}`;
+  // Every song Community described (up to PREVIEW_SONGS_SHOWN), then the invitation to see the rest.
+  const usable = songs;
   const more = total - usable.length;
   useEffect(() => recordCommunityTeaserViewed("tab", total), [total]);
   return (
@@ -263,11 +279,10 @@ function Preview({ preview, inTrackList, onConnect, onPlaySong }: {
         <TaggedByOthersRows matches={usable} onToggleTag={async () => {}} coverOf={coverOf} hasTag={() => false} canRemove={false}
           onPlay={onPlaySong ? (match) => onPlaySong(match.track.uri) : undefined}
           detailOf={previewDetail} onConnectToAdd={onConnect} />
-        {more > 0 ? (
-          <LockedSongs matches={songs.slice(usable.length)} total={total} coverOf={coverOf} onShare={onConnect} pitch={PREVIEW_PITCH}
-            countText={`${more === 1 ? "1 more song" : `${more.toLocaleString()} more songs`} tagged by others`}
-            actionLabel={`Connect to Tagify Community to see all ${total.toLocaleString()}`} />
-        ) : null}
+        {/* The invitation always closes the preview: to see the rest, or to add these tags. */}
+        <LockedSongs matches={songs.slice(usable.length)} total={total} coverOf={coverOf} onShare={onConnect} pitch={null}
+          countText={more > 0 ? `${more === 1 ? "1 more song" : `${more.toLocaleString()} more songs`} tagged by others` : "Add these tags to your songs"}
+          actionLabel={more > 0 ? `Create account or sign in to see all ${total.toLocaleString()}` : "Create account or sign in"} />
       </div>
     </section>
   );
@@ -363,8 +378,10 @@ function Results({
       && (!notTaggedOnly || touched.has(match.track.uri) || !(tracks[match.track.uri]?.tagIds?.length))
       && (!tagFilter || match.tags.some((tag) => isSameTagName(tag.label, tagFilter)))
       && (!artistFilter || match.track.artists.some((artist) => artist.name === artistFilter)));
-    // Songs most members tagged first; ties, and "Recently added", keep the order Spotify lists them in.
-    return kept.sort((a, b) => (choices.sort === "members" ? b.people - a.people : 0) || a.position - b.position);
+    // Songs most members tagged first, or the ones added to Spotify most recently (songs without a
+    // date, from checks saved before dates were kept, go last); ties keep the order Spotify lists them in.
+    return kept.sort((a, b) => (choices.sort === "members" ? b.people - a.people : (b.track.addedAt ?? 0) - (a.track.addedAt ?? 0))
+      || a.position - b.position);
   }, [visibleMatches, query, choices.sort, notTaggedOnly, touched, tracks, tagFilter, artistFilter]);
   const hiddenMatches = useMemo(() => matches.filter((match) => hiddenSet.has(match.track.uri)), [matches, hiddenSet]);
   const filtering = !!query || !!tagFilter || !!artistFilter || notTaggedOnly;

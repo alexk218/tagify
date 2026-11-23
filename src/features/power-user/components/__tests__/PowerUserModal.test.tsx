@@ -16,7 +16,7 @@ describe("PowerUserModal", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Invite link" })).toHaveTextContent("https://tagify.fm/join"));
     expect(screen.queryByRole("button", { name: "Star on GitHub" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Connect Community" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create account or sign in" }));
     expect(actions.onConnectCommunity).toHaveBeenCalledOnce();
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));

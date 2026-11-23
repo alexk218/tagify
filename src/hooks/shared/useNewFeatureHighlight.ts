@@ -1,4 +1,6 @@
 import { useCallback, useState } from "react";
+import packageJson from "@/package";
+import { isUpgradedSince } from "@/features/onboarding/installedVersion";
 
 const SEEN_PREFIX = "tagify:new-feature-seen:";
 
@@ -12,11 +14,13 @@ function hasSeen(feature: string): boolean {
 }
 
 /**
- * A one-time highlight on a new feature people would otherwise miss. It shows only while `eligible`
- * (the member can use the feature) and goes away for good once dismissed on this computer.
+ * A one-time highlight on a new feature people would otherwise miss. It shows only to people who
+ * used Tagify before `arrivedIn` (the version that brought the feature; for a new user everything
+ * is new), only while `eligible` (the member can use the feature), and goes away for good once
+ * dismissed on this computer.
  */
-export function useNewFeatureHighlight(feature: string, eligible: boolean): { show: boolean; dismiss: () => void } {
-  const [seen, setSeen] = useState(() => hasSeen(feature));
+export function useNewFeatureHighlight(feature: string, eligible: boolean, arrivedIn: string): { show: boolean; dismiss: () => void } {
+  const [seen, setSeen] = useState(() => hasSeen(feature) || !isUpgradedSince(arrivedIn, packageJson.version));
   const dismiss = useCallback(() => {
     setSeen(true);
     try {

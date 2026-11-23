@@ -14,15 +14,17 @@ import {
   isRevisionConflict,
   keepTagsPrivate,
   plural,
-  PUBLISH_RATINGS_LINE,
   publicTagSummary,
   publishTags,
   savePublicationPolicy,
   type SharingSurface,
 } from "./communityPublication";
+import { saveRatingSharing } from "./communityRatingSharing";
 import { CommunitySharingChoices, sameChoices, type SharingChoices } from "./CommunitySharingChoices";
-import { communityErrorMessage } from "./communitySyncCopy";
+import { ALL_HIDDEN_LINE, communityErrorMessage, KEEP_PRIVATE_CONSEQUENCE, PRIVATE_LOCKS_LINE } from "./communitySyncCopy";
+import { claimCommunityHandle, handleProblem, HandleClaimError, normalizeHandle } from "./communityDevice";
 import type { CommunitySharing } from "./useCommunitySharing";
+import { openCommunityUrlSignedIn } from "./communityWebsiteLink";
 
 /** `tasteLink`: a publish confirmation, which offers people who tag like the member. */
 type Notice = { tone: "success" | "error"; text: string; tasteLink?: boolean };
@@ -56,9 +58,16 @@ export function CommunitySharePanel({ surface, sharing, tracks, taxonomy, waitin
   const { policy, state, phase } = sharing;
   // Hidden choices the member changed here but hasn't saved; null follows the saved choice.
   const [draft, setDraft] = useState<SharingChoices | null>(null);
-  const [choosing, setChoosing] = useState(false);
+  // null follows the default: folded, except while every tag is hidden.
+  const [choosingChoice, setChoosing] = useState<boolean | null>(null);
+  // Asks once before every tag stays private, with what that locks (Alex's pick C, 2026-11-23): "keep"
+  // keeps tags private, "save" saves hidden choices that hide every tag (which counts as private too).
+  const [confirmingPrivate, setConfirmingPrivate] = useState<"keep" | "save" | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  // A member who connected before picking a handle picks it here, to publish (in-app sign-up, slice 2).
+  const [handleDraft, setHandleDraft] = useState("");
+  const [handleError, setHandleError] = useState("");
   const opened = useRef(false);
 
   useEffect(() => {
@@ -71,6 +80,8 @@ export function CommunitySharePanel({ surface, sharing, tracks, taxonomy, waitin
   const unsaved = Boolean(draft && policy && !sameChoices(draft, policy));
   const summary = useMemo(() => choices ? publicTagSummary(tracks, taxonomy, choices) : null, [choices, tracks, taxonomy]);
   const hiddenNames = useMemo(() => choices ? hiddenBranchNames(taxonomy, choices) : [], [choices, taxonomy]);
+  // Hiding every tag on a tagged library counts as keeping tags private (Alex, 2026-11-23).
+  const anyTagged = useMemo(() => publicTagSummary(tracks, taxonomy).songs > 0, [tracks, taxonomy]);
 
   if (!policy || !state || !choices || !summary) {
     if (phase === "error") return <div className={styles.sharePanel}>
@@ -102,43 +113,105 @@ export function CommunitySharePanel({ surface, sharing, tracks, taxonomy, waitin
     }
   };
 
-  const publish = () => apply((current) => publishTags(current, surface), "Publishing your tags. Your profile updates within a minute.", "Your tags couldn't be published. Please try again.", true);
+  const publish = async () => {
+    if (sharing.handleMissing) {
+      const handle = normalizeHandle(handleDraft);
+      const problem = handleProblem(handle);
+      if (problem) { setHandleError(problem); return; }
+      setSaving(true);
+      setHandleError("");
+      try {
+        await claimCommunityHandle(handle);
+      } catch (error) {
+        setSaving(false);
+        setHandleError(error instanceof HandleClaimError ? error.message : "Your handle couldn't be saved. Try again.");
+        return;
+      }
+    }
+    await apply(async (current) => {
+      // Publishing shares the star ratings on the published songs too; no separate choice (Alex, 2026-11-22).
+      const saved = await publishTags(current, surface);
+      // Records the answer so the question after rating never asks again.
+      if (notPublicYet) void saveRatingSharing(true, "desktop_publish").catch(() => undefined);
+      return saved;
+    }, "Publishing your tags. Your profile updates within a minute.", "Your tags couldn't be published. Please try again.", true);
+  };
   const saveChoices = () => apply((current) => savePublicationPolicy(current), "Saved. Your profile updates within a minute.", "Couldn't save your choices. Please try again.");
   const keepPrivate = () => apply(keepTagsPrivate, "Your tags stay private. You can publish them from Community in Tagify any time.", "Couldn't save your choice. Please try again.");
   const resume = () => apply((current) => changePublication(current, "resume"), "Updates resumed. Your profile catches up within a minute.", "Couldn't resume updates. Please try again.");
 
   const notPublicYet = state === "review" || state === "private";
+  const allHidden = anyTagged && summary.songs === 0;
+  const choosing = choosingChoice ?? allHidden;
   const busy = saving || waitingForLibrary;
+  const pickingHandle = notPublicYet && sharing.handleMissing;
+  const typedHandle = normalizeHandle(handleDraft);
 
   return <div className={styles.sharePanel}>
-    {state === "review" ? null : <p>{LEADS[state]}</p>}
-    {notPublicYet ? <p className={styles.shareLead}>{summary.songs > 0
-      ? <><strong>{plural(summary.tags, "tag")}</strong> on <strong>{plural(summary.songs, "song")}</strong> would appear on your profile.</>
-      : "None of your songs have tags to share yet. Songs you tag later will appear."}</p> : null}
-    {notPublicYet ? <p>{PUBLISH_RATINGS_LINE}</p> : null}
-    {hiddenNames.length ? <p>{hiddenLine(hiddenNames)}</p> : null}
+    {state === "review" || (allHidden && state === "public") ? null : <p>{LEADS[state]}</p>}
+    {allHidden ? <p className={styles.warningText} role="status">{ALL_HIDDEN_LINE}</p>
+      : notPublicYet ? <p className={styles.shareLead}>{summary.songs > 0
+        ? <><strong>{plural(summary.tags, "tag")}</strong> on <strong>{plural(summary.songs, "song")}</strong> would appear on your profile.</>
+        : "None of your songs have tags to share yet. Songs you tag later will appear."}</p> : null}
+    {notPublicYet ? <p>
+      Something personal in there?{" "}
+      <button type="button" className={styles.inlineLink} aria-expanded={choosing} aria-controls="community-sharing-choices" onClick={() => setChoosing(!choosing)}>Hide any tag or folder</button>
+      , and the rest goes on your profile. Private notes always stay private.
+    </p> : null}
+    {hiddenNames.length && !allHidden ? <p>{hiddenLine(hiddenNames)}</p> : null}
+    {pickingHandle ? <div className={styles.handleField}>
+      <label htmlFor="community-handle">Your handle</label>
+      <div className={styles.handleInput}>
+        <span aria-hidden="true">@</span>
+        <input id="community-handle" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={31}
+          placeholder="yourname" value={handleDraft} disabled={saving} aria-describedby="community-handle-hint" aria-invalid={Boolean(handleError)}
+          onChange={(event) => { setHandleDraft(event.target.value.replace(/\s/g, "")); setHandleError(""); }} />
+      </div>
+      <small id="community-handle-hint">Your profile will be at tagify.fm/@{typedHandle || "yourname"}. You can&apos;t change it later.</small>
+      {handleError ? <p className={styles.errorText} role="alert">{handleError}</p> : null}
+    </div> : null}
     {waitingForLibrary ? <p className={styles.warningText}>Choose how to combine this computer's library with Community in Sync before sharing.</p> : null}
 
-    <button type="button" className={styles.disclosureLink} aria-expanded={choosing} aria-controls="community-sharing-choices" onClick={() => setChoosing((current) => !current)}>
+    {notPublicYet ? null : <button type="button" className={styles.disclosureLink} aria-expanded={choosing} aria-controls="community-sharing-choices" onClick={() => setChoosing(!choosing)}>
       Choose what's hidden
-    </button>
+    </button>}
     {choosing ? <div id="community-sharing-choices">
       <CommunitySharingChoices taxonomy={taxonomy} choices={choices} published={state === "public" || state === "paused"} disabled={saving} onChange={setDraft} />
     </div> : null}
 
     {/* Alex, 2026-11-16: "Let's remove the stop sharing button there. They could do that elsewhere." Stop sharing lives on Community (profile and Settings > Privacy). */}
-    <div className={styles.visibilityActions}>
-      {notPublicYet ? <button type="button" className={styles.primary} onClick={() => void publish()} disabled={busy}>{saving ? "Publishing…" : "Publish my tags"}</button> : null}
-      {state === "review" ? <button type="button" className={styles.quietAction} onClick={() => void keepPrivate()} disabled={busy}>Keep my tags private</button> : null}
+    {confirmingPrivate ? <div className={styles.privateConfirm} role="group" aria-labelledby="community-keep-private-title" aria-describedby="community-keep-private-consequence">
+      <p id="community-keep-private-title"><strong>Keep all your tags private?</strong></p>
+      <p id="community-keep-private-consequence">{KEEP_PRIVATE_CONSEQUENCE}</p>
+      <div className={styles.visibilityActions}>
+        <button type="button" className={styles.secondary} onClick={() => { setConfirmingPrivate(null); setChoosing(true); }} disabled={busy}>{allHidden ? "Show some tags" : "Hide some instead"}</button>
+        <button type="button" className={styles.quietAction} onClick={() => {
+          const confirmed = confirmingPrivate;
+          setConfirmingPrivate(null);
+          void (confirmed === "save" ? saveChoices() : keepPrivate());
+        }} disabled={busy}>Keep everything private</button>
+      </div>
+    </div> : <div className={styles.visibilityActions}>
+      {/* Publishing with every tag hidden would publish nothing, so it asks the keep-private question instead. */}
+      {notPublicYet ? <button type="button" className={styles.primary} onClick={() => allHidden ? setConfirmingPrivate("keep") : void publish()} disabled={busy}>{saving ? "Publishing…" : "Publish my tags"}</button> : null}
       {state === "private" && unsaved ? <button type="button" className={styles.secondary} onClick={() => void saveChoices()} disabled={busy}>Save without publishing</button> : null}
       {state === "paused" ? <button type="button" className={styles.primary} onClick={() => void resume()} disabled={busy}>{saving ? "Resuming…" : "Resume updates"}</button> : null}
-      {(state === "public" || state === "paused") && unsaved ? <button type="button" className={state === "public" ? styles.primary : styles.secondary} onClick={() => void saveChoices()} disabled={busy}>{saving && state === "public" ? "Saving…" : "Save changes"}</button> : null}
-      {(state === "public" || state === "paused") && !unsaved ? <button type="button" className={styles.secondary} onClick={() => openCommunityUrl(communityProfileUrl(sharing.handle))}><ExternalLink size={15} /> View my profile</button> : null}
-    </div>
+      {(state === "public" || state === "paused") && unsaved ? <button type="button" className={state === "public" ? styles.primary : styles.secondary} onClick={() => allHidden ? setConfirmingPrivate("save") : void saveChoices()} disabled={busy}>{saving && state === "public" ? "Saving…" : "Save changes"}</button> : null}
+      {(state === "public" || state === "paused") && !unsaved ? <button type="button" className={styles.secondary} onClick={() => void openCommunityUrlSignedIn(communityProfileUrl(sharing.handle))}><ExternalLink size={15} /> View my profile</button> : null}
+    </div>}
+    {state === "review" && !confirmingPrivate ? <p className={styles.legalLine}>
+      {PRIVATE_LOCKS_LINE}{" "}
+      <button type="button" className={styles.inlineLink} onClick={() => setConfirmingPrivate("keep")} disabled={busy}>Keep my tags private</button>
+    </p> : null}
+    {pickingHandle ? <p className={styles.legalLine}>
+      By publishing, you confirm you&apos;re 16 or older and agree to the{" "}
+      <button type="button" className={styles.inlineLink} onClick={() => openCommunityUrl(`${COMMUNITY_PAGES_ORIGIN}/terms`)}>Terms</button> and{" "}
+      <button type="button" className={styles.inlineLink} onClick={() => openCommunityUrl(`${COMMUNITY_PAGES_ORIGIN}/privacy`)}>Privacy Policy</button>.
+    </p> : null}
     {notice ? <div className={notice.tone === "success" ? styles.success : styles.error} role="status">
       {notice.text}
       {/* Alex, 2026-10-30: "Link to Following (Recommended)", on the website and in the desktop app. */}
-      {notice.tasteLink ? <button type="button" className={styles.noticeLink} onClick={() => openCommunityUrl(COMMUNITY_FOLLOWING_URL)}>
+      {notice.tasteLink ? <button type="button" className={styles.noticeLink} onClick={() => void openCommunityUrlSignedIn(COMMUNITY_FOLLOWING_URL)}>
         See people who tag like you <ExternalLink size={13} aria-hidden="true" />
       </button> : null}
     </div> : null}

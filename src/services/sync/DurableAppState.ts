@@ -17,6 +17,7 @@ const PREFERENCE_KEYS = [
   "tagify:keyboardShortcutSettings",
   "tagify:tagCombinations",
   "tagify:automaticTagRules",
+  "tagify:toTagList",
   "tagify:autoFileBackupFrequency",
   "tagify:trackListSortBy",
   "tagify:trackListSortOrder",
@@ -29,6 +30,7 @@ const PREFERENCE_KEYS = [
   "tagify:tagSelectorSortMode",
   "tagify:colorThemeSortMode",
   "tagify:tagFilterEditorMode",
+  "tagify:advancedFilters",
   "tagify:basicTagFilterOperator",
   "tagify:showDefaultColorPalette",
 ] as const;

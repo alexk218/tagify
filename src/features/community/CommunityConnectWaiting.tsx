@@ -9,14 +9,20 @@ interface CommunityConnectWaitingProps {
   heading?: string;
   /** What connecting is for, when the way in needs saying. */
   description?: string;
+  /** What to do on the page; defaults to the email steps. */
+  steps?: string[];
+  /** "Back" when the member came from signing in inside Tagify. */
+  cancelLabel?: string;
   onCancel: () => void;
 }
 
+const EMAIL_STEPS = ["Enter your email on the page that opened", "Type the code we email you"];
+
 /**
- * While Community waits for the member to approve this computer in the browser: what to do there,
- * the code, and that Tagify finishes by itself.
+ * While Community waits for the member to sign in on the page that opened: what to do there, and
+ * that Tagify finishes by itself. The computer's code travels in the link, so nobody types it.
  */
-export function CommunityConnectWaiting({ pairing, heading = "Finish in your browser", description, onCancel }: CommunityConnectWaitingProps) {
+export function CommunityConnectWaiting({ pairing, heading = "Finish in your browser", description, steps = EMAIL_STEPS, cancelLabel = "Cancel", onCancel }: CommunityConnectWaitingProps) {
   const { pending, starting, error } = pairing;
   const failedToStart = !pending && !starting && Boolean(error);
   const entry = pairing.entry ?? "community";
@@ -27,24 +33,19 @@ export function CommunityConnectWaiting({ pairing, heading = "Finish in your bro
         <h3 className={styles.heading}>{heading}</h3>
         {description ? <p className={styles.description}>{description}</p> : null}
         <ol className={styles.steps}>
-          <li><span className={styles.number} aria-hidden="true">1</span>Sign in or create your free Community account</li>
-          <li><span className={styles.number} aria-hidden="true">2</span>Press Connect on the page that opened</li>
+          {steps.map((step, index) => <li key={step}><span className={styles.number} aria-hidden="true">{index + 1}</span>{step}</li>)}
         </ol>
         {failedToStart ? (
           <p className={styles.error} role="alert">{error}</p>
         ) : (
           <p className={styles.status} role="status">
             <Loader2 size={14} className={styles.spinner} aria-hidden="true" />
-            {starting && !pending ? "Opening Community in your browser…" : "Waiting for you to approve…"}
+            {starting && !pending ? "Opening the page in your browser…" : "Waiting for you to finish in your browser…"}
           </p>
         )}
         {error && !failedToStart ? <p className={styles.error} role="alert">{error}</p> : null}
       </div>
       <div className={styles.side}>
-        <div className={styles.code}>
-          <span>Your code</span>
-          <strong>{pending?.userCode ?? "····-····"}</strong>
-        </div>
         <div className={styles.actions}>
           {failedToStart ? (
             <button type="button" className={styles.primary} onClick={() => void communityPairing.start(entry)}>Try again</button>
@@ -53,10 +54,10 @@ export function CommunityConnectWaiting({ pairing, heading = "Finish in your bro
               <ExternalLink size={14} aria-hidden="true" /> Open the page again
             </button>
           )}
-          <button type="button" className={styles.secondary} onClick={onCancel}>Cancel</button>
+          <button type="button" className={styles.secondary} onClick={onCancel}>{cancelLabel}</button>
         </div>
       </div>
-      <p className={styles.note}>You can close this window. Tagify finishes connecting as soon as you approve.</p>
+      <p className={styles.note}>New here? The same steps create your free Tagify account. It&apos;s not your Spotify login. You can close this window: Tagify finishes connecting by itself.</p>
     </div>
   );
 }

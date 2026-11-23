@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import packageJson from "@/package";
+import { isUpgradedSince } from "@/features/onboarding/installedVersion";
+
+/** The version that added the phone apps button. */
+const PHONE_BUTTON_ARRIVED_IN = "3.4.0";
 
 /**
  * What this computer remembers about the phone apps button. Stored on this device only; nothing
@@ -17,6 +22,8 @@ export interface PhoneAppState {
   androidNotify?: boolean;
   /** The Android release notice was answered and never shows again. */
   androidNoticeDone?: boolean;
+  /** "Tag Spotify songs from your phone" was closed and never shows again. */
+  spotifyShareTipDone?: boolean;
 }
 
 export const PHONE_APP_STATE_KEY = "tagify:phone-app:v1";
@@ -97,5 +104,8 @@ export function usePhoneAppButton(optionalButtons: boolean) {
   const hide = useCallback(() => updatePhoneAppState({ hidden: true, pinned: false }), []);
   const setShown = useCallback((shown: boolean) => updatePhoneAppState({ hidden: !shown, pinned: shown }), []);
 
-  return { visible, showDot: visible && !state.opened, markOpened, hide, setShown };
+  // The "new" dot is for people who had Tagify before the button arrived; for a new user everything is new.
+  const [upgraded] = useState(() => isUpgradedSince(PHONE_BUTTON_ARRIVED_IN, packageJson.version));
+
+  return { visible, showDot: visible && upgraded && !state.opened, markOpened, hide, setShown };
 }

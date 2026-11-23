@@ -1,0 +1,189 @@
+/* Under the track list's own songs, separated by a rule like the list's own sections. */
+.section {
+  display: grid;
+  gap: 6px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  min-width: 0;
+}
+
+/* Its own tab or view: no rule above, the view names it. */
+.bare {
+  margin-top: 0;
+  padding-top: 4px;
+  border-top: 0;
+}
+
+.titleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.title {
+  margin: 0;
+  color: var(--spice-text);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.found {
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 13px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+
+.like {
+  align-items: center;
+  align-self: center;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  padding: 0;
+  width: 32px;
+}
+
+.like:hover {
+  color: var(--spice-text);
+  transform: scale(1.04);
+}
+
+.like.liked {
+  color: var(--spice-button);
+}
+
+.like:disabled {
+  cursor: default;
+}
+
+.like:focus-visible,
+.more:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
+.more {
+  justify-self: center;
+  margin-top: 8px;
+  min-height: 32px;
+  padding: 0 16px;
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 500px;
+  background: transparent;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.more:hover:not(:disabled) {
+  border-color: var(--spice-text);
+}
+
+.more:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* A shelf of covers, like Spotify's own shelves (Alex's pick C). */
+.shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 20px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tile {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tileText {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: start;
+  gap: 4px;
+}
+
+.tileName {
+  display: grid;
+  min-width: 0;
+}
+
+.tileTitle,
+.tileLine {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileTitle {
+  color: var(--spice-text);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.current {
+  color: var(--spice-button);
+}
+
+.tileLine {
+  color: var(--spice-subtext);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* Like Tagged Tracks' own tag pills: dark fill, no outline; the searched tag like the list's active filter. */
+.tilePills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: -2px;
+  min-width: 0;
+}
+
+.tilePill {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgb(0 0 0 / 30%);
+  color: var(--spice-subtext);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The track list's active-filter tag (TrackList.module.css .activeTagFilter). */
+.tilePillOn {
+  background: #1e40af;
+  color: white;
+  font-weight: 550;
+}
+

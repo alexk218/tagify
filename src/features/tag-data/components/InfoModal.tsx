@@ -2,7 +2,10 @@ import React, { useEffect, useState } from "react";
 import { Portal } from "@/components/ui";
 import communityPerspectivesScreenshot from "@/assets/communityPerspectivesScreenshot";
 import styles from "./InfoModal.module.css";
+import { PhoneTaggingGuide } from "@/features/phone-app";
 import packageJson from "@/package";
+import { isUpgradedSince } from "@/features/onboarding/installedVersion";
+import { showFirstRunTipsAgain } from "@/features/onboarding/firstRunTips";
 import { INSTALLER_RELEASES_URL } from "@/features/update-check";
 
 import {
@@ -47,6 +50,7 @@ import {
   faUser,
   faBoxOpen,
   faPeopleGroup,
+  faListCheck,
   faSeedling,
   faShieldHalved,
 } from "@fortawesome/free-solid-svg-icons";
@@ -62,14 +66,16 @@ interface InfoModalProps {
   initialSection?: string;
 }
 
-const LATEST_WHATS_NEW_VERSION = "3.4.0";
+const LATEST_WHATS_NEW_VERSION = "3.4.1";
 const WHATS_NEW_SEEN_VERSION_KEY = "tagify:info-modal:whats-new-seen-version";
 
+// What's New is marked NEW only for people who had Tagify before these notes' version.
 const hasSeenLatestWhatsNew = () => {
   try {
     return (
       localStorage.getItem(WHATS_NEW_SEEN_VERSION_KEY) ===
-      LATEST_WHATS_NEW_VERSION
+        LATEST_WHATS_NEW_VERSION ||
+      !isUpgradedSince(LATEST_WHATS_NEW_VERSION, packageJson.version)
     );
   } catch {
     return false;
@@ -102,6 +108,7 @@ const InfoModal: React.FC<InfoModalProps> = ({
   const sections = [
     { id: "whats-new", title: "What's New", icon: faBullhorn },
     { id: "overview", title: "Overview", icon: faBook },
+    { id: "phone-tagging", title: "Phone Tagging", icon: faMobileScreenButton },
     { id: "getting-started", title: "Getting Started", icon: faBaby },
     { id: "tagging", title: "Tagging System", icon: faTag },
     { id: "features", title: "Features", icon: faStar },
@@ -243,6 +250,31 @@ const InfoModal: React.FC<InfoModalProps> = ({
               {activeSection === "whats-new" && (
                 <div className={styles.section}>
                   <div className={styles.whatsNewHeader}>
+                    <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.4.1")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.4.1</a></h3>
+                  </div>
+                  <ul className={styles.compactUpdates}>
+                    {[
+                      { title: "Community in Tagify", description: "see what everyone else tagged, using your own filters.", icon: faPeopleGroup },
+                      { title: "To Tag list", description: "save songs for later and tick them off.", icon: faListCheck },
+                      { title: "Calmer Filters", description: 'plus "Any Mood" / "No Mood".', icon: faFilter },
+                      { title: "Local files", description: "go into your playlists now.", icon: faHardDrive },
+                      { title: "New here?", description: "Tagify asks what you listen to and sets up tags that fit.", icon: faSeedling },
+                      { title: "Tag from your iPhone", description: "Share a song in Spotify, pick Tagify.", icon: faMobileScreenButton },
+                    ].map(({ title, description, icon }) => (
+                      <li key={title} className={styles.compactUpdate}>
+                        <FontAwesomeIcon icon={icon} className={styles.compactUpdateIcon} aria-hidden="true" />
+                        <div className={styles.compactUpdateCopy}>
+                          <h4 className={styles.compactUpdateTitle}>{title}</h4>
+                          <p className={styles.compactUpdateDescription}>{description}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <details className={styles.releaseAccordion}>
+                    <summary className={styles.releaseSummary}><span>What's New in Tagify 3.4.0</span></summary>
+                    <div>
+                  {/* TAGIFY 3.4.0 */}
+                  <div className={styles.whatsNewHeader}>
                     <h3 className={styles.sectionTitle}><a href={getReleaseUrl("3.4.0")} target="_blank" rel="noopener noreferrer">What's new in Tagify 3.4.0</a></h3>
                   </div>
                   <ul className={styles.compactUpdates}>
@@ -261,6 +293,8 @@ const InfoModal: React.FC<InfoModalProps> = ({
                       </li>
                     ))}
                   </ul>
+                    </div>
+                  </details>
                   <details className={styles.releaseAccordion}>
                     <summary className={styles.releaseSummary}><span>What's New in Tagify 3.3.5</span></summary>
                     <div>
@@ -1230,6 +1264,13 @@ const InfoModal: React.FC<InfoModalProps> = ({
                 </div>
               )}
 
+              {activeSection === "phone-tagging" && (
+                <div className={styles.section}>
+                  <h3 className={styles.sectionTitle}>Tag Spotify songs from your phone</h3>
+                  <PhoneTaggingGuide onConnect={onClose} />
+                </div>
+              )}
+
               {activeSection === "getting-started" && (
                 <div className={styles.section}>
                   <h3 className={styles.sectionTitle}>Getting Started</h3>
@@ -1315,6 +1356,20 @@ const InfoModal: React.FC<InfoModalProps> = ({
                     <strong>First-time tip:</strong> Start by tagging 10-15
                     songs with basic categories like genre and mood. This will
                     give you enough data to see how filtering works!
+                  </div>
+
+                  <div className={styles.showTipsAgain}>
+                    <p>See the tips that point at Tagify's main controls again.</p>
+                    <button
+                      type="button"
+                      className={styles.showTipsAgainButton}
+                      onClick={() => {
+                        showFirstRunTipsAgain();
+                        onClose();
+                      }}
+                    >
+                      Show tips again
+                    </button>
                   </div>
                 </div>
               )}

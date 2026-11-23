@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Portal } from "@/components/ui";
+// eslint-disable-next-line css-modules/no-unused-class -- shared between the panel and its popover
 import styles from "./PhoneApp.module.css";
 
 const WIDTH = 400;

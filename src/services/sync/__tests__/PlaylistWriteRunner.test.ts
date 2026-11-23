@@ -14,6 +14,16 @@ import {
 } from "../PlaylistWriteRunner";
 import { desktopFeatures } from "../SyncRuntime";
 
+const localFiles = vi.hoisted(() => ({ here: new Set<string>(), stopped: [] as unknown[] }));
+vi.mock("../../localFilesOnThisComputer", () => ({
+  isLocalFileUri: (uri: string) => uri.startsWith("spotify:local:"),
+  addableHere: async (uris: string[]) => ({
+    addable: uris.filter((uri) => uri.startsWith("spotify:track:") || localFiles.here.has(uri)),
+    localElsewhere: uris.filter((uri) => uri.startsWith("spotify:local:") && !localFiles.here.has(uri)),
+  }),
+  stopLocalFileAdds: (error: unknown) => { localFiles.stopped.push(error); },
+}));
+
 const DEVICE = "11111111-1111-4111-8111-111111111111";
 const entity = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const trackId = (n: number) => `T${String(n).padStart(21, "0")}`;
@@ -29,7 +39,7 @@ function playlist(n: number, overrides: Record<string, unknown> = {}) {
 }
 
 /** Spotify's desktop playlists, as the runner sees and changes them. */
-function spotify(options: { gone?: string[]; createFails?: unknown; replaceFails?: unknown } = {}) {
+function spotify(options: { gone?: string[]; createFails?: unknown; replaceFails?: unknown; refuseLocal?: string } = {}) {
   const playlists = new Map<string, { name: string; description: string; uris: string[] }>();
   let created = 0;
   const writer: PlaylistWriter = {
@@ -45,8 +55,11 @@ function spotify(options: { gone?: string[]; createFails?: unknown; replaceFails
     }),
     replacePlaylistTracks: vi.fn(async (id: string, uris: string[]) => {
       if (options.replaceFails) throw options.replaceFails;
-      playlists.get(id)!.uris = [...uris];
+      const playlist = playlists.get(id)!;
+      if (options.refuseLocal && uris.includes(options.refuseLocal) && !playlist.uris.includes(options.refuseLocal)) throw new Error("Spotify refused the local file");
+      playlist.uris = [...uris];
     }),
+    playlistUris: vi.fn(async (id: string) => [...playlists.get(id)!.uris]),
   };
   return { playlists, writer };
 }
@@ -265,6 +278,53 @@ describe("Keeping Community playlists in Spotify", () => {
     account = "alice";
     created.delete(entity(1));
     expect(created.get(entity(1))).toBeNull();
+  });
+});
+
+describe("Local files in Community playlists", () => {
+  const local = (name: string) => `spotify:local:Artist:Album:${name}:200`;
+  const track = (n: number) => `spotify:track:${trackId(n)}`;
+  afterEach(() => { localFiles.here.clear(); localFiles.stopped.length = 0; });
+
+  async function write(playlistState: string[], claim: Record<string, unknown>, options: Parameters<typeof spotify>[0] = {}) {
+    const { playlists, writer } = spotify(options);
+    const id = await writer.createPrivatePlaylist("Mine", "");
+    playlists.get(id)!.uris = playlistState;
+    const { reports, request } = community([playlist(1, { spotifyPlaylistId: id, ...claim })]);
+    await runPlaylistWrites(session, writer, capability, memoryCreated(), request);
+    return { uris: playlists.get(id)!.uris, reports };
+  }
+
+  it("adds the local files this computer has in Community's order, and keeps ones another computer added", async () => {
+    localFiles.here.add(local("Here"));
+    const { uris, reports } = await write([track(1), local("Elsewhere")], {
+      trackIds: [trackId(1), trackId(2)],
+      uris: [local("Here"), track(1), local("Elsewhere"), local("Not added anywhere yet"), track(2)],
+    });
+    expect(uris).toEqual([local("Here"), track(1), local("Elsewhere"), track(2)]);
+    expect(reports[0]).toEqual([expect.objectContaining({ result: "written" })]);
+  });
+
+  it("removes only local files Community no longer asks for, and keeps ones the member added by hand", async () => {
+    const { uris } = await write([track(1), local("No longer matches"), local("Added by hand")], {
+      trackIds: [trackId(1)],
+      uris: [track(1)],
+      removedLocalUris: [local("No longer matches")],
+    });
+    expect(uris).toEqual([track(1), local("Added by hand")]);
+  });
+
+  it("still writes the Spotify songs when Spotify refuses a local file, and stops adding local files", async () => {
+    localFiles.here.add(local("Refused"));
+    const { uris, reports } = await write([], { trackIds: [trackId(1)], uris: [local("Refused"), track(1)] }, { refuseLocal: local("Refused") });
+    expect(uris).toEqual([track(1)]);
+    expect(localFiles.stopped).toHaveLength(1);
+    expect(reports[0]).toEqual([expect.objectContaining({ result: "written" })]);
+  });
+
+  it("keeps local files added by hand even when Community sends no local files", async () => {
+    const { uris } = await write([track(9), local("Added by hand")], { trackIds: [trackId(1)] });
+    expect(uris).toEqual([track(1), local("Added by hand")]);
   });
 });
 

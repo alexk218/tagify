@@ -10,6 +10,9 @@ const song = (tags: CommunityMatchTag[]): CommunityMatch => ({
   tags,
 });
 
+const navigation = vi.hoisted(() => ({ openSpotifyTrack: vi.fn(), openSpotifyArtist: vi.fn(async () => {}) }));
+vi.mock("@/services/spotifyNavigation", () => navigation);
+
 describe("members' tags on a song", () => {
   it("merges the same tag in different spellings, counts them together and names it the most-used way", () => {
     const merged = mergeSameTags([tag("Rock", 3), tag("nu metal", 2), tag("Nu Metal", 2), tag("Nu-metal", 1), tag("Angry"), tag("angry")]);
@@ -24,13 +27,49 @@ describe("members' tags on a song", () => {
 
     const row = screen.getByRole("listitem");
     expect(within(row).getAllByRole("button", { name: /^Add / })).toHaveLength(TAGS_SHOWN);
-    expect(within(row).getByRole("button", { name: "Add Rock to Bring Me To Life" })).toHaveTextContent("Rock8");
+    expect(within(row).getByRole("button", { name: "See music tagged Rock on tagify.fm" })).toHaveTextContent("Rock8");
     expect(within(row).getByText("Evanescence")).toBeInTheDocument();
     expect(within(row).getByText("Tagged by @ana +7")).toBeInTheDocument();
     fireEvent.click(within(row).getByRole("button", { name: "Show 16 more tags for Bring Me To Life" }));
     expect(within(row).getAllByRole("button", { name: /^Add / })).toHaveLength(22);
     fireEvent.click(within(row).getByRole("button", { name: "Show fewer tags for Bring Me To Life" }));
     expect(within(row).getAllByRole("button", { name: /^Add / })).toHaveLength(TAGS_SHOWN);
+  });
+
+  it("says when each song was liked or added to a playlist, with the exact time on hover", () => {
+    const at = new Date(2026, 10, 15, 21, 4).getTime();
+    const liked = { ...song([tag("Rock")]), track: { ...song([]).track, addedAt: at } };
+    const listed = { ...liked, track: { ...liked.track, uri: "spotify:track:2" }, from: "playlist" } as CommunityMatch;
+    const undated = { ...song([tag("Rock")]), track: { ...song([]).track, uri: "spotify:track:3" } };
+    render(<TaggedByOthersRows matches={[liked, listed, undated]} onToggleTag={vi.fn()} coverOf={() => undefined} hasTag={() => false} detailOf={() => ""} />);
+
+    const [likedRow, listedRow, undatedRow] = screen.getAllByRole("listitem");
+    const day = new Date(at).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+    expect(within(likedRow).getByText(`Liked ${day}`)).toHaveAttribute("title", `Added to your Liked Songs on ${new Date(at).toLocaleString()}`);
+    expect(within(listedRow).getByText(`Added ${day}`)).toHaveAttribute("title", expect.stringContaining("Added to a playlist on"));
+    expect(within(undatedRow).queryByText(/^(Liked|Added) /)).not.toBeInTheDocument();
+  });
+
+  it("opens a tag's page on tagify.fm from its name, while + still adds it", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const onToggleTag = vi.fn().mockResolvedValue(undefined);
+    const onLock = vi.fn();
+    render(<TaggedByOthersRows matches={[song([tag("Nu Metal", 3), tag("Rock", 2)])]} onToggleTag={onToggleTag} coverOf={() => undefined}
+      hasTag={() => false} detailOf={() => ""} onLock={onLock} />);
+
+    const name = screen.getByRole("button", { name: "See music tagged Nu Metal on tagify.fm" });
+    expect(name).toHaveAttribute("title", expect.stringContaining("See music tagged Nu Metal on tagify.fm"));
+    fireEvent.click(name);
+    expect(open).toHaveBeenCalledWith("https://tagify.fm/tags/nu-metal", "_blank", "noopener,noreferrer");
+    expect(onToggleTag).not.toHaveBeenCalled();
+    expect(onLock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Rock to Bring Me To Life" }));
+    await waitFor(() => expect(onToggleTag).toHaveBeenCalledTimes(1));
+    expect(onToggleTag.mock.calls[0][1]).toMatchObject({ label: "Rock" });
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(onLock).not.toHaveBeenCalled();
+    open.mockRestore();
   });
 
   it("turns a members' tag on and off again under the name most members used", async () => {
@@ -78,7 +117,7 @@ describe("members' tags on a song", () => {
     expect(onHide).toHaveBeenCalledTimes(1);
     expect(onLock).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByText("Evanescence"));
+    fireEvent.click(screen.getByText("Evanescence").closest("li")!);
     expect(onLock).toHaveBeenCalledTimes(1);
     expect(screen.getByLabelText("Your rating: 4 stars")).toBeInTheDocument();
   });
@@ -87,8 +126,19 @@ describe("members' tags on a song", () => {
     const onLock = vi.fn();
     render(<TaggedByOthersRows matches={[song([tag("Rock")])]} onToggleTag={vi.fn()} coverOf={() => undefined} hasTag={() => false}
       onLock={onLock} activeUri="spotify:track:1" detailOf={() => ""} />);
-    expect(screen.getByRole("button", { name: "Bring Me To Life, open in the editor" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByText("Evanescence"));
+    expect(screen.getByRole("listitem")).toHaveAttribute("aria-current", "true");
+    fireEvent.click(screen.getByText("Evanescence").closest("li")!);
+    expect(onLock).not.toHaveBeenCalled();
+  });
+
+  it("opens the song or an artist in Spotify from their names, without opening the song in the editor", () => {
+    const onLock = vi.fn();
+    render(<TaggedByOthersRows matches={[song([tag("Rock")])]} onToggleTag={vi.fn()} coverOf={() => undefined} hasTag={() => false}
+      onLock={onLock} detailOf={() => ""} />);
+    fireEvent.click(screen.getByRole("button", { name: "Go to Bring Me To Life in Spotify" }));
+    expect(navigation.openSpotifyTrack).toHaveBeenCalledWith("spotify:track:1");
+    fireEvent.click(screen.getByRole("button", { name: "Evanescence" }));
+    expect(navigation.openSpotifyArtist).toHaveBeenCalledWith("Evanescence", "spotify:track:1");
     expect(onLock).not.toHaveBeenCalled();
   });
 });

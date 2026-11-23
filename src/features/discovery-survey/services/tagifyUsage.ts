@@ -14,6 +14,8 @@ const LAST_VERSION_PREFIX = "tagify:usage:last-version:";
 const ACTIVITY_PREFIX = "tagify:usage:activity:";
 const ACTIVITY_EVENT = "tagify:usage:action";
 const ANSWER_PREFIX = "tagify:usage:pending-answer:";
+/** Sent on `window` after each manual rating, whether or not usage reporting is on, so Tagify can follow up on a member's rating. */
+export const RATING_COMPLETED_EVENT = "tagify:ratingCompleted";
 /** Shared by usage reports and prompt history, which use the same rate-limited endpoint. */
 export const USAGE_PAUSED_UNTIL_KEY = "tagify:usage:paused-until";
 const DEFAULT_RATE_LIMIT_PAUSE_MS = 60 * 60 * 1000;
@@ -129,6 +131,9 @@ function scheduleActivityFlush(accountDigest: string, failures = 0, delay = ACTI
  * `songs` is how many songs a tagging gesture changed, sent as a coarse range.
  */
 export async function recordMeaningfulAction(action: "tagging" | "rating", surface: NonNullable<ProductEventDetails["edit_surface"]> = "tagify_page", songs?: number): Promise<void> {
+  if (action === "rating") {
+    try { window.dispatchEvent(new Event(RATING_COMPLETED_EVENT)); } catch { /* Never interrupt editing. */ }
+  }
   const accountDigest = await getUsageAccountDigest();
   if (!accountDigest || !isAnalyticsSharing(accountDigest)) return;
   const songRange = action === "tagging" && songs !== undefined ? songsBucket(songs) : undefined;

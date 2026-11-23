@@ -1,6 +1,6 @@
 import type { LocalPrivateNote } from "@/services/sync/PrivateNotes.types";
 import { isPrivateNoteUri, type TagMembershipMethod } from "@tagify/sync-contracts";
-import { detachInconsistentRecordingGroups, expandRecordingEdits, normalizeRecordingIdentity, recordingAnnotations, recordingConflict, sameRecording, similarRecording } from "@/features/recording-reuse/utils/recordingReuse";
+import { detachInconsistentRecordingGroups, expandRecordingEdits, normalizeRecordingIdentity, recordingAnnotations, recordingConflict, nearRecording, sameRecording, similarRecording } from "@/features/recording-reuse/utils/recordingReuse";
 import type { RecordingChoices } from "@/features/recording-reuse/utils/recordingLibrary";
 import type { RecordingIdentity } from "@/types/tagData";
 import { restoreBulkTrack, type BulkUndoEntry } from "@/features/multi-track-tagging/utils/bulkUndo";
@@ -1550,7 +1550,7 @@ export class IndexedDBStorageService implements IStorageService {
       if (!source || !proposals[sourceUri]) throw new Error("Choose a saved release to reuse its tagging.");
       const identities = Object.values(proposals).map(proposal => proposal.identity);
       const confirmed = options?.confirmSimilar === true && !options.automatic;
-      if (identities.length < 2 || !identities.every(identity => normalizeRecordingIdentity(identity) && identities.every(other => confirmed ? similarRecording(identity, other) : sameRecording(identity, other)))) throw new Error("These releases couldn't be confirmed as the same recording.");
+      if (identities.length < 2 || !identities.every(identity => normalizeRecordingIdentity(identity) && identities.every(other => sameRecording(identity, other) || (confirmed && (similarRecording(identity, other) || nearRecording(identity, other)))))) throw new Error("These releases couldn't be confirmed as the same recording.");
       if (Object.keys(tracks).some(uri => !proposals[uri])) throw Object.assign(new Error("Linked releases have changed. Check the recording again before linking."), { code: "tagify-recording-changed" });
       Object.entries(proposals).forEach(([uri, proposal]) => {
         if (recordingAnnotations(tracks[uri]) !== proposal.annotations || tracks[uri]?.recordingReuseDisabled) throw Object.assign(new Error("Tagging changed since you checked. Check the recording again before linking."), { code: "tagify-recording-changed" });
@@ -1571,17 +1571,38 @@ export class IndexedDBStorageService implements IStorageService {
       const sharedTagIds = [...new Set(annotation.tagIds.filter(id => validTags.has(id)))];
       const groupId = crypto.randomUUID();
       const now = Date.now();
+      // A version saved only because it's linked keeps the song's first-tagged date, so Stats
+      // don't count the person as tagging it again on the day Tagify found the version.
+      const firstTagged = members.reduce<number | undefined>((earliest, track) =>
+        typeof track.dateCreated === "number" && (earliest === undefined || track.dateCreated < earliest) ? track.dateCreated : earliest, undefined);
       const changes: Record<string, TrackData> = {};
       Object.entries(proposals).forEach(([uri, proposal]) => {
         const before = tracks[uri];
         const leftover = (before?.tagIds || []).filter(id => !validTags.has(id));
         const after: TrackData = { ...{ rating: 0, energy: 0, bpm: null, tagIds: [] }, ...proposal.details, ...before,
           rating: annotation.rating, energy: annotation.energy, tagIds: [...new Set([...sharedTagIds, ...leftover])], recordingIdentity: proposal.identity, recordingGroupId: groupId, recordingGroupConfirmed: confirmed || undefined };
-        if (!before) { after.dateCreated = now; after.dateModified = now; }
+        if (!before) { after.dateCreated = firstTagged ?? now; after.dateModified = now; }
         changes[uri] = after;
       });
       return { changes, history, result: changes };
     }, undefined, options?.expectedDatabaseName);
+  }
+
+  /**
+   * Remember that two songs are different so Tagify doesn't ask again. Written on each saved
+   * copy; never creates a song, and annotations and dates stay as they are.
+   */
+  async rememberNotSameRecording(uris: [string, string], account = getTagifyDatabaseName(), isCurrent = () => true) {
+    return this.mutateBulkTracks(uris, (tracks, history) => {
+      const changes: Record<string, TrackData> = {};
+      if (!isCurrent()) throw new Error("Your library changed. Reopen this song and try again.");
+      uris.forEach((uri, index) => {
+        const other = uris[1 - index];
+        const current = tracks[uri];
+        if (current && !current.recordingNotSameAs?.includes(other)) changes[uri] = { ...current, recordingNotSameAs: [...(current.recordingNotSameAs || []), other] };
+      });
+      return { changes, history, result: changes };
+    }, undefined, account);
   }
 
   async unlinkRecording(uri: string, disabled = true, account = getTagifyDatabaseName()) {

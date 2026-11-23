@@ -1,5 +1,5 @@
 import type { LocalPrivateNote } from "./PrivateNotes.types";
-import { assertNotInOnboardingPreview } from "@/features/onboarding/preview/onboardingPreview";
+import { assertNotInOnboardingPreview, isOnboardingPreviewActive } from "@/features/onboarding/preview/onboardingPreview";
 import { isPrivateNoteUri } from "@tagify/sync-contracts";
 import type { ArtistData, PlaylistData, TagDataStructure, TagTaxonomy, TrackData } from "@/types/tagData";
 import { storageService } from "@/services/storage/StorageService";
@@ -71,7 +71,8 @@ let stagedApproval: ApprovedPairing | null = null;
 
 export class SyncPairingService {
   async begin(apiBaseUrl: string, name: string, platform: string): Promise<PendingPairing> {
-    assertNotInOnboardingPreview("Connecting to Community");
+    // The onboarding preview may create or sign in to an account (its connection is kept in the
+    // preview copy); see onboardingPreview.ts.
     this.cancelPending();
     // Choosing to link again means automatic reconnection is worth checking on the next start.
     clearRecoveryUnavailable();
@@ -120,31 +121,41 @@ export class SyncPairingService {
       return { status: "pending" };
     }
     if (!response.ok) throw new Error(body.error?.message || "Device linking failed");
-    const claims = decodeJwt(body.accessToken);
-    const configuration: DesktopSyncConfiguration = {
-      accountId: claims.sub,
-      libraryId: body.libraryId,
-      deviceId: body.deviceId,
-      apiBaseUrl: pending.apiBaseUrl,
-      supabaseUrl: body.supabaseUrl || claims.iss.replace(/\/auth\/v1\/?$/, ""),
-      supabasePublishableKey: body.supabasePublishableKey,
-      accessToken: body.accessToken,
-      refreshToken: body.refreshToken,
-      expiresAt: body.expiresAt,
-    };
-    const previous = getDesktopSyncConfiguration();
-    const provenance = getDisconnectedSyncProvenance();
-    stagedApproval = {
-      configuration,
-      relationship: getPairingRelationship(previous, provenance, configuration.accountId),
-      previousAccount: provenance || (previous ? {
-        accountId: previous.accountId,
-        libraryId: previous.libraryId,
-        disconnectedAt: new Date().toISOString(),
-        profile: previous.profile,
-      } : null),
-    };
-    return { status: "approved", approval: stagedApproval };
+    return { status: "approved", approval: stageApproval(pending, body) };
+  }
+
+  /**
+   * Emails a 6-digit sign-in code for the waiting device authorization, so the member can sign in
+   * or create their account without leaving Tagify. Community answers the same way for addresses
+   * it won't send to, so the reply never says whether an account exists.
+   */
+  async requestEmailCode(email: string): Promise<{ resendAfter: number }> {
+    const pending = this.requirePending();
+    const response = await fetch(`${pending.apiBaseUrl}/api/v2/device-authorizations/email`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ deviceCode: pending.deviceCode, verifier: pending.verifier, email }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw emailCodeError(response, body, "Couldn't send the code. Please try again.");
+    return { resendAfter: Number(body.resendAfter) || 60 };
+  }
+
+  /** Signs in with the emailed code; approves this computer exactly as the browser page would. */
+  async verifyEmailCode(email: string, code: string): Promise<{ status: "approved"; approval: ApprovedPairing }> {
+    const pending = this.requirePending();
+    const response = await fetch(`${pending.apiBaseUrl}/api/v2/device-authorizations/email/verify`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ deviceCode: pending.deviceCode, verifier: pending.verifier, email, code }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw emailCodeError(response, body, "Couldn't check the code. Please try again.");
+    return { status: "approved", approval: stageApproval(pending, body) };
+  }
+
+  private requirePending(): PendingPairing {
+    const pending = this.getPending();
+    if (!pending) throw new EmailCodeError("The sign-in request expired. Send a new code.", "expired_token");
+    return pending;
   }
 
   async complete(
@@ -171,15 +182,18 @@ export class SyncPairingService {
     let configurationSwitched = false;
 
     try {
-      if (approval.relationship === "account-switch" && previous) {
+      // In the onboarding preview the library stays in the preview's own database whichever
+      // account connects, and nothing is copied into an account library the real Tagify reads.
+      const preview = isOnboardingPreviewActive();
+      if (!preview && approval.relationship === "account-switch" && previous) {
         stashDurableLocalStateForAccount(previous.accountId);
       }
-      if (!previous && provenance) {
+      if (!preview && !previous && provenance) {
         stashDurableLocalStateForAccount(provenance.accountId);
         await reconcileUnlinkedReplica(provenance.accountId);
       }
 
-      if (!reconnectingFromLocalOnly) {
+      if (!preview && !reconnectingFromLocalOnly) {
         const mode = approval.relationship === "first-link"
           ? "seed-unlinked"
           : approval.relationship === "account-switch"
@@ -194,7 +208,7 @@ export class SyncPairingService {
       );
       configurationSwitched = true;
 
-      if (approval.relationship === "account-switch") {
+      if (!preview && approval.relationship === "account-switch") {
         clearDurableLocalStateForAccountSwitch();
         const restoredDraft = restoreDurableLocalStateForAccount(
           approval.configuration.accountId,
@@ -208,7 +222,8 @@ export class SyncPairingService {
       }
 
       setDisconnectedSyncProvenance(null);
-      void enrollDesktopRecovery(approval.configuration);
+      // Recovery would tie this installation to the preview account; Community refuses it anyway.
+      if (!preview) void enrollDesktopRecovery(approval.configuration);
       this.cancelPending();
       window.dispatchEvent(new CustomEvent("tagify:syncStatus", {
         detail: { status: window.TagifySync?.getStatus() || "unlinked" },
@@ -656,5 +671,69 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
   });
 }
 function requestResult<T>(request: IDBRequest<T>): Promise<T> { return new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
+
+export type EmailCodeErrorCode = "expired_token" | "invalid_code" | "rate_limited" | "invalid_request" | "unavailable";
+
+/** Why Community didn't send or accept an emailed code, with what the form needs to react. */
+export class EmailCodeError extends Error {
+  constructor(
+    message: string,
+    readonly code: EmailCodeErrorCode,
+    readonly retryAfter: number | null = null,
+    readonly attemptsRemaining: number | null = null,
+  ) {
+    super(message);
+    this.name = "EmailCodeError";
+  }
+}
+
+function emailCodeError(response: Response, body: { error?: { code?: string; message?: string; attemptsRemaining?: number } }, fallback: string): EmailCodeError {
+  const known: EmailCodeErrorCode[] = ["expired_token", "invalid_code", "rate_limited", "invalid_request"];
+  const raw = body.error?.code;
+  const code: EmailCodeErrorCode = raw && (known as string[]).includes(raw) ? raw as EmailCodeErrorCode
+    : response.status === 410 ? "expired_token" : response.status === 429 ? "rate_limited" : "unavailable";
+  const retryAfter = Number(response.headers.get("retry-after")) || null;
+  const attempts = body.error?.attemptsRemaining;
+  return new EmailCodeError(body.error?.message || fallback, code, retryAfter, typeof attempts === "number" ? attempts : null);
+}
+
+/** Turns Community's approved token payload into the approval this computer finishes connecting with. */
+interface ApprovedTokenPayload {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  libraryId: string;
+  deviceId: string;
+  supabaseUrl?: string;
+  supabasePublishableKey: string;
+}
+
+function stageApproval(pending: PendingPairing, body: ApprovedTokenPayload): ApprovedPairing {
+  const claims = decodeJwt(body.accessToken);
+  const configuration: DesktopSyncConfiguration = {
+    accountId: claims.sub,
+    libraryId: body.libraryId,
+    deviceId: body.deviceId,
+    apiBaseUrl: pending.apiBaseUrl,
+    supabaseUrl: body.supabaseUrl || claims.iss.replace(/\/auth\/v1\/?$/, ""),
+    supabasePublishableKey: body.supabasePublishableKey,
+    accessToken: body.accessToken,
+    refreshToken: body.refreshToken,
+    expiresAt: body.expiresAt,
+  };
+  const previous = getDesktopSyncConfiguration();
+  const provenance = getDisconnectedSyncProvenance();
+  stagedApproval = {
+    configuration,
+    relationship: getPairingRelationship(previous, provenance, configuration.accountId),
+    previousAccount: provenance || (previous ? {
+      accountId: previous.accountId,
+      libraryId: previous.libraryId,
+      disconnectedAt: new Date().toISOString(),
+      profile: previous.profile,
+    } : null),
+  };
+  return stagedApproval;
+}
 
 export const syncPairingService = new SyncPairingService();

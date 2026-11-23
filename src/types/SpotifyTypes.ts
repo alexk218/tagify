@@ -7,6 +7,8 @@ export interface SpotifyTrack {
   artists: { name: string }[];
   album: { name: string; uri?: string | null; images?: { url: string }[] };
   duration_ms: number;
+  /** When the song was added to the Liked Songs or playlist it was read from (ms), when Spotify says. */
+  addedAt?: number;
 }
 
 /**

@@ -76,6 +76,8 @@ export interface TaggedByOthersMatch extends CommunityMatch {
   sample: string[];
   /** Where the song was first read: Liked Songs newest first, then playlists in library order. */
   position: number;
+  /** Where it was first read from; checks saved before this existed don't say. Its added date is `track.addedAt`. */
+  from?: "liked" | "playlist";
 }
 
 export interface TaggedByOthersProgress {
@@ -285,7 +287,7 @@ export async function scanTaggedByOthers({
   // kept only until Community has answered for it.
   const answered = [...(continueFrom?.songIds ?? [])];
   const seen = new Set<string>(answered);
-  const asking = new Map<string, { track: SpotifyTrack; position: number }>();
+  const asking = new Map<string, { track: SpotifyTrack; position: number; from: "liked" | "playlist" }>();
   const found: TaggedByOthersMatch[] = [...(continueFrom?.matches ?? [])];
   const playlistIds = [...(continueFrom?.playlistIds ?? [])];
   let skippedPlaylists = continueFrom?.skippedPlaylists ?? 0;
@@ -307,7 +309,7 @@ export async function scanTaggedByOthers({
       const asked = new Set(batch);
       for (const item of items) {
         const song = asked.delete(item.providerId) ? asking.get(item.providerId) : undefined;
-        if (song) found.push({ track: song.track, tags: item.tags, people: item.people, peopleCapped: item.peopleCapped, sample: item.sample, position: song.position });
+        if (song) found.push({ track: song.track, tags: item.tags, people: item.people, peopleCapped: item.peopleCapped, sample: item.sample, position: song.position, from: song.from });
       }
       for (const id of batch) asking.delete(id);
       answered.push(...batch);
@@ -361,7 +363,7 @@ export async function scanTaggedByOthers({
       for (const track of chunk.tracks) {
         const id = communitySong(track)?.id;
         if (!id || seen.has(id) || seen.size >= maxSongs) continue;
-        asking.set(id, { track, position: seen.size });
+        asking.set(id, { track, position: seen.size, from: chunk.kind });
         seen.add(id);
         waiting.push(id);
       }

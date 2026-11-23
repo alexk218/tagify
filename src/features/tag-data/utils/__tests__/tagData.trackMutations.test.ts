@@ -4,6 +4,7 @@ import { TagDataStructure, TrackData, TrackTag } from "@/types/tagData";
 import {
   commitTrackMutation,
   createInitialTrackData,
+  withMissingAudioFeatures,
   withRating,
   withTrackMetadata,
   withToggledTrackTag,
@@ -109,5 +110,21 @@ describe("tagData.trackMutations", () => {
     expect(rated.rating).toBe(5);
     expect(rated.dateCreated).toBe(100);
     expect(rated.dateModified).toBe(200);
+  });
+
+  it("fills missing BPM and key without changing dateModified", () => {
+    const track: TrackData = { rating: 0, energy: 3, bpm: null, tagIds: [HOUSE_TAG], dateCreated: 10, dateModified: 20 };
+
+    const filled = withMissingAudioFeatures(track, { bpm: 123, camelotKey: "11A" });
+
+    expect(filled).toMatchObject({ bpm: 123, camelotKey: "11A", dateCreated: 10, dateModified: 20 });
+  });
+
+  it("never overwrites BPM or key the song already has", () => {
+    const track: TrackData = { rating: 0, energy: 0, bpm: 128, camelotKey: "8A", tagIds: [HOUSE_TAG], dateCreated: 10, dateModified: 20 };
+
+    expect(withMissingAudioFeatures(track, { bpm: 123, camelotKey: "11A" })).toBe(track);
+    expect(withMissingAudioFeatures({ ...track, camelotKey: undefined }, { bpm: 123, camelotKey: "11A" }))
+      .toMatchObject({ bpm: 128, camelotKey: "11A", dateModified: 20 });
   });
 });

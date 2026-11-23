@@ -3,7 +3,6 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityOnboardingModal } from "../CommunityOnboardingModal";
 import { communityPairing } from "../communityPairing";
-import { CloudSyncModal as CloudSyncDialog } from "../CloudSyncModal";
 import { PENDING_PAIRING_STORAGE_KEY, syncPairingService, type ApprovedPairing, type PairingRelationship } from "@/services/sync/SyncPairingService";
 import { setDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
@@ -11,16 +10,16 @@ import { recordProductInteraction } from "@/features/product-analytics/productAn
 import { policyFixture, sharingStub, taxonomyFixture } from "./sharingFixtures";
 
 const sharing = sharingStub(policyFixture({ reviewedAt: null }));
-/** Community setup always knows where it was opened from. */
+/** Setup always knows where it was opened from; Cloud Sync connects through the same setup. */
 const CommunitySetup = (props: { onClose: () => void }) => <CommunityOnboardingModal entry="community" sharing={sharing} tracks={{}} taxonomy={taxonomyFixture()} {...props} />;
-const CloudSyncModal = (props: { onClose: () => void }) => <CloudSyncDialog sharing={sharing} onOpenSharing={vi.fn()} {...props} />;
+const SetupFromCloudSync = (props: { onClose: () => void }) => <CommunityOnboardingModal entry="sync" sharing={sharing} tracks={{}} taxonomy={taxonomyFixture()} {...props} />;
 
 vi.mock("@/features/product-analytics/productAnalytics", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/product-analytics/productAnalytics")>()),
   recordProductInteraction: vi.fn(),
 }));
 
-// Both dialogs show the sharing choice once connected: Sync as a line, setup as its share step.
+// Setup shows the sharing choice as its share step once connected.
 vi.mock("../CommunityShareDialog", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../CommunityShareDialog")>()),
   CommunitySharePanel: () => <div>Your tags: Not public yet</div>,
@@ -35,8 +34,8 @@ const configuration = {
 
 describe.each([
   ["Community setup", CommunitySetup],
-  ["Cloud Sync", CloudSyncModal],
-] as const)("%s browser approval", (_name, Modal) => {
+  ["Cloud Sync's", SetupFromCloudSync],
+] as const)("%s setup browser approval", (_name, Modal) => {
   let activateCurrentAccount: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -67,10 +66,9 @@ describe.each([
     syncPairingService.cancelPending();
   });
 
-  // Setup checks by itself while it waits; Cloud Sync also has an "I've approved it" button.
+  // Setup checks by itself while it waits.
   function checkApproval() {
-    if (Modal === CommunitySetup) act(() => { void communityPairing.check(); });
-    else fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+    act(() => { void communityPairing.check(); });
   }
 
   function approve(relationship: PairingRelationship = "first-link") {
@@ -100,14 +98,13 @@ describe.each([
       expect(screen.getByText(/Reload Spotify to finish switching accounts/)).toBeInTheDocument();
       expect(activateCurrentAccount).not.toHaveBeenCalled();
       // Choosing what to share waits until Spotify has reloaded into the new account.
-      if (Modal === CommunitySetup) expect(screen.queryByText("Your tags: Not public yet")).not.toBeInTheDocument();
-      else expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
+      expect(screen.queryByText("Your tags: Not public yet")).not.toBeInTheDocument();
     } else {
       await waitFor(() => expect(activateCurrentAccount).toHaveBeenCalledTimes(1));
     }
   });
 
-  const entry = Modal === CloudSyncModal ? "sync" : "community";
+  const entry = Modal === SetupFromCloudSync ? "sync" : "community";
   const connectEvents = () => vi.mocked(recordProductInteraction).mock.calls.filter(([event]) => event.startsWith("community_"));
 
   it("measures opening setup and the saved connection, credited to where the attempt started", async () => {
@@ -149,15 +146,11 @@ describe.each([
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     render(<Modal onClose={vi.fn()} />);
     checkApproval();
-    if (Modal === CommunitySetup) {
-      // Setup replaces the expired code while it waits, without opening the browser again.
-      expect(await screen.findByText("WXYZ-2345")).toBeInTheDocument();
-      expect(begin).toHaveBeenCalledTimes(1);
-      expect(open).not.toHaveBeenCalled();
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    } else {
-      expect(await screen.findByRole("alert")).toBeInTheDocument();
-    }
+    // Setup replaces the expired code while it waits, without opening the browser again.
+    await waitFor(() => expect(communityPairing.getState().pending?.userCode).toBe("WXYZ-2345"));
+    expect(begin).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     expect(connectEvents()).toEqual([["community_setup_opened", { entry }]]);
   });
@@ -191,14 +184,8 @@ describe.each([
       finish = () => resolve({ configuration: { ...configuration, profile: { handle: "alex-b", displayName: "Alex B" } }, requiresReload: false });
     }));
     render(<Modal onClose={vi.fn()} />);
-    if (Modal === CommunitySetup) {
-      checkApproval();
-      checkApproval();
-    } else {
-      const approved = screen.getByRole("button", { name: "I've approved it" });
-      fireEvent.click(approved);
-      fireEvent.click(approved);
-    }
+    checkApproval();
+    checkApproval();
 
     expect(await screen.findByText("Connecting as Alex B…")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();

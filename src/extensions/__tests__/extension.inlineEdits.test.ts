@@ -382,7 +382,7 @@ it("updates all three simultaneous playlist columns when tags are added or remov
   window.dispatchEvent(new CustomEvent("tagify:settingsChanged", { detail: { tracklistDisplayMode: "combined" } }));
   const checkTags = async (tags: string[]) => {
     await eventually(async () => {
-      for (const uri of uris) expect((await indexedDBStorage.getTrack(uri))?.tagIds.slice().sort()).toEqual([...tags].sort());
+      for (const uri of uris) expect(((await indexedDBStorage.getTrack(uri))?.tagIds ?? []).slice().sort()).toEqual([...tags].sort());
       for (const row of rows) {
         const label = row.querySelector('[aria-label^="Edit applied tags"]')?.getAttribute("aria-label") || "";
         expect(label.includes("Rock")).toBe(tags.includes(rock));
@@ -406,7 +406,7 @@ it("updates all three simultaneous playlist columns when tags are added or remov
     });
     await toggleTag(rows[0], jazz); await checkTags([]);
     // The Tagify page writes shared storage and broadcasts this save event.
-    await indexedDBStorage.saveTrack(uris[0], { ...(await indexedDBStorage.getTrack(uris[0]))!, tagIds: [rock], rating: 4, energy: 8 });
+    await indexedDBStorage.saveTrack(uris[0], { ...song, name, recordingIdentity: identity(0), tagIds: [rock], rating: 4, energy: 8 });
     window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
     await checkTags([rock]);
     await eventually(() => {

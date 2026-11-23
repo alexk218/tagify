@@ -22,13 +22,13 @@ type PromptKind = "connect" | "reconnect";
 
 const COPY: Record<PromptKind, { title: string; description: string; action: string }> = {
   connect: {
-    title: "Share your tags on Community",
-    description: "Put the music you tag on your own profile and back up your library. You choose what's public. If someone invited you, this finishes joining them.",
-    action: "Share my tags",
+    title: "Back up your tags and use them on your phone",
+    description: "Everything you've tagged here comes with you. Nothing is public unless you choose.",
+    action: "Create account or sign in",
   },
   reconnect: {
     title: "Reconnect this computer",
-    description: "Tagify lost its connection to your Community account here, so your tags aren't being backed up or shared. Reconnect to pick up where you left off.",
+    description: "Tagify on this computer lost its connection to your Tagify account, so your tags aren't being backed up. Reconnect to pick up where you left off.",
     action: "Reconnect",
   },
 };

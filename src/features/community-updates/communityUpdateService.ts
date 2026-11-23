@@ -1,11 +1,19 @@
+import packageJson from "@/package";
 import { COMMUNITY_ORIGIN } from "@/features/community/communityLinks";
+import { isNewInstallation } from "@/features/onboarding/installedVersion";
 
 export interface CommunityUpdate {
   revision: number;
   title: string;
   publishedAt: string;
   changes: string[];
+  /** Something the notice can do right here. Unknown actions are ignored, so older notices stay as they were. */
+  action?: CommunityUpdateAction;
 }
+
+/** "share_ratings": a "Share my ratings" button that turns rating sharing on. */
+export type CommunityUpdateAction = "share_ratings";
+const ACTIONS: readonly string[] = ["share_ratings"];
 
 export const COMMUNITY_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 export const COMMUNITY_UPDATE_SEEN_KEY = "tagify:community-updates:seen:v1";
@@ -32,7 +40,10 @@ export function parseCommunityUpdates(value: unknown): CommunityUpdate[] {
     }
     revisions.add(release.revision);
   }
-  return feed.releases.map(({ revision, title, publishedAt, changes }) => ({ revision, title, publishedAt, changes }))
+  return feed.releases.map(({ revision, title, publishedAt, changes, action }) => ({
+    revision, title, publishedAt, changes,
+    ...(ACTIONS.includes(action) ? { action: action as CommunityUpdateAction } : {}),
+  }))
     .sort((a, b) => b.revision - a.revision);
 }
 
@@ -128,8 +139,17 @@ export class CommunityUpdateService {
   private unseen(): CommunityUpdate[] {
     const seen = this.seenRevision();
     const published = this.releases.filter((release) => Date.parse(release.publishedAt) <= Date.now());
-    // New installations get the latest summary, rather than the entire archive.
-    return seen === 0 ? published.slice(0, 1) : published.filter((release) => release.revision > seen);
+    if (seen === 0 && published.length > 0) {
+      // Notices describe what changed for people who already used Community. Someone who just
+      // installed Tagify starts after all of them, so they count as seen; only later ones show.
+      if (isNewInstallation(packageJson.version)) {
+        this.dismiss(published);
+        return [];
+      }
+      // Earlier installations that never answered a notice get the latest summary, not the archive.
+      return published.slice(0, 1);
+    }
+    return published.filter((release) => release.revision > seen);
   }
 
   dismiss(releases: CommunityUpdate[]): void {

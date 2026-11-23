@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { REWIND_URL } from "@/features/rewind/rewindPromptRules";
-import { syncPairingService, type ApprovedPairing } from "@/services/sync/SyncPairingService";
+import { EmailCodeError, syncPairingService, type ApprovedPairing } from "@/services/sync/SyncPairingService";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
 import type { DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { fetchCommunityProfile } from "./communityDevice";
@@ -13,6 +13,7 @@ import {
   recordCommunityConnectStartFailed,
   type CommunityConnectEntry,
 } from "./communityConnectAnalytics";
+import { openCommunityUrlSignedIn } from "./communityWebsiteLink";
 
 export type PendingCommunityPairing = NonNullable<ReturnType<typeof syncPairingService.getPending>>;
 
@@ -92,7 +93,11 @@ export class CommunityPairing {
     this.schedule();
   }
 
-  async start(entry: CommunityConnectEntry, options: { renewal?: boolean } = {}): Promise<void> {
+  /**
+   * Asks Community for a code. Unless `inApp`, the browser opens on the sign-in page at once; with
+   * `inApp`, the member signs in inside Tagify and the browser opens only if they choose it.
+   */
+  async start(entry: CommunityConnectEntry, options: { renewal?: boolean; inApp?: boolean } = {}): Promise<void> {
     if (this.state.starting) return;
     this.set({ entry, starting: true, error: "", ...(options.renewal ? {} : { approvedPairing: null, connection: null }) });
     try {
@@ -101,7 +106,7 @@ export class CommunityPairing {
       // A renewed code continues the same attempt: the member is already on the page that opened.
       if (!options.renewal) {
         recordCommunityConnectStarted(entry);
-        openCommunityUrl(pending.verificationUri);
+        if (!options.inApp) openCommunityUrl(pending.verificationUri);
       }
       this.schedule();
     } catch (error) {
@@ -123,23 +128,8 @@ export class CommunityPairing {
     try {
       const result = await syncPairingService.poll();
       if (result.status === "approved") {
-        const profile = await fetchCommunityProfile(result.approval.configuration.accessToken);
-        const approval = profile
-          ? { ...result.approval, configuration: { ...result.approval.configuration, profile } }
-          : result.approval;
         completingApproval = true;
-        this.clearTimer();
-        this.set({ approvedPairing: approval, pending: null });
-        const connection = await syncPairingService.complete(approval, {
-          confirmedAccountSwitch: approval.relationship === "account-switch",
-        });
-        recordCommunityConnectCompleted(entry, approval.relationship);
-        // Someone who connected to see their Rewind lands on it.
-        if (entry === "rewind") openCommunityUrl(REWIND_URL);
-        const done: CommunityConnection = { configuration: connection.configuration, requiresReload: connection.requiresReload, entry };
-        this.set({ approvedPairing: null, connection: done });
-        if (!connection.requiresReload) await activeSyncRuntime().activateCurrentAccount();
-        for (const listener of this.connectedListeners) listener(done);
+        await this.finish(result.approval, entry);
       } else {
         this.set({ pending: syncPairingService.getPending() });
       }
@@ -163,6 +153,57 @@ export class CommunityPairing {
     }
   }
 
+  /**
+   * Emails a sign-in code for in-app sign-in. Resolves with the seconds until another may be sent.
+   * A request that expired is replaced first, so a member who waited a while can still send.
+   */
+  async sendEmailCode(email: string): Promise<{ resendAfter: number }> {
+    const entry = this.state.entry ?? "community";
+    if (!syncPairingService.getPending()) await this.start(entry, { renewal: true, inApp: true });
+    if (this.state.error && !this.state.pending) throw new EmailCodeError(this.state.error, "unavailable");
+    try {
+      return await syncPairingService.requestEmailCode(email);
+    } catch (error) {
+      if (!(error instanceof EmailCodeError) || error.code !== "expired_token") throw error;
+      await this.start(entry, { renewal: true, inApp: true });
+      return syncPairingService.requestEmailCode(email);
+    }
+  }
+
+  /**
+   * Signs in with the emailed code and connects this computer, the same way an approval in the
+   * browser does. A wrong or expired code rejects with an EmailCodeError for the form to show.
+   */
+  async verifyEmailCode(email: string, code: string): Promise<void> {
+    if (this.polling) return;
+    const entry = this.state.entry ?? "community";
+    this.polling = true;
+    let completingApproval = false;
+    this.clearTimer();
+    this.set({ checking: true, error: "" });
+    try {
+      const result = await syncPairingService.verifyEmailCode(email, code);
+      completingApproval = true;
+      await this.finish(result.approval, entry);
+    } catch (error) {
+      if (!completingApproval) {
+        // Too many wrong codes end the request on Community: a fresh one lets the member send a new code.
+        if (error instanceof EmailCodeError && error.code === "expired_token") {
+          syncPairingService.cancelPending();
+          this.set({ pending: null });
+          void this.start(entry, { renewal: true, inApp: true });
+        }
+        throw error;
+      }
+      recordCommunityConnectFinishFailed(entry);
+      this.set({ error: communityErrorMessage(error, "Couldn't finish connecting to Community. Please try again.") });
+    } finally {
+      this.polling = false;
+      this.set({ checking: false });
+      this.schedule();
+    }
+  }
+
   cancel(): void {
     this.clearTimer();
     syncPairingService.cancelPending();
@@ -175,6 +216,23 @@ export class CommunityPairing {
     this.watchers = 0;
     this.polling = false;
     this.state = IDLE;
+  }
+
+  private async finish(approved: ApprovedPairing, entry: CommunityConnectEntry): Promise<void> {
+    const profile = await fetchCommunityProfile(approved.configuration.accessToken);
+    const approval = profile ? { ...approved, configuration: { ...approved.configuration, profile } } : approved;
+    this.clearTimer();
+    this.set({ approvedPairing: approval, pending: null });
+    const connection = await syncPairingService.complete(approval, {
+      confirmedAccountSwitch: approval.relationship === "account-switch",
+    });
+    recordCommunityConnectCompleted(entry, approval.relationship);
+    // Someone who connected to see their Rewind lands on it.
+    if (entry === "rewind") void openCommunityUrlSignedIn(REWIND_URL);
+    const done: CommunityConnection = { configuration: connection.configuration, requiresReload: connection.requiresReload, entry };
+    this.set({ approvedPairing: null, connection: done });
+    if (!connection.requiresReload) await activeSyncRuntime().activateCurrentAccount();
+    for (const listener of this.connectedListeners) listener(done);
   }
 
   private schedule(): void {

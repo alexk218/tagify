@@ -1,7 +1,7 @@
 .communityLink {
   align-items: center;
-  background: rgb(155 140 255 / 9%);
-  border: 1px solid rgb(155 140 255 / 24%);
+  background: rgb(255 255 255 / 7%);
+  border: 1px solid rgb(255 255 255 / 12%);
   border-radius: 7px;
   color: var(--spice-subtext);
   display: inline-flex;
@@ -12,6 +12,7 @@
 }
 
 .communityLink:hover {
-  background: rgb(155 140 255 / 16%);
+  background: rgb(255 255 255 / 12%);
+  border-color: rgb(255 255 255 / 24%);
   color: var(--spice-text);
 }

@@ -203,3 +203,32 @@ export function getSortedMenuTagCategories(categories, storage = localStorage) {
 
   return sortTagSelectorCategories(categories, storedSortMode);
 }
+
+function folderHasTag(folder, tagIds) {
+  return (
+    (folder.tags || []).some((tag) => tagIds.has(tag.id)) ||
+    (folder.subcategories || []).some((child) => folderHasTag(child, tagIds))
+  );
+}
+
+/**
+ * One category as nested <details>: its own tags first, then each folder (at any depth).
+ * Categories can hold tags directly, and folders can hold folders, so this walks the whole tree.
+ * Sections holding an applied tag start open when the menu opens on the tags.
+ */
+export function createMenuTagCategory(category, { appliedTagIds, openApplied = false, createTagButton }) {
+  const renderFolder = (folder, isCategory) => {
+    const details = document.createElement("details");
+    details.open = openApplied && folderHasTag(folder, appliedTagIds);
+    if (!isCategory) details.style.marginLeft = "12px";
+    const summary = document.createElement("summary");
+    summary.textContent = folder.name;
+    summary.style.cursor = "pointer";
+    summary.style.padding = isCategory ? "5px 4px" : "4px";
+    details.appendChild(summary);
+    (folder.tags || []).forEach((tag) => details.appendChild(createTagButton(tag)));
+    (folder.subcategories || []).forEach((child) => details.appendChild(renderFolder(child, false)));
+    return details;
+  };
+  return renderFolder(category, true);
+}

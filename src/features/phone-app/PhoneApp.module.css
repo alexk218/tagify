@@ -136,3 +136,46 @@
   cursor: pointer;
 }
 
+
+.account {
+  color: var(--spice-text);
+  font-weight: 600;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+}
+
+.stepTitle {
+  margin: 0;
+  color: var(--spice-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.stepNumber {
+  margin-right: 4px;
+  color: var(--spice-subtext);
+}
+
+.connectButton {
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--spice-button);
+  border-radius: 8px;
+  background: var(--spice-button);
+  color: #000;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.connectButton:hover {
+  border-color: var(--spice-button-active);
+  background: var(--spice-button-active);
+}

@@ -1,4 +1,5 @@
 import { rememberPlaylistAdditions } from "./SpotifyPlaylistWriteOrigins";
+import { addableHere, isLocalFileUri, localFileAddsAvailable, stopLocalFileAdds } from "./localFilesOnThisComputer";
 import { spotifyRequestAccounting } from "@/utils/spotifyRequestAccounting";
 import type { RequestOptions } from "@/utils/RateLimiter";
 import { spotifyFetch, spotifyRead, spotifyWrite, spotifyAccountKey, promoteSpotifyRequest, spotifyReadGeneration, assertSpotifyWriteSettled, throwIfSpotifyRequestStopped } from "./SpotifyRequests";
@@ -6,6 +7,7 @@ import { rememberRuleFacts } from "@/features/automatic-tags/facts";
 import { normalizeRecordingIdentity } from "@/features/recording-reuse/utils/recordingReuse";
 import { normalizeQueuePage } from "@/features/track-session/utils/taggingQueue.logic";
 import type { SpotifyTrack } from "@/types/SpotifyTypes";
+import type { RecordingIdentity } from "@/types/tagData";
 import { trackArtistIdentitiesStore, type TrackArtist } from "@/services/trackArtistIdentities";
 import { audioFeaturesService } from "@/services/AudioFeaturesService";
 import { requestSpicetifyGraphQL } from "@/services/spicetifyGraphQL";
@@ -70,8 +72,23 @@ export interface SpotifyArtistMetadata {
 interface DesktopLikedSongs {
   contains(...uris: string[]): Promise<unknown>;
   add(options: { uris: string[] }): Promise<unknown>;
+  remove(options: { uris: string[] }): Promise<unknown>;
 }
 const desktopLikedSongs = () => Spicetify.Platform.LibraryAPI as unknown as DesktopLikedSongs;
+
+/** The recording identity (ISRC, artists, length, title) in one desktop metadata answer. */
+function recordingIdentityFromMetadata(value: any): RecordingIdentity | undefined {
+  const artistIds = Array.isArray(value?.artist) ? value.artist.map((artist: { gid?: unknown }) =>
+    typeof artist?.gid === "string" && /^[a-f0-9]{32}$/i.test(artist.gid) ? Spicetify.URI.hexToId(artist.gid) : undefined) : undefined;
+  const isrc = Array.isArray(value?.external_id)
+    ? value.external_id.find((entry: { type?: unknown }) => typeof entry?.type === "string" && entry.type.toLowerCase() === "isrc")?.id
+    : undefined;
+  return normalizeRecordingIdentity({
+    isrc: typeof isrc === "string" ? isrc.toUpperCase() : undefined,
+    artistIds, leadArtistId: Array.isArray(artistIds) ? artistIds[0] : undefined,
+    durationMs: value?.duration, name: value?.name,
+  });
+}
 
 class SpotifyApiService {
   private playlistReadsBlockedUntil = 0;
@@ -91,22 +108,18 @@ class SpotifyApiService {
    */
   getRecordingIdentity = async (uri: string, signal?: AbortSignal, options?: RequestOptions) => {
     const value = await this.readTrackMetadata(uri, signal, options);
-    if (!value) return undefined;
-    return normalizeRecordingIdentity({
-      isrc: value.external_id?.find((entry: { type?: string }) => entry.type?.toLowerCase() === "isrc")?.id?.toUpperCase(),
-      artistIds: value.artist?.map((artist: { gid?: string }) =>
-        typeof artist.gid === "string" && /^[a-f0-9]{32}$/i.test(artist.gid) ? Spicetify.URI.hexToId(artist.gid) : undefined),
-      durationMs: value.duration, name: value.name,
-    });
+    return value ? recordingIdentityFromMetadata(value) : undefined;
   };
 
   /**
    * A song's ISRC and the album Spotify files it under, from the same desktop
    * metadata as getRecordingIdentity (one request, no Web API). `isrc` is null
    * when Spotify lists none; `albumUri` is null when the answer names no album.
+   * `identity` is the recording identity getRecordingIdentity would return from
+   * this same answer, so callers can save it without a second request.
    * Undefined when Spotify can't describe the song right now.
    */
-  getTrackRelease = async (uri: string, options?: RequestOptions): Promise<{ isrc: string | null; albumUri: string | null } | undefined> => {
+  getTrackRelease = async (uri: string, options?: RequestOptions): Promise<{ isrc: string | null; albumUri: string | null; identity?: RecordingIdentity } | undefined> => {
     const value = await this.readTrackMetadata(uri, undefined, options);
     if (!value) return undefined;
     const isrc = Array.isArray(value.external_id)
@@ -114,9 +127,11 @@ class SpotifyApiService {
       : undefined;
     const albumGid = value.album?.gid;
     const albumId = typeof albumGid === "string" && /^[a-f0-9]{32}$/i.test(albumGid) ? Spicetify.URI.hexToId(albumGid) : undefined;
+    const identity = recordingIdentityFromMetadata(value);
     return {
       isrc: typeof isrc === "string" ? isrc : null,
       albumUri: typeof albumId === "string" && /^[A-Za-z0-9]{22}$/.test(albumId) ? `spotify:album:${albumId}` : null,
+      ...(identity ? { identity } : {}),
     };
   };
 
@@ -264,6 +279,10 @@ class SpotifyApiService {
       this.membershipCache.delete(`${spotifyAccountKey()}:${playlistId}`);
     }
   };
+
+  /** Every song in a playlist, in order, read through Spotify's desktop app. */
+  playlistUris = async (playlistId: string, options?: RequestOptions): Promise<string[]> =>
+    (await this.readPlaylistItems(playlistId, { feature: "playlist-contents", ...options })).map(item => (item.uri ?? item.link) as string);
 
   private hasUsableName(value: unknown, placeholder: string): value is string {
     return (
@@ -987,11 +1006,17 @@ class SpotifyApiService {
             offset,
             limit,
           });
-          const pageTrackUris = this.extractTrackUrisFromGraphQL(response?.data);
+          const album = this.findAlbumMetadataNode(response?.data, albumUri);
+          const pageItems = (album?.tracksV2 ?? album?.tracks)?.items;
+          if (!Array.isArray(pageItems)) break;
+          // Only the songs the album lists. A song from a removed release also names
+          // the song Spotify plays in its place; taking both tagged each song twice.
+          pageItems.forEach((item: { track?: { uri?: unknown }; uri?: unknown } | null) => {
+            const trackUri = item?.track?.uri ?? item?.uri;
+            if (typeof trackUri === "string" && trackUri.startsWith("spotify:track:")) trackUris.add(trackUri);
+          });
 
-          pageTrackUris.forEach((trackUri) => trackUris.add(trackUri));
-
-          if (pageTrackUris.length < limit) {
+          if (pageItems.length < limit) {
             break;
           }
 
@@ -1010,44 +1035,6 @@ class SpotifyApiService {
       return [];
     }
   };
-
-  private extractTrackUrisFromGraphQL(value: any): string[] {
-    const trackUris = new Set<string>();
-
-    const visit = (node: any) => {
-      if (!node) {
-        return;
-      }
-
-      if (typeof node === "string") {
-        if (node.startsWith("spotify:track:")) {
-          trackUris.add(node);
-        }
-        return;
-      }
-
-      if (Array.isArray(node)) {
-        node.forEach(visit);
-        return;
-      }
-
-      if (typeof node !== "object") {
-        return;
-      }
-
-      if (
-        typeof node.uri === "string" &&
-        node.uri.startsWith("spotify:track:")
-      ) {
-        trackUris.add(node.uri);
-      }
-
-      Object.values(node).forEach(visit);
-    };
-
-    visit(value);
-    return Array.from(trackUris);
-  }
 
   isTrackInPlaylist = async (
     trackUri: string,
@@ -1226,17 +1213,32 @@ class SpotifyApiService {
           }
         }
       }
-      const missing = [...new Set(additions)].filter(track => track.startsWith("spotify:track:") && !membership.has(track));
-      for (let index = 0; index < missing.length; index += 100) {
-        const batch = missing.slice(index, index + 100);
-        await spotifyWrite(async signal => {
-          await options?.beforeWrite?.(batch, "add");
-          signal.throwIfAborted();
-          options?.assertCurrent?.();
-          if (options?.feature === "smart-playlists") rememberPlaylistAdditions(playlistId, batch);
-          return api.add(uri, batch, { after: "end" });
-        }, { ...options, resource: uri });
+      // Local files are added only when this computer's Spotify lists them; the rest wait for
+      // the computer that has them. Catalog songs go first so a refused local file can't block them.
+      const { addable } = await addableHere([...new Set(additions)].filter(track => !membership.has(track)));
+      const catalog = addable.filter(track => !isLocalFileUri(track)), local = addable.filter(isLocalFileUri);
+      const addBatch = (batch: string[]) => spotifyWrite(async signal => {
+        await options?.beforeWrite?.(batch, "add");
+        signal.throwIfAborted();
+        options?.assertCurrent?.();
+        if (options?.feature === "smart-playlists") rememberPlaylistAdditions(playlistId, batch);
+        return api.add(uri, batch, { after: "end" });
+      }, { ...options, resource: uri });
+      for (let index = 0; index < catalog.length; index += 100) {
+        const batch = catalog.slice(index, index + 100);
+        await addBatch(batch);
         added.push(...batch);
+      }
+      for (let index = 0; index < local.length && localFileAddsAvailable(); index += 100) {
+        const batch = local.slice(index, index + 100);
+        try {
+          await addBatch(batch);
+          added.push(...batch);
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") throw error;
+          // The caller's confirmation read shows whether any of it arrived; never resend it here.
+          stopLocalFileAdds(error);
+        }
       }
       this.membershipCache.delete(`${spotifyAccountKey()}:${playlistId}`);
       return { added: [...new Set(added)], removed: [...new Set(removed)], success: true };
@@ -1260,6 +1262,11 @@ class SpotifyApiService {
     await spotifyWrite(() => desktopLikedSongs().add({ uris }), { feature: "library" });
   };
 
+  /** Removes songs from the member's Liked Songs through Spotify's desktop app. */
+  removeFromLikedSongs = async (uris: string[]): Promise<void> => {
+    await spotifyWrite(() => desktopLikedSongs().remove({ uris }), { feature: "library" });
+  };
+
   /**
    * Add single track to playlist using Platform API
    */
@@ -1268,7 +1275,8 @@ class SpotifyApiService {
     playlistId: string
   ): Promise<{ success: boolean; wasAdded: boolean }> => {
     try {
-      if (trackUri.startsWith("spotify:local:")) {
+      // A local file is added only when this computer's Spotify lists it (see localFilesOnThisComputer).
+      if (isLocalFileUri(trackUri) && !(await addableHere([trackUri])).addable.length) {
         return { success: true, wasAdded: false };
       }
 

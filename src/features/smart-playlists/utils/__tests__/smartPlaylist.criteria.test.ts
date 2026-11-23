@@ -38,7 +38,7 @@ describe("evaluateTrackMatchesCriteria", () => {
     const track = createBaseTrack();
     const criteria = createCriteria();
 
-    expect(evaluateTrackMatchesCriteria(track, criteria)).toBe(true);
+    expect(evaluateTrackMatchesCriteria(track, criteria, null)).toBe(true);
   });
 
   it("enforces AND include-tag mode", () => {
@@ -53,7 +53,7 @@ describe("evaluateTrackMatchesCriteria", () => {
       ],
     });
 
-    expect(evaluateTrackMatchesCriteria(track, criteria)).toBe(true);
+    expect(evaluateTrackMatchesCriteria(track, criteria, null)).toBe(true);
 
     const missingTagCriteria = createCriteria({
       includeTagClauses: [
@@ -65,7 +65,7 @@ describe("evaluateTrackMatchesCriteria", () => {
       ],
     });
 
-    expect(evaluateTrackMatchesCriteria(track, missingTagCriteria)).toBe(false);
+    expect(evaluateTrackMatchesCriteria(track, missingTagCriteria, null)).toBe(false);
   });
 
   it("enforces OR include-tag mode", () => {
@@ -80,7 +80,7 @@ describe("evaluateTrackMatchesCriteria", () => {
       ],
     });
 
-    expect(evaluateTrackMatchesCriteria(track, criteria)).toBe(true);
+    expect(evaluateTrackMatchesCriteria(track, criteria, null)).toBe(true);
 
     const noMatchCriteria = createCriteria({
       includeTagClauses: [
@@ -92,7 +92,7 @@ describe("evaluateTrackMatchesCriteria", () => {
       ],
     });
 
-    expect(evaluateTrackMatchesCriteria(track, noMatchCriteria)).toBe(false);
+    expect(evaluateTrackMatchesCriteria(track, noMatchCriteria, null)).toBe(false);
   });
 
   it("supports AND of OR groups", () => {
@@ -113,7 +113,7 @@ describe("evaluateTrackMatchesCriteria", () => {
       clauseConnectors: ["AND"],
     });
 
-    expect(evaluateTrackMatchesCriteria(track, criteria)).toBe(true);
+    expect(evaluateTrackMatchesCriteria(track, criteria, null)).toBe(true);
 
     const failingCriteria = createCriteria({
       includeTagClauses: [
@@ -134,7 +134,7 @@ describe("evaluateTrackMatchesCriteria", () => {
     expect(
       evaluateTrackMatchesCriteria(
         createBaseTrack({ tagIds: ["tag_house"] }),
-        failingCriteria,
+        failingCriteria, null,
       ),
     ).toBe(false);
   });
@@ -159,7 +159,7 @@ describe("evaluateTrackMatchesCriteria", () => {
     expect(
       evaluateTrackMatchesCriteria(
         createBaseTrack({ tagIds: ["tag_sfw"] }),
-        criteria,
+        criteria, null,
       ),
     ).toBe(true);
   });
@@ -176,7 +176,7 @@ describe("evaluateTrackMatchesCriteria", () => {
       ],
     });
 
-    expect(evaluateTrackMatchesCriteria(track, criteria)).toBe(false);
+    expect(evaluateTrackMatchesCriteria(track, criteria, null)).toBe(false);
   });
 
   it("applies rating, energy, and BPM ranges", () => {
@@ -195,25 +195,25 @@ describe("evaluateTrackMatchesCriteria", () => {
     const failingBpm = createCriteria({ bpmMaxFilter: 120 });
     const failingCamelotKey = createCriteria({ camelotKeyFilters: ["9A"] });
 
-    expect(evaluateTrackMatchesCriteria(track, passing)).toBe(true);
-    expect(evaluateTrackMatchesCriteria(track, failingRating)).toBe(false);
-    expect(evaluateTrackMatchesCriteria(track, failingEnergy)).toBe(false);
-    expect(evaluateTrackMatchesCriteria(track, failingBpm)).toBe(false);
-    expect(evaluateTrackMatchesCriteria(track, failingCamelotKey)).toBe(false);
+    expect(evaluateTrackMatchesCriteria(track, passing, null)).toBe(true);
+    expect(evaluateTrackMatchesCriteria(track, failingRating, null)).toBe(false);
+    expect(evaluateTrackMatchesCriteria(track, failingEnergy, null)).toBe(false);
+    expect(evaluateTrackMatchesCriteria(track, failingBpm, null)).toBe(false);
+    expect(evaluateTrackMatchesCriteria(track, failingCamelotKey, null)).toBe(false);
   });
 
   it("fails BPM filter when track BPM is null and BPM filter is set", () => {
     const track = createBaseTrack({ bpm: null });
     const criteria = createCriteria({ bpmMinFilter: 120 });
 
-    expect(evaluateTrackMatchesCriteria(track, criteria)).toBe(false);
+    expect(evaluateTrackMatchesCriteria(track, criteria, null)).toBe(false);
   });
 
   it("fails key filter when track key is missing and key filter is set", () => {
     const track = createBaseTrack({ camelotKey: null });
     const criteria = createCriteria({ camelotKeyFilters: ["8A"] });
 
-    expect(evaluateTrackMatchesCriteria(track, criteria)).toBe(false);
+    expect(evaluateTrackMatchesCriteria(track, criteria, null)).toBe(false);
   });
 
   it("supports legacy key range criteria when key filter array is not present", () => {
@@ -224,6 +224,6 @@ describe("evaluateTrackMatchesCriteria", () => {
       camelotMaxFilter: "9A",
     });
 
-    expect(evaluateTrackMatchesCriteria(track, criteria)).toBe(true);
+    expect(evaluateTrackMatchesCriteria(track, criteria, null)).toBe(true);
   });
 });

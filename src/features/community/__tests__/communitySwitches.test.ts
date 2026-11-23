@@ -32,15 +32,26 @@ describe("Community switches", () => {
   });
 });
 
-describe("switches that start off", () => {
-  it("stay off until Community's list or this computer turns them on", () => {
-    expect(communitySwitchOn("communityTeasers", null)).toBe(false);
-    expect(communitySwitchOn("communityTeasers", BASE)).toBe(false);
-    offer({ communityTeasers: { enabled: true } });
+describe("Community tag search", () => {
+  it("is on unless Community or this computer turns it off", () => {
+    expect(communitySwitchOn("communityTagSearch", null)).toBe(true);
+    expect(communitySwitchOn("communityTagSearch", BASE)).toBe(true);
+    offer({ communityTagSearch: { enabled: false } });
+    expect(communitySwitchOn("communityTagSearch", BASE)).toBe(false);
+    localStorage.clear();
+    localStorage.setItem("tagify:switch:communityTagSearch", "off");
+    expect(communitySwitchOn("communityTagSearch", null)).toBe(false);
+  });
+});
+
+describe("community teasers", () => {
+  it("are on for a desktop that was never connected, since Community's preview route pauses them", () => {
+    expect(communitySwitchOn("communityTeasers", null)).toBe(true);
     expect(communitySwitchOn("communityTeasers", BASE)).toBe(true);
-    offer({ communityTeasers: true });
-    localStorage.setItem("tagify:switch:communityTeasers", "off");
+    offer({ communityTeasers: { enabled: false } });
     expect(communitySwitchOn("communityTeasers", BASE)).toBe(false);
+    localStorage.setItem("tagify:switch:communityTeasers", "on");
+    expect(communitySwitchOn("communityTeasers", BASE)).toBe(true);
   });
 });
 

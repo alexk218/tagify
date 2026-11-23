@@ -5,3 +5,7 @@ export { IPHONE_APP_URL, ANDROID_APP_URL } from "./phoneAppLinks";
 export { usePhoneAppButton, usePhoneAppState, updatePhoneAppState, isPhoneButtonVisible, PHONE_APP_STATE_KEY } from "./phoneAppState";
 export { useAndroidReleased, useAndroidReleaseNotice } from "./useAndroidReleaseNotice";
 export * from "./phoneAppAnalytics";
+export { SpotifyShareTip } from "./SpotifyShareTip";
+export { useSpotifyShareTip } from "./useSpotifyShareTip";
+export { usePhoneConnection, requestConnectForPhone, CONNECT_FOR_PHONE_EVENT, type PhoneConnection } from "./phoneConnection";
+export { PhoneTaggingGuide } from "./PhoneTaggingGuide";

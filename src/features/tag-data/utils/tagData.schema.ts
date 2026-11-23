@@ -73,7 +73,7 @@ function normalizeLegacyTrackTags(trackData: Partial<LegacyTrackData>): string[]
  * replaced by a known field are listed so they are not kept.
  */
 const TRACK_FIELDS = [
-  "uri", "tags", "recordingIdentity", "recordingGroupId", "recordingGroupConfirmed", "recordingReuseDisabled", "rating", "energy", "bpm",
+  "uri", "tags", "recordingIdentity", "recordingGroupId", "recordingGroupConfirmed", "recordingReuseDisabled", "recordingNotSameAs", "rating", "energy", "bpm",
   "camelotKey", "tagIds", "dateCreated", "dateModified", "name", "artists", "albumName", "albumUri",
   "albumImageUrl", "backfillAttempts", "audioFeaturesBackfillRevision", "albumBackfillAttempts",
   "durationMs", "releaseDate", "originalReleaseDate", "songDetailsAttempts", "songDetailsCheckedAt",
@@ -102,6 +102,12 @@ function unknownFields(value: unknown, knownFields: readonly string[]): Record<s
     !knownFields.includes(field) && fieldValue !== undefined));
 }
 
+function normalizeNotSameAs(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return;
+  const uris = [...new Set(value.filter((uri): uri is string => typeof uri === "string" && /^spotify:track:[A-Za-z0-9]{22}$/.test(uri)))];
+  return uris.length ? uris : undefined;
+}
+
 function normalizeTrackData(trackData: unknown): TrackData {
   const candidate = (trackData || {}) as Partial<TrackData & LegacyTrackData>;
 
@@ -115,6 +121,7 @@ function normalizeTrackData(trackData: unknown): TrackData {
     ...(normalizeRecordingIdentity(candidate.recordingIdentity) && typeof candidate.recordingGroupId === "string" && candidate.recordingGroupId && !candidate.recordingReuseDisabled ? { recordingGroupId: candidate.recordingGroupId } : {}),
     ...(candidate.recordingGroupConfirmed === true && normalizeRecordingIdentity(candidate.recordingIdentity) && typeof candidate.recordingGroupId === "string" && candidate.recordingGroupId && !candidate.recordingReuseDisabled ? { recordingGroupConfirmed: true } : {}),
     ...(candidate.recordingReuseDisabled === true ? { recordingReuseDisabled: true } : {}),
+    ...(normalizeNotSameAs(candidate.recordingNotSameAs) ? { recordingNotSameAs: normalizeNotSameAs(candidate.recordingNotSameAs) } : {}),
     rating: typeof candidate.rating === "number" ? candidate.rating : 0,
     energy: typeof candidate.energy === "number" ? candidate.energy : 0,
     bpm:

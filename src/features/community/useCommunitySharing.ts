@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PublicationPolicyV2 } from "@tagify/sync-contracts";
 import type { SyncStatus } from "@/services/sync/SyncRuntime";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
-import { hydrateSyncProfile } from "./communityDevice";
+import { checkCommunityHandle, COMMUNITY_HANDLE_CHANGED_EVENT, type CommunityProfileSummary } from "./communityDevice";
 import {
   COMMUNITY_SHARING_CHANGED_EVENT,
   fetchPublicationPolicy,
@@ -19,6 +19,11 @@ export interface CommunitySharing {
   policy: PublicationPolicyV2 | null;
   state: PublicationState | null;
   handle: string | null;
+  /**
+   * True once Community says the member hasn't picked a handle yet (connected before picking one).
+   * Publishing asks for one first; keeping tags private doesn't need one.
+   */
+  handleMissing: boolean;
   refresh: () => void;
 }
 
@@ -40,6 +45,7 @@ export function useCommunitySharing({ connected, status, active }: { connected: 
   const [phase, setPhase] = useState<CommunitySharing["phase"]>("idle");
   const [policy, setPolicy] = useState<PublicationPolicyV2 | null>(null);
   const [handle, setHandle] = useState<string | null>(() => getDesktopSyncConfiguration()?.profile?.handle ?? null);
+  const [handleMissing, setHandleMissing] = useState(false);
   const loadedAt = useRef(0);
   const request = useRef(0);
   const usable = connected && status !== "reauthorize" && status !== "unlinked";
@@ -104,17 +110,31 @@ export function useCommunitySharing({ connected, status, active }: { connected: 
       return;
     }
     let current = true;
-    void hydrateSyncProfile(configuration).then((next) => {
-      if (current && next?.profile?.handle) setHandle(next.profile.handle);
+    void checkCommunityHandle(configuration).then((answer) => {
+      if (!current || !answer) return;
+      setHandle(answer.handle);
+      setHandleMissing(!answer.handle);
     }).catch(() => { /* The profile link waits for the next opening. */ });
     return () => { current = false; };
   }, [active, connected]);
+
+  useEffect(() => {
+    const picked = (event: Event) => {
+      const profile = (event as CustomEvent<{ profile?: CommunityProfileSummary }>).detail?.profile;
+      if (!profile?.handle) return;
+      setHandle(profile.handle);
+      setHandleMissing(false);
+    };
+    window.addEventListener(COMMUNITY_HANDLE_CHANGED_EVENT, picked);
+    return () => window.removeEventListener(COMMUNITY_HANDLE_CHANGED_EVENT, picked);
+  }, []);
 
   return {
     phase: connected ? phase : "idle",
     policy: connected ? policy : null,
     state: connected && policy ? publicationState(policy) : null,
     handle: connected ? handle : null,
+    handleMissing: connected && handleMissing,
     refresh: load,
   };
 }

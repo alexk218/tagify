@@ -9,6 +9,11 @@
 //   * Tagify writes each one as a private Spotify playlist (creating it when `spotifyPlaylistId` is
 //     null, else replacing that playlist's name and songs in order), then reports
 //     PUT /api/v2/sync/playlist-writes { deviceId, results: PlaylistWriteResultV1[] }.
+// Local files: for a playlist of the member's own library, Community may also send `uris`, every song
+// in order with the member's local files as `spotify:local:` URIs. A Tagify that reads `uris` adds
+// the local files its own Spotify lists, leaves listed local files that are already in the playlist
+// (another computer added them), removes only `removedLocalUris`, and keeps local files the member
+// added by hand. A Tagify that doesn't read `uris` writes `trackIds` as before.
 export const PLAYLIST_WRITES_PROTOCOL_VERSION = 1 as const;
 export const PLAYLIST_WRITES_FEATURE = "playlistWrites" as const;
 export const PLAYLIST_WRITES_PATH = "/api/v2/sync/playlist-writes" as const;
@@ -27,6 +32,14 @@ export interface PlaylistWriteV1 {
   spotifyPlaylistId: string | null;
   /** Spotify track ids in order, at most 500. Empty means the playlist is emptied. */
   trackIds: string[];
+  /**
+   * Every song in order, at most 500: `spotify:track:<id>` for Spotify songs and `spotify:local:…`
+   * for the member's local files. Sent only for playlists of the member's own library that match
+   * local files; when present, Tagify writes these instead of `trackIds`.
+   */
+  uris?: string[];
+  /** Local files Community asked for earlier that no longer match; Tagify removes them. */
+  removedLocalUris?: string[];
   fingerprint: string;
 }
 export interface PlaylistWriteClaimV1 { playlists: PlaylistWriteV1[] }
@@ -45,6 +58,13 @@ export type PlaylistWriteResultV1 =
 export interface PlaylistWriteReportV1 { deviceId: string; results: PlaylistWriteResultV1[] }
 
 const SPOTIFY_ID = /^[A-Za-z0-9]{22}$/;
+const MAX_LOCAL_URI_LENGTH = 2048;
+const isTrackUri = (value: unknown) => typeof value === "string" && value.startsWith("spotify:track:") && SPOTIFY_ID.test(value.slice(14));
+/** A Spotify local-file URI as Spotify writes it: `spotify:local:artist:album:title:seconds`. */
+export const isSpotifyLocalFileUri = (value: unknown): value is string =>
+  typeof value === "string" && value.startsWith("spotify:local:") && value.length <= MAX_LOCAL_URI_LENGTH && value.split(":").length >= 6;
+const optionalUris = (value: unknown, accept: (uri: unknown) => boolean) =>
+  value === undefined || (Array.isArray(value) && value.length <= MAX_PLAYLIST_TRACKS && value.every(accept) && new Set(value).size === value.length);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FINGERPRINT = /^[0-9a-f]{16}$/;
 const FAILURES = new Set<PlaylistWriteFailureV1>(["spotify_unavailable", "spotify_busy", "playlist_gone", "unknown"]);
@@ -57,6 +77,8 @@ export function assertPlaylistWriteClaim(value: unknown): asserts value is Playl
       || typeof item.description !== "string" || !(item.spotifyPlaylistId === null || (typeof item.spotifyPlaylistId === "string" && SPOTIFY_ID.test(item.spotifyPlaylistId)))
       || !Array.isArray(item.trackIds) || item.trackIds.length > MAX_PLAYLIST_TRACKS
       || !item.trackIds.every((id) => typeof id === "string" && SPOTIFY_ID.test(id))
+      || !optionalUris(item.uris, (uri) => isTrackUri(uri) || isSpotifyLocalFileUri(uri))
+      || !optionalUris(item.removedLocalUris, isSpotifyLocalFileUri)
       || typeof item.fingerprint !== "string" || !FINGERPRINT.test(item.fingerprint)) throw new Error("Invalid playlist writes");
   }
 }

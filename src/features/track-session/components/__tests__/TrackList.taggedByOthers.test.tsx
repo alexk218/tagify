@@ -57,15 +57,17 @@ beforeAll(() => {
 });
 beforeEach(() => {
   localStorage.clear();
+  // Someone updating from before these features: New marks are for them, not new installations.
+  localStorage.setItem("tagify:lastSeenVersion", "3.3.6");
   analytics.record.mockClear();
   community.current = { others: new Map([[SONG, others]]), people: new Map([[SONG, 2]]), available: true, status: "done" };
 });
 
 describe("TrackList: the Tagged by others view", () => {
-  it("keeps today's title when the view isn't offered", () => {
+  it("shows only Tagged Tracks and To Tag when the view isn't offered", () => {
     render(<Harness />);
-    expect(screen.getByRole("heading", { name: "Tagged Tracks" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab")).toBeNull();
+    // To Tag is always there, even with nothing on the list (Alex, 2026-11-23).
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent?.trim())).toEqual(["Tagged Tracks", "To Tag"]);
   });
 
   it("switches between Tagged Tracks and Tagged by others, and remembers the choice", async () => {
@@ -84,6 +86,12 @@ describe("TrackList: the Tagged by others view", () => {
     unmount();
     render(<Harness taggedByOthersView={<p>Songs others tagged</p>} />);
     expect(screen.getByRole("tab", { name: "Tagged by others" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("doesn't mark the tab New for someone who just installed Tagify", () => {
+    localStorage.removeItem("tagify:lastSeenVersion");
+    render(<Harness taggedByOthersView={<p>Songs others tagged</p>} />);
+    expect(screen.getByRole("tab", { name: "Tagged by others" })).toBeInTheDocument();
   });
 
   it("marks the tab New for connected members until they first open it", async () => {
@@ -141,6 +149,7 @@ describe("TrackList: others' tags for someone who isn't connected", () => {
   });
 
   it("shows nothing while the communityTeasers switch is off", () => {
+    localStorage.setItem("tagify:switch:communityTeasers", "off");
     render(<Harness communityTeaser={teaser()} />);
     expect(screen.queryByRole("button", { name: /2 others/ })).toBeNull();
   });
@@ -154,8 +163,8 @@ describe("TrackList: others' tags for someone who isn't connected", () => {
     expect(toggle).toHaveTextContent("House");
     expect(toggle.getAttribute("title")).not.toContain("@");
     await user.click(toggle);
-    expect(screen.getByRole("group", { name: "Other members' tags" })).toHaveTextContent("Connect to Tagify Community to add the tags others gave this song.");
-    await user.click(screen.getByRole("button", { name: "Connect" }));
+    expect(screen.getByRole("group", { name: "Other members' tags" })).toHaveTextContent("Create a free Tagify account or sign in to add the tags others gave this song.");
+    await user.click(screen.getByRole("button", { name: "Create account or sign in" }));
     expect(onConnect).toHaveBeenCalledTimes(1);
     expect(analytics.record).not.toHaveBeenCalledWith("track_list_others_opened");
   });

@@ -40,7 +40,8 @@ export function findViolations(source, filename) {
   // SyncRuntime's 11th: the direct Community pull through Supabase's API (docs in tagify-community DESKTOP_DIRECT_PULL.md).
   // SyncRuntime's 12th: Community's smart playlist list (one list with Community), to Tagify's own API.
   // SyncInstallRecovery's 2nd: Community's device-authorization token, when reconnecting after a Spotify update.
-  const fetchLimit = filename.endsWith("/SyncRuntime.ts") ? 12 : filename.endsWith("/communityDevice.ts") ? 3 : /\/(?:PrivateNotes|SyncPairingService|SyncInstallRecovery)\.ts$/.test(filename) ? 2 : 1;
+  // SyncPairingService's 3rd and 4th: Community's emailed sign-in code (send, then verify) for signing in inside Tagify.
+  const fetchLimit = filename.endsWith("/SyncRuntime.ts") ? 12 : filename.endsWith("/communityDevice.ts") ? 3 : filename.endsWith("/SyncPairingService.ts") ? 4 : /\/(?:PrivateNotes|SyncInstallRecovery)\.ts$/.test(filename) ? 2 : 1;
   walk(file, node => {
     if (!ts.isCallExpression(node)) return;
     const callee = node.expression.getText(file);

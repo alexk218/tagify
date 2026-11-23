@@ -38,6 +38,8 @@ import {
   useAndroidReleased,
   usePhoneAppButton,
   usePhoneAppState,
+  usePhoneConnection,
+  requestConnectForPhone,
 } from "@/features/phone-app";
 
 interface DataManagerProps {
@@ -112,6 +114,7 @@ const DataManager: React.FC<DataManagerProps> = ({
   const phoneButtonRef = useRef<HTMLButtonElement>(null);
   const [showPhone, setShowPhone] = useState(false);
   const closePhone = useCallback(() => setShowPhone(false), []);
+  const phoneConnection = usePhoneConnection();
   const togglePhone = () => {
     if (!showPhone) {
       recordPhoneAppPanelOpened(!showOptionalButtons);
@@ -296,6 +299,12 @@ const DataManager: React.FC<DataManagerProps> = ({
       {showPhone && phoneButton.visible && (
         <PhoneAppPopover anchor={phoneButtonRef.current} onClose={closePhone}>
           <PhoneAppPanel
+            connected={phoneConnection.connected}
+            accountLabel={phoneConnection.accountLabel}
+            onConnect={() => {
+              setShowPhone(false);
+              requestConnectForPhone();
+            }}
             androidReleased={androidReleased}
             androidNotify={Boolean(phoneState.androidNotify)}
             onStore={(store) => {

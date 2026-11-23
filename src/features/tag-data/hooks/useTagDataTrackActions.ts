@@ -28,6 +28,7 @@ import {
   createInitialTrackData,
   withBpm,
   withCamelotKey,
+  withMissingAudioFeatures,
   withEnergy,
   withRating,
   withToggledTrackTag,
@@ -69,7 +70,10 @@ export function useTagDataTrackActions({
       const current = latestTagDataRef.current.tracks;
       const edits = Object.fromEntries(Object.entries(nextData.tracks).filter(([uri, track]) => track !== current[uri]));
       const expanded = expandRecordingEdits(current, edits);
-      nextData = { ...nextData, tracks: { ...nextData.tracks, ...expanded } as Record<string, TrackData> };
+      const tracks = { ...nextData.tracks, ...expanded };
+      // Linked copies left with nothing set are removed (see blankAutomaticRecordingCopies).
+      Object.entries(expanded).forEach(([uri, track]) => { if (!track) delete tracks[uri]; });
+      nextData = { ...nextData, tracks: tracks as Record<string, TrackData> };
       // Linked releases keep the method of the edit they copy.
       if (tagMethod) noteRecordTagMethods(current, { ...edits, ...expanded }, tagMethod);
       trackEditHistory.record(session, current, nextData.tracks, "saved");
@@ -312,6 +316,21 @@ export function useTagDataTrackActions({
     [commitDataSnapshot, ensureTrackData, latestTagDataRef, syncTrackAfterDelay],
   );
 
+  // Track Details' automatic BPM/key lookup: fills only what's missing, keeps
+  // dateModified and stays out of Undo, like the background backfill.
+  const fillMissingAudioFeatures = useCallback(
+    (trackUri: string, features: { bpm: number | null; camelotKey: string | null }) => {
+      const currentData = latestTagDataRef.current;
+      const trackData = currentData.tracks[trackUri];
+      if (!trackData) return;
+      const updated = withMissingAudioFeatures(trackData, features);
+      if (updated === trackData) return;
+      commitDataSnapshot({ ...currentData, tracks: { ...currentData.tracks, [trackUri]: updated } });
+      syncTrackAfterDelay(trackUri);
+    },
+    [commitDataSnapshot, latestTagDataRef, syncTrackAfterDelay],
+  );
+
   const updateBpm = useCallback(
     async (trackUri: string): Promise<number | null> => {
       const session = trackEditHistory.capture("single", [trackUri]);
@@ -462,6 +481,7 @@ export function useTagDataTrackActions({
     applyBatchTagUpdates,
     setBpm,
     setCamelotKey,
+    fillMissingAudioFeatures,
     updateBpm,
     toggleTagSingleTrack,
     setRating,

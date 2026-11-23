@@ -89,8 +89,8 @@
 
 .communityButton {
   align-items: center;
-  background: rgb(155 140 255 / 10%);
-  border: 1px solid rgb(155 140 255 / 26%);
+  background: rgb(255 255 255 / 7%);
+  border: 1px solid rgb(255 255 255 / 12%);
   border-radius: 8px;
   color: var(--spice-text);
   cursor: pointer;
@@ -107,7 +107,7 @@
 
 /* Shown while the member's tags aren't public yet and they never chose. */
 .communityDot {
-  background: #b7adff;
+  background: var(--spice-button, #1db954);
   border: 2px solid var(--spice-main);
   border-radius: 50%;
   height: 10px;
@@ -118,14 +118,13 @@
 }
 
 .communityButton:hover {
-  background: rgb(155 140 255 / 18%);
-  border-color: rgb(155 140 255 / 48%);
+  background: rgb(255 255 255 / 12%);
+  border-color: rgb(255 255 255 / 24%);
 }
 
 .communityButtonActive {
-  background: rgb(155 140 255 / 24%);
-  border-color: rgb(155 140 255 / 56%);
-  box-shadow: 0 0 0 2px rgb(155 140 255 / 10%);
+  background: rgb(255 255 255 / 14%);
+  border-color: rgb(255 255 255 / 30%);
 }
 
 /* Narrow: title and Community share the first row; the view tabs span the second. */
@@ -238,4 +237,19 @@
 .backfillHint {
   color: var(--spice-subtext);
   font-size: 11px;
+}
+
+.emptyTrackDetails {
+  color: var(--spice-subtext);
+  font-size: 14px;
+  margin: 8px 0;
+  text-align: center;
+}
+
+/* The notification bell and the Community button, on the right of the header. */
+.headerActions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 8px;
 }

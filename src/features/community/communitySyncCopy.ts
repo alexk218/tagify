@@ -23,7 +23,7 @@ export function backupNotices(health: Partial<BackupHealth> | null): string[] {
   const notices: string[] = [];
   const tooLarge = (health.notBackedUp ?? []).map(savedSettingsLabel);
   if (tooLarge.length) {
-    notices.push(`${listLabels(tooLarge)} ${tooLarge.length === 1 ? "is" : "are"} too large to back up to Community. ${tooLarge.length === 1 ? "It's" : "They're"} still saved on this device; download a Tagify backup to keep a copy.`);
+    notices.push(`${listLabels(tooLarge)} ${tooLarge.length === 1 ? "is" : "are"} too large to back up to your Tagify account. ${tooLarge.length === 1 ? "It's" : "They're"} still saved on this device; download a Tagify backup to keep a copy.`);
   }
   const retrying = health.retrying ?? [];
   if (retrying.length) {
@@ -49,9 +49,9 @@ export function communitySyncStatusLabel(status: SyncStatus, settingsNeedChoice 
     "snapshot-required": "Backup paused. Your library is still on this device.",
     "merge-required": "Choose how to combine your libraries",
     "publication-review-required": "Up to date",
-    "recovery-available": "Your Community backup can restore this device",
+    "recovery-available": "Your Tagify account can restore this device",
     restoring: "Getting your library back…",
-    "restore-failed": "Couldn't restore yet. Your Community backup is safe.",
+    "restore-failed": "Couldn't restore yet. Your backup in your Tagify account is safe.",
     error: "Couldn't back up right now. Tagify will try again.",
     unlinked: "Not connected",
   };
@@ -71,17 +71,29 @@ export function communityErrorMessage(error: unknown, fallback: string): string 
     return "Tagify couldn't finish backing up your library. Your data is still on this device. Try Sync now again; if it keeps happening, save a backup and contact support.";
   }
   if (/device_confirmation_required/i.test(message)) {
-    return "To keep your library safe, reconnect this device to Community before restoring or replacing your library. Nothing was changed.";
+    return "To keep your library safe, reconnect this device to your Tagify account before restoring or replacing your library. Nothing was changed.";
   }
   if (/device_revoked|session_inactive/i.test(message)) {
-    return "This device is no longer connected to Community. Reconnect it to resume backups.";
+    return "This device is no longer connected to your Tagify account. Reconnect it to resume backups.";
   }
   if (/sync_waiting/i.test(message)) {
     return "Some changes haven't backed up yet. They're safe on this device, and Tagify will try again.";
   }
   if (/merge_review_required/i.test(message)) {
-    return "Your device and Community both have changes. Choose how to combine them before backing up.";
+    return "This device and your Tagify account both have changes. Choose how to combine them before backing up.";
   }
   // Server and storage errors are for diagnostics, not a message to show in Spotify.
   return fallback;
 }
+
+/** The Community features in Tagify that wait for a member to share their tags (communitySwitches.ts). */
+const LOCKED_FEATURES = "Tagged by others, other people's tags on your songs and Community songs in your tag filters";
+
+/** Under Publish, beside "Keep my tags private" (Alex's pick C, 2026-11-23: it "needs to be clear to them"). */
+export const PRIVATE_LOCKS_LINE = `Keeping your tags private locks Community features in Tagify: ${LOCKED_FEATURES}.`;
+
+/** The question before every tag stays private. */
+export const KEEP_PRIVATE_CONSEQUENCE = `${PRIVATE_LOCKS_LINE.replace("Keeping your tags private locks", "Private tags lock")} Backup keeps working either way.`;
+
+/** Every tag hidden counts as keeping tags private (Alex, 2026-11-23). */
+export const ALL_HIDDEN_LINE = "You've hidden all your tags, so this counts as keeping them private. Community features in Tagify stay locked until you show at least one.";

@@ -37,7 +37,7 @@ describe("smartPlaylist.syncUtils", () => {
         bpmMaxFilter: 130,
         camelotKeyFilters: ["8B"],
       },
-      100,
+      100, null,
     );
 
     expect(updated).toEqual({
@@ -61,7 +61,7 @@ describe("smartPlaylist.syncUtils", () => {
         bpmMinFilter: null,
         bpmMaxFilter: null,
       },
-      100,
+      100, null,
     );
     expect(allowed.rating).toBe(5);
     expect(allowed.energy).toBe(5);
@@ -77,7 +77,7 @@ describe("smartPlaylist.syncUtils", () => {
         bpmMinFilter: null,
         bpmMaxFilter: null,
       },
-      100,
+      100, null,
     );
     expect(tied.rating).toBe(3);
   });
@@ -128,7 +128,7 @@ describe("smartPlaylist.syncUtils", () => {
       energyMaxFilter: null,
       bpmMinFilter: 120,
       bpmMaxFilter: 130,
-    });
+    }, null);
 
     expect(matches).toEqual(["spotify:track:house"]);
   });

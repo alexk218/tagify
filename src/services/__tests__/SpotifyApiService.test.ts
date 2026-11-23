@@ -83,6 +83,17 @@ describe("SpotifyApiService entity metadata", () => {
       expect(localStorage.getItem("tagify:spotify-cooldown:v1:current")).toBeNull();
     });
 
+    it("lists only the album's own songs when a removed release names the songs Spotify plays instead", async () => {
+      // A removed album: each song also names the song from another release that plays in its place.
+      vi.mocked(Spicetify.GraphQL.Request).mockResolvedValue(albumUnion({ tracksV2: { totalCount: 2, items: [
+        { track: { uri: "spotify:track:listed-one", relinkingInformation: { linkedTrack: { __typename: "Track", uri: "spotify:track:other-release-one" } } } },
+        { track: { uri: "spotify:track:listed-two", relinkingInformation: { linkedTrack: { __typename: "Track", uri: "spotify:track:other-release-two" } } } },
+      ] } }) as any);
+
+      await expect(spotifyApiService.getAllTrackUrisInAlbum("album-2"))
+        .resolves.toEqual(["spotify:track:listed-one", "spotify:track:listed-two"]);
+    });
+
     it("returns no album details without a Web API request when Spotify's client can't describe the album", async () => {
       delete (Spicetify.GraphQL.Definitions as any).getAlbum;
       await expect(spotifyApiService.getPlaylistMetadata("spotify:album:album-2")).resolves.toBeNull();

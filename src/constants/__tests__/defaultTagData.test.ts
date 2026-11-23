@@ -67,8 +67,10 @@ describe("starter tags", () => {
   });
 
   it("recognise every version: the 73 tags new libraries got until 3.3.3, the refreshed 82, and Era & Feel's 78", () => {
-    expect(KNOWN_STARTER_TAXONOMIES).toHaveLength(3);
-    const [version1, version2, version3] = KNOWN_STARTER_TAXONOMIES;
+    // The fourth is Moods and moments, what "What do you listen to?" starts a new library from.
+    expect(KNOWN_STARTER_TAXONOMIES).toHaveLength(4);
+    const [version1, version2, version3, moods] = KNOWN_STARTER_TAXONOMIES;
+    expect(Object.keys(moods.tagsById)).toHaveLength(40);
     expect(version3).toEqual(defaultTagData.taxonomy);
     expect(Object.keys(version1.tagsById)).toHaveLength(73);
     expect(Object.keys(version2.tagsById)).toHaveLength(82);

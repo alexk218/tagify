@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { buildCategoryTree } from "../../utils/tagTaxonomy";
 import {
   createEnergyRatingRow,
+  createMenuTagCategory,
   createStarRatingRow,
   getInlineMenuPlacement,
   getInitialInlineMenuFocusTarget,
@@ -155,5 +157,83 @@ describe("inline editor menu", () => {
 
     expect(getInitialInlineMenuFocusTarget(menu, "tags")).toHaveTextContent("House");
     expect(getInitialInlineMenuFocusTarget(menu, "energy")).toHaveTextContent("3");
+  });
+});
+
+describe("createMenuTagCategory", () => {
+  const createTagButton = (tag) => {
+    const button = document.createElement("button");
+    button.textContent = tag.name;
+    button.dataset.tagId = tag.id;
+    return button;
+  };
+
+  it("shows tags placed directly in a category and in nested folders", () => {
+    const category = {
+      id: "aesthetic",
+      name: "AESTHETIC",
+      tags: [{ id: "space", name: "太空", accentId: null }],
+      subcategories: [
+        {
+          id: "eras",
+          name: "Eras",
+          tags: [{ id: "y2k", name: "Y2K", accentId: null }],
+          subcategories: [
+            { id: "deep", name: "Deep", tags: [{ id: "retro", name: "复古", accentId: null }], subcategories: [] },
+          ],
+        },
+      ],
+    };
+
+    const details = createMenuTagCategory(category, {
+      appliedTagIds: new Set(["retro"]),
+      openApplied: true,
+      createTagButton,
+    });
+
+    expect([...details.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["太空", "Y2K", "复古"]);
+    expect(details.querySelector(":scope > button")?.textContent).toBe("太空");
+    expect([...details.querySelectorAll("details")].map((d) => d.open)).toEqual([true, true]);
+    expect(details.open).toBe(true);
+  });
+
+  it("keeps sections closed unless the menu opens on the tags", () => {
+    const details = createMenuTagCategory(
+      { id: "c", name: "From Community", tags: [{ id: "t", name: "Single", accentId: null }], subcategories: [] },
+      { appliedTagIds: new Set(["t"]), openApplied: false, createTagButton },
+    );
+    expect(details.open).toBe(false);
+    expect(details.querySelector("button")?.textContent).toBe("Single");
+  });
+});
+
+describe("menu tags built from a saved library", () => {
+  it("shows a category's own tags and its folders, including folders inside folders", () => {
+    const tag = (id, parentId) => ({ id, name: id, parentId, subcategoryId: parentId, accentId: null });
+    const folder = (id, parentId) => ({ id, name: id, parentId, categoryId: "electronic", tagIds: [], childIds: [] });
+    const folders = { house: folder("#house", "electronic"), techno: folder("#techno", "electronic"), region: folder("Region", "house") };
+    folders.house.id = "house"; folders.techno.id = "techno"; folders.region.id = "region";
+    const [category] = buildCategoryTree({
+      categoryOrder: ["electronic"],
+      categoriesById: { electronic: { id: "electronic", name: "ELECTRONIC", subcategoryIds: ["house", "techno"], childIds: ["HOUSE", "DISCO", "house", "techno"] } },
+      foldersById: folders,
+      subcategoriesById: folders,
+      childrenByParentId: { electronic: ["HOUSE", "DISCO", "house", "techno"], house: ["Deep House", "region"], techno: ["Acid Techno"], region: ["French House"] },
+      tagsById: {
+        HOUSE: tag("HOUSE", "electronic"),
+        DISCO: tag("DISCO", "electronic"),
+        "Deep House": tag("Deep House", "house"),
+        "Acid Techno": tag("Acid Techno", "techno"),
+        "French House": tag("French House", "region"),
+      },
+      customAccentsById: {},
+    });
+    const details = createMenuTagCategory(category, {
+      appliedTagIds: new Set(),
+      createTagButton: (item) => Object.assign(document.createElement("button"), { textContent: item.name }),
+    });
+
+    expect([...details.querySelectorAll("summary")].map((summary) => summary.textContent)).toEqual(["ELECTRONIC", "#house", "Region", "#techno"]);
+    expect([...details.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["HOUSE", "DISCO", "Deep House", "French House", "Acid Techno"]);
   });
 });

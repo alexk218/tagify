@@ -106,6 +106,7 @@ import { communitySpotifySearchLookupSources } from "./CommunitySpotifySearchLoo
 import { communityCatalogFillJobSources } from "./CommunityCatalogFillJobSources";
 import { communitySongReleaseSources } from "./CommunitySongReleaseSources";
 import { runSongNameReports } from "./CommunitySongNames";
+import { readRestoreDetails, withRestoreDetails } from "./CommunityRestoreDetails";
 import { communitySongNameSources } from "./CommunitySongNameSources";
 import { runSongDetailReports } from "./CommunitySongDetails";
 import { communitySongDetailSources } from "./CommunitySongDetailSources";
@@ -157,7 +158,7 @@ export interface BackupHealth {
   deviceOnlyChanges: number;
 }
 export interface CommunityRequestOptions {
-  method?: "GET" | "POST" | "PUT";
+  method?: "GET" | "POST" | "PUT" | "PATCH";
   body?: unknown;
   /**
    * False for a Community route outside sync, such as /api/v2/device/profile. Those
@@ -1229,7 +1230,9 @@ class SyncRuntime extends EventTarget {
       const snapshot = await this.downloadSnapshot(configuration, this.supportsV2 ? PRIVATE_SYNC_PROTOCOL_VERSION : 1);
       if (snapshot.protocolVersion === PRIVATE_SYNC_PROTOCOL_VERSION) assertLibrarySnapshotV2(snapshot); else assertLibrarySnapshotV1(snapshot);
       const appState = snapshot.protocolVersion === PRIVATE_SYNC_PROTOCOL_VERSION ? snapshot.appState : [];
-      const data = tagDataFromSnapshot(snapshot);
+      // The snapshot has no song names; Community's names come with the restore so the library
+      // doesn't show "Unknown Track" while Tagify looks each song up again.
+      const data = withRestoreDetails(tagDataFromSnapshot(snapshot), await readRestoreDetails(configuration));
       const manifest = replicaManifest(configuration, snapshot);
       const saved = await indexedDBStorage.replaceCloudReplica(data, manifest, stateRecordsFromSnapshot(snapshot), appState);
       if (!saved) throw new Error("The cloud snapshot could not be committed atomically");

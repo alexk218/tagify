@@ -13,6 +13,7 @@ import {
   normalizeTaxonomyTree,
 } from "@/utils/tagTaxonomy";
 import { normalizeCamelotKey } from "@/utils/camelotKey";
+import { getTagGroupFilterGroupId } from "@/utils/tagFilterGroups";
 
 export interface InstalledSmartPlaylistRecipes {
   playlists: SmartPlaylistCriteria[];
@@ -90,6 +91,7 @@ export async function createSmartPlaylistRecipeBundle(
   const recipes: SmartPlaylistRecipe[] = await Promise.all(playlists.map(async (playlist) => {
     const recipeKeys = new Map<string, string>();
     const references = referencedTagIds(playlist.criteria).flatMap((tagId, index) => {
+      if (getTagGroupFilterGroupId(tagId) !== null) throw new SmartPlaylistShareError("Setups with a whole-category filter, like “Any Genre” or “No Mood”, can’t be shared yet. Edit its filters before sharing it.");
       const tag = resolved.get(tagId);
       if (!tag) throw new SmartPlaylistShareError("A tag used by this setup is missing. Edit its filters before sharing it.");
       const key = `tag-${index + 1}`;

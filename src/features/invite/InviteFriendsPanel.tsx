@@ -138,7 +138,7 @@ export function InviteFriendsPanel({ entry, onConnectCommunity, onOpenSync, reso
             className={styles.nameStepAction}
             onClick={link.nameStep === "connect" ? onConnectCommunity : onOpenSync}
           >
-            {link.nameStep === "connect" ? "Connect Community" : "Make your tags public"}
+            {link.nameStep === "connect" ? "Create account or sign in" : "Make your tags public"}
           </button>
         </p>
       )}

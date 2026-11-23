@@ -29,12 +29,12 @@ export function RewindPrompt({ songs, connected, onOpen, onDismiss }: RewindProm
         <p id="rewind-prompt-description" className={promptStyles.description}>
           {connected
             ? "Your top tags, busiest month and longest streak are on Community."
-            : "See your top tags, busiest month and longest streak on Community. Connecting backs up your library there, and your tags stay private unless you publish them."}
+            : "See your top tags, busiest month and longest streak on Community with a free Tagify account. Everything you've tagged here comes with you. Nothing is public unless you choose."}
         </p>
       </div>
       <div className={`${promptStyles.actions} ${styles.actions}`}>
         <button type="button" className={promptStyles.secondary} onClick={onDismiss}>Not now</button>
-        <button type="button" className={promptStyles.primary} onClick={onOpen}>See your full Rewind on Community</button>
+        <button type="button" className={promptStyles.primary} onClick={onOpen}>{connected ? "See your full Rewind on Community" : "Create account or sign in"}</button>
       </div>
     </section>
   );

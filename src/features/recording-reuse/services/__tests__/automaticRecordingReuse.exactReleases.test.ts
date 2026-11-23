@@ -46,7 +46,17 @@ it("shares tags both ways across Heavynissen's exact three releases automaticall
   for (const uri of uris) expect(await indexedDBStorage.getTrack(uri)).toMatchObject({ rating: 2, energy: 8, tagIds: [] });
 });
 
-it("makes no Spotify requests and no records when a song has no saved candidates", async () => {
+it("looks a song with no saved candidates up once in the background and saves nothing when its ISRC matches no saved song", async () => {
+  const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity").mockResolvedValue({ ...identities[1], isrc: "US2641200000", name: "Unrelated song" });
+  for (let pass = 0; pass < 2; pass++) await checkAutomaticRecordingReuse({ uri: uris[1], name: "Unrelated song" }, (await indexedDBStorage.loadAllStrict()).tracks, async () => undefined);
+  expect(lookup).toHaveBeenCalledTimes(1);
+  expect(lookup.mock.calls[0][2]).toMatchObject({ priority: "background" });
+  expect(await indexedDBStorage.getTrack(uris[1])).toBeNull();
+});
+
+it("makes no Spotify requests when no saved song has an ISRC the viewed song could share", async () => {
+  const saved = (await indexedDBStorage.getTrack(uris[0]))!;
+  await indexedDBStorage.saveTrack(uris[0], { ...saved, recordingIdentity: undefined });
   const lookup = vi.spyOn(spotifyApiService, "getRecordingIdentity");
   await checkAutomaticRecordingReuse({ uri: uris[1], name: "Unrelated song" }, (await indexedDBStorage.loadAllStrict()).tracks, async () => undefined);
   expect(lookup).not.toHaveBeenCalled();

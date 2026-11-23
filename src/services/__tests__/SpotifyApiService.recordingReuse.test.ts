@@ -28,7 +28,7 @@ it("confirms the discussion #39 single, EP and album using live-captured desktop
   }) }));
   vi.stubGlobal("fetch", fetchMock);
   const identities = await Promise.all(exactIds.map(id => api.getRecordingIdentity(`spotify:track:${id}`)));
-  expect(identities).toEqual(Array(3).fill({ isrc: "GBAHS2600027", name: "HARDSTYLE 2 - Lou Nour remix", durationMs: 192000, artistIds: [...artistIds].sort() }));
+  expect(identities).toEqual(Array(3).fill({ isrc: "GBAHS2600027", name: "HARDSTYLE 2 - Lou Nour remix", durationMs: 192000, artistIds: [...artistIds].sort(), leadArtistId: artistIds[0] }));
   expect(fetchMock).toHaveBeenCalledTimes(3);
   expect(fetchMock.mock.calls.every(([url]) => url.startsWith("https://spclient.wg.spotify.com/metadata/4/track/"))).toBe(true);
 });
@@ -112,7 +112,12 @@ it("reads a song's ISRC and album for Community from the same desktop metadata, 
     .mockResolvedValueOnce({ ok: false, status: 404, headers: new Headers() });
   vi.stubGlobal("fetch", fetchMock);
   const options = { priority: "background" as const, feature: "recording-matching" as const };
-  await expect(api.getTrackRelease(`spotify:track:${exactIds[0]}`, options)).resolves.toEqual({ isrc: "USABC2400001", albumUri: "spotify:album:4m2880jivSbbyEGAKfITCa" });
+  // The same answer's recording identity comes back too, so it can be saved without a second read.
+  await expect(api.getTrackRelease(`spotify:track:${exactIds[0]}`, options)).resolves.toEqual({
+    isrc: "USABC2400001", albumUri: "spotify:album:4m2880jivSbbyEGAKfITCa",
+    identity: { isrc: "USABC2400001", artistIds: [artistIds[0]], leadArtistId: artistIds[0], durationMs: 180000, name: "Song - Original Mix" },
+  });
+  // No ISRC means no identity to save.
   await expect(api.getTrackRelease(`spotify:track:${exactIds[1]}`, options)).resolves.toEqual({ isrc: null, albumUri: null });
   await expect(api.getTrackRelease(`spotify:track:${exactIds[2]}`, options)).resolves.toBeUndefined();
   expect(fetchMock.mock.calls.every(([url]) => url.startsWith("https://spclient.wg.spotify.com/metadata/4/track/"))).toBe(true);

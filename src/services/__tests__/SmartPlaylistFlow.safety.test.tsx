@@ -145,10 +145,10 @@ describe("smart playlist safety across storage, Community and Spotify", () => {
       { tagIds: ["house", "techno"], excludedTagIds: [], operator: "OR" as const },
     ], clauseConnectors: [] };
     const original = { ...rated, tagIds: ["house"] };
-    expect(evaluateTrackMatchesCriteria(original, formula)).toBe(true);
-    const updated = applySmartPlaylistCriteriaToTrack(original, formula, 100);
+    expect(evaluateTrackMatchesCriteria(original, formula, null)).toBe(true);
+    const updated = applySmartPlaylistCriteriaToTrack(original, formula, 100, null);
     expect(updated.tagIds).toEqual(["house"]);
-    expect(evaluateTrackMatchesCriteria(updated, formula)).toBe(true);
+    expect(evaluateTrackMatchesCriteria(updated, formula, null)).toBe(true);
   });
 
   it("a transient local read failure stops sync before changing Spotify", async () => {

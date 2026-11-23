@@ -88,6 +88,15 @@ describe("onboarding preview sandbox", () => {
     expect(rawGet(ONBOARDING_PREVIEW_FLAG_KEY)).toBe("on");
   });
 
+  it("keeps Community's Tagged by others answer across Start over, so it isn't asked for again", () => {
+    startOnboardingPreview(() => {});
+    loadPage();
+    localStorage.setItem("tagify:community-teaser-preview:alex", "{\"at\":1}");
+    startOnboardingPreview(() => {});
+    loadPage();
+    expect(localStorage.getItem("tagify:community-teaser-preview:alex")).toBe("{\"at\":1}");
+  });
+
   it("runs normally when the flag is set but the sandbox didn't install on this page", () => {
     startOnboardingPreview(() => {});
     uninstall();
@@ -135,6 +144,36 @@ describe("onboarding preview requests", () => {
     expect(await previewResponseFor("https://api.spotify.com/v1/me/tracks", { method: "PUT" })).toBeNull();
     expect((await previewResponseFor("https://community.tagify.fm/api/v2/sync/push", { method: "POST" }))?.status).toBe(503);
     expect((await previewResponseFor("https://abc.supabase.co/rest/v1/rpc/x", { method: "POST" }))?.status).toBe(503);
+  });
+
+  it("lets the Tagged by others preview ask Community which Liked Songs others tagged, as a new user's would", async () => {
+    expect(await previewResponseFor("https://community.tagify.fm/api/v2/public/tagged-by-others-preview", { method: "POST", body: "{\"songs\":[]}" })).toBeNull();
+    // Once the preview account is connected, Tagged by others asks the connected lookup; blocking it read as "Community has paused this".
+    expect(await previewResponseFor("https://community.tagify.fm/api/v2/sync/tagged-by-others", { method: "POST", body: "{\"songs\":[]}" })).toBeNull();
+    expect((await previewResponseFor("https://community.tagify.fm/api/v2/sync/push", { method: "POST", body: "{}" }))?.status).toBe(503);
+  });
+
+  it("lets a new account be created and signed in to, while library sync and uploads stay refused", async () => {
+    for (const [method, url] of [
+      ["POST", "https://community.tagify.fm/api/v2/device-authorizations"],
+      ["POST", "https://community.tagify.fm/api/v2/device-authorizations/email"],
+      ["POST", "https://community.tagify.fm/api/v2/device-authorizations/email/verify"],
+      ["POST", "https://community.tagify.fm/api/v2/device-authorizations/token"],
+      ["POST", "https://community.tagify.fm/api/v2/device/profile"],
+      ["PUT", "https://community.tagify.fm/api/v2/publication-policy"],
+      ["POST", "https://tagify.fm/api/v2/device/website-link"],
+      ["POST", "https://abc.supabase.co/auth/v1/token?grant_type=refresh_token"],
+    ]) expect(await previewResponseFor(url, { method })).toBeNull();
+    for (const [method, url] of [
+      ["POST", "https://community.tagify.fm/api/v2/sync/push"],
+      ["POST", "https://community.tagify.fm/api/v2/sync/bootstrap"],
+      ["POST", "https://community.tagify.fm/api/v2/sync/replace"],
+      ["POST", "https://community.tagify.fm/api/v2/tag-imports"],
+      ["POST", "https://community.tagify.fm/api/v2/device-recovery/token"],
+      ["POST", "https://community.tagify.fm/api/v2/device-recovery/enroll"],
+      ["PUT", "https://community.tagify.fm/api/v2/device/profile"],
+      ["POST", "https://abc.supabase.co/rest/v1/rpc/x"],
+    ]) expect((await previewResponseFor(url, { method }))?.status).toBe(503);
   });
 
   it("routes the page's fetch through the preview answers", async () => {

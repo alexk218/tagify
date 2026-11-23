@@ -1,7 +1,7 @@
 import React from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CommunityUpdates } from "../CommunityUpdates";
+import { CommunityUpdates, NoticeText } from "../CommunityUpdates";
 import { communityUpdateService } from "../communityUpdateService";
 
 const updates = [{ revision: 1, title: "More ways to discover music", publishedAt: "2026-10-01T12:00:00Z", changes: ["Browse tags on albums and artists.", "<script>This remains plain text</script>"] }];
@@ -16,6 +16,24 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("Community update popup", () => {
+  it("never pops up for someone who just installed Tagify, only for notices published after", async () => {
+    vi.mocked(communityUpdateService.check).mockRestore();
+    vi.mocked(communityUpdateService.dismiss).mockRestore();
+    localStorage.clear();
+    const fetchFeed = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ schemaVersion: 1, releases: updates }) });
+    vi.stubGlobal("fetch", fetchFeed);
+    try {
+      render(<CommunityUpdates enabled />);
+      await advance(3000);
+      await advance(1100);
+      expect(fetchFeed).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+      localStorage.clear();
+    }
+  });
+
   it("shows plain text, traps keyboard focus, dismisses with Escape, and restores focus", async () => {
     const { unmount } = render(<><button>Tag a song</button><CommunityUpdates enabled /></>);
     screen.getByRole("button", { name: "Tag a song" }).focus();
@@ -106,5 +124,19 @@ describe("Community update popup", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open Community" }));
     expect(open).toHaveBeenCalledWith("https://tagify.fm", "_blank", "noopener,noreferrer");
     expect(communityUpdateService.dismiss).toHaveBeenCalledWith(updates);
+  });
+});
+
+describe("Notice links", () => {
+  it("makes https links clickable and opens them in the browser, leaving other text as written", () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const url = "https://www.reddit.com/r/truespotify/comments/1xzkccn/i_built_a_song_tagging_rating_community_for/";
+    render(<ul><li><NoticeText text={`Go here: ${url}. Thanks <b>x</b> javascript:alert(1) http://plain.example`} /></li></ul>);
+    const link = screen.getByRole("link", { name: url });
+    expect(link).toHaveAttribute("href", url);
+    fireEvent.click(link);
+    expect(open).toHaveBeenCalledWith(url, "_blank", "noopener,noreferrer");
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByText(/Thanks <b>x<\/b> javascript:alert\(1\) http:\/\/plain\.example/)).toBeInTheDocument();
   });
 });

@@ -6,7 +6,7 @@ interface SpicetifyPlayerItem {
   uri?: string;
   name?: string;
   artists?: Array<{ name?: string }>;
-  album?: { name?: string };
+  album?: { name?: string; uri?: string };
   duration?: number | { milliseconds?: number };
 }
 
@@ -65,7 +65,8 @@ export function createSpotifyTrackFromPlayerItem(
       item.artists && item.artists.length > 0
         ? item.artists.map((artist) => ({ name: artist?.name || "Unknown Artist" }))
         : [{ name: "Unknown Artist" }],
-    album: { name: item.album?.name || "Unknown Album" },
+    // The album link lets the song card look across the album (other versions of its songs).
+    album: { name: item.album?.name || "Unknown Album", ...(item.album?.uri?.startsWith("spotify:album:") ? { uri: item.album.uri } : {}) },
     duration_ms: resolveDurationMs(item.duration),
   };
 }

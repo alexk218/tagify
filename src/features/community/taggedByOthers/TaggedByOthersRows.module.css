@@ -165,6 +165,25 @@
   opacity: 0.8;
 }
 
+.artistButton {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+.artistButton:hover {
+  text-decoration: underline;
+}
+
+.artistButton:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
 /* Tag chips match Tagged Tracks' own tag pills: dark fill, no outline; on the song = the accented green tint. */
 .tags {
   display: flex;
@@ -193,30 +212,63 @@
   border: 0;
   border-radius: 12px;
   color: var(--spice-subtext);
+  cursor: default;
+  gap: 0;
+  padding: 0;
 }
 
-.tag:hover:not(:disabled),
-.tag:focus-visible {
+/* A chip is two buttons: + (or the check) adds or takes the tag off; the name opens its tag page. */
+.tagAdd,
+.tagLink {
+  align-items: center;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  min-width: 0;
+}
+
+.tagAdd {
+  border-radius: 12px 0 0 12px;
+  flex: 0 0 auto;
+  padding: 0 3px 0 6px;
+}
+
+.tagLink {
+  border-radius: 0 12px 12px 0;
+  gap: 4px;
+  padding: 0 8px 0 1px;
+}
+
+.tagAdd:hover:not(:disabled),
+.tagAdd:focus-visible {
   background: rgb(255 255 255 / 10%);
   color: var(--spice-text);
 }
 
-.tag:disabled {
+.tagLink:hover,
+.tagLink:focus-visible {
+  color: var(--spice-text);
+}
+
+.tagLink:hover .tagName {
+  text-decoration: underline;
+}
+
+.tagAdd:disabled {
   cursor: progress;
 }
 
-/* Not connected: the tag shows but can't be added. */
-.tagReadOnly {
-  cursor: default;
+/* Not connected: the tag shows but can't be added; its name still opens the tag page. */
+.tagReadOnly .tagLink {
+  border-radius: 12px;
   padding: 0 8px;
 }
 
-.tag.tagReadOnly:hover:not(:disabled) {
-  background: rgb(0 0 0 / 30%);
-  color: var(--spice-subtext);
-}
-
-/* On the song: tinted green, so on and off read at a glance; clicking again takes it off. */
+/* On the song: tinted green, so on and off read at a glance; clicking the check takes it off. */
 .tagOn {
   background: color-mix(in srgb, rgb(0 0 0 / 24%) 68%, rgb(30 215 96 / 30%) 32%);
   box-shadow: inset 0 0 0 1px rgb(30 215 96 / 45%);
@@ -227,12 +279,11 @@
   color: var(--spice-button);
 }
 
-.tagOn:hover:not(:disabled) {
+.tagOn .tagAdd:hover:not(:disabled) {
   background: rgb(241 94 108 / 12%);
-  box-shadow: inset 0 0 0 1px rgb(241 94 108 / 45%);
 }
 
-.tagOn:hover:not(:disabled) svg {
+.tagOn .tagAdd:hover:not(:disabled) svg {
   color: #f15e6c;
 }
 
@@ -272,7 +323,12 @@
   color: var(--spice-text);
 }
 
-.tag:focus-visible,
+.tagAdd:focus-visible,
+.tagLink:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: -2px;
+}
+
 .more:focus-visible {
   outline: 2px solid var(--spice-button);
   outline-offset: 2px;
@@ -283,3 +339,4 @@
   font-size: 13px;
   margin: 0;
 }
+

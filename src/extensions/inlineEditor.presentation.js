@@ -55,6 +55,7 @@ export function renderInlineEditorPresentation(
     onEnergy,
     onOpenEnergy,
     onOpenTags,
+    trailingExtra = null,
   },
 ) {
   control.replaceChildren();
@@ -64,8 +65,16 @@ export function renderInlineEditorPresentation(
     ? displayMode
     : "combined";
 
+  // trailingExtra (the song row's To Tag icon) sits right after the stars and
+  // energy, and still shows when the rest of the controls are turned off.
   if (selectedMode === "disabled") {
-    control.style.display = "none";
+    if (trailingExtra) {
+      control.style.display = "inline-flex";
+      control.style.width = "auto";
+      control.appendChild(trailingExtra);
+    } else {
+      control.style.display = "none";
+    }
     return;
   }
   control.style.display = selectedMode === "combined" ? "grid" : "inline-flex";
@@ -76,6 +85,7 @@ export function renderInlineEditorPresentation(
     control.appendChild(
       createRatingControl({ rating, compact, getRateActionLabel, onRate }),
     );
+    if (trailingExtra) control.appendChild(trailingExtra);
     return;
   }
 
@@ -90,6 +100,7 @@ export function renderInlineEditorPresentation(
       onEnergy,
     });
     control.appendChild(energyControl);
+    if (trailingExtra) control.appendChild(trailingExtra);
     return;
   }
 
@@ -107,6 +118,7 @@ export function renderInlineEditorPresentation(
         onOpenEditor: onOpenTags,
       }),
     );
+    if (trailingExtra) control.appendChild(trailingExtra);
     return;
   }
 
@@ -140,6 +152,7 @@ export function renderInlineEditorPresentation(
   trailingSlot.style.minWidth = "0";
   const energyLabel = createEnergyLabel(energy, compact, onOpenEnergy);
   if (energyLabel) trailingSlot.appendChild(energyLabel);
+  if (trailingExtra) trailingSlot.appendChild(trailingExtra);
 
   control.append(
     leadingSlot,

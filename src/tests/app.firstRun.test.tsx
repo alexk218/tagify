@@ -29,21 +29,22 @@ it("starts an unlinked library without account setup and keeps connecting option
   expect(screen.queryByRole("button", { name: "Automatic tags" })).not.toBeInTheDocument();
   expect(screen.queryByText(/Last saved:/)).not.toBeInTheDocument();
   expect(screen.queryByRole("group", { name: "Song edit history" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("dialog", { name: "Community setup" })).not.toBeInTheDocument();
-  // A new library starts from a first song; the Community invitation waits until a few songs are tagged.
-  expect(await screen.findByRole("region", { name: "Tag your first song" }, { timeout: 5000 })).toBeInTheDocument();
-  expect(screen.queryByRole("region", { name: "Share your tags on Community" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("dialog", { name: "Community setup" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Your Tagify account" })).not.toBeInTheDocument();
+  // With nothing playing, track details says the one step to take; the Community invitation waits
+  // until a few songs are tagged.
+  expect(await screen.findByText("Play a song and tag it here.")).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Back up your tags and use them on your phone" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Your Tagify account" })).not.toBeInTheDocument();
 
   // Connecting stays one choice away, and setup opens only when the listener chooses it.
-  fireEvent.click(screen.getByRole("button", { name: "Open the Tagify Community workspace" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open the Tagify Community workspace. Create account or sign in to back up your tags." }));
   // The Community tab's own title invites sharing; the separate invitation card stays hidden.
-  expect(screen.getAllByRole("region", { name: "Share your tags on Community" })).toHaveLength(1);
+  expect(screen.getAllByRole("region", { name: "Back up your tags and use them on your phone" })).toHaveLength(1);
   expect(document.getElementById("community-connect-prompt-title")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Share my tags" }));
-  expect(screen.getByRole("dialog", { name: "Community setup" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(screen.queryByRole("dialog", { name: "Community setup" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Create account or sign in" }));
+  expect(screen.getByRole("dialog", { name: "Your Tagify account" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.queryByRole("dialog", { name: "Your Tagify account" })).not.toBeInTheDocument();
 
   firstVisit.unmount();
   sessionStorage.clear();
@@ -51,6 +52,6 @@ it("starts an unlinked library without account setup and keeps connecting option
   await waitFor(() => expect(screen.queryByText("Loading tag data...")).not.toBeInTheDocument(), { timeout: 5000 });
   expect(screen.queryByRole("button", { name: "Automatic tags" })).not.toBeInTheDocument();
   expect(screen.queryByText(/Last saved:/)).not.toBeInTheDocument();
-  expect(screen.queryByRole("dialog", { name: "Community setup" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Your Tagify account" })).not.toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "Tracks" })).toHaveAttribute("aria-selected", "true");
 });

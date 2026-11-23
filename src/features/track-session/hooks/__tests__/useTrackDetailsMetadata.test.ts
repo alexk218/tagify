@@ -64,6 +64,7 @@ describe("useTrackDetailsMetadata", () => {
         },
         onSetBpm,
         onSetCamelotKey,
+        onFillMissingAudioFeatures: vi.fn(),
       }),
     );
 
@@ -73,6 +74,45 @@ describe("useTrackDetailsMetadata", () => {
 
     expect(result.current.trackMetadata.bpm).toBe(124);
     expect(result.current.trackMetadata.camelotKey).toBe("9B");
+    expect(onSetBpm).not.toHaveBeenCalled();
+    expect(onSetCamelotKey).not.toHaveBeenCalled();
+  });
+
+  it("fills a tagged song's missing BPM and key without saving them as an edit", async () => {
+    vi.mocked(spotifyService.getTrackMetadata).mockResolvedValue(null as never);
+    vi.mocked(audioFeaturesService.getAudioFeaturesFromUri).mockResolvedValue({
+      bpm: 123,
+      key: "F#",
+      mode: 0,
+      camelotKey: "11A",
+    });
+
+    const onSetBpm = vi.fn();
+    const onSetCamelotKey = vi.fn();
+    const onFillMissingAudioFeatures = vi.fn();
+    const { result } = renderHook(() =>
+      useTrackDetailsMetadata({
+        displayedTrack: mockTrack,
+        artistNames: "Test Artist",
+        trackData: {
+          rating: 0,
+          energy: 3,
+          bpm: null,
+          tagIds: ["tag_house"],
+          dateCreated: 10,
+          dateModified: 20,
+        },
+        onSetBpm,
+        onSetCamelotKey,
+        onFillMissingAudioFeatures,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoadingMetadata).toBe(false);
+    });
+
+    expect(onFillMissingAudioFeatures).toHaveBeenCalledWith({ bpm: 123, camelotKey: "11A" });
     expect(onSetBpm).not.toHaveBeenCalled();
     expect(onSetCamelotKey).not.toHaveBeenCalled();
   });

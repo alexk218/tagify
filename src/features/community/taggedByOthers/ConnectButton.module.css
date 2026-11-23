@@ -1,0 +1,29 @@
+/* "Create account or sign in" (and "Share your tags…"): a white pill, the same size and type as the
+   welcome window's buttons. Two classes, so these win over the surrounding .action rules. */
+.button.connect {
+  min-height: 36px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 500px;
+  background: #fff;
+  color: #000;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+  transition: transform 0.1s ease, background-color 0.1s ease;
+}
+
+.button.connect:hover {
+  filter: none;
+  background: #f0f0f0;
+  transform: scale(1.03);
+}
+
+.button.connect:active {
+  transform: scale(0.98);
+}
+
+.button.connect:focus-visible {
+  outline: 2px solid var(--spice-text, #fff);
+  outline-offset: 2px;
+}

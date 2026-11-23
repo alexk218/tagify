@@ -1,0 +1,28 @@
+.button {
+  background-color: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  border: none;
+  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.button:hover {
+  background-color: rgb(0 0 0 / 40%);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
+.onList {
+  color: var(--spice-button);
+}

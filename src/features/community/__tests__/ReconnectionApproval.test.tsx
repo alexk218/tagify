@@ -19,7 +19,7 @@ function renderCloudSync() {
   window.TagifySync = {
     getStatus: () => "unlinked", getInitialMergePreview: () => null, getBackupHealth: () => null,
   } as unknown as NonNullable<typeof window.TagifySync>;
-  return render(<CloudSyncModal sharing={sharingStub(policyFixture())} onOpenSharing={vi.fn()} onClose={vi.fn()} />);
+  return render(<CloudSyncModal sharing={sharingStub(policyFixture())} onOpenSharing={vi.fn()} onConnect={vi.fn()} onClose={vi.fn()} />);
 }
 
 describe("Cloud Sync while a reconnection waits for approval on Community", () => {

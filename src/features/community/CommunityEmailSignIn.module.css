@@ -1,0 +1,225 @@
+/* Signing in inside Tagify. Colors come from Spotify's theme (--spice-*), like the rest of Tagify. */
+.signIn {
+  color: var(--spice-text);
+  display: grid;
+  gap: 20px;
+}
+
+.intro {
+  display: grid;
+  gap: 8px;
+}
+
+.heading {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.description,
+.hint {
+  color: var(--spice-subtext);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.description strong {
+  color: var(--spice-text);
+}
+
+.form {
+  display: grid;
+  gap: 8px;
+}
+
+.label {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.row {
+  display: grid;
+  gap: 12px;
+}
+
+.input {
+  background: var(--spice-main);
+  border: 1px solid var(--spice-misc);
+  border-radius: 6px;
+  box-sizing: border-box;
+  color: var(--spice-text);
+  font: inherit;
+  font-size: 16px;
+  height: 48px;
+  min-width: 0;
+  padding: 0 14px;
+  width: 100%;
+}
+
+.input::placeholder {
+  color: var(--spice-misc);
+}
+
+.input:hover:not(:disabled) {
+  border-color: var(--spice-text);
+}
+
+.input:focus,
+.input:focus-visible {
+  border-color: var(--spice-text);
+  box-shadow: inset 0 0 0 1px var(--spice-text);
+  outline: none;
+}
+
+.input:disabled {
+  opacity: 0.6;
+}
+
+.code {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.35em;
+}
+
+.primary,
+.secondary {
+  align-items: center;
+  border-radius: 999px;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  gap: 10px;
+  height: 48px;
+  justify-content: center;
+  padding: 0 28px;
+  transition: transform 0.1s ease, background-color 0.1s ease, border-color 0.1s ease;
+  white-space: nowrap;
+}
+
+.primary {
+  background: var(--spice-button);
+  border: 0;
+  color: #000;
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--spice-button-active);
+  transform: scale(1.02);
+}
+
+.secondary {
+  background: transparent;
+  border: 1px solid var(--spice-misc);
+  color: var(--spice-text);
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--spice-text);
+  transform: scale(1.02);
+}
+
+.primary:disabled,
+.secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.primary:focus-visible,
+.secondary:focus-visible,
+.link:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 3px;
+}
+
+.appleLogo {
+  height: 20px;
+  width: 17px;
+}
+
+.divider {
+  align-items: center;
+  color: var(--spice-subtext);
+  display: flex;
+  font-size: 14px;
+  gap: 14px;
+}
+
+.divider::before,
+.divider::after {
+  border-top: 1px solid rgba(var(--spice-rgb-text), 0.15);
+  content: "";
+  flex: 1 1 auto;
+}
+
+.alternatives {
+  display: grid;
+  gap: 16px;
+}
+
+.codeLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.link {
+  background: none;
+  border: 0;
+  color: var(--spice-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 0;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+
+.link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.link:disabled {
+  color: var(--spice-subtext);
+  cursor: default;
+}
+
+.error {
+  color: var(--spice-notification-error);
+  filter: brightness(1.35);
+  font-size: 14px;
+  line-height: 1.45;
+  margin: -8px 0 0;
+}
+
+.footer {
+  display: flex;
+}
+
+/* In the Tagify account window: centred and stacked, like Spotify's own sign-in. */
+[data-account-window] .intro,
+[data-account-window] .alternatives,
+[data-account-window] .codeLinks {
+  justify-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+[data-account-window] .alternatives .secondary {
+  justify-self: stretch;
+  width: 100%;
+}
+
+[data-account-window] .hint {
+  text-align: center;
+}
+
+[data-account-window] .error {
+  text-align: center;
+}

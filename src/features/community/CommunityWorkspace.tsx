@@ -1,12 +1,8 @@
 import React, { useMemo, useState } from "react";
-import { ExternalLink, GitMerge, Globe, Link2, RefreshCw, ShieldAlert, Unplug, UserCircle2, Users } from "lucide-react";
+import { ExternalLink, GitMerge, Globe, Link2, RefreshCw, ShieldAlert, UserCircle2, Users } from "lucide-react";
 import type { SyncStatus } from "@/services/sync/SyncRuntime";
 import type { TagTaxonomy, TrackData } from "@/types/tagData";
-import {
-  COMMUNITY_PAGES_ORIGIN,
-  getCommunityDisconnectUrl,
-  openCommunityUrl,
-} from "./communityLinks";
+import { COMMUNITY_PAGES_ORIGIN } from "./communityLinks";
 import { changePublication, plural, publicTagSummary, SHARING_STATE_LABELS } from "./communityPublication";
 import { communityProfileUrl } from "./CommunityShareDialog";
 import styles from "./CommunityWorkspace.module.css";
@@ -14,12 +10,15 @@ import { backupLabel, communityErrorMessage } from "./communitySyncCopy";
 import type { CommunitySharing } from "./useCommunitySharing";
 import type { CommunityMatch, CommunityMatchTag } from "@/features/onboarding/services/communityMatches";
 import { TaggedByOthersSection } from "./taggedByOthers/TaggedByOthersSection";
+import { openCommunityUrlSignedIn } from "./communityWebsiteLink";
 
 interface Action {
-  label: string;
+  label: React.ReactNode;
   icon: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  /** Shown on hover when the label alone doesn't say where it goes. */
+  title?: string;
 }
 
 export function CommunityWorkspace({
@@ -33,8 +32,6 @@ export function CommunityWorkspace({
   tracks,
   taxonomy,
   connectedAccountId,
-  connectedDeviceId,
-  onDisconnect,
   onAddMembersTags,
   onConnectFromLibraryCheck,
   onOpenSong,
@@ -50,8 +47,6 @@ export function CommunityWorkspace({
   tracks: Record<string, TrackData>;
   taxonomy: TagTaxonomy;
   connectedAccountId: string | null;
-  connectedDeviceId: string | null;
-  onDisconnect: () => Promise<void>;
   /** Adds other members' tags to a song in this library; without it the Liked Songs check isn't offered. */
   onAddMembersTags?: (match: CommunityMatch, tags: CommunityMatchTag[]) => Promise<void>;
   /** Connecting from that card's invitation, so its share of connections can be told apart. */
@@ -59,33 +54,12 @@ export function CommunityWorkspace({
   /** Opens a song from that card for tagging. */
   onOpenSong?: (uri: string) => void;
 }) {
-  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [disconnectError, setDisconnectError] = useState("");
   const [resuming, setResuming] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const reconnectRequired = connected && status === "reauthorize";
   const { policy, state } = sharing;
   const summary = useMemo(() => publicTagSummary(tracks, taxonomy, policy ?? undefined), [tracks, taxonomy, policy]);
   const amounts = `${plural(summary.tags, "tag")} on ${plural(summary.songs, "song")}`;
-
-  const disconnect = async () => {
-    if (connectedAccountId && connectedDeviceId) {
-      openCommunityUrl(
-        getCommunityDisconnectUrl(connectedAccountId, connectedDeviceId),
-      );
-    }
-    setDisconnecting(true);
-    setDisconnectError("");
-    try {
-      await onDisconnect();
-      setConfirmingDisconnect(false);
-    } catch (error) {
-      setDisconnectError(communityErrorMessage(error, "Couldn't disconnect safely. Your library is still on this device. Please try again."));
-    } finally {
-      setDisconnecting(false);
-    }
-  };
 
   const resume = async () => {
     if (!policy) return;
@@ -101,18 +75,18 @@ export function CommunityWorkspace({
     }
   };
 
-  const visit: Action = { label: "Visit Community", icon: <ExternalLink size={16} />, onClick: () => openCommunityUrl(COMMUNITY_PAGES_ORIGIN) };
+  const visit: Action = { label: "Visit Community", icon: <ExternalLink size={16} />, onClick: () => void openCommunityUrlSignedIn(COMMUNITY_PAGES_ORIGIN) };
   // The title says what's going on; the lead says what that means or what to do next.
   let title = "Tagify Community";
   let lead: React.ReactNode;
   let primary: Action;
   let secondary: Action | null = visit;
   if (!connected) {
-    title = connectionPending ? "Finish connecting in your browser" : "Share your tags on Community";
-    lead = connectionPending ? "Approve the connection there, then come back here."
-      : summary.songs > 0 ? `${amounts} are ready to share.`
-      : "Tag a few songs, then share them on your profile.";
-    primary = { label: connectionPending ? "Finish connecting" : "Share my tags", icon: connectionPending ? <Link2 size={16} /> : <Globe size={16} />, onClick: onConnectCommunity };
+    title = connectionPending ? "Finish connecting in your browser" : "Back up your tags and use them on your phone";
+    lead = connectionPending ? "Enter your email on the page that opened and type the code we email you. Tagify finishes by itself."
+      : summary.songs > 0 ? `${amounts} come with you. Nothing is public unless you choose.`
+      : "Everything you tag here comes with you. Nothing is public unless you choose.";
+    primary = { label: connectionPending ? "Finish connecting" : "Create account or sign in", icon: connectionPending ? <Link2 size={16} /> : <UserCircle2 size={16} />, onClick: onConnectCommunity };
   } else if (reconnectRequired) {
     title = "Reconnect this computer";
     lead = "Backing up and sharing your tags stop until you reconnect.";
@@ -131,9 +105,14 @@ export function CommunityWorkspace({
     primary = { label: resuming ? "Resuming…" : "Resume updates", icon: <RefreshCw size={16} />, onClick: () => void resume(), disabled: resuming };
   } else if (state === "public") {
     title = "Your tags are public";
+    const openProfile = () => void openCommunityUrlSignedIn(communityProfileUrl(sharing.handle));
+    // Until the handle is known (still loading, or never picked) the profile keeps its plain name.
+    const handle = sharing.handle ? `@${sharing.handle}` : null;
     lead = <>Anyone can see them on your profile. <ChooseLink onClick={onOpenSharing} /></>;
     primary = visit;
-    secondary = { label: "View my profile", icon: <UserCircle2 size={16} />, onClick: () => openCommunityUrl(communityProfileUrl(sharing.handle)) };
+    secondary = handle
+      ? { label: <span className={styles.handleText}>{handle}</span>, icon: <UserCircle2 size={16} />, onClick: openProfile, title: "View my profile" }
+      : { label: "View my profile", icon: <UserCircle2 size={16} />, onClick: openProfile };
   } else if (sharing.phase === "error") {
     lead = <>Couldn't check what's public. <button type="button" className={styles.inlineLink} onClick={sharing.refresh}>Try again</button></>;
     primary = { label: "Share my tags", icon: <Globe size={16} />, onClick: onOpenSharing };
@@ -163,61 +142,22 @@ export function CommunityWorkspace({
             {primary.icon}
             {primary.label}
           </button>
-          {secondary ? <button type="button" className={styles.secondaryAction} onClick={secondary.onClick}>
+          {secondary ? <button type="button" className={styles.secondaryAction} onClick={secondary.onClick} title={secondary.title}>
             {secondary.icon}
             {secondary.label}
           </button> : null}
         </div>
 
-        {message ? <p className={message.tone === "success" ? styles.message : styles.disconnectError} role="status">{message.text}</p> : null}
+        {message ? <p className={message.tone === "success" ? styles.message : styles.errorMessage} role="status">{message.text}</p> : null}
 
+        {/* No Disconnect in Tagify (Alex, 2026-11-23): a computer is removed on Community's Linked devices page. */}
         {connected ? (
           <div className={styles.connectionPanel}>
-            {confirmingDisconnect ? (
-              <div className={styles.disconnectConfirmation}>
-                <div>
-                  <strong>Stop cloud backup?</strong>
-                  <span>
-                    Your tags stay here. Cloud sync stops, and Community signs out in your browser.
-                  </span>
-                </div>
-                <div className={styles.disconnectActions}>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmingDisconnect(false)}
-                    disabled={disconnecting}
-                  >
-                    Keep connected
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.disconnectConfirmButton}
-                    onClick={() => void disconnect()}
-                    disabled={disconnecting}
-                  >
-                    <Unplug size={14} />
-                    {disconnecting ? "Disconnecting…" : "Disconnect now"}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className={`${styles.connectionStatus} ${reconnectRequired ? styles.reconnectStatus : ""}`}>
-                <span className={reconnectRequired ? styles.reconnectDot : styles.connectedDot} aria-hidden="true" />
-                <span>{reconnectRequired ? "Device revoked · Reconnect required" : `${state ? `${SHARING_STATE_LABELS[state]} · ` : ""}${backupLabel(status)}`}</span>
-                {!reconnectRequired ? <button type="button" onClick={onOpenCloudSync}>Sync</button> : null}
-                <button
-                  type="button"
-                  onClick={() => setConfirmingDisconnect(true)}
-                >
-                  Disconnect
-                </button>
-              </div>
-            )}
-            {disconnectError ? (
-              <p className={styles.disconnectError} role="alert">
-                {disconnectError}
-              </p>
-            ) : null}
+            <div className={`${styles.connectionStatus} ${reconnectRequired ? styles.reconnectStatus : ""}`}>
+              <span className={reconnectRequired ? styles.reconnectDot : styles.connectedDot} aria-hidden="true" />
+              <span>{reconnectRequired ? "Device revoked · Reconnect required" : `${state ? `${SHARING_STATE_LABELS[state]} · ` : ""}${backupLabel(status)}`}</span>
+              {!reconnectRequired ? <button type="button" onClick={onOpenCloudSync}>Sync</button> : null}
+            </div>
           </div>
         ) : null}
       </div>

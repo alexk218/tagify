@@ -232,9 +232,10 @@ const TagSelector: React.FC<TagSelectorProps> = ({
 
   const renderTagGrid = (tags: TagNode[]) => (
     <div className={styles.tagGrid}>
-      {tags.map((tag) => (
+      {tags.map((tag, index) => (
         <button
           key={tag.id}
+          data-tip={index === 0 ? "tag-button" : undefined}
           className={`${styles.tagButton} ${
             tag.accentId ? styles.tagButtonAccented : ""
           } ${isTagApplied(tag.id) ? styles.tagApplied : ""}`}
@@ -288,7 +289,7 @@ const TagSelector: React.FC<TagSelectorProps> = ({
 
   return (
     <div className={styles.container} ref={containerRef} data-tagify-tag-selector="">
-      <div className={styles.header}>
+      <div className={styles.header} data-tip="tag-picker">
         <div className={styles.titleContainer}>
           <h2 className={styles.title}>
             {selectorTitle}
@@ -344,6 +345,7 @@ const TagSelector: React.FC<TagSelectorProps> = ({
 
           <button
             className={styles.manageButton}
+            data-tip="manage-tags"
             onClick={(e) => {
               e.stopPropagation();
               onOpenTagManager();

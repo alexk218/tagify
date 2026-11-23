@@ -1,4 +1,4 @@
-/* Matches .form-select so the typeable fields sit naturally beside Energy Level's dropdowns. */
+/* Matches .form-select so the typeable fields sit naturally beside Energy's dropdowns. */
 .combo {
   position: relative;
   display: inline-flex;
@@ -18,7 +18,7 @@
 }
 
 .input {
-  width: 5.5ch;
+  width: 4.5ch;
   min-width: 0;
   padding: 4px 0 4px 8px;
   border: 0;
@@ -46,7 +46,7 @@
   align-items: center;
   justify-content: center;
   align-self: stretch;
-  padding: 0 7px 0 4px;
+  padding: 0 5px 0 1px;
   border: 0;
   background: transparent;
   color: var(--spice-text);

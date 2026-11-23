@@ -10,6 +10,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-12-10T12:00:00.000Z"));
   localStorage.clear();
+  localStorage.setItem("tagify:lastSeenVersion", "3.3.0");
   vi.stubGlobal("fetch", vi.fn());
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });

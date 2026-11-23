@@ -10,12 +10,14 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-10-01T12:00:00.000Z"));
   localStorage.clear();
+  // Someone who had Tagify before this version; new installations are covered by their own tests.
+  localStorage.setItem("tagify:lastSeenVersion", "3.3.0");
   vi.stubGlobal("fetch", vi.fn());
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("Community website update notices", () => {
-  it("shows only the latest approved summary to a new reader and persists dismissal across app restarts", async () => {
+  it("shows only the latest approved summary to an earlier installation that never answered one, and persists dismissal across app restarts", async () => {
     respond(feed(1, 2));
     const service = new CommunityUpdateService();
     const updates = await service.check();
@@ -24,6 +26,25 @@ describe("Community website update notices", () => {
     service.dismiss(updates);
     expect(await new CommunityUpdateService().check()).toEqual([]);
     expect(fetch).toHaveBeenCalledWith("https://community.tagify.fm/api/v1/updates", expect.objectContaining({ credentials: "omit" }));
+  });
+
+  it("counts every notice published before a new installation as seen and shows only later ones", async () => {
+    localStorage.clear();
+    respond(feed(1, 2));
+    const service = new CommunityUpdateService();
+    expect(await service.check()).toEqual([]);
+    expect(localStorage.getItem(COMMUNITY_UPDATE_SEEN_KEY)).toBe("2");
+
+    respond(feed(1, 2, 3));
+    vi.advanceTimersByTime(COMMUNITY_UPDATE_INTERVAL_MS);
+    expect((await service.check()).map((item) => item.revision)).toEqual([3]);
+  });
+
+  it("marks nothing seen for a new installation until the feed has answered", async () => {
+    localStorage.clear();
+    vi.mocked(fetch).mockRejectedValue(new Error("offline"));
+    expect(await new CommunityUpdateService().check()).toEqual([]);
+    expect(localStorage.getItem(COMMUNITY_UPDATE_SEEN_KEY)).toBeNull();
   });
 
   it("collects missed announcements even when the Tagify app version has not changed", async () => {
@@ -85,15 +106,28 @@ describe("Community website update notices", () => {
     expect(await service.check()).toEqual([release(1)]);
   });
 
-  it("does not show future announcements or repeat notices when storage is blocked", async () => {
+  it("does not show future announcements", async () => {
     respond({ schemaVersion: 1, releases: [release(1), { ...release(2), publishedAt: "2030-01-01T00:00:00Z" }] });
+    expect(await new CommunityUpdateService().check()).toEqual([release(1)]);
+  });
+
+  it("stays quiet when storage is blocked, since a new installation can't be told apart", async () => {
+    respond(feed(1));
     vi.spyOn(localStorage, "getItem").mockImplementation(() => { throw new Error("blocked"); });
     vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new Error("blocked"); });
     const service = new CommunityUpdateService();
-    const updates = await service.check();
-    expect(updates).toEqual([release(1)]);
-    service.dismiss(updates);
     expect(await service.check()).toEqual([]);
+    expect(await service.check()).toEqual([]);
+  });
+
+  it("keeps a known action on a notice and ignores unknown ones, so older notices read as before", () => {
+    const parsed = parseCommunityUpdates({ schemaVersion: 1, releases: [
+      { ...release(9), action: "share_ratings" },
+      { ...release(8), action: "delete_everything" },
+      release(7),
+    ] });
+    expect(parsed.map((update) => update.action)).toEqual(["share_ratings", undefined, undefined]);
+    expect("action" in parsed[2]).toBe(false);
   });
 
   it("rejects duplicate revisions and oversized or malformed content", () => {

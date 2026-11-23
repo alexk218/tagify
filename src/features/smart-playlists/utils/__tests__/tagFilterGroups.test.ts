@@ -44,7 +44,7 @@ describe("tagFilterGroups", () => {
           },
         ],
         connectors: [TAG_FILTER_OPERATORS.AND],
-      }),
+      }, null),
     ).toBe(true);
 
     expect(
@@ -62,7 +62,7 @@ describe("tagFilterGroups", () => {
           },
         ],
         connectors: [TAG_FILTER_OPERATORS.OR],
-      }),
+      }, null),
     ).toBe(true);
   });
 

@@ -1044,6 +1044,13 @@
   font-size: 12px;
 }
 
+/* Title, description and filters read as one header; the only line is under the filters (Alex's pick B, 2026-11-18). */
+.communityInspector .paneHeader {
+  padding-top: 16px;
+  padding-bottom: 12px;
+  border-bottom: 0;
+}
+
 .communityFilterControls {
   display: flex;
   flex-wrap: wrap;

@@ -18,6 +18,7 @@ import { syncRuntime } from "@/services/sync/SyncRuntime";
 import { startOnboardingPreview } from "@/features/onboarding/preview/onboardingPreview";
 import { useOnboardingPreviewAccess } from "@/features/onboarding/preview/onboardingPreviewAccess";
 import { setPrivateNotesShown, usePrivateNotesShown } from "@/features/private-notes/privateNotesSetting";
+import { setAdvancedFilters, useAdvancedFilters } from "@/features/filter-state/advancedFiltersSetting";
 
 interface MainSettingsModalProps {
   onClose: () => void;
@@ -73,6 +74,7 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
 }) => {
   const showOnboardingPreview = useOnboardingPreviewAccess();
   const privateNotesShown = usePrivateNotesShown();
+  const advancedFilters = useAdvancedFilters();
   const [storedExtensionSettings, setExtensionSettings] =
     useLocalStorage<ExtensionSettings>(
       "tagify:extensionSettings",
@@ -425,6 +427,25 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
 
               <div className={styles.toggleItem}>
                 <div className={styles.toggleInfo}>
+                  <label className={styles.toggleLabel}>Advanced Filters</label>
+                  <span className={styles.toggleDescription}>
+                    Show tag groups with AND/OR logic and the Camelot key
+                    filter in Filters
+                  </span>
+                </div>
+                <label className={styles.toggleSwitch}>
+                  <input
+                    aria-label="Show advanced filters"
+                    type="checkbox"
+                    checked={advancedFilters}
+                    onChange={(e) => setAdvancedFilters(e.target.checked)}
+                  />
+                  <span className={styles.slider}></span>
+                </label>
+              </div>
+
+              <div className={styles.toggleItem}>
+                <div className={styles.toggleInfo}>
                   <label className={styles.toggleLabel}>
                     Reset Tagify Data
                   </label>
@@ -448,7 +469,7 @@ const MainSettingsModal: React.FC<MainSettingsModalProps> = ({
                     <label className={styles.toggleLabel}>Onboarding Preview</label>
                     <span className={styles.toggleDescription}>
                       Go through onboarding as a brand-new user. Your library,
-                      settings and Community account stay as they are. Only you see this.
+                      settings and Tagify account stay as they are. Only you see this.
                     </span>
                   </div>
                   <button

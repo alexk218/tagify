@@ -28,6 +28,7 @@ import { syncRuntime } from "../services/sync/SyncRuntime";
 import { smartPlaylistSyncService } from "../services/SmartPlaylistSyncService";
 import { loadSmartPlaylistsFromStorage } from "../features/smart-playlists/utils/smartPlaylist.storage";
 import { welcomeModal } from "./WelcomeModal";
+import { initializeTagifyNavToggle } from "./tagifyNavToggle";
 import { createBulkTagHistoryLocation } from "./contextMenu.navigation";
 import {
   addRecentTag,
@@ -39,6 +40,7 @@ import {
   createStarRatingRow,
   getInitialInlineMenuFocusTarget,
   getSortedMenuTagCategories,
+  createMenuTagCategory,
   positionInlineMenu,
 } from "./inlineEditor.menu";
 import { renderInlineEditorPresentation } from "./inlineEditor.presentation";
@@ -48,6 +50,9 @@ import {
   getSmartPlaylistRatingRemoval,
 } from "./inlineEditor.smartPlaylistRating";
 import { buildTagDetails } from "./inlineEditor.tagIndicator";
+import { getTagGroupFilterGroupId, getTagGroupName } from "../utils/tagFilterGroups";
+import { addToTag, readToTagList, removeFromToTag, subscribeToTag } from "../features/to-tag/toTagStore";
+import { toTagIconSvg } from "../features/to-tag/toTagIcons";
 import {
   buildExtensionTagLookup,
   getExtensionTagForId,
@@ -109,6 +114,7 @@ function findUriInObject(root, maxDepth = 6) {
     }
   });
   welcomeModal.initialize();
+  initializeTagifyNavToggle();
   // The quick tag menu suggests names from this list without waiting, so it's fetched now.
   void preloadCommunityPopularTags();
 
@@ -178,6 +184,8 @@ function findUriInObject(root, maxDepth = 6) {
     taggedPlaylists: {},
     taggedArtists: {},
     tagCategories: [],
+    // Resolves category terms ("Any Genre", "No Mood") in smart playlist rules.
+    taxonomy: null,
     tagLookup: new Map(),
     customTagAccents: {},
     recentTagIds: [],
@@ -436,6 +444,8 @@ function findUriInObject(root, maxDepth = 6) {
         artists,
         categories,
         tagLookup,
+        taxonomy:
+          data.taxonomy && typeof data.taxonomy === "object" ? data.taxonomy : null,
         customTagAccents:
           data.taxonomy?.customAccentsById &&
           typeof data.taxonomy.customAccentsById === "object"
@@ -541,6 +551,7 @@ function findUriInObject(root, maxDepth = 6) {
         state.taggedPlaylists = library.playlists;
         state.taggedArtists = library.artists;
         state.tagCategories = library.categories;
+        state.taxonomy = library.taxonomy;
         state.tagLookup = library.tagLookup;
         state.customTagAccents = library.customTagAccents;
         return true;
@@ -558,6 +569,7 @@ function findUriInObject(root, maxDepth = 6) {
       const taxonomy = await storageService.getTaxonomy();
       state.libraryVersion += 1;
       state.tagCategories = this.buildCategoryTreeFromTaxonomy(taxonomy);
+      state.taxonomy = taxonomy && typeof taxonomy === "object" ? taxonomy : null;
       state.tagLookup = buildExtensionTagLookup(state.tagCategories, taxonomy);
       state.customTagAccents =
         taxonomy?.customAccentsById && typeof taxonomy.customAccentsById === "object"
@@ -1113,6 +1125,9 @@ function findUriInObject(root, maxDepth = 6) {
     },
   };
 
+  const toTagAddIcon = toTagIconSvg(false);
+  const toTagDoneIcon = toTagIconSvg(true);
+
   // Context menu feature - adds "Tag with Tagify" to context menu
   const contextMenuItem = {
     /**
@@ -1176,9 +1191,55 @@ function findUriInObject(root, maxDepth = 6) {
           </svg>`,
         ).register();
 
+        new Spicetify.ContextMenu.Item(
+          "Add to To Tag",
+          (uris) => this.addSongsToTag(uris),
+          (uris) => this.songUris(uris).some((uri) => !this.toTagUris().has(uri)),
+          toTagAddIcon,
+        ).register();
+        new Spicetify.ContextMenu.Item(
+          "Remove from To Tag",
+          (uris) => {
+            const removed = removeFromToTag(this.songUris(uris));
+            Spicetify.showNotification(removed === 1 ? "Removed from To Tag." : `Removed ${removed} songs from To Tag.`);
+          },
+          (uris) => { const songs = this.songUris(uris); return songs.length > 0 && songs.every((uri) => this.toTagUris().has(uri)); },
+          toTagDoneIcon,
+        ).register();
+
         state.initialized.menu = true;
       } catch (error) {
         console.error("Tagify: Error initializing menu feature:", error);
+      }
+    },
+
+    songUris(uris) {
+      return uris.filter((uri) => uri.startsWith("spotify:track:") || uri.startsWith("spotify:local:"));
+    },
+    toTagUris() {
+      return new Set(readToTagList().map((entry) => entry.uri));
+    },
+    /** Name snapshots come from what's on screen, the player or saved data; never a new request. */
+    addSongsToTag(uris) {
+      const songs = this.songUris(uris);
+      const rows = new Map(getSpotifyTrackRows(document).map((row) => tracklistEnhancer.trackFromRow(row)).filter(Boolean).map((track) => [track.uri, track]));
+      const playing = Spicetify.Player.data?.item;
+      const details = songs.map((uri) => {
+        const saved = state.taggedTracks[uri];
+        const row = rows.get(uri);
+        const fromPlayer = playing?.uri === uri ? playing : null;
+        return {
+          uri,
+          name: row?.name || fromPlayer?.name || saved?.name || "",
+          artists: row?.details?.artists || fromPlayer?.artists?.map((artist) => artist.name).join(", ") || saved?.artists || "",
+          album: fromPlayer?.album?.name || saved?.albumName || "",
+        };
+      });
+      try {
+        const added = addToTag(details);
+        Spicetify.showNotification(added === 1 ? "Added to To Tag." : `Added ${added} songs to To Tag.`);
+      } catch (error) {
+        Spicetify.showNotification(error instanceof Error ? error.message : "Couldn’t add to To Tag. Please try again.", true);
       }
     },
 
@@ -1330,6 +1391,7 @@ function findUriInObject(root, maxDepth = 6) {
             trackUris,
             tracks: state.taggedTracks,
             rating,
+            taxonomy: state.taxonomy,
           });
           if (removal && !(await confirmSmartPlaylistRatingRemoval(removal))) {
             return false;
@@ -1385,7 +1447,7 @@ function findUriInObject(root, maxDepth = 6) {
       }
     },
 
-    createControl(trackUri, compact = false) {
+    createControl(trackUri, compact = false, trailingExtra = null) {
       const control = document.createElement("div");
       control.className = "tagify-inline-editor";
       control.dataset.tagifyTrackUri = trackUri;
@@ -1394,6 +1456,7 @@ function findUriInObject(root, maxDepth = 6) {
       control.style.cursor = "pointer";
       control.setAttribute("role", "group");
       control.setAttribute("aria-label", "Tagify track controls");
+      control.tagifyTrailingExtra = trailingExtra;
 
       control.addEventListener("contextmenu", (event) => {
         event.preventDefault();
@@ -1427,6 +1490,7 @@ function findUriInObject(root, maxDepth = 6) {
         tagGroups,
         compact,
         displayMode,
+        trailingExtra: control.tagifyTrailingExtra || null,
         getRateActionLabel: (value, defaultLabel) =>
           this.getRatingActionLabel(trackUri, value, defaultLabel),
         getEnergyActionLabel: (value, defaultLabel) =>
@@ -1795,59 +1859,41 @@ function findUriInObject(root, maxDepth = 6) {
           state.tagCategories,
           localStorage,
         );
+        const appliedTagIds = new Set(
+          scope.trackUris.flatMap((uri) =>
+            utils.getTrackTagIds(state.taggedTracks[uri]),
+          ),
+        );
+        const createTagButton = (tag) => {
+          const tagButton = document.createElement("button");
+          tagButton.type = "button";
+          tagButton.textContent = tag.name;
+          tagButton.style.display = "block";
+          tagButton.style.margin = "3px 4px 3px 12px";
+          tagButton.style.border = "0";
+          tagButton.style.background = "transparent";
+          tagButton.style.color = "var(--spice-text)";
+          tagButton.style.cursor = "pointer";
+          registerTagButton(tagButton, tag.id, tag.name);
+          tagButton.onclick = async () => {
+            try {
+              await tagAction(tag.id, tag.name);
+              this.refreshTracks(scope.trackUris);
+            } catch (error) {
+              console.error("Tagify: Unable to save inline tag", error);
+              showEditError(error, "Tagify couldn't save that tag");
+            }
+          };
+          return tagButton;
+        };
         sortedCategories.forEach((category) => {
-          const categoryDetails = document.createElement("details");
-          const appliedTagIds = new Set(
-            scope.trackUris.flatMap((uri) =>
-              utils.getTrackTagIds(state.taggedTracks[uri]),
-            ),
+          menu.appendChild(
+            createMenuTagCategory(category, {
+              appliedTagIds,
+              openApplied: initialSection === "tags",
+              createTagButton,
+            }),
           );
-          const categoryHasAppliedTag = category.subcategories.some(
-            (subcategory) =>
-              subcategory.tags.some((tag) => appliedTagIds.has(tag.id)),
-          );
-          categoryDetails.open = initialSection === "tags" && categoryHasAppliedTag;
-          const categorySummary = document.createElement("summary");
-          categorySummary.textContent = category.name;
-          categorySummary.style.cursor = "pointer";
-          categorySummary.style.padding = "5px 4px";
-          categoryDetails.appendChild(categorySummary);
-          category.subcategories.forEach((subcategory) => {
-            const subcategoryDetails = document.createElement("details");
-            subcategoryDetails.open =
-              initialSection === "tags" &&
-              subcategory.tags.some((tag) => appliedTagIds.has(tag.id));
-            subcategoryDetails.style.marginLeft = "12px";
-            const subcategorySummary = document.createElement("summary");
-            subcategorySummary.textContent = subcategory.name;
-            subcategorySummary.style.cursor = "pointer";
-            subcategorySummary.style.padding = "4px";
-            subcategoryDetails.appendChild(subcategorySummary);
-            subcategory.tags.forEach((tag) => {
-              const tagButton = document.createElement("button");
-              tagButton.type = "button";
-              tagButton.textContent = tag.name;
-              tagButton.style.display = "block";
-              tagButton.style.margin = "3px 4px 3px 12px";
-              tagButton.style.border = "0";
-              tagButton.style.background = "transparent";
-              tagButton.style.color = "var(--spice-text)";
-              tagButton.style.cursor = "pointer";
-              registerTagButton(tagButton, tag.id, tag.name);
-              tagButton.onclick = async () => {
-                try {
-                  await tagAction(tag.id, tag.name);
-                  this.refreshTracks(scope.trackUris);
-                } catch (error) {
-                  console.error("Tagify: Unable to save inline tag", error);
-                  showEditError(error, "Tagify couldn't save that tag");
-                }
-              };
-              subcategoryDetails.appendChild(tagButton);
-            });
-            categoryDetails.appendChild(subcategoryDetails);
-          });
-          menu.appendChild(categoryDetails);
         });
       }
 
@@ -2469,10 +2515,66 @@ function findUriInObject(root, maxDepth = 6) {
       container.style.alignItems = "center";
       container.style.justifyContent = "center";
 
-      container.appendChild(inlineEditor.createControl(trackUri));
+      // The To Tag icon renders inside the controls, right after the stars.
+      container.appendChild(
+        inlineEditor.createControl(trackUri, false, this.createToTagIcon(trackUri, row)),
+      );
       tagColumn.appendChild(container);
 
       this.insertColumn(row, tagColumn, layout);
+    },
+
+    ensureToTagIconStyles() {
+      if (document.getElementById("tagify-to-tag-icon-styles")) return;
+      const style = document.createElement("style");
+      style.id = "tagify-to-tag-icon-styles";
+      style.textContent = `
+        .tagify-to-tag-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 24px; margin-left: 2px; padding: 0; border: none; border-radius: 50%; background: transparent; color: var(--spice-subtext); cursor: pointer; flex-shrink: 0; }
+        .tagify-to-tag-icon svg { position: relative; top: 2px; }
+        .tagify-to-tag-icon:hover { color: var(--spice-text); }
+        .tagify-to-tag-icon:focus-visible { outline: 2px solid var(--spice-button); outline-offset: 1px; }
+        .tagify-to-tag-icon[aria-pressed="true"] { color: var(--spice-button); }
+        .tagify-to-tag-icon[aria-pressed="false"] { visibility: hidden; }
+        [role="row"]:hover .tagify-to-tag-icon, [aria-selected="true"] .tagify-to-tag-icon, .tagify-to-tag-icon:focus-visible { visibility: visible; }
+      `;
+      document.head.appendChild(style);
+    },
+    syncToTagIcon(button, onList) {
+      button.setAttribute("aria-pressed", String(onList));
+      const label = onList ? "On your To Tag list. Click to tick it off." : "Add to To Tag";
+      button.setAttribute("aria-label", label);
+      button.title = label;
+      button.innerHTML = onList ? toTagDoneIcon : toTagAddIcon;
+    },
+    createToTagIcon(trackUri, row) {
+      this.ensureToTagIconStyles();
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "tagify-to-tag-icon";
+      button.dataset.uri = trackUri;
+      this.syncToTagIcon(button, readToTagList().some((entry) => entry.uri === trackUri));
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        const onList = button.getAttribute("aria-pressed") === "true";
+        try {
+          if (onList) removeFromToTag([trackUri]);
+          else {
+            const track = this.trackFromRow(row);
+            addToTag([{ uri: trackUri, name: track?.name || state.taggedTracks[trackUri]?.name || "", artists: track?.details?.artists || state.taggedTracks[trackUri]?.artists || "", album: state.taggedTracks[trackUri]?.albumName || "" }]);
+          }
+        } catch (error) {
+          Spicetify.showNotification(error instanceof Error ? error.message : "Couldn’t update your To Tag list. Please try again.", true);
+        }
+      });
+      if (!this.toTagListener) {
+        this.toTagListener = () => {
+          const uris = new Set(readToTagList().map((entry) => entry.uri));
+          document.querySelectorAll(".tagify-to-tag-icon").forEach((icon) => this.syncToTagIcon(icon, uris.has(icon.dataset.uri)));
+        };
+        subscribeToTag(this.toTagListener);
+      }
+      return button;
     },
 
     /**
@@ -3340,6 +3442,11 @@ function findUriInObject(root, maxDepth = 6) {
     },
 
     resolveTagFilterLabel(filter) {
+      const groupId =
+        typeof filter === "string" ? getTagGroupFilterGroupId(filter) : null;
+      if (groupId !== null) {
+        return getTagGroupName(state.taxonomy, groupId) || "Category unavailable";
+      }
       return resolveExtensionTagFilterLabel(
         filter,
         state.tagLookup,
@@ -3434,6 +3541,16 @@ function findUriInObject(root, maxDepth = 6) {
       };
     },
 
+    /** "Rock", "Any Genre"; excluded: "NOT Rock", "No Mood". */
+    resolveCriteriaTermLabel(termId, excluded = false) {
+      const label = this.resolveTagFilterLabel(termId);
+      if (!label) return label;
+      if (getTagGroupFilterGroupId(termId) === null) {
+        return excluded ? `NOT ${label}` : label;
+      }
+      return excluded ? `No ${label}` : `Any ${label}`;
+    },
+
     formatIncludeTagFormula(criteria) {
       const normalizedFormula = this.normalizeIncludeTagFormula(criteria);
 
@@ -3447,15 +3564,14 @@ function findUriInObject(root, maxDepth = 6) {
             ? ""
             : clause.tagIds.length > 1
               ? `(${clause.tagIds
-                  .map((tagId) => this.resolveTagFilterLabel(tagId))
+                  .map((tagId) => this.resolveCriteriaTermLabel(tagId))
                   .filter(Boolean)
                   .join(` ${clause.operator} `)})`
-              : this.resolveTagFilterLabel(clause.tagIds[0]);
+              : this.resolveCriteriaTermLabel(clause.tagIds[0]);
         const negativeTerms = Array.isArray(clause.excludedTagIds)
           ? clause.excludedTagIds
-              .map((tagId) => this.resolveTagFilterLabel(tagId))
+              .map((tagId) => this.resolveCriteriaTermLabel(tagId, true))
               .filter(Boolean)
-              .map((label) => `NOT ${label}`)
           : [];
         const terms = positiveText ? [positiveText, ...negativeTerms] : negativeTerms;
 

@@ -8,7 +8,7 @@ import { spotifyApiService } from "@/services/SpotifyApiService";
 import type { SmartPlaylistImportSummary, SpotifyPlaylistReference } from "../utils/smartPlaylist.import";
 import { collectMatchingTrackUris } from "../utils/smartPlaylist.syncUtils";
 import { buildResolvedTagLookup, normalizeTaxonomyTree } from "@/utils/tagTaxonomy";
-import { formatTagFilterFormula } from "@/utils/tagFilterGroups";
+import { formatTagFilterFormula, getTagGroupFilterGroupId, isKnownTagFilterTerm } from "@/utils/tagFilterGroups";
 import { getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
 import { storageService } from "@/services/storage/StorageService";
 import styles from "./SmartPlaylistSharingDialog.module.css";
@@ -29,8 +29,8 @@ interface Props {
   onClose: () => void;
 }
 
-function describeRules(criteria: SmartPlaylistFilterCriteria, name: (id: string) => string): string {
-  const parts = [formatTagFilterFormula({ clauses: criteria.includeTagClauses, connectors: criteria.clauseConnectors }, name)];
+function describeRules(criteria: SmartPlaylistFilterCriteria, name: (id: string) => string, taxonomy: TagTaxonomy | null = null): string {
+  const parts = [formatTagFilterFormula({ clauses: criteria.includeTagClauses, connectors: criteria.clauseConnectors }, name, taxonomy)];
   if (criteria.ratingFilters.length) parts.push(`${criteria.ratingFilters.join(" or ")} stars`);
   if (criteria.energyMinFilter !== null || criteria.energyMaxFilter !== null) parts.push(`Energy ${criteria.energyMinFilter ?? "any"}–${criteria.energyMaxFilter ?? "any"}`);
   if (criteria.bpmMinFilter !== null || criteria.bpmMaxFilter !== null) parts.push(`BPM ${criteria.bpmMinFilter ?? "any"}–${criteria.bpmMaxFilter ?? "any"}`);
@@ -40,12 +40,22 @@ function describeRules(criteria: SmartPlaylistFilterCriteria, name: (id: string)
   return parts.filter(Boolean).join(" · ") || "All songs with saved Tagify details";
 }
 
+/**
+ * Why a setup can't go into a share file yet: a missing tag, or a rule on a
+ * whole category ("Any Genre", "No Mood"), which shares can't carry yet.
+ */
+function shareBlocker(criteria: SmartPlaylistFilterCriteria, taxonomy: TagTaxonomy): "missing" | "category" | null {
+  const terms = criteria.includeTagClauses.flatMap((clause) => [...clause.tagIds, ...clause.excludedTagIds]);
+  if (terms.some((id) => !isKnownTagFilterTerm(taxonomy, id))) return "missing";
+  return terms.some((id) => getTagGroupFilterGroupId(id) !== null) ? "category" : null;
+}
+
 function Matches({ uris, tracks }: { uris: string[]; tracks: Record<string, TrackData> }) {
   const local = uris.filter((uri) => uri.startsWith("spotify:local:"));
   const spotify = uris.filter((uri) => uri.startsWith("spotify:track:"));
   return <div className={styles.matches}>
     <strong>{spotify.length.toLocaleString()} Spotify {spotify.length === 1 ? "song matches" : "songs match"}</strong>
-    {local.length > 0 ? <p>{local.length} local {local.length === 1 ? "song also matches" : "songs also match"}. Add {local.length === 1 ? "it" : "those"} manually in Spotify on the device where the files are saved.</p> : null}
+    {local.length > 0 ? <p>{local.length} local {local.length === 1 ? "song also matches" : "songs also match"}. Tagify adds {local.length === 1 ? "it" : "them"} on each computer where the {local.length === 1 ? "file is" : "files are"} in Spotify’s Local Files.</p> : null}
     {uris.length === 0 ? <p>No songs match yet. You can save this setup for later, choose different tags, or edit its filters after saving. Creating new tags does not tag your songs.</p> : null}
     {spotify.length > 0 ? <details><summary>Preview matching songs</summary><ul>{spotify.slice(0, 10).map((uri, index) => <li key={uri}>{tracks[uri]?.name || `Song ${index + 1}`}{tracks[uri]?.artists ? ` — ${tracks[uri].artists}` : ""}</li>)}</ul>{spotify.length > 10 ? <p>And {(spotify.length - 10).toLocaleString()} more.</p> : null}</details> : null}
   </div>;
@@ -106,7 +116,7 @@ export default function SmartPlaylistSharingDialog({ mode, taxonomy, playlists, 
     try {
       const copy = normalizeTaxonomyTree(JSON.parse(JSON.stringify(taxonomy)) as TagTaxonomy);
       const criteria = resolveSharedRecipeCriteria(recipe, choice, copy);
-      return { uris: tracks ? collectMatchingTrackUris(tracks, criteria) : [], error: "" };
+      return { uris: tracks ? collectMatchingTrackUris(tracks, criteria, copy) : [], error: "" };
     } catch (cause) { return { uris: [], error: cause instanceof Error ? cause.message : "Choose your tags again." }; }
   }), [bundle, choices, taxonomy, tracks]);
   const existingRecipeIds = useMemo(() => new Set(bundle ? getRecipeSelections(bundle, taxonomy, playlists).filter((choice) => choice.mode === "skip").map((choice) => choice.recipeId) : []), [bundle, taxonomy, playlists]);
@@ -119,7 +129,7 @@ export default function SmartPlaylistSharingDialog({ mode, taxonomy, playlists, 
     try {
       if (getTagifyDatabaseName() !== account.current) throw new Error("Your Spotify account changed. Close this window and open the share again for your current account.");
       if (isExport) {
-        const selectedPlaylists = playlists.filter((p) => selected.has(p.id ?? p.playlistId) && !p.criteria.includeTagClauses.some((c) => [...c.tagIds, ...c.excludedTagIds].some((id) => !taxonomy.tagsById[id])));
+        const selectedPlaylists = playlists.filter((p) => selected.has(p.id ?? p.playlistId) && !shareBlocker(p.criteria, taxonomy));
         await onShare(selectedPlaylists);
         setComplete("shared");
       } else if (mode === "restore" && backup) {
@@ -157,14 +167,15 @@ export default function SmartPlaylistSharingDialog({ mode, taxonomy, playlists, 
             <p>Restore {backup.length} saved Smart Playlist{backup.length === 1 ? "" : "s"} and reconnect them to your Spotify playlists.</p>
             <p className={styles.notice}>Import your tags first. Saved active playlists will resume updating: matching songs are added and songs that don’t match can be removed. Existing songs keep their tags and ratings.</p>
             <p>Tagify checks the saved playlist first, then a unique name match. If there’s no clear match, the rules stay saved and inactive for you to connect. Other Smart Playlists are kept.</p>
-            {backup.map((playlist, index) => <article className={styles.card} key={playlist.id ?? index}><strong>{playlist.playlistName}</strong><p className={styles.rules}>{describeRules(playlist.criteria, (id) => tagNames.get(id) ?? "Missing tag")}</p><p>{playlist.isActive ? "Resume automatic updates when connected" : "Keep automatic updates off"}</p></article>)}
+            {backup.map((playlist, index) => <article className={styles.card} key={playlist.id ?? index}><strong>{playlist.playlistName}</strong><p className={styles.rules}>{describeRules(playlist.criteria, (id) => tagNames.get(id) ?? "Missing tag", taxonomy)}</p><p>{playlist.isActive ? "Resume automatic updates when connected" : "Keep automatic updates off"}</p></article>)}
           </> : isExport ? <>
             <p>Choose the setups to share. The recipient will use their own songs, tags, and ratings.</p>
             <p className={styles.notice}>Shared names, descriptions, filters, and tag names will be visible to anyone with the file. Songs and Spotify connections stay private.</p>
             {playlists.length ? <div className={styles.toolbar}><button disabled={busy} onClick={() => setSelected(new Set(playlists.map((p) => p.id ?? p.playlistId)))}>Select all</button><button disabled={busy} onClick={() => setSelected(new Set())}>Clear selection</button></div> : <p>Create a smart playlist before sharing a setup.</p>}
             {playlists.map((playlist) => {
-              const missing = playlist.criteria.includeTagClauses.some((clause) => [...clause.tagIds, ...clause.excludedTagIds].some((id) => !taxonomy.tagsById[id]));
-              return <label key={playlist.id ?? playlist.playlistId} className={styles.shareCard}><input type="checkbox" checked={!missing && selected.has(playlist.id ?? playlist.playlistId)} disabled={missing || busy} onChange={(event) => setSelected((current) => { const next = new Set(current); if (event.target.checked) next.add(playlist.id ?? playlist.playlistId); else next.delete(playlist.id ?? playlist.playlistId); return next; })} /><span><strong>{playlist.playlistName}</strong><span className={styles.rules}>{describeRules(playlist.criteria, (id) => tagNames.get(id) ?? "Missing tag")}</span>{playlist.description ? <span className={styles.rules}>{playlist.description}</span> : null}{missing ? <span className={styles.warning}>A filter uses a missing tag. Edit its filters before sharing.</span> : null}</span></label>;
+              const blocker = shareBlocker(playlist.criteria, taxonomy);
+              const missing = blocker !== null;
+              return <label key={playlist.id ?? playlist.playlistId} className={styles.shareCard}><input type="checkbox" checked={!missing && selected.has(playlist.id ?? playlist.playlistId)} disabled={missing || busy} onChange={(event) => setSelected((current) => { const next = new Set(current); if (event.target.checked) next.add(playlist.id ?? playlist.playlistId); else next.delete(playlist.id ?? playlist.playlistId); return next; })} /><span><strong>{playlist.playlistName}</strong><span className={styles.rules}>{describeRules(playlist.criteria, (id) => tagNames.get(id) ?? "Missing tag", taxonomy)}</span>{playlist.description ? <span className={styles.rules}>{playlist.description}</span> : null}{blocker === "missing" ? <span className={styles.warning}>A filter uses a missing tag or category. Edit its filters before sharing.</span> : blocker === "category" ? <span className={styles.warning}>Setups with a whole-category filter, like “Any Genre” or “No Mood”, can’t be shared yet.</span> : null}</span></label>;
             })}
           </> : mode === "import" && bundle ? <>
             <p>Choose what to add, then match each shared tag to a tag you use. These rules will use your saved Tagify songs and ratings.</p>
@@ -198,8 +209,8 @@ export default function SmartPlaylistSharingDialog({ mode, taxonomy, playlists, 
             {loadingPlaylists ? <p role="status">Reading your Spotify playlists…</p> : null}
             {playlistLoadError ? <div role="alert"><p>Your Spotify playlists couldn’t be read.</p><button disabled={busy} onClick={() => setPlaylistRetry((value) => value + 1)}>Retry playlists</button></div> : null}
             {destination !== "new" && !loadingPlaylists && !playlistLoadError && !availableDestinations.length ? <p>No other Spotify playlists are available. Create a new playlist, or save this setup for later.</p> : null}
-            <h3>{setup.playlistName}</h3><p className={styles.rules}>{describeRules(setup.criteria, (id) => tagNames.get(id) ?? "Missing tag")}</p>
-            {tracks ? <Matches uris={collectMatchingTrackUris(tracks, setup.criteria)} tracks={tracks} /> : null}
+            <h3>{setup.playlistName}</h3><p className={styles.rules}>{describeRules(setup.criteria, (id) => tagNames.get(id) ?? "Missing tag", taxonomy)}</p>
+            {tracks ? <Matches uris={collectMatchingTrackUris(tracks, setup.criteria, taxonomy)} tracks={tracks} /> : null}
             <p className={styles.notice}>{destination === "new" ? "Creates a new private playlist in your Spotify account. Your existing playlists and songs keep their tags and ratings." : `Connects ${existingPlaylist ? `“${existingPlaylist.playlistName}”` : "the playlist you choose"} to these rules. Songs that don’t match can be removed from that playlist. Existing songs keep their tags and ratings.`}</p>
             <p>Sync will keep this playlist up to date: songs that match are added, and songs that stop matching are removed from this playlist.</p>
             <p>If you later add a song to this active playlist in Spotify, Tagify can apply its tags, rating, and energy rules to that song. Tagify asks you to choose when the tag rules allow more than one answer.</p>
@@ -209,7 +220,7 @@ export default function SmartPlaylistSharingDialog({ mode, taxonomy, playlists, 
         </>}
         {error ? <p className={styles.error} role="alert">{error}</p> : null}
       </div>
-      <footer className={styles.footer}>{complete ? <button className={styles.primary} onClick={onClose}>Done</button> : <><button disabled={busy} onClick={onClose}>Cancel</button><button className={styles.primary} disabled={busy || (isExport ? !playlists.some((p) => selected.has(p.id ?? p.playlistId) && !p.criteria.includeTagClauses.some((c) => [...c.tagIds, ...c.excludedTagIds].some((id) => !taxonomy.tagsById[id]))) : mode === "restore" ? !backup?.length : mode === "import" ? !canImport : !tracks || loadError || (destination !== "new" && (!existingPlaylist || loadingPlaylists || playlistLoadError)))} onClick={() => void submit()}>{busy ? "Saving…" : mode === "share" ? "Save share file" : mode === "restore" ? "Restore Smart Playlists" : mode === "import" ? `Add ${included.length} setup${included.length === 1 ? "" : "s"}` : destination === "new" ? "Create playlist and enable sync" : "Connect playlist and enable sync"}</button></>}</footer>
+      <footer className={styles.footer}>{complete ? <button className={styles.primary} onClick={onClose}>Done</button> : <><button disabled={busy} onClick={onClose}>Cancel</button><button className={styles.primary} disabled={busy || (isExport ? !playlists.some((p) => selected.has(p.id ?? p.playlistId) && !shareBlocker(p.criteria, taxonomy)) : mode === "restore" ? !backup?.length : mode === "import" ? !canImport : !tracks || loadError || (destination !== "new" && (!existingPlaylist || loadingPlaylists || playlistLoadError)))} onClick={() => void submit()}>{busy ? "Saving…" : mode === "share" ? "Save share file" : mode === "restore" ? "Restore Smart Playlists" : mode === "import" ? `Add ${included.length} setup${included.length === 1 ? "" : "s"}` : destination === "new" ? "Create playlist and enable sync" : "Connect playlist and enable sync"}</button></>}</footer>
     </div>
   </div></Portal>;
 }

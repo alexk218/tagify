@@ -8,19 +8,19 @@ const MAX_AGE = 7 * 86400000;
 const MAX_EVENTS = 200;
 const HOSTS = ["https://us.i.posthog.com", "https://eu.i.posthog.com"];
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
-const EVENTS = ["tagify_opened", "tagify_present", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened", "update_banner_shown", "update_instructions_opened", "update_download_clicked", "update_banner_dismissed", "community_publish_prompt_shown", "community_publish_prompt_reminder_shown", "community_publish_prompt_snoozed", "community_publish_prompt_published", "community_profile_published", "community_publish_kept_private", "community_share_opened", "community_sharing_stopped", "community_sharing_resumed", "community_connect_prompt_shown", "community_connect_prompt_dismissed", "community_setup_opened", "community_connect_started", "community_connect_completed", "community_connect_failed", "invite_opened", "invite_link_copied", "first_run_shown", "first_run_song_picked", "first_run_members_checked", "first_run_members_tag_added", "community_library_check_completed", "community_library_tag_added", "first_run_payoff_shown", "first_run_payoff_reached", "welcome_popup_shown", "taste_packs_shown", "taste_pack_added", "taste_packs_skipped", "rewind_prompt_shown", "rewind_prompt_opened", "phone_app_panel_opened", "phone_app_store_clicked", "phone_app_button_hidden", "android_notify_requested", "android_release_notice_shown", "track_list_others_opened", "track_list_members_tag_added", "track_list_community_link_opened", "track_list_sort_changed", "smart_playlist_created", "smart_playlist_refreshed", "note_saved", "bulk_tag_applied", "suggested_tag_used", "auto_tags_applied", "energy_set", "tag_filter_used", "album_apply_to_tracks", "tagged_by_others_song_played", "tagged_by_others_tag_toggled", "tagged_by_others_song_hidden", "tagged_by_others_filter_used", "tagged_by_others_playlists_chosen", "community_teaser_viewed", "community_teaser_connect_clicked"] as const;
+const EVENTS = ["tagify_opened", "tagify_present", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened", "update_banner_shown", "update_instructions_opened", "update_download_clicked", "update_banner_dismissed", "community_publish_prompt_shown", "community_publish_prompt_reminder_shown", "community_publish_prompt_snoozed", "community_publish_prompt_published", "community_profile_published", "community_publish_kept_private", "community_share_opened", "community_sharing_stopped", "community_sharing_resumed", "community_connect_prompt_shown", "community_connect_prompt_dismissed", "community_setup_opened", "community_connect_started", "community_connect_completed", "community_connect_failed", "invite_opened", "invite_link_copied", "first_run_shown", "first_run_song_picked", "first_run_members_checked", "first_run_members_tag_added", "community_library_check_completed", "community_library_tag_added", "first_run_payoff_shown", "first_run_payoff_reached", "first_run_tip_shown", "first_run_tip_done", "welcome_popup_shown", "taste_packs_shown", "taste_pack_added", "taste_packs_skipped", "rewind_prompt_shown", "rewind_prompt_opened", "phone_app_panel_opened", "phone_app_store_clicked", "phone_app_button_hidden", "android_notify_requested", "android_release_notice_shown", "community_rating_sharing_asked", "community_rating_sharing_answered", "track_list_others_opened", "track_list_members_tag_added", "track_list_community_link_opened", "track_list_sort_changed", "smart_playlist_created", "smart_playlist_refreshed", "note_saved", "bulk_tag_applied", "suggested_tag_used", "auto_tags_applied", "energy_set", "tag_filter_used", "album_apply_to_tracks", "tagged_by_others_song_played", "tagged_by_others_tag_toggled", "tagged_by_others_song_hidden", "tagged_by_others_filter_used", "tagged_by_others_playlists_chosen", "community_teaser_viewed", "community_teaser_connect_clicked"] as const;
 export type ProductEventName = typeof EVENTS[number];
 // Details are fixed, coarse values so an event never carries content, versions or links.
 const DETAILS = {
   update_kind: ["patch", "minor", "major"],
   method: ["direct", "release_page", "command"],
   sync_state: ["connected", "disconnected", "not_connected"],
-  entry: ["prompt", "community", "sync", "invite", "rewind", "library_check", "teaser_tab", "teaser_rows", "teaser_track_details"],
+  entry: ["prompt", "community", "sync", "invite", "rewind", "library_check", "teaser_tab", "teaser_rows", "teaser_track_details", "teaser_tag_search", "phone_app"],
   relationship: ["first_link", "reconnect", "account_switch"],
   stage: ["start", "finish"],
   invite_entry: ["action_bar", "milestone"],
   invite_link: ["personal", "general"],
-  surface: ["workspace", "sync", "invitation", "onboarding", "first_run", "tag_manager", "tab", "rows", "track_details"],
+  surface: ["workspace", "sync", "invitation", "onboarding", "first_run", "tag_manager", "desktop_question", "desktop_publish", "notice", "tab", "rows", "track_details", "tag_search"],
   sharing_state: ["review", "private", "paused", "public"],
   saved_songs: ["0", "1-9", "10-99", "100-999", "1000+"],
   tagged_songs: ["0", "1-9", "10-99", "100-999", "1000-2499", "2500-4999", "5000-9999", "10000+"],
@@ -41,7 +41,7 @@ const DETAILS = {
   phone_surface: ["panel", "notice"],
   // Tagged tracks: other members' tags opened on a row.
   new_to_library: ["yes", "no"],
-  target: ["song", "member"],
+  target: ["song", "member", "tag"],
   // The track list's Sort by options (SORT_OPTIONS in constants/trackList, as snake_case). A test fails when an option is added there but not here.
   sort: ["date_modified", "date_created", "alphabetical", "rating", "energy", "bpm", "community_people"],
   after_highlight: ["yes", "no"],
@@ -53,6 +53,10 @@ const DETAILS = {
   folders_used: ["yes", "no"],
   // Community teasers for people who aren't connected: songs other members tagged among their newest Liked Songs.
   found_bucket: ["1-9", "10-49", "50-99", "100-249", "250+"],
+  answer: ["yes", "no"],
+  // First-run tips (docs/ONBOARDING_FIRST_RUN_PLAN_2026-11.md section 10).
+  tip: ["play", "tag", "manage", "tagged", "others", "playlist", "smart", "rate"],
+  how: ["action", "got_it", "skipped"],
 } as const;
 type DetailKey = keyof typeof DETAILS;
 export type ProductEventDetails = { [K in DetailKey]?: typeof DETAILS[K][number] };
@@ -72,6 +76,8 @@ const EVENT_DETAILS: Partial<Record<ProductEventName, readonly DetailKey[]>> = {
   community_teaser_connect_clicked: ["surface"],
   community_library_tag_added: ["members_add"],
   first_run_payoff_reached: ["payoff_action"],
+  first_run_tip_shown: ["tip"],
+  first_run_tip_done: ["tip", "how"],
   community_setup_opened: ["entry"],
   community_connect_started: ["entry"],
   community_connect_completed: ["entry", "relationship"],
@@ -93,6 +99,8 @@ const EVENT_DETAILS: Partial<Record<ProductEventName, readonly DetailKey[]>> = {
   tagged_by_others_song_hidden: ["hide_action"],
   tagged_by_others_filter_used: ["filter_kind"],
   tagged_by_others_playlists_chosen: ["playlists_chosen", "folders_used"],
+  community_rating_sharing_asked: ["surface"],
+  community_rating_sharing_answered: ["answer", "surface"],
 };
 const BASE_PROPERTIES = ["app_version", "spotify_version", "installation_id", "$process_person_profile", "$geoip_disable", "$ip"];
 const SPOTIFY_VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}(\.\d{1,6})?$/;
@@ -126,14 +134,18 @@ export function songsBucket(count: number): ProductEventDetails["songs"] {
 }
 // Sharing and taste packs both report a `surface`, from different places.
 const SHARING_SURFACES = ["workspace", "sync", "invitation", "onboarding"] as const;
-const TEASER_SURFACES = ["tab", "rows", "track_details"] as const;
+// Where Tagify asked "Share your ratings on your profile?": the question, the publish choice or an update notice.
+const RATING_SHARING_SURFACES = ["desktop_question", "desktop_publish", "notice"] as const;
+const TEASER_SURFACES = ["tab", "rows", "track_details", "tag_search"] as const;
 const EVENT_VALUES: Partial<Record<ProductEventName, Partial<Record<DetailKey, readonly string[]>>>> = {
   community_share_opened: { surface: SHARING_SURFACES },
   community_profile_published: { surface: SHARING_SURFACES },
-  taste_pack_added: { surface: ["tag_manager"] },
+  taste_pack_added: { surface: ["first_run", "tag_manager"] },
   track_list_sort_changed: { sort: ["community_people"] },
   community_teaser_viewed: { surface: TEASER_SURFACES },
   community_teaser_connect_clicked: { surface: TEASER_SURFACES },
+  community_rating_sharing_asked: { surface: RATING_SHARING_SURFACES },
+  community_rating_sharing_answered: { surface: RATING_SHARING_SURFACES },
 };
 /** The track list's Sort by option as a fixed detail value, for example `dateModified` → `date_modified`. */
 export function sortDetail(sortBy: string): ProductEventDetails["sort"] {
@@ -295,7 +307,7 @@ export function recordProductInteraction(event: ProductEventName, details?: Prod
   }).catch(() => { /* Optional reporting never interrupts the user's action. */ });
 }
 
-export type TastePackSurface = "tag_manager";
+export type TastePackSurface = "first_run" | "tag_manager";
 /** One `taste_pack_added` per pack. Call only once the packs are saved; unknown keys are dropped. */
 export function recordTastePacksAdded(keys: readonly string[], surface: TastePackSurface): void {
   for (const key of new Set(keys)) recordProductInteraction("taste_pack_added", { taste_pack: key as ProductEventDetails["taste_pack"], surface });

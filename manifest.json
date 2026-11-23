@@ -1,6 +1,6 @@
 {
   "name": "Tagify",
-  "description": "Apply custom tags and star ratings to your tracks.",
+  "description": "Organize your Spotify library with custom tags, ratings, and smart playlists.",
   "preview": "src/assets/preview.gif",
   "readme": "README.md",
   "tags": ["tags", "music-management", "playlists"]

@@ -4,7 +4,7 @@ import { storageService } from "@/services/storage/StorageService";
 import { smartPlaylistSyncService } from "@/services/SmartPlaylistSyncService";
 import type { TagDataStructure } from "@/types/tagData";
 import { findDisplayTagName } from "@/utils/tagTaxonomy";
-import { evaluateTagFilterFormula, flattenTagFilterFormula, flattenExcludedTagFilterFormula, formatTagFilterFormula } from "@/utils/tagFilterGroups";
+import { evaluateTagFilterFormula, expandTagGroupTerms, flattenTagFilterFormula, flattenExcludedTagFilterFormula, formatTagFilterFormula } from "@/utils/tagFilterGroups";
 import { smartPlaylistTagChoices, type TagChoice } from "../utils/smartPlaylist.tagChoices";
 import { loadSmartPlaylistsFromStorage } from "../utils/smartPlaylist.storage";
 import { isAnotherDialogOpen } from "@/utils/openDialogs";
@@ -68,12 +68,12 @@ export default function SmartPlaylistTagChoices({ enabled }: { enabled: boolean 
   const { playlist, uri } = current;
   const track = data.tracks[uri];
   const existingTags = track?.tagIds ?? [];
-  const choices = smartPlaylistTagChoices(existingTags, playlist.criteria);
+  const choices = smartPlaylistTagChoices(existingTags, playlist.criteria, data.taxonomy);
   const formula = { clauses: playlist.criteria.includeTagClauses, connectors: playlist.criteria.clauseConnectors };
   const name = (id: string) => data.taxonomy.tagsById[id] ? findDisplayTagName(data.taxonomy, id, { disambiguate: true }) : "Unavailable tag";
   const manualChoice = { add: manualTags.filter((id) => !existingTags.includes(id)), remove: existingTags.filter((id) => !manualTags.includes(id)) };
   const choice: TagChoice | null = choices ? (selected === null ? null : choices[selected]) : manualChoice;
-  const canSave = Boolean(choice) && (choices !== null || evaluateTagFilterFormula(manualTags, formula));
+  const canSave = Boolean(choice) && (choices !== null || evaluateTagFilterFormula(manualTags, formula, data.taxonomy));
   const save = async () => {
     if (!choice || busy) return;
     setBusy(true); setError("");
@@ -99,12 +99,12 @@ export default function SmartPlaylistTagChoices({ enabled }: { enabled: boolean 
       <h2 id="smart-tag-choice-title">How would you like to tag this song?</h2>
       <p className={styles.track}>{track?.name || "Song added to your playlist"}{track?.artists ? <span>{track.artists}</span> : null}</p>
       <p>You added this song to <strong>{playlist.playlistName}</strong>. Its filters allow more than one tag choice.</p>
-      <p className={styles.formula}>{formatTagFilterFormula(formula, name)}</p>
+      <p className={styles.formula}>{formatTagFilterFormula(formula, name, data.taxonomy)}</p>
       <fieldset disabled={busy} className={styles.options}><legend>Choose the tags that fit</legend>
         {choices ? choices.map((option, index) => <label key={index} className={styles.option}>
           <input type="radio" name="smart-playlist-tag-choice" checked={selected === index} onChange={() => setSelected(index)} />
           <span>{[option.add.length ? `Add ${option.add.map(name).join(" + ")}` : "", option.remove.length ? `Remove ${option.remove.map(name).join(" + ")}` : ""].filter(Boolean).join("; ") || "Keep the current tags"}</span>
-        </label>) : [...new Set([...existingTags, ...flattenTagFilterFormula(formula), ...flattenExcludedTagFilterFormula(formula)])].map((id) => <label key={id} className={styles.option}>
+        </label>) : [...new Set([...existingTags, ...expandTagGroupTerms(data.taxonomy, [...flattenTagFilterFormula(formula), ...flattenExcludedTagFilterFormula(formula)])])].map((id) => <label key={id} className={styles.option}>
           <input type="checkbox" checked={manualTags.includes(id)} onChange={(event) => setManualTags((tags) => event.target.checked ? [...tags, id] : tags.filter((tag) => tag !== id))} />{name(id)}
         </label>)}
       </fieldset>

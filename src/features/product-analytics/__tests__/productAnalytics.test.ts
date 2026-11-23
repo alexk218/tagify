@@ -298,6 +298,20 @@ describe("automatic Tagify product analytics", () => {
     recordProductEvent(account, "community_share_opened", { surface: "workspace" });
     expect(queue().events.map((event: any) => event.properties.surface)).toEqual(["workspace"]);
   });
+  it("accepts rating sharing questions only from their own surfaces, with a yes or no answer", () => {
+    recordProductEvent(account, "community_rating_sharing_asked", { surface: "desktop_question" });
+    recordProductEvent(account, "community_rating_sharing_answered", { answer: "yes", surface: "notice" });
+    recordProductEvent(account, "community_rating_sharing_answered", { answer: "no", surface: "desktop_publish" });
+    recordProductEvent(account, "community_rating_sharing_asked", { surface: "workspace" });
+    recordProductEvent(account, "community_rating_sharing_asked", { answer: "yes", surface: "notice" });
+    recordProductEvent(account, "community_rating_sharing_answered", { answer: "maybe" as any, surface: "notice" });
+    recordProductEvent(account, "community_share_opened", { surface: "notice" });
+    expect(queue().events.map((event: any) => [event.event, event.properties.answer, event.properties.surface])).toEqual([
+      ["community_rating_sharing_asked", undefined, "desktop_question"],
+      ["community_rating_sharing_answered", "yes", "notice"],
+      ["community_rating_sharing_answered", "no", "desktop_publish"],
+    ]);
+  });
   it("accepts every track list sort on tag_filter_used, and nothing else", () => {
     const sorts = Object.values(SORT_OPTIONS).map(sortDetail);
     expect(sorts).not.toContain(undefined);

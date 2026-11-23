@@ -80,8 +80,6 @@ export function useTrackListControls({
     setReleaseYearMinFilter(filters.releaseYearMinFilter ?? null);
     setReleaseYearMaxFilter(filters.releaseYearMaxFilter ?? null);
   }, [setLengthMaxFilter, setLengthMinFilter, setReleaseYearMaxFilter, setReleaseYearMinFilter]);
-  const [showAdvancedFilters, setShowAdvancedFilters] =
-    useLocalStorage<boolean>("tagify:showAdvancedFilters", false);
   const [sortBy, setSortBy] = useLocalStorage<SortOption>(
     "tagify:trackListSortBy",
     SORT_OPTIONS.DATE_MODIFIED,
@@ -225,8 +223,6 @@ export function useTrackListControls({
     setBpmMaxFilter,
     camelotKeyFilters,
     setCamelotKeyFilters,
-    showAdvancedFilters,
-    setShowAdvancedFilters,
     sortBy,
     setSortBy,
     sortOrder,

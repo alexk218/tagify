@@ -1,4 +1,5 @@
 import { getTagifyDatabaseName, flushLocalPersistence } from "@/services/sync/SyncLocalState";
+import { isKnownTagFilterTerm } from "@/utils/tagFilterGroups";
 import { storageService } from "@/services/storage/StorageService";
 import { useCallback } from "react";
 import { spotifyApiService } from "@/services/SpotifyApiService";
@@ -121,7 +122,7 @@ export function useSmartPlaylistActions({
       const library = await storageService.loadAllStrict();
       checkAccount();
       if (backupData.some((playlist) => playlist.criteria.includeTagClauses.some((clause) =>
-        [...clause.tagIds, ...clause.excludedTagIds].some((id) => !library.taxonomy.tagsById[id])))) {
+        [...clause.tagIds, ...clause.excludedTagIds].some((id) => !isKnownTagFilterTerm(library.taxonomy, id))))) {
         throw new Error("This backup uses tags that aren’t in your library. Import your tag backup first, then restore these Smart Playlists.");
       }
       let playlistsToImport: SmartPlaylistCriteria[];

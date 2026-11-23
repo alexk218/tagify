@@ -321,6 +321,18 @@ class SpotifyService {
   }
 
   /**
+   * A song's Spotify play count from the desktop `getTrack` operation, through the shared
+   * GraphQL wrapper and its cooldowns. Undefined when Spotify gives no count.
+   */
+  async getTrackPlayCount(trackUri: string, priority: "foreground" | "background" = "foreground", feature: SpotifyRequestFeature = "recording-matching"): Promise<number | undefined> {
+    if (!/^spotify:track:[A-Za-z0-9]{22}$/.test(trackUri)) return undefined;
+    const response = await this.requestTrackGraphQL(trackUri, "getTrackPlayCount", undefined, priority, feature);
+    const value = response.errors?.length ? undefined : response.data?.trackUnion?.playcount;
+    const count = typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value.trim()) : undefined;
+    return count !== undefined && Number.isSafeInteger(count) ? count : undefined;
+  }
+
+  /**
    * Get comprehensive track metadata for TrackDetails display
    * Consolidates multiple GraphQL calls into one
    */

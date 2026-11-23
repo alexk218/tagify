@@ -56,11 +56,11 @@ it("fills song lengths and release dates without changing Last Updated, so lengt
   expect(tracks[short].songDetailsAttempts).toBeUndefined();
 
   const underFourMinutes = { ...criteria, lengthMaxFilter: 240 };
-  expect(evaluateTrackMatchesCriteria(tracks[short], underFourMinutes)).toBe(true);
-  expect(evaluateTrackMatchesCriteria(tracks[long], underFourMinutes)).toBe(false);
+  expect(evaluateTrackMatchesCriteria(tracks[short], underFourMinutes, null)).toBe(true);
+  expect(evaluateTrackMatchesCriteria(tracks[long], underFourMinutes, null)).toBe(false);
   const nineties = { ...criteria, releaseYearMinFilter: 1990, releaseYearMaxFilter: 1999 };
-  expect(evaluateTrackMatchesCriteria(tracks[short], nineties)).toBe(true);
-  expect(evaluateTrackMatchesCriteria(tracks[long], nineties)).toBe(false);
+  expect(evaluateTrackMatchesCriteria(tracks[short], nineties, null)).toBe(true);
+  expect(evaluateTrackMatchesCriteria(tracks[long], nineties, null)).toBe(false);
 
   // Nothing left to look up.
   expect(await runSongDetailsFill({ paceMs: 0 })).toMatchObject({ reads: 0, updated: 0 });

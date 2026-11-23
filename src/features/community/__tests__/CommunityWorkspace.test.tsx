@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SyncStatus } from "@/services/sync/SyncRuntime";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
@@ -14,7 +14,6 @@ afterEach(() => {
 });
 
 const ACCOUNT = "9ca88f9f-1ff9-4f1f-8dad-fbd7191d78e7";
-const DEVICE = "c61cb594-ae81-4977-9a10-fdca576e4939";
 
 function renderWorkspace({ connected = true, status = "idle" as SyncStatus, sharing = sharingStub(policyFixture()), ...handlers }: {
   connected?: boolean;
@@ -24,13 +23,11 @@ function renderWorkspace({ connected = true, status = "idle" as SyncStatus, shar
   onConnectCommunity?: () => void;
   onOpenCloudSync?: () => void;
   onOpenSharing?: () => void;
-  onDisconnect?: () => Promise<void>;
 } = {}) {
   const props = {
     onConnectCommunity: vi.fn(),
     onOpenCloudSync: vi.fn(),
     onOpenSharing: vi.fn(),
-    onDisconnect: vi.fn().mockResolvedValue(undefined),
     ...handlers,
   };
   render(
@@ -43,7 +40,6 @@ function renderWorkspace({ connected = true, status = "idle" as SyncStatus, shar
       tracks={tracksFixture()}
       taxonomy={taxonomyFixture()}
       connectedAccountId={connected ? ACCOUNT : null}
-      connectedDeviceId={connected ? DEVICE : null}
     />,
   );
   return props;
@@ -54,12 +50,12 @@ describe("CommunityWorkspace", () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     const { onConnectCommunity, onOpenCloudSync } = renderWorkspace({ connected: false, status: "unlinked" });
 
-    expect(screen.getByRole("heading", { name: "Share your tags on Community" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Back up your tags and use them on your phone" })).toBeInTheDocument();
     // Local files never publish, so only the three Spotify songs count.
-    expect(screen.getByText("3 tags on 3 songs are ready to share.")).toBeInTheDocument();
+    expect(screen.getByText("3 tags on 3 songs come with you. Nothing is public unless you choose.")).toBeInTheDocument();
     expect(screen.getAllByRole("button")).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole("button", { name: "Share my tags" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create account or sign in" }));
     expect(onConnectCommunity).toHaveBeenCalledTimes(1);
     expect(onOpenCloudSync).not.toHaveBeenCalled();
 
@@ -71,7 +67,7 @@ describe("CommunityWorkspace", () => {
   it("asks to finish connecting while an approval waits in the browser", () => {
     const { onConnectCommunity } = renderWorkspace({ connected: false, status: "unlinked", connectionPending: true });
     expect(screen.getByRole("heading", { name: "Finish connecting in your browser" })).toBeInTheDocument();
-    expect(screen.getByText("Approve the connection there, then come back here.")).toBeInTheDocument();
+    expect(screen.getByText("Enter your email on the page that opened and type the code we email you. Tagify finishes by itself.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Finish connecting" }));
     expect(onConnectCommunity).toHaveBeenCalledTimes(1);
   });
@@ -102,11 +98,17 @@ describe("CommunityWorkspace", () => {
 
     expect(screen.getByRole("heading", { name: "Your tags are public" })).toBeInTheDocument();
     expect(screen.getByText("Public · Backed up")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "View my profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "@alex" }));
     expect(openSpy).toHaveBeenCalledWith("https://tagify.fm/@alex", "_blank", "noopener,noreferrer");
     fireEvent.click(screen.getByRole("button", { name: "Choose what's hidden" }));
     expect(onOpenSharing).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Visit Community" })).toBeInTheDocument();
+  });
+
+  it("keeps \"View my profile\" until the handle is known", () => {
+    renderWorkspace({ sharing: sharingStub(policyFixture(), { handle: null }) });
+    expect(screen.getByRole("button", { name: "View my profile" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "@alex" })).not.toBeInTheDocument();
   });
 
   it("resumes paused updates in one step", async () => {
@@ -138,33 +140,12 @@ describe("CommunityWorkspace", () => {
     expect(screen.getByText("Backed up")).toBeInTheDocument();
   });
 
-  it("offers a confirmed disconnect while connected", async () => {
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
-    const { onDisconnect } = renderWorkspace();
+  it("has no Disconnect on the card", () => {
+    const { onOpenCloudSync } = renderWorkspace();
 
-    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
-    expect(screen.getByText("Stop cloud backup?")).toBeInTheDocument();
-    expect(screen.getByText("Your tags stay here. Cloud sync stops, and Community signs out in your browser.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Disconnect now" }));
-
-    await waitFor(() => expect(onDisconnect).toHaveBeenCalledTimes(1));
-    expect(openSpy).toHaveBeenCalledWith(
-      `https://tagify.fm/auth/disconnect?account=${ACCOUNT}&device=${DEVICE}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
-    expect(openSpy.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(onDisconnect).mock.invocationCallOrder[0]);
-  });
-
-  it("opens the browser handoff immediately even when remote disconnect later fails", async () => {
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
-    renderWorkspace({ onDisconnect: vi.fn().mockRejectedValue(new Error("Community is unavailable")) });
-
-    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
-    fireEvent.click(screen.getByRole("button", { name: "Disconnect now" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't disconnect safely. Your library is still on this device.");
-    expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("/auth/disconnect?account="), "_blank", "noopener,noreferrer");
+    expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sync" }));
+    expect(onOpenCloudSync).toHaveBeenCalledTimes(1);
   });
 
   it("shows a revoked device as requiring reconnection instead of connected", () => {

@@ -28,8 +28,7 @@
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 9px;
+  padding: 0;
   border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 999px;
   background: transparent;
@@ -37,24 +36,64 @@
   font-size: 12px;
   line-height: 16px;
   white-space: nowrap;
+}
+
+/* A chip is two buttons: + adds the tag; the name opens its tag page. Each has its own hover. */
+.chipAdd,
+.chipLink {
+  align-items: center;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  color: inherit;
   cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  display: inline-flex;
+  font: inherit;
+  line-height: 16px;
+  min-width: 0;
+  transition: background-color 0.15s ease;
 }
 
-.chip:hover:not(:disabled) {
-  border-color: rgb(255 255 255 / 45%);
-  background: rgb(255 255 255 / 8%);
+.chipAdd {
+  border-radius: 999px 0 0 999px;
+  flex: 0 0 auto;
+  padding: 3px 2px 3px 8px;
 }
 
-.chip:focus-visible,
+.chipLink {
+  border-radius: 0 999px 999px 0;
+  gap: 4px;
+  padding: 3px 9px 3px 2px;
+}
+
+/* No + in front (not addable): the name is the whole chip. */
+.chipLink:first-child {
+  border-radius: 999px;
+  padding-left: 9px;
+}
+
+.chipAdd:hover:not(:disabled) {
+  background: rgb(255 255 255 / 10%);
+}
+
+.chipLink:hover > span:first-of-type {
+  text-decoration: underline;
+}
+
+.chipAdd:disabled {
+  cursor: default;
+}
+
+.chipAdd:focus-visible,
+.chipLink:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: -2px;
+}
+
 .link:focus-visible,
 .handle:focus-visible {
   outline: 2px solid var(--spice-text);
   outline-offset: 2px;
-}
-
-.chip:disabled {
-  cursor: default;
 }
 
 .chipOn {

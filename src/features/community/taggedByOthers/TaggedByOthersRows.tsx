@@ -2,8 +2,19 @@ import React, { useState } from "react";
 import { Check, Lock, Plus, Star, X } from "lucide-react";
 import { sameTagNameKey } from "@tagify/community-contracts";
 import type { CommunityMatch, CommunityMatchTag } from "@/features/onboarding/services/communityMatches";
+import { communityTagLinkTitle, getCommunityTagUrl, openCommunityUrl } from "@/features/community/communityLinks";
 import styles from "./TaggedByOthersRows.module.css";
 import { CoverPlay, usePlayerNow } from "@/components/ui";
+import { openSpotifyArtist, openSpotifyTrack } from "@/services/spotifyNavigation";
+
+const shortDate = (at: number) => new Date(at).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+/** When the song was added to the member's Spotify, as Spotify reported it when the check read it. */
+function addedOf(match: CommunityMatch) {
+  const at = match.track.addedAt;
+  if (!at) return null;
+  const playlist = (match as { from?: string }).from === "playlist";
+  return { at, verb: playlist ? "Added" : "Liked", title: `${playlist ? "Added to a playlist" : "Added to your Liked Songs"} on ${new Date(at).toLocaleString()}` };
+}
 
 /** Tags a song shows before "+N more": enough to see what members agree on, few enough to scan a long list. */
 export const TAGS_SHOWN = 6;
@@ -90,6 +101,15 @@ export function TaggedByOthersRows({ matches, onToggleTag, coverOf, hasTag, onLo
     }
   };
 
+  /** A chip's name and count: opens the tag's page on tagify.fm, to find more music with it. */
+  const tagLink = (tag: MergedTag, title: string) => (
+    <button type="button" className={styles.tagLink} title={title} aria-label={communityTagLinkTitle(tag.label)}
+      onClick={(event) => { stop(event); openCommunityUrl(getCommunityTagUrl(tag.label)); }}>
+      <span className={styles.tagName}>{tag.label}</span>
+      {tag.people > 1 ? <span className={styles.count} aria-hidden="true">{tag.people.toLocaleString()}</span> : null}
+    </button>
+  );
+
   return (
     <>
       <ul className={styles.rows}>
@@ -99,7 +119,6 @@ export function TaggedByOthersRows({ matches, onToggleTag, coverOf, hasTag, onLo
           const open = opened.has(uri);
           const visible = open ? tags : tags.slice(0, TAGS_SHOWN);
           const hidden = tags.length - visible.length;
-          const artist = match.track.artists.map((item) => item.name).join(", ");
           const toggleMore = () => setOpened((current) => {
             const next = new Set(current);
             if (next.has(uri)) next.delete(uri); else next.add(uri);
@@ -109,8 +128,9 @@ export function TaggedByOthersRows({ matches, onToggleTag, coverOf, hasTag, onLo
           const active = activeUri === uri;
           const playing = player.uri === uri && player.playing;
           const rating = ratingOf?.(match) ?? 0;
+          const added = addedOf(match);
           return (
-            <li key={uri} className={`${styles.row} ${active ? styles.rowActive : ""} ${onLock ? styles.rowLockable : ""}`}
+            <li key={uri} aria-current={active ? "true" : undefined} className={`${styles.row} ${active ? styles.rowActive : ""} ${onLock ? styles.rowLockable : ""}`}
               onClick={onLock && !active ? () => onLock(match) : undefined}>
               {onPlay ? (
                 <CoverPlay name={match.track.name} current={player.uri === uri} playing={playing} onPlay={() => onPlay(match)} size={64}>
@@ -119,13 +139,11 @@ export function TaggedByOthersRows({ matches, onToggleTag, coverOf, hasTag, onLo
               ) : cover ? <img src={cover} alt="" className={styles.cover} /> : <span className={styles.cover} />}
               <div className={styles.body}>
                 <span className={styles.titleLine}>
-                  {onLock ? (
-                    <button type="button" className={`${styles.song} ${styles.songButton}`} aria-pressed={active}
-                      onClick={(event) => { stop(event); if (!active) onLock(match); }}
-                      aria-label={active ? `${match.track.name}, open in the editor` : `Open ${match.track.name}`}>
-                      <span className={styles.songName}>{match.track.name}</span>
-                    </button>
-                  ) : <span className={`${styles.song} ${styles.songName}`}>{match.track.name}</span>}
+                  <button type="button" className={`${styles.song} ${styles.songButton}`}
+                    onClick={(event) => { stop(event); openSpotifyTrack(uri); }}
+                    title="Go to song" aria-label={`Go to ${match.track.name} in Spotify`}>
+                    <span className={styles.songName}>{match.track.name}</span>
+                  </button>
                   {rating > 0 ? (
                     <span className={styles.rating} aria-label={`Your rating: ${rating} ${rating === 1 ? "star" : "stars"}`}>
                       <Star size={11} fill="currentColor" aria-hidden="true" />{rating}
@@ -133,29 +151,44 @@ export function TaggedByOthersRows({ matches, onToggleTag, coverOf, hasTag, onLo
                   ) : null}
                 </span>
                 <span className={styles.meta}>
-                  <span className={styles.artist}>{artist}</span>
+                  <span className={styles.artist}>
+                    {match.track.artists.map((item, index) => (
+                      <React.Fragment key={`${item.name}-${index}`}>
+                        {index > 0 ? ", " : null}
+                        <button type="button" className={styles.artistButton} title={`Go to ${item.name}`}
+                          onClick={(event) => { stop(event); void openSpotifyArtist(item.name, uri); }}>
+                          {item.name}
+                        </button>
+                      </React.Fragment>
+                    ))}
+                  </span>
                   <span aria-hidden="true"> · </span>
                   <span>{detailOf(match)}</span>
+                  {added ? (
+                    <>
+                      <span aria-hidden="true"> · </span>
+                      <span title={added.title}>{added.verb} {shortDate(added.at)}</span>
+                    </>
+                  ) : null}
                 </span>
                 <span className={styles.tags}>
                   {onConnectToAdd ? visible.map((tag) => (
-                    <span key={tag.label} className={`${styles.tag} ${styles.tagReadOnly}`} title={`Tagged ${tag.label} by ${peopleText(tag.people)}`}>
-                      <span className={styles.tagName}>{tag.label}</span>
-                      {tag.people > 1 ? <span className={styles.count} aria-hidden="true">{tag.people.toLocaleString()}</span> : null}
+                    <span key={tag.label} className={`${styles.tag} ${styles.tagReadOnly}`}>
+                      {tagLink(tag, `${communityTagLinkTitle(tag.label)} · tagged by ${peopleText(tag.people)}`)}
                     </span>
                   )) : visible.map((tag) => {
                     const on = hasTag(match, tag);
                     const working = busy === keyOf(uri, tag.label);
                     return (
-                      <button key={tag.label} type="button" className={`${styles.tag} ${on ? styles.tagOn : ""}`} disabled={busy !== null || (on && !canRemove)}
-                        aria-pressed={on} aria-busy={working || undefined}
-                        aria-label={on && !canRemove ? `${tag.label} added to ${match.track.name}` : on ? `Remove ${tag.label} from ${match.track.name}` : `Add ${tag.label} to ${match.track.name}`}
-                        title={`${on ? (canRemove ? "On your song. Click to remove" : "On your song") : "Click to add"} · tagged ${tag.label} by ${peopleText(tag.people)}`}
-                        onClick={(event) => { stop(event); void toggleTag(match, tag); }}>
-                        {on ? <Check size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
-                        <span className={styles.tagName}>{tag.label}</span>
-                        {tag.people > 1 ? <span className={styles.count} aria-hidden="true">{tag.people.toLocaleString()}</span> : null}
-                      </button>
+                      <span key={tag.label} className={`${styles.tag} ${on ? styles.tagOn : ""}`} aria-busy={working || undefined}>
+                        <button type="button" className={styles.tagAdd} disabled={busy !== null || (on && !canRemove)} aria-pressed={on}
+                          aria-label={on && !canRemove ? `${tag.label} added to ${match.track.name}` : on ? `Remove ${tag.label} from ${match.track.name}` : `Add ${tag.label} to ${match.track.name}`}
+                          title={`${on ? (canRemove ? "On your song. Click to remove" : "On your song") : "Click to add"} · tagged ${tag.label} by ${peopleText(tag.people)}`}
+                          onClick={(event) => { stop(event); void toggleTag(match, tag); }}>
+                          {on ? <Check size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
+                        </button>
+                        {tagLink(tag, `${communityTagLinkTitle(tag.label)} · tagged by ${peopleText(tag.people)}`)}
+                      </span>
                     );
                   })}
                   {hidden > 0 || open ? (
@@ -166,7 +199,7 @@ export function TaggedByOthersRows({ matches, onToggleTag, coverOf, hasTag, onLo
                   ) : null}
                   {onConnectToAdd ? (
                     <button type="button" className={styles.more} onClick={(event) => { stop(event); onConnectToAdd(); }}
-                      aria-label={`Connect to Tagify Community to add these tags to ${match.track.name}`}>
+                      aria-label={`Create account or sign in to add these tags to ${match.track.name}`}>
                       <Lock size={11} aria-hidden="true" />Connect to add
                     </button>
                   ) : null}

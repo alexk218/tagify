@@ -80,6 +80,13 @@ import {
   queueCommunityTagImportCredits,
 } from "@/features/tag-data/utils/communityTagImportCredits";
 import { useCommunityTagCatalog } from "@/features/tag-data/hooks/useCommunityTagCatalog";
+import { useTagsForYourSongs } from "@/features/tag-data/hooks/useTagsForYourSongs";
+import {
+  buildOwnedTagIndex,
+  describeYourSongs,
+  findOwnedTag,
+  type OwnedMatch,
+} from "@/features/tag-data/utils/communityCatalogForYou";
 import { useCommunityPopularTags } from "@/features/tag-data/hooks/useCommunityPopularTags";
 import { findTagSuggestions, findUsualTagName, TASTE_PACK_HOME, type TastePackInstallResult } from "@tagify/community-contracts";
 import { COMMUNITY_PAGES_ORIGIN } from "@/features/community/communityLinks";
@@ -1485,7 +1492,7 @@ const TagManager: React.FC<TagManagerProps> = ({
   >(null);
   const [renameValue, setRenameValue] = useState("");
   const [communitySearchQuery, setCommunitySearchQuery] = useState<string>("");
-  const [communitySortMode, setCommunitySortMode] = useState<CommunityCatalogSort>("contributors");
+  const [communitySortChoice, setCommunitySortChoice] = useState<CommunityCatalogSort | "for-you" | null>(null);
   const [communityMinTrackCount, setCommunityMinTrackCount] = useState(1);
   const [importingCommunityTagKey, setImportingCommunityTagKey] = useState<string | null>(null);
   const [newCustomAccentName, setNewCustomAccentName] = useState<string>("");
@@ -1721,12 +1728,49 @@ const TagManager: React.FC<TagManagerProps> = ({
     return allCustomAccents;
   }, [allCustomAccents, colorLibrarySortMode, localTaxonomy, selectedColorTheme, selectedColorThemeId]);
 
+  const tagsForYourSongs = useTagsForYourSongs(activeView === "community");
+  // "For your songs" is offered, and opens first, once this computer has checked your songs.
+  // Until that saved check is read, the list waits instead of flashing "Most users" first.
+  const waitingForTagsForYourSongs = communitySortChoice === null && tagsForYourSongs.status === "loading";
+  const communitySortMode =
+    communitySortChoice === null
+      ? tagsForYourSongs.status === "none" ? "contributors" : "for-you"
+      : communitySortChoice === "for-you" && tagsForYourSongs.status !== "ready"
+        ? "contributors"
+        : communitySortChoice;
+  const showingTagsForYourSongs = communitySortMode === "for-you";
   const communityCatalog = useCommunityTagCatalog({
-    enabled: activeView === "community",
+    enabled: activeView === "community" && !showingTagsForYourSongs,
     query: communitySearchQuery,
-    sort: communitySortMode,
+    sort: communitySortMode === "for-you" ? "contributors" : communitySortMode,
     minTrackCount: communityMinTrackCount,
   });
+  const ownedTagIndex = useMemo(() => buildOwnedTagIndex(localTaxonomy), [localTaxonomy]);
+  const communityRows = useMemo(() => {
+    const rows: Array<{ tag: CommunityCatalogTag; stats: string; usualPlace: string | null; owned: OwnedMatch }> =
+      showingTagsForYourSongs
+        ? tagsForYourSongs.tags
+            .filter((tag) => tag.name.toLowerCase().includes(communitySearchQuery.trim().toLowerCase()))
+            .map((tag) => ({
+              tag: {
+                key: tag.name.trim().toLowerCase(),
+                name: tag.name,
+                songCount: tag.yourSongCount,
+                contributorCount: tag.people,
+              },
+              stats: describeYourSongs(tag.yourSongCount),
+              usualPlace: tag.usualPlace,
+              owned: findOwnedTag(ownedTagIndex, tag.name),
+            }))
+        : communityCatalog.tags.map((tag) => ({
+            tag,
+            stats: formatCommunityTagStats(tag),
+            usualPlace: null,
+            owned: findOwnedTag(ownedTagIndex, tag.name),
+          }));
+    return rows;
+  }, [showingTagsForYourSongs, tagsForYourSongs.tags, communitySearchQuery, communityCatalog.tags, ownedTagIndex]);
+
   // Only a desktop signed in to Community thanks the people who share a tag.
   const canThankCurators = getDesktopSyncConfiguration() !== null;
 
@@ -4502,7 +4546,7 @@ const TagManager: React.FC<TagManagerProps> = ({
                   <div>
                     <h3 className={styles.paneTitle}>Community Tag Catalog</h3>
                     <p className={styles.paneSubtitle}>
-                      Public tags from community-tagged tracks, normalized by tag name.
+                      Tags other Tagify members use, ready to add to your own tags.
                       {canThankCurators && " When you import a tag, the people who share it get a thank-you."}
                     </p>
                   </div>
@@ -4522,16 +4566,17 @@ const TagManager: React.FC<TagManagerProps> = ({
                     className={styles.compactSelect}
                     value={communitySortMode}
                     onChange={(event) =>
-                      setCommunitySortMode(event.target.value as CommunityCatalogSort)
+                      setCommunitySortChoice(event.target.value as CommunityCatalogSort | "for-you")
                     }
                     aria-label="Sort community tags"
                   >
+                    {tagsForYourSongs.status === "ready" && <option value="for-you">For your songs</option>}
                     <option value="contributors">Most users</option>
                     <option value="popular">Most tracks</option>
                     <option value="niche">Fewest tracks</option>
                     <option value="alphabetical">Alphabetical</option>
                   </select>
-                  <select
+                  {!showingTagsForYourSongs && <select
                     className={styles.compactSelect}
                     value={communityMinTrackCount}
                     onChange={(event) => setCommunityMinTrackCount(Number(event.target.value))}
@@ -4542,23 +4587,23 @@ const TagManager: React.FC<TagManagerProps> = ({
                         {count}+ tracks
                       </option>
                     ))}
-                  </select>
+                  </select>}
                 </div>
 
-                {communityCatalog.status === "loading" ? (
+                {waitingForTagsForYourSongs || (!showingTagsForYourSongs && communityCatalog.status === "loading") ? (
                   <div className={styles.emptyState}>Loading community tags...</div>
-                ) : communityCatalog.status === "error" ? (
+                ) : !showingTagsForYourSongs && communityCatalog.status === "error" ? (
                   <div className={styles.emptyState}>
                     <p>Couldn't load Community tags. Check your connection and try again.</p>
                     <button type="button" className={styles.secondaryButton} onClick={communityCatalog.retry}>
                       Try again
                     </button>
                   </div>
-                ) : communityCatalog.tags.length === 0 ? (
+                ) : communityRows.length === 0 ? (
                   <div className={styles.emptyState}>No community tags match this search.</div>
                 ) : (
                   <div className={styles.communityTagList}>
-                    {communityCatalog.tags.map((tag) => (
+                    {communityRows.map(({ tag, stats, usualPlace, owned }) => (
                       <article
                         key={tag.key}
                         className={styles.communityTagRow}
@@ -4574,9 +4619,18 @@ const TagManager: React.FC<TagManagerProps> = ({
                       >
                         <div className={styles.communityTagCopy}>
                           <strong>{tag.name}</strong>
-                          <span>{formatCommunityTagStats(tag)}</span>
+                          <span>{stats}</span>
+                          {owned?.kind === "same" ? (
+                            <span>You have this in {owned.tag.location || "your tags"}</span>
+                          ) : owned?.kind === "similar" ? (
+                            <span>
+                              Similar to your “{owned.tag.name}”{owned.tag.location ? ` in ${owned.tag.location}` : ""}
+                            </span>
+                          ) : usualPlace ? (
+                            <span>Usually kept in {usualPlace}</span>
+                          ) : null}
                         </div>
-                        <button
+                        {owned?.kind === "same" ? null : <button
                           type="button"
                           className={styles.secondaryButtonSmall}
                           disabled={importingCommunityTagKey === tag.key}
@@ -4586,10 +4640,10 @@ const TagManager: React.FC<TagManagerProps> = ({
                           }}
                         >
                           {importingCommunityTagKey === tag.key ? "Importing..." : "Import"}
-                        </button>
+                        </button>}
                       </article>
                     ))}
-                    {communityCatalog.hasMore && (
+                    {!showingTagsForYourSongs && communityCatalog.hasMore && (
                       <div className={styles.communityLoadMore}>
                         <button
                           type="button"

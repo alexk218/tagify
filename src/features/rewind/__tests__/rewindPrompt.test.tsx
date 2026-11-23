@@ -92,8 +92,8 @@ describe("Your Rewind 2026 is ready", () => {
     expect(prompt()).toBeInTheDocument();
     expect(screen.getByText("312")).toBeInTheDocument();
     expect(screen.getByText("songs tagged in 2026")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "See your full Rewind on Community" })).toBeInTheDocument();
-    expect(screen.getByText(/Connecting backs up your library there/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create account or sign in" })).toBeInTheDocument();
+    expect(screen.getByText(/with a free Tagify account. Everything you've tagged here comes with you./)).toBeInTheDocument();
     expect(events()).toEqual([["rewind_prompt_shown"]]);
   });
 
@@ -101,7 +101,7 @@ describe("Your Rewind 2026 is ready", () => {
     render(<Harness connected />);
     await settle();
     expect(screen.getByText("Your top tags, busiest month and longest streak are on Community.")).toBeInTheDocument();
-    expect(screen.queryByText(/Connecting backs up/)).toBeNull();
+    expect(screen.queryByText(/Everything you've tagged here/)).toBeNull();
   });
 
   it("stays away before noon UTC on December 8 and after December 31", async () => {
@@ -196,7 +196,7 @@ describe("Your Rewind 2026 is ready", () => {
     const onOpen = vi.fn();
     const first = render(<Harness onOpen={onOpen} />);
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: "See your full Rewind on Community" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create account or sign in" }));
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(prompt()).toBeNull();
     expect(events()).toEqual([["rewind_prompt_shown"], ["rewind_prompt_opened"]]);

@@ -1,4 +1,4 @@
-import { TrackData } from "@/types/tagData";
+import type { TagTaxonomy, TrackData } from "@/types/tagData";
 import { SmartPlaylistFilterCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
 import { isCamelotKeyInRange, normalizeCamelotKey } from "@/utils/camelotKey";
 import { compileTagFilterFormula } from "@/utils/tagFilterGroups";
@@ -7,8 +7,9 @@ import { matchesSongDetailFilters } from "@/utils/songDetails";
 export function evaluateTrackMatchesCriteria(
   trackData: TrackData,
   criteria: SmartPlaylistFilterCriteria,
+  taxonomy: TagTaxonomy | null,
 ): boolean {
-  return compileTrackCriteria(criteria)(trackData);
+  return compileTrackCriteria(criteria, taxonomy)(trackData);
 }
 
 /**
@@ -17,6 +18,7 @@ export function evaluateTrackMatchesCriteria(
  */
 export function compileTrackCriteria(
   criteria: SmartPlaylistFilterCriteria,
+  taxonomy: TagTaxonomy | null,
 ): (trackData: TrackData) => boolean {
   const includeTagClauses = criteria.includeTagClauses ?? [];
   const clauseConnectors = criteria.clauseConnectors ?? [];
@@ -26,7 +28,7 @@ export function compileTrackCriteria(
       : compileTagFilterFormula({
           clauses: includeTagClauses,
           connectors: clauseConnectors,
-        });
+        }, taxonomy);
   const normalizedCamelotKeyFilters = (criteria.camelotKeyFilters ?? [])
     .map((key) => normalizeCamelotKey(key))
     .filter((key): key is string => key !== null);

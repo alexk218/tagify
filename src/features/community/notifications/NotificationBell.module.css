@@ -1,0 +1,164 @@
+.wrapper {
+  flex: 0 0 auto;
+  position: relative;
+}
+
+/* Matches the Community button beside it. */
+.bell {
+  align-items: center;
+  background: rgb(255 255 255 / 7%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 8px;
+  color: var(--spice-text);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+  min-height: 36px;
+  min-width: 36px;
+  padding: 0 10px;
+  position: relative;
+}
+
+.bell:hover {
+  background: rgb(255 255 255 / 12%);
+  border-color: rgb(255 255 255 / 24%);
+}
+
+.bellOpen {
+  background: rgb(255 255 255 / 14%);
+  border-color: rgb(255 255 255 / 30%);
+}
+
+.bell:focus-visible,
+.entry:focus-visible,
+.older:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
+}
+
+/* The unread count sits on the bell's corner. */
+.count {
+  background: var(--spice-button, #1db954);
+  border: 2px solid var(--spice-main);
+  border-radius: 9px;
+  box-sizing: border-box;
+  color: #000;
+  font-size: 10px;
+  font-weight: 700;
+  height: 18px;
+  line-height: 14px;
+  min-width: 18px;
+  padding: 0 4px;
+  position: absolute;
+  right: -7px;
+  text-align: center;
+  top: -7px;
+}
+
+.menu {
+  background: var(--spice-main-elevated, #242424);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  box-sizing: border-box;
+  max-height: min(440px, 70vh);
+  overflow-y: auto;
+  padding: 8px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: min(360px, calc(100vw - 24px));
+  z-index: 50;
+}
+
+.heading {
+  color: var(--spice-text);
+  font-size: 13px;
+  font-weight: 700;
+  margin: 2px 6px 6px;
+}
+
+.message {
+  color: var(--spice-subtext);
+  font-size: 12px;
+  margin: 6px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.entry {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 2px;
+  line-height: 1.4;
+  padding: 7px 8px 7px 20px;
+  position: relative;
+  text-align: left;
+  width: 100%;
+}
+
+.entry:hover {
+  background: rgb(255 255 255 / 8%);
+}
+
+.entryNew {
+  color: var(--spice-text);
+}
+
+.text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.time {
+  color: var(--spice-subtext);
+  flex: 0 0 auto;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* A dot marks new entries; the time sits under the text. */
+.entryNew::before {
+  background: var(--spice-button, #1db954);
+  border-radius: 50%;
+  content: "";
+  height: 6px;
+  left: 8px;
+  position: absolute;
+  top: 13px;
+  width: 6px;
+}
+
+.entryNew .text {
+  font-weight: 600;
+}
+
+.older {
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 999px;
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 8px 6px 2px;
+  padding: 6px 12px;
+}
+
+.older:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

@@ -49,9 +49,10 @@ describe("TrackDetailsCommunity", () => {
     renderSection(members, { onAdd: vi.fn(async () => {}) });
     expect(await screen.findByRole("heading", { name: "From Community" })).toBeInTheDocument();
     expect(screen.getByText("2 members")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add Deep House to Glass Horizons" })).toHaveTextContent("2");
+    expect(screen.getByRole("button", { name: "Add Deep House to Glass Horizons" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "See music tagged Deep House on tagify.fm" })).toHaveTextContent("2");
     expect(screen.getByRole("button", { name: "Warm is on Glass Horizons" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Add Vocal to Glass Horizons" })).toHaveTextContent("new");
+    expect(screen.getByRole("button", { name: "See music tagged Vocal on tagify.fm" })).toHaveTextContent("new");
     expect(screen.queryByText("Mine only")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "@nightdrive" })).toBeInTheDocument();
     expect(screen.getByLabelText("Rated 4.5 stars")).toBeInTheDocument();
@@ -64,6 +65,17 @@ describe("TrackDetailsCommunity", () => {
     expect(onAdd).toHaveBeenCalledWith([{ label: "Deep House", paths: ["Genre / Deep House"], people: 2 }]);
     expect(await screen.findByRole("button", { name: "Deep House is on Glass Horizons" })).toBeDisabled();
     expect(analytics.record).toHaveBeenCalledWith("track_list_members_tag_added", { members_add: "tag", new_to_library: "no" });
+  });
+
+  it("opens a tag's page on tagify.fm from its name without adding it", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const onAdd = vi.fn(async () => {});
+    renderSection(members, { onAdd });
+    await userEvent.click(await screen.findByRole("button", { name: "See music tagged Deep House on tagify.fm" }));
+    expect(open).toHaveBeenCalledWith("https://tagify.fm/tags/deep-house", "_blank", "noopener,noreferrer");
+    expect(analytics.record).toHaveBeenCalledWith("track_list_community_link_opened", { target: "tag" });
+    expect(onAdd).not.toHaveBeenCalled();
+    open.mockRestore();
   });
 
   it("lets a tag be added again after it is removed from the song", async () => {
@@ -93,19 +105,34 @@ describe("TrackDetailsCommunity", () => {
 
   it("keeps tags read-only without an add handler", async () => {
     renderSection(members);
-    expect(await screen.findByRole("button", { name: "Add Vocal to Glass Horizons" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "See music tagged Vocal on tagify.fm" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Add Vocal to Glass Horizons" })).not.toBeInTheDocument();
     expect(screen.queryByText("new")).not.toBeInTheDocument();
   });
 
   it("keeps tags read-only when not connected, even with an add handler, and asks to connect", async () => {
     const onAdd = vi.fn(async () => {});
     const onConnect = vi.fn();
-    renderSection(members, { onAdd, onConnect });
-    expect(await screen.findByRole("button", { name: "Add Vocal to Glass Horizons" })).toBeDisabled();
-    expect(screen.getByText(/Connect to Tagify Community to add these tags/)).toBeInTheDocument();
+    renderSection(members, { onAdd, lock: { ask: "connect", onAct: onConnect } });
+    expect(await screen.findByRole("button", { name: "See music tagged Vocal on tagify.fm" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Add Vocal to Glass Horizons" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Create a free Tagify account or sign in to add these tags/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "@nightdrive" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create account or sign in" }));
     expect(onConnect).toHaveBeenCalledTimes(1);
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it("keeps tags read-only for a member who doesn't share their tags, and asks them to share", async () => {
+    const onAdd = vi.fn(async () => {});
+    const onShare = vi.fn();
+    renderSection(members, { onAdd, lock: { ask: "share", onAct: onShare } });
+    expect(await screen.findByRole("button", { name: "See music tagged Vocal on tagify.fm" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Add Vocal to Glass Horizons" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Share your tags on Community to add these tags/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create account or sign in" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Share my tags" }));
+    expect(onShare).toHaveBeenCalledTimes(1);
     expect(onAdd).not.toHaveBeenCalled();
   });
 });

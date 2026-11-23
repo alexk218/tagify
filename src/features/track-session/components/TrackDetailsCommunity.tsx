@@ -2,11 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ExternalLink, Plus, Star, Users } from "lucide-react";
 import { sameTagNameKey, type PublicEntityViewV1 } from "@tagify/community-contracts";
 import { lookupCommunityEntity, peekCommunityEntity, type CommunityEntityLookup } from "@/features/community/communityEntityCache";
-import { COMMUNITY_PAGES_ORIGIN, getCommunityEntityUrl, openCommunityUrl } from "@/features/community/communityLinks";
+import { COMMUNITY_PAGES_ORIGIN, communityTagLinkTitle, getCommunityEntityUrl, getCommunityTagUrl, openCommunityUrl } from "@/features/community/communityLinks";
 import type { CommunityMatchTag } from "@/features/onboarding/services/communityMatches";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import { recordCommunityTeaserViewed } from "@/features/community/taggedByOthers/communityTeaserPreview";
 import styles from "./TrackDetailsCommunity.module.css";
+import { ALL_HIDDEN_LOCK, useSharingLockReason } from "@/features/community/sharingLockReason";
 
 interface TrackDetailsCommunityProps {
   uri: string;
@@ -20,11 +21,19 @@ interface TrackDetailsCommunityProps {
   ownHandle: string | null;
   /** Puts these tags on the song, adding any the library doesn't have yet. Without it the tags are read-only. */
   onAdd?: (tags: CommunityMatchTag[]) => Promise<void>;
-  /** Tells the header whether Community has a page for this song. */
-  onAvailabilityChange?: (entityUri: string, hasPerspectives: boolean, found: boolean) => void;
   lookup?: typeof lookupCommunityEntity;
-  /** Not connected to Community: the tags stay read-only and a line asks them to connect to add them. */
-  onConnect?: () => void;
+  /**
+   * Adding waits on Community: the tags stay read-only and a line asks the person to connect
+   * (`ask: "connect"`) or, connected but not sharing their tags, to share them (`ask: "share"`).
+   * Every Community-locked feature treats those two the same, only the button differs.
+   */
+  lock?: CommunityLock;
+}
+
+/** What an add locked behind Community asks for, and the action that answers it. */
+export interface CommunityLock {
+  ask: "connect" | "share";
+  onAct: () => void;
 }
 
 export interface MemberTag extends CommunityMatchTag {
@@ -95,10 +104,11 @@ const whoText = (handles: string[]) => {
  * Nothing shows until Community answers, and nothing at all when no one else tagged or rated the song.
  */
 export function TrackDetailsCommunity({
-  uri, songName, songTagKeys, libraryTagKeys, destinationOf, ownHandle, onAdd: onAddWhenConnected, onAvailabilityChange, onConnect,
+  uri, songName, songTagKeys, libraryTagKeys, destinationOf, ownHandle, onAdd: onAddWhenConnected, lock,
   lookup = lookupCommunityEntity,
 }: TrackDetailsCommunityProps) {
-  const onAdd = onConnect ? undefined : onAddWhenConnected;
+  const allHidden = useSharingLockReason() === "all-hidden";
+  const onAdd = lock ? undefined : onAddWhenConnected;
   const providerId = uri.startsWith(TRACK_PREFIX) ? uri.slice(TRACK_PREFIX.length) : null;
   const [answer, setAnswer] = useState<{ uri: string; lookup: CommunityEntityLookup } | null>(() => {
     const known = providerId ? peekCommunityEntity("track", providerId) : undefined;
@@ -135,11 +145,7 @@ export function TrackDetailsCommunity({
   const members = useMemo(() => membersOf(current?.entity, ownHandle), [current, ownHandle]);
   const tags = useMemo(() => memberTagsOf(current?.entity, ownHandle), [current, ownHandle]);
 
-  useEffect(() => {
-    if (current && !current.unavailable) onAvailabilityChange?.(uri, members.length > 0, current.found);
-  }, [current, members.length, onAvailabilityChange, uri]);
-
-  const teaserShown = Boolean(onConnect && current && members.length);
+  const teaserShown = Boolean(lock?.ask === "connect" && current && members.length);
   useEffect(() => {
     if (teaserShown) recordCommunityTeaserViewed("track_details");
   }, [teaserShown]);
@@ -175,6 +181,10 @@ export function TrackDetailsCommunity({
     openCommunityUrl(`${COMMUNITY_PAGES_ORIGIN}/@${handle}`);
     recordProductInteraction("track_list_community_link_opened", { target: "member" });
   };
+  const openTag = (label: string) => {
+    openCommunityUrl(getCommunityTagUrl(label));
+    recordProductInteraction("track_list_community_link_opened", { target: "tag" });
+  };
   const openSong = () => {
     if (!songUrl) return;
     openCommunityUrl(songUrl);
@@ -190,16 +200,23 @@ export function TrackDetailsCommunity({
       : fresh ? `Add ${tag.label} to this song. It's new to your library, so it goes in ${destinationOf(tag)}. ${who}.`
       : `Add ${tag.label} to this song. ${who}.`;
     return (
-      <button key={tag.label} type="button"
-        className={`${styles.chip} ${on ? styles.chipOn : ""}`}
-        disabled={!onAdd || on || busy !== null} title={title}
-        aria-label={on ? `${tag.label} is on ${songName}` : `Add ${tag.label} to ${songName}`}
-        onClick={() => void add(tag)}>
-        {on ? <Check size={12} aria-hidden="true" /> : onAdd ? <Plus size={12} aria-hidden="true" /> : null}
-        <span>{tag.label}</span>
-        {tag.people > 1 ? <span className={styles.count}>{tag.people}</span> : null}
-        {fresh && onAdd ? <span className={styles.newTag}>new</span> : null}
-      </button>
+      <span key={tag.label} className={`${styles.chip} ${on ? styles.chipOn : ""}`}>
+        {on || onAdd ? (
+          <button type="button" className={styles.chipAdd}
+            disabled={!onAdd || on || busy !== null} title={title}
+            aria-label={on ? `${tag.label} is on ${songName}` : `Add ${tag.label} to ${songName}`}
+            onClick={() => void add(tag)}>
+            {on ? <Check size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
+          </button>
+        ) : null}
+        <button type="button" className={styles.chipLink} title={on || onAdd ? communityTagLinkTitle(tag.label) : `${communityTagLinkTitle(tag.label)}. ${who}.`}
+          aria-label={communityTagLinkTitle(tag.label)}
+          onClick={(event) => { event.stopPropagation(); openTag(tag.label); }}>
+          <span>{tag.label}</span>
+          {tag.people > 1 ? <span className={styles.count}>{tag.people}</span> : null}
+          {fresh && onAdd ? <span className={styles.newTag}>new</span> : null}
+        </button>
+      </span>
     );
   };
 
@@ -239,10 +256,15 @@ export function TrackDetailsCommunity({
     <section className={styles.section} aria-label={`Other members' tags on ${songName}`}>
       {header}
       {tags.length ? <div className={styles.tray}>{tags.map(chip)}</div> : null}
-      {onConnect ? (
+      {lock?.ask === "connect" ? (
         <p className={styles.connectLine}>
-          Connect to Tagify Community to add these tags to your song.
-          <button type="button" className={styles.connectButton} onClick={onConnect}>Connect</button>
+          Create a free Tagify account or sign in to add these tags to your song.
+          <button type="button" className={styles.connectButton} onClick={lock.onAct}>Create account or sign in</button>
+        </p>
+      ) : lock?.ask === "share" ? (
+        <p className={styles.connectLine}>
+          {allHidden ? `${ALL_HIDDEN_LOCK} Show some of them to add these tags to your song.` : "Share your tags on Community to add these tags to your song."}
+          <button type="button" className={styles.connectButton} onClick={lock.onAct}>{allHidden ? "Show some tags" : "Share my tags"}</button>
         </p>
       ) : null}
       <p className={styles.whoLine}>

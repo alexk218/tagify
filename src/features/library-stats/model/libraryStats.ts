@@ -1,6 +1,7 @@
 import type { TagDataStructure, TrackData } from "@/types/tagData";
 import { buildResolvedTagLookup, findTagAccentId } from "@/utils/tagTaxonomy";
 import { getTagAccentTokens } from "@/features/tag-data/utils/tagAccent";
+import { recordingDisplayKeys } from "@/features/recording-reuse/utils/recordingLibrary";
 
 /** Which tracks the stats describe, by when they were first tagged. */
 export type StatsRange = "all" | "12m" | "90d" | "30d";
@@ -235,13 +236,14 @@ function dateStamp(entries: Array<[string, TrackData]>): number | null {
  * Tracks with the date Stats counts them by, as `dateCreated`: the baseline date for tracks that
  * were already tagged when Stats first opened, otherwise when they were first tagged. A date that
  * is only the shared stamp from when dates were introduced counts as no date (All time only).
- * Stored dates are never changed.
+ * Versions of one song that Tagify links count once, by the version tagged first, as the library
+ * lists them, so finding more versions of a tagged song doesn't count as tagging. Stored dates are
+ * never changed.
  */
 export function statsTrackEntries(tracks: TagDataStructure["tracks"], baseline: StatsBaseline | null = null): Array<[string, TrackData]> {
   const entries = Object.entries(tracks);
   const stamp = dateStamp(entries);
-  if (!baseline && stamp === null) return entries;
-  return entries.map(([uri, track]) => {
+  const dated: Array<[string, TrackData]> = !baseline && stamp === null ? entries : entries.map(([uri, track]) => {
     const created = track.dateCreated;
     const taggedSinceBaseline = typeof created === "number" && baseline !== null && created > baseline.takenAt;
     const saved = baseline && !taggedSinceBaseline && uri in baseline.dates;
@@ -250,6 +252,22 @@ export function statsTrackEntries(tracks: TagDataStructure["tracks"], baseline: 
     if (date === stamp) date = !saved && typeof track.dateModified === "number" && track.dateModified > stamp ? track.dateModified : undefined;
     return date === created ? [uri, track] : [uri, { ...track, dateCreated: date }];
   });
+  return oneEntryPerRecording(dated, recordingDisplayKeys(tracks));
+}
+
+function oneEntryPerRecording(entries: Array<[string, TrackData]>, keys: Map<string, string>): Array<[string, TrackData]> {
+  if (!keys.size) return entries;
+  const kept = new Map<string, number>();
+  const result: Array<[string, TrackData]> = [];
+  for (const entry of entries) {
+    const key = keys.get(entry[0]);
+    const index = key === undefined ? undefined : kept.get(key);
+    if (key !== undefined && index === undefined) kept.set(key, result.length);
+    if (index === undefined) { result.push(entry); continue; }
+    const date = entry[1].dateCreated, current = result[index][1].dateCreated;
+    if (typeof date === "number" && (typeof current !== "number" || date < current)) result[index] = entry;
+  }
+  return result;
 }
 
 function isAnnotated(track: TrackData): boolean {

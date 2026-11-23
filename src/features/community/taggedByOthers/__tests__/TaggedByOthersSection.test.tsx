@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import type { TagTaxonomy, TrackData } from "@/types/tagData";
-import { ROWS_PER_STEP, TaggedByOthersSection, checkedSummary, checkedWhen, taggedByText } from "../TaggedByOthersSection";
+import { ROWS_PER_STEP, TaggedByOthersSection, checkedSummary, previewFoundText, checkedWhen, taggedByText } from "../TaggedByOthersSection";
 import type { TaggedByOthersMatch, TaggedByOthersOutcome } from "../taggedByOthersScan";
 import type { SavedCheck, TaggedByOthersStore } from "../taggedByOthersStore";
 import { CHECK_AGAIN_AFTER_MS, forgetTaggedByOthers, preloadTaggedByOthers, type TaggedByOthersCheck, type TaggedByOthersPlaylistCheck } from "../useTaggedByOthers";
@@ -43,7 +43,7 @@ function renderSection(check: TaggedByOthersCheck, props: Partial<React.Componen
   const view = render(<TaggedByOthersSection connected accountId="account-a" tracks={tracks} taxonomy={taxonomy} check={check} store={memoryStore().store} {...handlers} {...props} />);
   return { ...handlers, ...view };
 }
-const names = () => screen.getAllByRole("listitem").map((row) => within(row).getByRole("button", { name: /^Open / }).getAttribute("aria-label"));
+const names = () => screen.getAllByRole("listitem").map((row) => within(row).getByRole("button", { name: /^Go to .* in Spotify$/ }).getAttribute("aria-label")!.replace(/^Go to (.*) in Spotify$/, "$1"));
 
 beforeEach(() => {
   vi.mocked(recordProductInteraction).mockClear();
@@ -57,7 +57,7 @@ describe("songs other members tagged", () => {
     const check = vi.fn(done({}));
     const { onConnectCommunity } = renderSection(check, { connected: false, accountId: null });
 
-    fireEvent.click(screen.getByRole("button", { name: "Connect to see them" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create account or sign in" }));
     expect(onConnectCommunity).toHaveBeenCalledTimes(1);
     expect(check).not.toHaveBeenCalled();
   });
@@ -67,24 +67,46 @@ describe("songs other members tagged", () => {
     afterEach(() => localStorage.clear());
 
     it("shows today's card while the communityTeasers switch is off", () => {
+      localStorage.setItem("tagify:switch:communityTeasers", "off");
       renderSection(vi.fn(done({})), { connected: false, accountId: null, preview });
-      expect(screen.getByRole("button", { name: "Connect to see them" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Create account or sign in" })).toBeTruthy();
       expect(screen.queryByText("Song 1")).toBeNull();
     });
 
-    it("five songs with their tags, nothing to add, no member names, then the locked rest", () => {
-      localStorage.setItem("tagify:switch:communityTeasers", "on");
+    it("every song Community described with its tags, nothing to add, no member names, then the invitation", () => {
       const check = vi.fn(done({}));
       const { onConnectCommunity } = renderSection(check, { connected: false, accountId: null, preview });
       expect(screen.getByText("Song 1")).toBeTruthy();
+      expect(screen.getByText("Song 7")).toBeTruthy();
+      expect(screen.queryByRole("list", { name: "Locked songs" })).toBeNull();
       expect(screen.getByText(/Tagged by 9 members/)).toBeTruthy();
       expect(screen.queryByText(/@ana/)).toBeNull();
       expect(screen.queryByRole("button", { name: /^Add Chill/ })).toBeNull();
-      expect(screen.getByText("37 more songs tagged by others")).toBeTruthy();
-      fireEvent.click(screen.getByRole("button", { name: "Connect to Tagify Community to see all 42" }));
-      fireEvent.click(screen.getAllByRole("button", { name: /^Connect to Tagify Community to add these tags/ })[0]);
+      expect(screen.getByText("35 more songs tagged by others")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Create account or sign in to see all 42" }));
+      fireEvent.click(screen.getAllByRole("button", { name: /^Create account or sign in to add these tags/ })[0]);
       expect(onConnectCommunity).toHaveBeenCalledTimes(2);
       expect(check).not.toHaveBeenCalled();
+    });
+
+    it("still ends with the invitation when every song found fits in the preview", () => {
+      const { onConnectCommunity } = renderSection(vi.fn(done({})), { connected: false, accountId: null, preview: { ...preview, total: 7 } });
+      expect(screen.getByText("Song 7")).toBeTruthy();
+      expect(screen.getByText("Add these tags to your songs")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Create account or sign in" }));
+      expect(onConnectCommunity).toHaveBeenCalledTimes(1);
+    });
+
+    it("says it's looking while the preview loads, instead of flashing the invitation first", () => {
+      renderSection(vi.fn(done({})), { connected: false, accountId: null, previewLoading: true });
+      expect(screen.getByRole("status").textContent).toBe("Looking for songs in your Liked Songs that other members tagged…");
+      expect(screen.queryByRole("button", { name: "Create account or sign in" })).toBeNull();
+    });
+
+    it("counts the whole of Liked Songs, or says only the newest were asked about", () => {
+      expect(previewFoundText({ total: 742, asked: 3_200, complete: true })).toBe("742 of your Liked Songs");
+      expect(previewFoundText({ total: 1_204, asked: 5_000, complete: false })).toBe("1,204 of your 5,000 newest Liked Songs");
+      expect(previewFoundText({ total: 1, asked: 40, complete: true })).toBe("1 of your Liked Song");
     });
   });
 
@@ -509,10 +531,10 @@ describe("finding a song in the list", () => {
   it("lists the songs most members tagged first, or in the order Spotify lists them", async () => {
     renderSection(done({ checked: 50, matches: many }));
     await screen.findByText("Song 2");
-    expect(names()).toEqual(["Open Song 2", "Open Röyksopp Forever", "Open Song 5", "Open Song 1", "Open Song 4", "Open Song 6"]);
+    expect(names()).toEqual(["Song 2", "Röyksopp Forever", "Song 5", "Song 1", "Song 4", "Song 6"]);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Sort songs" }), { target: { value: "recent" } });
-    expect(names()).toEqual(["Open Song 1", "Open Song 2", "Open Röyksopp Forever", "Open Song 4", "Open Song 5", "Open Song 6"]);
+    expect(names()).toEqual(["Song 1", "Song 2", "Röyksopp Forever", "Song 4", "Song 5", "Song 6"]);
   });
 
   it("searches song and artist names, and says when nothing matches", async () => {
@@ -520,9 +542,9 @@ describe("finding a song in the list", () => {
     const search = await screen.findByRole("searchbox", { name: "Search songs or artists" });
 
     fireEvent.change(search, { target: { value: "royksopp" } });
-    expect(names()).toEqual(["Open Röyksopp Forever"]);
+    expect(names()).toEqual(["Röyksopp Forever"]);
     fireEvent.change(search, { target: { value: "artist 5" } });
-    expect(names()).toEqual(["Open Song 5"]);
+    expect(names()).toEqual(["Song 5"]);
     fireEvent.change(search, { target: { value: "zzz" } });
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
     expect(screen.getByText(/No songs match/)).toBeInTheDocument();
@@ -530,7 +552,7 @@ describe("finding a song in the list", () => {
 
   it("opens a song's details from its row", async () => {
     const { onOpenSong } = renderSection(done({ checked: 50, matches: many }));
-    fireEvent.click(await screen.findByRole("button", { name: "Open Song 5" }));
+    fireEvent.click((await screen.findByRole("button", { name: "Go to Song 5 in Spotify" })).closest("li")!);
     expect(onOpenSong).toHaveBeenCalledWith("spotify:track:5");
   });
 
@@ -565,21 +587,21 @@ describe("finding a song in the list", () => {
 });
 
 describe("in the track list, for a member who doesn't share their tags", () => {
-  const many = Array.from({ length: 8 }, (_, index) => match(index + 1, ["Chill", "Focus"], { people: 20 - index }));
+  const many = Array.from({ length: 23 }, (_, index) => match(index + 1, ["Chill", "Focus"], { people: 40 - index }));
 
-  it("keeps the top 5 usable and locks the rest behind sharing their tags", async () => {
+  it("keeps the top 20 usable and locks the rest behind sharing their tags", async () => {
     const onShareTags = vi.fn();
     renderSection(done({ checked: 400, matches: many }), { inTrackList: true, sharingLocked: true, onShareTags });
 
-    expect(await screen.findByRole("button", { name: "Share your tags on Community to see all 8" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Share your tags on Community to see all 23" })).toBeInTheDocument();
     expect(screen.getByText("Others get to see your tags in return.")).toBeInTheDocument();
-    // Five songs with their tags one tap away; the next show only their names, never the tags.
-    expect(screen.getAllByRole("button", { name: /^Open / })).toHaveLength(5);
-    expect(screen.getByRole("button", { name: "Add Focus to Song 5" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /to Song 6$/ })).toBeNull();
+    // As many songs as the preview before connecting, their tags one tap away; the next show only their names.
+    expect(screen.getAllByRole("button", { name: /^Go to .* in Spotify$/ })).toHaveLength(20);
+    expect(screen.getByRole("button", { name: "Add Focus to Song 20" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /to Song 21$/ })).toBeNull();
     const locked = within(screen.getByRole("list", { name: "Locked songs" }));
     expect(locked.getAllByRole("listitem")).toHaveLength(3);
-    expect(locked.getByText("Song 6")).toBeInTheDocument();
+    expect(locked.getByText("Song 21")).toBeInTheDocument();
     expect(locked.getAllByText("2 tags from others")).toHaveLength(3);
     expect(screen.getByText("3 more songs tagged by others")).toBeInTheDocument();
     expect(screen.queryByText(/Liked Songs on Community/)).toBeNull();
@@ -587,14 +609,14 @@ describe("in the track list, for a member who doesn't share their tags", () => {
     expect(screen.queryByRole("searchbox")).toBeNull();
     expect(screen.queryByRole("button", { name: "Also check playlists I made…" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Share your tags on Community to see all 8" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share your tags on Community to see all 23" }));
     expect(onShareTags).toHaveBeenCalledTimes(1);
   });
 
   it("shows every song to a member who shares their tags", async () => {
     renderSection(done({ checked: 400, matches: many }), { inTrackList: true, sharingLocked: false, onShareTags: vi.fn() });
 
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Open / })).toHaveLength(8));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Go to .* in Spotify$/ })).toHaveLength(23));
     expect(screen.queryByRole("list", { name: "Locked songs" })).toBeNull();
     expect(screen.getByRole("searchbox")).toBeInTheDocument();
   });
@@ -693,7 +715,7 @@ describe("in the track list, where tags come off again", () => {
   it("locks a song in the editor when its row is clicked", async () => {
     const onLockSong = vi.fn();
     renderSection(done({ checked: 2, matches: [match(2), match(3)] }), editable({ onLockSong }));
-    fireEvent.click(await screen.findByText("Artist 3"));
+    fireEvent.click((await screen.findByText("Artist 3")).closest("li")!);
     expect(onLockSong).toHaveBeenCalledWith(expect.objectContaining({ track: expect.objectContaining({ uri: "spotify:track:3" }) }));
   });
 });

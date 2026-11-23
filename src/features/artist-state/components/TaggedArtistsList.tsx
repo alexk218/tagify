@@ -232,7 +232,7 @@ const TaggedArtistsList: React.FC<TaggedArtistsListProps> = ({
         evaluateTagFilterFormula(effectiveTagIds.get(artistUri) ?? [], {
           clauses: includeTagClauses,
           connectors: clauseConnectors,
-        });
+        }, taxonomy);
       const matchesRating =
         ratingFilters.length === 0 || ratingFilters.includes(artist.rating || 0);
       const artistEnergy = artist.energy || 0;

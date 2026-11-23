@@ -1,5 +1,6 @@
 import React from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { IN_APP_SIGN_UP_SWITCH_KEY } from "../inAppSignUp";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityOnboardingModal } from "../CommunityOnboardingModal";
 import { communityPairing } from "../communityPairing";
@@ -23,6 +24,8 @@ describe("CommunityOnboardingModal actions", () => {
     vi.restoreAllMocks();
     syncPairingService.cancelPending();
     localStorage.clear();
+    // These cover the browser-page connect flow; CommunityEmailSignIn.test.tsx covers signing in inside Tagify.
+    localStorage.setItem(IN_APP_SIGN_UP_SWITCH_KEY, "off");
     sessionStorage.clear();
     vi.mocked(recordProductInteraction).mockClear();
   });
@@ -38,7 +41,8 @@ describe("CommunityOnboardingModal actions", () => {
     render(<CommunityOnboardingModal entry="prompt" {...shared()} onClose={vi.fn()} />);
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByText("ABCD-EFGH")).toBeInTheDocument();
+    await waitFor(() => expect(communityPairing.getState().pending?.userCode).toBe("ABCD-EFGH"));
+    expect(screen.getByRole("status")).toHaveTextContent("Waiting for you to finish in your browser…");
 
     expect(begin).toHaveBeenCalledTimes(2);
     expect(open).toHaveBeenCalledTimes(1);
@@ -64,7 +68,7 @@ describe("CommunityOnboardingModal actions", () => {
     });
     const onClose = vi.fn();
     render(<CommunityOnboardingModal entry="community" {...shared()} onClose={onClose} />);
-    await screen.findByText("ABCD-EFGH");
+    await waitFor(() => expect(communityPairing.getState().pending?.userCode).toBe("ABCD-EFGH"));
 
     expect(screen.queryByRole("button", { name: "Not now" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Don't ask again" })).not.toBeInTheDocument();
@@ -84,15 +88,15 @@ describe("CommunityOnboardingModal actions", () => {
     }));
     const onClose = vi.fn();
     render(<CommunityOnboardingModal entry="community" {...shared()} onClose={onClose} />);
-    expect(screen.getByText("ABCD-EFGH")).toBeInTheDocument();
+    expect(screen.getByText("Enter your email on the page that opened")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Community setup" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(syncPairingService.getPending()?.userCode).toBe("ABCD-EFGH");
     expect(communityPairing.getState().pending?.userCode).toBe("ABCD-EFGH");
   });
 
-  it("waits on two numbered steps, the code and a way back to the page", () => {
+  it("waits on two numbered steps that match the page, with a way back to it", () => {
     vi.spyOn(window, "open").mockReturnValue(null);
     localStorage.setItem("tagify:sync:pending-pairing", JSON.stringify({
       apiBaseUrl: "https://community.tagify.fm", deviceCode: "device-code", verifier: "verifier",
@@ -100,10 +104,12 @@ describe("CommunityOnboardingModal actions", () => {
       expiresAt: Date.now() + 600_000, interval: 10,
     }));
     render(<CommunityOnboardingModal entry="community" {...shared()} onClose={vi.fn()} />);
-    expect(screen.getByText("Sign in or create your free Community account")).toBeInTheDocument();
-    expect(screen.getByText("Press Connect on the page that opened")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Waiting for you to approve…");
-    expect(screen.getByText("ABCD-EFGH")).toBeInTheDocument();
+    expect(screen.getByText("Enter your email on the page that opened")).toBeInTheDocument();
+    expect(screen.getByText("Type the code we email you")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Waiting for you to finish in your browser…");
+    // The page carries this computer's code, so nobody has to type it.
+    expect(screen.queryByText("ABCD-EFGH")).not.toBeInTheDocument();
+    expect(screen.getByText(/It's not your Spotify login/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Open the page again/ }));
     expect(window.open).toHaveBeenCalledWith("https://community.tagify.fm/device?code=ABCD-EFGH", "_blank", "noopener,noreferrer");
     expect(screen.queryByText("Tagify 3.0")).not.toBeInTheDocument();
@@ -125,9 +131,29 @@ describe("CommunityOnboardingModal actions", () => {
 
     render(<CommunityOnboardingModal entry="community" {...shared()} onClose={vi.fn()} />);
 
-    expect(screen.getByText("Connected as Alex")).toBeInTheDocument();
+    expect(screen.getByText("You're connected as Alex")).toBeInTheDocument();
     expect(screen.getByText("Connect Tagify to Community to share your tags.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Finish later" })).not.toBeInTheDocument();
+  });
+
+  it("says You're connected, without an account number, before a handle is picked", () => {
+    setDesktopSyncConfiguration({
+      accountId: "account-000001",
+      libraryId: "library-a",
+      deviceId: "device-a",
+      apiBaseUrl: "https://community.tagify.fm",
+      supabaseUrl: "https://example.supabase.co",
+      supabasePublishableKey: "key",
+      accessToken: "access",
+      refreshToken: "refresh",
+      expiresAt: Date.now() + 60_000,
+      profile: { handle: null, displayName: null },
+    });
+
+    render(<CommunityOnboardingModal entry="community" {...shared()} onClose={vi.fn()} />);
+
+    expect(screen.getAllByText("You're connected").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/000001/)).not.toBeInTheDocument();
   });
 
   it("keeps the library review visible while a combined backup is being saved", async () => {

@@ -58,6 +58,17 @@ describe("trackSession.mappers", () => {
     });
   });
 
+  it("keeps the album link of the playing song", () => {
+    const mapped = createSpotifyTrackFromPlayerItem({
+      uri: "spotify:track:abc",
+      name: "Go Easy",
+      artists: [{ name: "Dua Lipa" }],
+      album: { name: "Grand Theft Auto VI: The Album", uri: "spotify:album:5BYKG4MHfySZthe2W6r7n4" },
+    });
+
+    expect(mapped?.album).toEqual({ name: "Grand Theft Auto VI: The Album", uri: "spotify:album:5BYKG4MHfySZthe2W6r7n4" });
+  });
+
   it("returns null when player item is missing uri", () => {
     expect(createSpotifyTrackFromPlayerItem(undefined)).toBeNull();
     expect(createSpotifyTrackFromPlayerItem({})).toBeNull();

@@ -77,13 +77,10 @@ export async function savePublicationPolicy(
   return announce(saved);
 }
 
-/** What a member reads before publishing: their star ratings go public with their tags. */
-export const PUBLISH_RATINGS_LINE = "Your tags and star ratings would be public. Private notes stay private.";
-
 /**
  * "Publish my tags": public with the member's hidden tags, and updates running again if they were paused.
- * For a member who isn't public yet it also shares their song and album ratings with their tags, as
- * PUBLISH_RATINGS_LINE says. A member who is already public keeps their saved rating choice.
+ * For a member who isn't public yet it also shares their song and album ratings with their tags
+ * (Alex, 2026-11-22: no separate choice). A member who is already public keeps their saved rating choice.
  */
 export function publishTags(policy: PublicationPolicyV2, surface: SharingSurface): Promise<PublicationPolicyV2> {
   const state = publicationState(policy);

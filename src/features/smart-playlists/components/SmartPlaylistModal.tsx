@@ -1,4 +1,5 @@
 import { songDetailFilterParts } from "@/utils/songDetails";
+import { addableHere } from "@/services/localFilesOnThisComputer";
 import { spotifyRead, throwIfSpotifyRequestStopped } from "@/services/SpotifyRequests";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./SmartPlaylistModal.module.css";
@@ -50,7 +51,7 @@ import {
   requestSmartPlaylistRefresh,
   type CommunityOnlySmartPlaylist,
 } from "@/services/sync/SmartPlaylistCommunityList";
-import { openPhoneStore } from "@/features/phone-app";
+import { openPhoneStore, requestConnectForPhone, usePhoneConnection } from "@/features/phone-app";
 import {
   clearExplicitSmartPlaylistClear,
   markSmartPlaylistsExplicitlyCleared,
@@ -132,6 +133,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
   const [isLoadingCounts, setIsLoadingCounts] = useState(false);
   const promptHistory = usePromptHistory();
   const [manualMobileTaggingIntro, setManualMobileTaggingIntro] = useState(false);
+  const phoneConnection = usePhoneConnection();
   const [introDismissed, setIntroDismissed] = useState(false);
   const showMobileTaggingIntro = manualMobileTaggingIntro ||
     (!introDismissed && promptHistory.ready && !promptHistory.mobileTaggingIntroSeen);
@@ -222,8 +224,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
       for (const playlist of unconnected) {
         await yieldToBrowser();
         if (!active) return;
-        counts.set(matchCountKey(playlist), collectMatchingTrackUris(tracks, playlist.criteria, [], recordingKeys)
-          .filter((uri) => uri.startsWith("spotify:track:")).length);
+        counts.set(matchCountKey(playlist), (await addableHere(collectMatchingTrackUris(tracks, playlist.criteria, taxonomy ?? null, [], recordingKeys))).addable.length);
       }
       setMatchingSongCounts(counts);
     })();
@@ -363,8 +364,12 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
             continue;
           }
           const actualSet = new Set(actual);
-          // Matching local files must be added manually, so their absence isn't a sync failure.
-          const expected = new Set(collectMatchingTrackUris(data.tracks, playlist.criteria, [], recordingKeys).filter((uri) => !uri.startsWith("spotify:local:") || actualSet.has(uri)));
+          // Sync adds local files only on the computer whose Spotify lists them, so one saved
+          // elsewhere being absent here isn't a sync failure.
+          const matching = collectMatchingTrackUris(data.tracks, playlist.criteria, data.taxonomy ?? null, [], recordingKeys);
+          const { localElsewhere } = await addableHere(matching);
+          const elsewhere = new Set(localElsewhere);
+          const expected = new Set(matching.filter((uri) => !elsewhere.has(uri) || actualSet.has(uri)));
           const matches = actual.length === expected.size && actualSet.size === actual.length && actual.every((uri) => expected.has(uri));
           results.push({ id: playlist.playlistId, count: actual.length, status: matches ? "synced" : "needsSync" });
         }
@@ -810,6 +815,7 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
                         connectors: criteria.clauseConnectors,
                       },
                       displayTagName,
+                      taxonomy,
                     );
                     const ratingText = formatRatingFilters(
                       criteria.ratingFilters,
@@ -1108,13 +1114,42 @@ const SmartPlaylistModal: React.FC<SmartPlaylistModalProps> = ({
               <p className={styles.mobileTaggingAppNote}>
                 On iPhone? Tagify for iPhone lets you tag and rate songs straight
                 from Spotify&apos;s Share button.{" "}
-                <button
-                  type="button"
-                  className={styles.mobileTaggingAppLink}
-                  onClick={() => openPhoneStore("app_store")}
-                >
-                  Get the app
-                </button>
+                {phoneConnection.connected ? (
+                  <>
+                    Sign in with the same Tagify account as this computer.{" "}
+                    <button
+                      type="button"
+                      className={styles.mobileTaggingAppLink}
+                      onClick={() => openPhoneStore("app_store")}
+                    >
+                      Get the app
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    It works with your Tagify account, so connect this computer first.{" "}
+                    <button
+                      type="button"
+                      className={styles.mobileTaggingAppLink}
+                      onClick={() => {
+                        // Community setup opens in place of Smart Playlists.
+                        dismissMobileTaggingIntro();
+                        onClose();
+                        requestConnectForPhone();
+                      }}
+                    >
+                      Connect this computer
+                    </button>
+                    {" · "}
+                    <button
+                      type="button"
+                      className={styles.mobileTaggingAppLink}
+                      onClick={() => openPhoneStore("app_store")}
+                    >
+                      Get the app
+                    </button>
+                  </>
+                )}
               </p>
 
               <button

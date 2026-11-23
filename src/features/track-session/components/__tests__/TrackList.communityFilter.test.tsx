@@ -1,6 +1,5 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { useFilterState } from "@/features/filter-state";
 import { TagTaxonomy } from "@/types/tagData";
@@ -75,7 +74,7 @@ function Harness() {
 
 const titles = () => screen.queryAllByText(/(Missing|Owned|Alone) Song$/).map((element) => element.textContent?.replace(/^\W+/, "")).sort();
 
-describe("TrackList: Community filter", () => {
+describe("TrackList: Filters without a Community section", () => {
   beforeAll(() => {
     vi.stubGlobal("IntersectionObserver", class { observe = vi.fn(); unobserve = vi.fn(); disconnect = vi.fn(); });
   });
@@ -85,43 +84,12 @@ describe("TrackList: Community filter", () => {
     localStorage.setItem("tagify:showFilterOptions", "true");
   });
 
-  it("shows only songs other members tagged, or only those with a tag the song lacks, and Clear All resets it", async () => {
-    setCommunity(true);
-    const user = userEvent.setup();
-    render(<Harness />);
-    expect(titles()).toEqual(["Alone Song", "Missing Song", "Owned Song"]);
-
-    const tagged = screen.getByRole("button", { name: "Tagged by others 2" });
-    await user.click(tagged);
-    expect(tagged).toHaveAttribute("aria-pressed", "true");
-    expect(titles()).toEqual(["Missing Song", "Owned Song"]);
-    expect(screen.getByText("2/3 tracks")).toBeInTheDocument();
-
-    // "house" and "House" are the same tag, so only Jazz is one Missing Song lacks.
-    await user.click(screen.getByRole("button", { name: "Has tags I don't 1" }));
-    expect(titles()).toEqual(["Missing Song"]);
-    expect(localStorage.getItem("tagify:trackListCommunityFilter")).toContain("new_tags");
-
-    await user.click(screen.getByRole("button", { name: "Clear All" }));
-    expect(titles()).toEqual(["Alone Song", "Missing Song", "Owned Song"]);
-    expect(screen.getByRole("button", { name: "Tagged by others 2" })).toHaveAttribute("aria-pressed", "false");
-  });
-
-  it("clicking the chosen filter again turns it off", async () => {
-    setCommunity(true);
-    const user = userEvent.setup();
-    render(<Harness />);
-    await user.click(screen.getByRole("button", { name: "Tagged by others 2" }));
-    await user.click(screen.getByRole("button", { name: "Tagged by others 2" }));
-    expect(titles()).toEqual(["Alone Song", "Missing Song", "Owned Song"]);
-  });
-
-  it("keeps but ignores a saved filter on a computer that isn't connected", () => {
+  it("has no Community section in Filters, and a filter saved before it was removed shows every song", () => {
     localStorage.setItem("tagify:trackListCommunityFilter", "tagged");
-    setCommunity(false);
+    setCommunity(true);
     render(<Harness />);
-    expect(screen.queryByRole("button", { name: /Tagged by others/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Community" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Has tags I don't/ })).not.toBeInTheDocument();
     expect(titles()).toEqual(["Alone Song", "Missing Song", "Owned Song"]);
-    expect(localStorage.getItem("tagify:trackListCommunityFilter")).toBe("tagged");
   });
 });

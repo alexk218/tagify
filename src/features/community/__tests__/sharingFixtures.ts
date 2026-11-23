@@ -32,6 +32,7 @@ export function sharingStub(policy: PublicationPolicyV2 | null, overrides: Parti
     policy,
     state: policy ? publicationState(policy) : null,
     handle: "alex",
+    handleMissing: false,
     refresh: vi.fn(),
     ...overrides,
   };

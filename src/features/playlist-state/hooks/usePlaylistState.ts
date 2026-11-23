@@ -1,6 +1,8 @@
 import { spotifyWrite } from "@/services/SpotifyRequests";
 import { spotifyApiService } from "@/services/SpotifyApiService";
 import { useState } from "react";
+import { notePlaylistMade } from "@/features/onboarding/howToTips";
+import { addableHere, isLocalFileUri, localFileAddsAvailable, stopLocalFileAdds } from "@/services/localFilesOnThisComputer";
 
 export interface CreatedPlaylistInfo {
   name: string;
@@ -30,26 +32,39 @@ export function usePlaylistState() {
     const type = isSmartPlaylist ? "smart playlist" : "playlist";
 
     try {
-      const spotifyTrackUris = trackUris.filter(
-        (uri) => !uri.startsWith("spotify:local:"),
-      );
-      const localTrackUris = trackUris.filter((uri) =>
-        uri.startsWith("spotify:local:"),
-      );
-
       const playlistId = await spotifyApiService.createPlaylist(playlistName, { description: playlistDescription, isPublic });
       const playlistUri = `spotify:playlist:${playlistId}`;
 
-      if (spotifyTrackUris.length > 0) {
-        for (let index = 0; index < spotifyTrackUris.length; index += 100) {
-          const batch = spotifyTrackUris.slice(index, index + 100);
+      // Local files this computer's Spotify lists are added like any song; only the rest
+      // (files on another computer, or ones Spotify refused) are left to add by hand.
+      const { addable } = await addableHere(trackUris);
+      const catalogUris = addable.filter((uri) => !isLocalFileUri(uri));
+      const localUris = addable.filter(isLocalFileUri);
+      const added: string[] = [];
+      const addBatches = async (uris: string[]) => {
+        for (let index = 0; index < uris.length; index += 100) {
+          const batch = uris.slice(index, index + 100);
           await spotifyWrite(() => (Spicetify.Platform.PlaylistAPI as any).add(
             playlistUri,
             batch,
             { after: "end" },
-          ));
+          ), { resource: playlistUri });
+          added.push(...batch);
+        }
+      };
+      await addBatches(catalogUris);
+      if (localUris.length && localFileAddsAvailable()) {
+        try {
+          await addBatches(localUris);
+        } catch (error) {
+          stopLocalFileAdds(error);
         }
       }
+      const addedSet = new Set(added);
+      const localTrackUris = trackUris.filter((uri) => isLocalFileUri(uri) && !addedSet.has(uri));
+      const addedCount = added.length;
+
+      if (!isSmartPlaylist) notePlaylistMade();
 
       if (localTrackUris.length > 0) {
         setCreatedPlaylistInfo({
@@ -60,7 +75,7 @@ export function usePlaylistState() {
 
         if (!isSmartPlaylist) {
           Spicetify.showNotification(
-            `Created ${type} "${playlistName}" with ${spotifyTrackUris.length} ${spotifyTrackUris.length === 1 ? "track" : "tracks"}. Local tracks need to be added manually.`,
+            `Created ${type} "${playlistName}" with ${addedCount} ${addedCount === 1 ? "track" : "tracks"}. Local tracks need to be added manually.`,
           );
         }
 
@@ -70,7 +85,7 @@ export function usePlaylistState() {
 
       if (!isSmartPlaylist) {
         Spicetify.showNotification(
-          `Created ${type} "${playlistName}" with ${spotifyTrackUris.length} ${spotifyTrackUris.length === 1 ? "track" : "tracks"}.`,
+          `Created ${type} "${playlistName}" with ${addedCount} ${addedCount === 1 ? "track" : "tracks"}.`,
         );
       }
 

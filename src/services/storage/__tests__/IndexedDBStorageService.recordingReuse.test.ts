@@ -26,6 +26,13 @@ it("links and propagates edits, keeps metadata dates stable, and unlinks without
   await indexedDBStorage.saveTrack("a", { ...(await indexedDBStorage.getTrack("a"))!, rating: 2 });
   expect((await indexedDBStorage.getTrack("b"))!.rating).toBe(5);
 });
+it("saves a newly found version with the song's first-tagged date", async () => {
+  const found = { identity, annotations: recordingAnnotations(undefined), details: { name: "Song", albumName: "Deluxe" } };
+  await indexedDBStorage.linkRecordings({ ...(await proposals()), c: found }, "a", false);
+  const saved = (await indexedDBStorage.getTrack("c"))!;
+  expect(saved).toMatchObject({ rating: 3, energy: 4, albumName: "Deluxe", dateCreated: 10 });
+  expect(saved.dateModified).toBeGreaterThan(30);
+});
 it("records every linked bulk change for undo, including after restart and file restore", async () => {
   await indexedDBStorage.linkRecordings(await proposals(), "a", false);
   const saved = normalizeTagDataStructure(await indexedDBStorage.loadAllStrict());
@@ -143,8 +150,8 @@ it("refuses partial relinking, deleted sources, and cross-account reviews withou
 it("restores an inconsistent duration chain as separate songs without dropping choices or moving dates", async () => {
   const tracks = {
     a: { ...original, recordingGroupId: "old-group", recordingIdentity: identity },
-    b: { ...original, recordingGroupId: "old-group", recordingIdentity: { ...identity, durationMs: 179100 }, dateModified: 30 },
-    c: { ...original, recordingGroupId: "old-group", recordingIdentity: { ...identity, durationMs: 180900 }, dateModified: 40 },
+    b: { ...original, recordingGroupId: "old-group", recordingIdentity: { ...identity, durationMs: 176500 }, dateModified: 30 },
+    c: { ...original, recordingGroupId: "old-group", recordingIdentity: { ...identity, durationMs: 183000 }, dateModified: 40 },
   };
   expect(await indexedDBStorage.saveAll(normalizeTagDataStructure({ ...defaultTagData, tracks }))).toBe(true);
   const saved = (await indexedDBStorage.loadAllStrict()).tracks;
@@ -194,4 +201,31 @@ it("does not restore a deleted track when an older metadata backfill completes",
   await indexedDBStorage.deleteTrack("a");
   expect(await indexedDBStorage.saveTracks(new Map([["a", { ...original, artists: "Late metadata" }]]), { a: original }, { keepConcurrentChanges: true })).toBe(true);
   expect(await indexedDBStorage.getTrack("a")).toBeNull();
+});
+
+it("links a confirmed single and album version, keeping each copy's dates, and remembers Not the same", async () => {
+  const justice = "1gR0gsQYfi6joyO1dlp76N", tame = "5INjqkS1o8h1imAzPqGZBb";
+  const singleIdentity = { isrc: "FR6P12602660", artistIds: [justice, tame, "15o7qdDTBzs6xWRUYUtZc1"].sort(), leadArtistId: justice, durationMs: 224877, name: "Flower In A Hurricane (feat. Tame Impala) [From GTAVI: Original Score]" };
+  const albumIdentity = { isrc: "USAT22606646", artistIds: [justice, tame].sort(), leadArtistId: justice, durationMs: 221189, name: "Flower In A Hurricane (feat. Tame Impala)" };
+  const tracks = (await indexedDBStorage.loadAllStrict()).tracks;
+  const near = { a: { identity: singleIdentity, annotations: recordingAnnotations(tracks.a) }, b: { identity: albumIdentity, annotations: recordingAnnotations(tracks.b) } };
+  await expect(indexedDBStorage.linkRecordings(near, "a", false)).rejects.toThrow("same recording");
+  await expect(indexedDBStorage.linkRecordings(near, "a", false, { automatic: true, confirmSimilar: true })).rejects.toThrow("same recording");
+  await indexedDBStorage.linkRecordings(near, "a", false, { confirmSimilar: true });
+  const b = (await indexedDBStorage.getTrack("b"))!;
+  expect(b).toMatchObject({ rating: 3, energy: 4, dateModified: 30, recordingGroupConfirmed: true, recordingIdentity: albumIdentity });
+  expect((await indexedDBStorage.getTrack("a"))!.dateModified).toBe(20);
+  // Restore and later edits keep the confirmed link.
+  await indexedDBStorage.saveAll(normalizeTagDataStructure(await indexedDBStorage.loadAllStrict()));
+  await indexedDBStorage.saveTrack("a", { ...(await indexedDBStorage.getTrack("a"))!, rating: 5 });
+  expect((await indexedDBStorage.getTrack("b"))!.rating).toBe(5);
+
+  await indexedDBStorage.unlinkRecording("b", false);
+  const before = (await indexedDBStorage.getTrack("b"))!;
+  const remembered = await indexedDBStorage.rememberNotSameRecording(["spotify:track:4HCOHRCSQelz2GPX8iTamO", "b"]);
+  expect(Object.keys(remembered)).toEqual(["b"]);
+  expect(await indexedDBStorage.getTrack("spotify:track:4HCOHRCSQelz2GPX8iTamO")).toBeNull();
+  expect(await indexedDBStorage.getTrack("b")).toEqual({ ...before, recordingNotSameAs: ["spotify:track:4HCOHRCSQelz2GPX8iTamO"] });
+  const restored = normalizeTagDataStructure(await indexedDBStorage.loadAllStrict());
+  expect(restored.tracks.b.recordingNotSameAs).toEqual(["spotify:track:4HCOHRCSQelz2GPX8iTamO"]);
 });

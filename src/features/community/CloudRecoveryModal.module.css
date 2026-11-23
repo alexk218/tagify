@@ -21,7 +21,8 @@
 .error { padding: 12px; border-radius: 10px; color: #ffb0b5; background: rgb(239 124 131 / 10%); }
 .actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
 .primary, .secondary { min-height: 42px; display: inline-flex; justify-content: center; gap: 8px; align-items: center; padding: 9px 15px; border-radius: 10px; cursor: pointer; font-weight: 800; }
-.primary { border: 1px solid rgb(155 140 255 / 40%); color: white; background: #7566d8; }
-.secondary { border: 1px solid rgb(255 255 255 / 12%); color: var(--spice-subtext); background: transparent; }
+.primary { border: 1px solid var(--spice-button); color: #000; background: var(--spice-button); }
+.primary:hover:not(:disabled) { border-color: var(--spice-button-active); background: var(--spice-button-active); }
+.secondary { border: 1px solid var(--spice-misc); color: var(--spice-subtext); background: transparent; }
 .primary:disabled, .secondary:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 560px) { .overlay { padding: 12px; } .stats { grid-template-columns: 1fr; } .actions { grid-template-columns: 1fr; } }

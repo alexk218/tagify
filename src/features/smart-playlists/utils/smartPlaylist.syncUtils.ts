@@ -1,5 +1,5 @@
 import { SmartPlaylistFilterCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
-import { TagDataStructure, TrackData } from "@/types/tagData";
+import { TagDataStructure, TagTaxonomy, TrackData } from "@/types/tagData";
 import { compileTrackCriteria } from "./smartPlaylist.criteria";
 import { applyTagChoice, smartPlaylistTagChoices } from "./smartPlaylist.tagChoices";
 import { collapseRecordingEntries, recordingDisplayKeys } from "@/features/recording-reuse/utils/recordingLibrary";
@@ -19,8 +19,9 @@ export function applySmartPlaylistCriteriaToTrack(
   trackData: TrackData,
   criteria: SmartPlaylistFilterCriteria,
   now: number,
+  taxonomy: TagTaxonomy | null,
 ): TrackData {
-  const choices = smartPlaylistTagChoices(trackData.tagIds, criteria);
+  const choices = smartPlaylistTagChoices(trackData.tagIds, criteria, taxonomy);
   const nextTagIds = choices?.length === 1 ? applyTagChoice(trackData.tagIds, choices[0]) : trackData.tagIds;
 
   let rating = trackData.rating;
@@ -94,10 +95,11 @@ export function findDuplicateTrackUris(trackUris: string[]): {
 export function collectMatchingTrackUris(
   tracks: TagDataStructure["tracks"],
   criteria: SmartPlaylistFilterCriteria,
+  taxonomy: TagTaxonomy | null,
   preferredUris: string[] = [],
   recordingKeys?: Map<string, string>,
 ): string[] {
-  const matchesCriteria = compileTrackCriteria(criteria);
+  const matchesCriteria = compileTrackCriteria(criteria, taxonomy);
   const matchingTrackUris: string[] = [];
 
   for (const trackUri in tracks) {

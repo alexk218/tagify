@@ -58,7 +58,7 @@ describe("InviteFriendsPanel", () => {
     expect(screen.getByRole("img", { name: "You're invited to Tagify" })).toHaveAttribute("src", "https://tagify.fm/join/opengraph-image");
     expect(recordProductInteraction).toHaveBeenCalledWith("invite_opened", { invite_entry: "milestone", invite_link: "general" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Connect Community" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create account or sign in" }));
     expect(actions.onConnectCommunity).toHaveBeenCalledOnce();
     expect(actions.onOpenSync).not.toHaveBeenCalled();
   });

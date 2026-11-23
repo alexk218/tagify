@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import DataManager from "@/features/tag-data/components/DataManager";
 import { PHONE_APP_STATE_KEY } from "../phoneAppState";
+import { CONNECT_FOR_PHONE_EVENT } from "../phoneConnection";
+import { setDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 
 const renderBar = () => render(
   <DataManager onExportTagData={vi.fn()} onImportTagData={vi.fn()} onOpenStats={vi.fn()} onResetTagifyData={vi.fn()} onRetryMigration={vi.fn()} onConnectCommunity={vi.fn()} onOpenSync={vi.fn()} />,
@@ -13,7 +15,15 @@ describe("Get Tagify on your phone", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    // Someone updating from before these features: New marks are for them, not new installations.
+    localStorage.setItem("tagify:lastSeenVersion", "3.3.6");
     window.open = vi.fn() as typeof window.open;
+  });
+
+  it("has no new dot for someone who just installed Tagify", () => {
+    localStorage.removeItem("tagify:lastSeenVersion");
+    renderBar();
+    expect(screen.getByRole("button", { name: "Get Tagify on your phone" })).toBeInTheDocument();
   });
 
   it("is new until opened, then offers the App Store and an Android alert", () => {
@@ -56,5 +66,31 @@ describe("Get Tagify on your phone", () => {
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
     expect(screen.getByRole("button", { name: "Get Tagify on your phone" })).toBeInTheDocument();
+  });
+
+  it("asks a computer that isn't connected to connect first, and opens Community setup", () => {
+    const connect = vi.fn();
+    window.addEventListener(CONNECT_FOR_PHONE_EVENT, connect);
+    renderBar();
+    fireEvent.click(screen.getByRole("button", { name: /Get Tagify on your phone/ }));
+    expect(screen.getByText("Connect this computer to your Tagify account")).toBeVisible();
+    expect(screen.getByText("Get the app and sign in with the same account")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create account or sign in" }));
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "Tagify on your phone" })).not.toBeInTheDocument();
+    window.removeEventListener(CONNECT_FOR_PHONE_EVENT, connect);
+  });
+
+  it("names the connected account instead of asking to connect", () => {
+    setDesktopSyncConfiguration({
+      accountId: "account-1", libraryId: "library-1", deviceId: "device-1", apiBaseUrl: "https://tagify.fm",
+      supabaseUrl: "https://example.supabase.co", supabasePublishableKey: "key", accessToken: "access", refreshToken: "refresh",
+      expiresAt: Date.now() + 3600000, profile: { handle: "alex", displayName: "Alex" },
+    });
+    renderBar();
+    fireEvent.click(screen.getByRole("button", { name: /Get Tagify on your phone/ }));
+    expect(screen.queryByRole("button", { name: "Create account or sign in" })).not.toBeInTheDocument();
+    expect(screen.getByText("Alex")).toBeVisible();
   });
 });

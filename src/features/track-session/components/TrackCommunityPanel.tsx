@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Check, ExternalLink, Plus, Star } from "lucide-react";
 import { sameTagNameKey, type PublicContributorV1 } from "@tagify/community-contracts";
 import { lookupCommunityEntity, peekCommunityEntity, type CommunityEntityLookup } from "@/features/community/communityEntityCache";
-import { COMMUNITY_PAGES_ORIGIN, getCommunityEntityUrl, openCommunityUrl } from "@/features/community/communityLinks";
+import { COMMUNITY_PAGES_ORIGIN, communityTagLinkTitle, getCommunityEntityUrl, getCommunityTagUrl, openCommunityUrl } from "@/features/community/communityLinks";
 import type { TaggedByOthersItem } from "@/features/community/taggedByOthers/taggedByOthersScan";
 import type { CommunityMatchTag } from "@/features/onboarding/services/communityMatches";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
@@ -106,6 +106,10 @@ export function TrackCommunityPanel({ uri, songName, others, songTagKeys, librar
   };
 
   const songUrl = getCommunityEntityUrl(uri);
+  const openTag = (label: string) => {
+    openCommunityUrl(getCommunityTagUrl(label));
+    recordProductInteraction("track_list_community_link_opened", { target: "tag" });
+  };
   const fallbackWho = others.sample.length ? others.sample.map((handle) => `@${handle}`).join(", ") : null;
 
   return (
@@ -119,14 +123,19 @@ export function TrackCommunityPanel({ uri, songName, others, songTagKeys, librar
             : fresh ? `Add ${tag.label} to this song. It's new to your library, so it goes in ${destinationOf(tag)}.`
             : `Add ${tag.label} to this song`;
           return (
-            <button key={tag.label} type="button" className={`${styles.chip} ${on ? styles.chipOn : ""}`} disabled={busy || on}
-              aria-label={on ? `${tag.label} added to ${songName}` : `Add ${tag.label} to ${songName}`} title={title}
-              onClick={() => void add([tag])}>
-              {on ? <Check size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
-              <span>{tag.label}</span>
-              {tag.people > 1 ? <span className={styles.count}>{tag.people}</span> : null}
-              {fresh ? <span className={styles.newTag}>new</span> : null}
-            </button>
+            <span key={tag.label} className={`${styles.chip} ${on ? styles.chipOn : ""}`}>
+              <button type="button" className={styles.chipAdd} disabled={busy || on}
+                aria-label={on ? `${tag.label} added to ${songName}` : `Add ${tag.label} to ${songName}`} title={title}
+                onClick={() => void add([tag])}>
+                {on ? <Check size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
+              </button>
+              <button type="button" className={styles.chipLink} title={communityTagLinkTitle(tag.label)} aria-label={communityTagLinkTitle(tag.label)}
+                onClick={(event) => { event.stopPropagation(); openTag(tag.label); }}>
+                <span>{tag.label}</span>
+                {tag.people > 1 ? <span className={styles.count}>{tag.people}</span> : null}
+                {fresh ? <span className={styles.newTag}>new</span> : null}
+              </button>
+            </span>
           );
         })}
       </div>

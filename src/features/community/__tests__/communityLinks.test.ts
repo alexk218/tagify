@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { getCommunityDisconnectUrl, getCommunityEntityUrl } from "../communityLinks";
+import { getCommunityDisconnectUrl, getCommunityEntityUrl, getCommunityTagUrl } from "../communityLinks";
 
 describe("Community links", () => {
   it("links supported exact Spotify entities", () => {
@@ -16,5 +16,11 @@ describe("Community links", () => {
     expect(getCommunityDisconnectUrl("account/id", "device/id")).toBe(
       "https://tagify.fm/auth/disconnect?account=account%2Fid&device=device%2Fid",
     );
+  });
+
+  it("links a tag to its page with the website's slug, or its music search when it has none", () => {
+    expect(getCommunityTagUrl("Nu-Metal")).toBe("https://tagify.fm/tags/nu-metal");
+    expect(getCommunityTagUrl("Drum & Bass")).toBe("https://tagify.fm/tags/drum-and-bass");
+    expect(getCommunityTagUrl("🔥")).toBe(`https://tagify.fm/search?tag=label:${encodeURIComponent("🔥")}`);
   });
 });

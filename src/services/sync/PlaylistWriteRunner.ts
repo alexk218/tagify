@@ -9,6 +9,7 @@ import type { SendSession } from "./SpotifyLibrarySender";
 import { isSpotifyBusy } from "./SpotifyLibrarySender";
 import { syncClientHeaders } from "./SyncClientHeaders";
 import { backoffDelayMs, isBusyStatus, retryAfterSeconds } from "./SyncRetryAfter";
+import { addableHere, isLocalFileUri, stopLocalFileAdds } from "../localFilesOnThisComputer";
 
 // Keeps playlists the member made on Tagify Community in their Spotify (Community migration 0261,
 // contract @tagify/sync-contracts playlistWrites). Community holds no Spotify sign-in, so Tagify
@@ -65,6 +66,8 @@ export interface PlaylistWriter {
   updatePlaylistDetails(playlistId: string, details: { name: string; description: string }): Promise<void>;
   /** Leaves the playlist holding exactly `uris`, in order. */
   replacePlaylistTracks(playlistId: string, uris: string[]): Promise<void>;
+  /** Every song in the playlist now, in order. */
+  playlistUris(playlistId: string): Promise<string[]>;
 }
 
 /** Remembers playlists Tagify created but Community hasn't heard about, so a retry fills the same one. */
@@ -94,9 +97,41 @@ export function localCreatedPlaylists(account: () => string): CreatedPlaylists {
 
 const writeFailure = (error: unknown): PlaylistWriteFailureV1 => (isSpotifyBusy(error) ? "spotify_busy" : "spotify_unavailable");
 
+/**
+ * What a Community playlist should hold in Spotify. Community's songs in its order, where a local
+ * file is added only when this computer's Spotify lists it, and stays when it is already there
+ * (another computer added it). Local files Community no longer asks for are removed; local files
+ * the member added by hand stay, after Community's songs.
+ */
+export function plannedPlaylistUris(wanted: string[], current: string[], removed: readonly string[], addable: ReadonlySet<string>): string[] {
+  const wantedSet = new Set(wanted);
+  const present = new Set(current);
+  const removing = new Set(removed);
+  const planned = wanted.filter((uri) => !isLocalFileUri(uri) || present.has(uri) || addable.has(uri));
+  const handAdded = current.filter((uri) => isLocalFileUri(uri) && !wantedSet.has(uri) && !removing.has(uri));
+  return [...planned, ...new Set(handAdded)];
+}
+
+async function writeSongs(writer: PlaylistWriter, spotifyPlaylistId: string, playlist: PlaylistWriteV1, isNew: boolean): Promise<void> {
+  const wanted = playlist.uris ?? playlist.trackIds.map((trackId) => `spotify:track:${trackId}`);
+  const removed = playlist.removedLocalUris ?? [];
+  const current = isNew ? [] : await writer.playlistUris(spotifyPlaylistId);
+  const local = wanted.filter((uri) => isLocalFileUri(uri) && !current.includes(uri));
+  const addable = new Set((await addableHere(local)).addable);
+  try {
+    await writer.replacePlaylistTracks(spotifyPlaylistId, plannedPlaylistUris(wanted, current, removed, addable));
+  } catch (error) {
+    // Spotify refusing a local file must not cost the playlist its Spotify songs: write it again
+    // without the new local files, and stop adding local files until Spotify reloads.
+    if (!addable.size || isSpotifyBusy(error)) throw error;
+    stopLocalFileAdds(error);
+    const now = await writer.playlistUris(spotifyPlaylistId);
+    await writer.replacePlaylistTracks(spotifyPlaylistId, plannedPlaylistUris(wanted, now, removed, new Set()));
+  }
+}
+
 /** Writes one claimed playlist to Spotify; never throws. `created` is set when a new Spotify playlist was made. */
 export async function writeClaimedPlaylist(writer: PlaylistWriter, playlist: PlaylistWriteV1, created: CreatedPlaylists): Promise<PlaylistWriteResultV1 & { created?: boolean }> {
-  const uris = playlist.trackIds.map((trackId) => `spotify:track:${trackId}`);
   try {
     let spotifyPlaylistId = playlist.spotifyPlaylistId;
     let isNew = false;
@@ -116,7 +151,7 @@ export async function writeClaimedPlaylist(writer: PlaylistWriter, playlist: Pla
         isNew = true;
       }
     }
-    await writer.replacePlaylistTracks(spotifyPlaylistId, uris);
+    await writeSongs(writer, spotifyPlaylistId, playlist, isNew);
     return { id: playlist.id, result: "written", spotifyPlaylistId, fingerprint: playlist.fingerprint, ...(isNew ? { created: true } : {}) };
   } catch (error) {
     return { id: playlist.id, result: "failed", failure: writeFailure(error) };

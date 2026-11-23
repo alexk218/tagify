@@ -7,7 +7,12 @@
  *   settings, prompt flags and Community connection are never read back or changed;
  * - the tag library opens a separate, empty IndexedDB database (see getTagifyDatabaseName);
  * - requests to Tagify Community and PostHog are answered locally: Community's usage endpoint as a
- *   brand-new account, product analytics dropped, and every other Community write refused;
+ *   brand-new account, product analytics dropped, and every other Community write refused, except
+ *   the account sign-up requests (SIGN_UP_REQUESTS), which reach Community so the team can walk
+ *   through creating an account, and the "Tagged by others" lookups (PUBLIC_READS): the public
+ *   preview a brand-new user sends, and the connected one a new account sends once it's connected. The connection they produce is stored in the preview copy only,
+ *   and library sync, uploads and recovery enrollment stay refused, so a preview account never
+ *   receives the real library;
  * - Spotify writes (playlists) are refused in spotifyWrite.
  *
  * The flag itself lives outside the `tagify:` namespace so the sandbox never redirects it.
@@ -25,6 +30,38 @@ const COMMUNITY_HOST = /(^|\.)tagify\.fm$/;
 const SUPABASE_HOST = /\.supabase\.co$/;
 const POSTHOG_HOST = /(^|\.)posthog\.com$/;
 const USAGE_PATH = "/api/v1/tagify-usage";
+/**
+ * Writes that go out during the preview: creating or signing in to a Tagify account inside Tagify
+ * (device authorization, email code, token), picking a handle, the private/publish choice on the
+ * new account, opening tagify.fm signed in, and keeping that session fresh. None of them carries
+ * library data.
+ */
+const SIGN_UP_REQUESTS: ReadonlyArray<{ host: RegExp; method: string; path: string }> = [
+  { host: COMMUNITY_HOST, method: "POST", path: "/api/v2/device-authorizations" },
+  { host: COMMUNITY_HOST, method: "POST", path: "/api/v2/device-authorizations/token" },
+  { host: COMMUNITY_HOST, method: "POST", path: "/api/v2/device-authorizations/email" },
+  { host: COMMUNITY_HOST, method: "POST", path: "/api/v2/device-authorizations/email/verify" },
+  { host: COMMUNITY_HOST, method: "POST", path: "/api/v2/device/profile" },
+  { host: COMMUNITY_HOST, method: "PUT", path: "/api/v2/publication-policy" },
+  { host: COMMUNITY_HOST, method: "POST", path: "/api/v2/device/website-link" },
+  { host: SUPABASE_HOST, method: "POST", path: "/auth/v1/token" },
+];
+
+/**
+ * Community lookups sent as POST that only read: which of the person's songs other members tagged.
+ * Without an account Tagify asks the public preview; once the preview account is connected it asks
+ * the connected lookup instead. A new user sends the same, so the preview shows what they would see.
+ * Neither saves the songs on Community (the connected one only counts how many were checked today).
+ */
+const PUBLIC_READS: ReadonlyArray<{ host: RegExp; method: string; path: string }> = [
+  { host: COMMUNITY_HOST, method: "POST", path: "/api/v2/public/tagged-by-others-preview" },
+  { host: COMMUNITY_HOST, method: "POST", path: "/api/v2/sync/tagged-by-others" },
+];
+
+function goesOutDuringPreview(url: URL, method: string): boolean {
+  const path = url.pathname.replace(/\/+$/, "");
+  return [...SIGN_UP_REQUESTS, ...PUBLIC_READS].some((request) => request.method === method && request.path === path && request.host.test(url.hostname));
+}
 
 export class OnboardingPreviewBlockedError extends Error {
   constructor(what: string) {
@@ -120,6 +157,7 @@ export async function previewResponseFor(input: RequestInfo | URL, init?: Reques
     });
   }
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return null;
+  if (goesOutDuringPreview(url, method)) return null;
   return jsonResponse({ error: "onboarding_preview", message: "Not sent during the onboarding preview." }, 503);
 }
 
@@ -171,11 +209,19 @@ function deleteDatabase(name: string): void {
   try { globalThis.indexedDB?.deleteDatabase(name); } catch { /* Opened again empty or as left. */ }
 }
 
+/**
+ * Preview keys a fresh preview keeps. Community's answer about which Liked Songs others tagged only
+ * describes the real library, and asking again spends the address's daily allowance: a few "Start
+ * over"s in one day used it up and left the Tagged by others preview empty (2026-11-23).
+ */
+const KEPT_ACROSS_START_OVER = [`${ONBOARDING_PREVIEW_STORAGE_PREFIX}tagify:community-teaser-preview`];
+
 function clearPreviewStorage(storage: Storage, original: StorageMethods): void {
   const keys: string[] = [];
   try {
     for (let index = 0; index < storage.length; index++) {
       const key = storage.key(index);
+      if (key && KEPT_ACROSS_START_OVER.some((kept) => key.startsWith(kept))) continue;
       if (key?.startsWith(ONBOARDING_PREVIEW_STORAGE_PREFIX) && key !== ONBOARDING_PREVIEW_FLAG_KEY) keys.push(key);
     }
     for (const key of keys) original.removeItem.call(storage, key);

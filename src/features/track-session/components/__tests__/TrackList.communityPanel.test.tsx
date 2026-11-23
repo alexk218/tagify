@@ -139,7 +139,7 @@ describe("TrackList: other members' tags on a row", () => {
     // The song already has House; Night isn't in the library yet, so it's marked new.
     expect(within(panel).getByRole("button", { name: "House added to What A Wonderful World" })).toBeDisabled();
     const night = within(panel).getByRole("button", { name: "Add Night to What A Wonderful World" });
-    expect(within(night).getByText("new")).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "See music tagged Night on tagify.fm" })).toHaveTextContent("new");
     // The library has no Mood category, so Night would go in From Community.
     expect(night).toHaveAttribute("title", expect.stringContaining("goes in From Community"));
 
@@ -155,6 +155,15 @@ describe("TrackList: other members' tags on a row", () => {
     expect(onAdd).toHaveBeenLastCalledWith(SONG, [others.tags[2]]);
     expect(analytics.record).toHaveBeenLastCalledWith("track_list_members_tag_added", { members_add: "tag", new_to_library: "yes" });
     expect(within(panel).getByRole("button", { name: "Night added to What A Wonderful World" })).toBeDisabled();
+
+    // The name opens the tag's page instead of adding it.
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    onAdd.mockClear();
+    await user.click(within(panel).getByRole("button", { name: "See music tagged Jazz on tagify.fm" }));
+    expect(open).toHaveBeenCalledWith("https://tagify.fm/tags/jazz", "_blank", "noopener,noreferrer");
+    expect(analytics.record).toHaveBeenLastCalledWith("track_list_community_link_opened", { target: "tag" });
+    expect(onAdd).not.toHaveBeenCalled();
+    open.mockRestore();
 
     analytics.record.mockClear();
     await user.click(toggle);
@@ -200,6 +209,8 @@ describe("TrackList: the sort dropdown's one-time highlight", () => {
 
   beforeEach(() => {
     localStorage.clear();
+    // Someone updating from before these features: New marks are for them, not new installations.
+    localStorage.setItem("tagify:lastSeenVersion", "3.3.6");
     analytics.record.mockClear();
   });
 

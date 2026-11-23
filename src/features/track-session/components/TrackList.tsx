@@ -1,4 +1,5 @@
 import { connectExistingSmartPlaylist } from "@/features/smart-playlists";
+import { addableHere } from "@/services/localFilesOnThisComputer";
 import React, {
   useCallback,
   useDeferredValue,
@@ -16,6 +17,7 @@ import { TagTaxonomy } from "@/types/tagData";
 import { CreatePlaylistModal } from "@/features/playlist-state";
 import { trackService } from "@/services/TrackService";
 import { spotifyService } from "@/services/SpotifyService";
+import { openSpotifyArtist } from "@/services/spotifyNavigation";
 import {
   PAGINATION_BATCH_SIZE,
   SORT_OPTIONS,
@@ -26,11 +28,11 @@ import ReactStars from "react-rating-stars-component";
 import { SmartPlaylistModal } from "@/features/smart-playlists";
 import { collectMatchingTrackUris } from "@/features/smart-playlists";
 import type { SpotifyPlaylistReference } from "@/features/smart-playlists";
-import { formatTimestamp } from "@/utils/formatters";
 import { revealElement } from "@/utils/revealElement";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faArrowLeft,
+  faCheck,
   faBoltLightning,
   faFloppyDisk,
   faXmark,
@@ -70,7 +72,9 @@ import {
   TAG_FILTER_OPERATORS,
   TagFilterClause,
   TagFilterFormula,
+  buildTagGroupFilterOptions,
   formatTagFilterFormula,
+  getTagGroupFilterGroupId,
 } from "@/utils/tagFilterGroups";
 import { useTrackListControls } from "@/features/track-session/hooks/useTrackListControls";
 import { useTrackListCommunity } from "@/features/track-session/hooks/useTrackListCommunity";
@@ -83,6 +87,7 @@ import type { CommunityMatchTag } from "@/features/onboarding/services/community
 import { communityTagDestination } from "@/features/onboarding/services/communityTagPlacement";
 import { sameTagNameKey } from "@tagify/community-contracts";
 import { ChevronDown } from "lucide-react";
+import { RowTimestamps } from "./TimestampIcon";
 import { preloadTaggedByOthers } from "@/features/community/taggedByOthers/useTaggedByOthers";
 import { OthersTagsGate } from "@/features/track-session/components/OthersTagsGate";
 import { communitySwitchOn } from "@/features/community/communitySwitches";
@@ -103,16 +108,24 @@ import {
 } from "@/features/track-session/utils/trackList.logic";
 import {
   TagDisplayInfo,
+  TrackListEntry,
   TrackListTrackData,
 } from "@/features/track-session/model/trackList.types";
 import { buildTagAccentCssVars } from "@/features/tag-data";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
+import { setAdvancedFilters, useAdvancedFilters } from "@/features/filter-state/advancedFiltersSetting";
+import { removeFromToTag, useToTagList } from "@/features/to-tag/toTagStore";
+import { useFillToTagNames } from "@/features/to-tag/useFillToTagNames";
 import { collapseRecordingEntries, recordingDisplayKeys } from "@/features/recording-reuse/utils/recordingLibrary";
 import { buildValidTagIdSet } from "@/utils/tagTaxonomy";
+import { CommunityTagSearch, tagSearchQuery } from "@/features/community/tagSearch/CommunityTagResults";
+import { useCommunityTagSearch } from "@/features/community/tagSearch/useCommunityTagSearch";
+import { useTagSearchNewLabel } from "@/features/community/tagSearch/tagSearchNewLabel";
 import { usePrivateNotePreviews } from "@/features/private-notes/hooks/usePrivateNotePreviews";
 import { PrivateNotePreview, PrivateNotePreviewError } from "@/features/private-notes/components/PrivateNotePreview";
 import { TrackCover } from "./TrackCover";
 import { CoverPlay, usePlayerNow } from "@/components/ui";
+import { useSharingLockReason } from "@/features/community/sharingLockReason";
 
 const CAMELOT_KEY_LINE_A = Array.from(
   { length: 12 },
@@ -122,7 +135,6 @@ const CAMELOT_KEY_LINE_B = Array.from(
   { length: 12 },
   (_, index) => `${index + 1}B`,
 );
-const TAG_FILTER_EDITOR_MODE_STORAGE_KEY = "tagify:tagFilterEditorMode";
 const BASIC_TAG_FILTER_OPERATOR_STORAGE_KEY = "tagify:basicTagFilterOperator";
 
 type TagFilterEditorMode = "basic" | "complex";
@@ -237,8 +249,6 @@ interface TrackListProps {
   ) => Promise<SmartPlaylistImportSummary>;
   requestedSmartPlaylistEditId?: string | null;
   onSmartPlaylistEditRequestHandled?: () => void;
-  // Each new value opens Create Playlist for the songs the filters show.
-  createPlaylistRequest?: number;
   /**
    * Tracks opened from Stats; while set, the list shows only these. A new id starts from clear
    * filters and scrolls the list into view, unless `reveal` is "track" (a song was opened instead).
@@ -265,17 +275,14 @@ interface TrackListProps {
    * tags, never who), as a preview with adding locked until they connect (switch `communityTeasers`).
    */
   communityTeaser?: { others: ReadonlyMap<string, TaggedByOthersItem>; found?: number; onConnect: () => void };
+  /**
+   * "On Community" under the list's own songs while a tag filter is on: songs other members tagged
+   * that way (switch `communityTagSearch`). `viewer` changes when who is asking changes (connected, sharing).
+   */
+  communityTagSearch?: { viewer: string; onConnect: () => void; onShare: () => void; onPlay: (uri: string) => void };
 }
 
-type TrackListView = "tagged" | "others";
-
-/** Songs other members tagged, or only those where they used a tag the song doesn't have. */
-type CommunityFilter = "off" | "tagged" | "new_tags";
-const COMMUNITY_FILTERS: readonly CommunityFilter[] = ["off", "tagged", "new_tags"];
-const COMMUNITY_FILTER_LABELS: Record<Exclude<CommunityFilter, "off">, string> = {
-  tagged: "Tagged by others",
-  new_tags: "Has tags I don't",
-};
+type TrackListView = "tagged" | "others" | "toTag";
 
 const TrackList: React.FC<TrackListProps> = ({
   tracks,
@@ -307,7 +314,6 @@ const TrackList: React.FC<TrackListProps> = ({
   onImportSmartPlaylists,
   requestedSmartPlaylistEditId = null,
   onSmartPlaylistEditRequestHandled,
-  createPlaylistRequest = 0,
   statsTrackSet = null,
   onClearStatsTrackSet,
   onReturnToStats,
@@ -316,10 +322,18 @@ const TrackList: React.FC<TrackListProps> = ({
   othersTagsLocked = false,
   onShareTags,
   communityTeaser,
+  communityTagSearch,
 }) => {
+  const allTagsHidden = useSharingLockReason() === "all-hidden";
   const [savedView, setSavedView] = useLocalStorage<TrackListView>("tagify:trackListView", "tagged");
+  const viewTabsRef = useRef<HTMLDivElement | null>(null);
   // A list opened from Stats is always Tagged Tracks.
   const othersActive = !!taggedByOthersView && !statsTrackSet && savedView === "others";
+  const toTagList = useToTagList();
+  const toTagActive = !statsTrackSet && savedView === "toTag";
+  // Always shown, even before anything is on the list (Alex, 2026-11-23), so people find it.
+  const toTagTabShown = !statsTrackSet;
+
   const [showCreatePlaylistModal, setShowCreatePlaylistModal] =
     useState<boolean>(false);
   const [showSmartPlaylistModal, setShowSmartPlaylistModal] =
@@ -327,11 +341,9 @@ const TrackList: React.FC<TrackListProps> = ({
   const [editingSmartPlaylist, setEditingSmartPlaylist] =
     useState<SmartPlaylistCriteria | null>(null);
   const handledSmartPlaylistEditRequestRef = useRef<string | null>(null);
-  const [tagFilterEditorMode, setTagFilterEditorMode] =
-    useLocalStorage<TagFilterEditorMode>(
-      TAG_FILTER_EDITOR_MODE_STORAGE_KEY,
-      "basic",
-    );
+  // Settings > Advanced filters: the tag group formula editor and the Camelot key filter.
+  const advancedFilters = useAdvancedFilters();
+  const tagFilterEditorMode: TagFilterEditorMode = advancedFilters ? "complex" : "basic";
   const [basicTagFilterOperator, setBasicTagFilterOperator] = useLocalStorage<
     "AND" | "OR"
   >(BASIC_TAG_FILTER_OPERATOR_STORAGE_KEY, TAG_FILTER_OPERATORS.OR);
@@ -357,8 +369,6 @@ const TrackList: React.FC<TrackListProps> = ({
     bpmMaxFilter,
     setBpmMaxFilter,
     setCamelotKeyFilters,
-    showAdvancedFilters,
-    setShowAdvancedFilters,
     sortBy,
     setSortBy,
     sortOrder,
@@ -394,9 +404,21 @@ const TrackList: React.FC<TrackListProps> = ({
   );
   const statsTrackUris = useMemo(() => statsTrackSet ? new Set(statsTrackSet.trackUris) : null, [statsTrackSet]);
   // Search, filters and sorting still work inside a set opened from Stats.
+  // The To Tag list shows songs whether or not they have anything saved yet. Songs with nothing
+  // saved get a display-only placeholder; nothing is written to the library until they're tagged.
+  const toTagEntries = useMemo<TrackListEntry[]>(
+    () => toTagList.map((entry) => [entry.uri, deferredTracks[entry.uri] ?? {
+      rating: 0, energy: 0, bpm: null, tagIds: [],
+      name: entry.name || undefined, artists: entry.artists || undefined,
+      albumName: entry.album || undefined, albumImageUrl: entry.image || null,
+    }]),
+    [toTagList, deferredTracks],
+  );
+  const toTagUnsaved = useMemo(() => toTagList.filter((entry) => !deferredTracks[entry.uri]), [toTagList, deferredTracks]);
+  useFillToTagNames(toTagUnsaved, toTagActive);
   const listedEntries = useMemo(
-    () => statsTrackUris ? trackEntries.filter(([uri]) => statsTrackUris.has(uri)) : trackEntries,
-    [trackEntries, statsTrackUris],
+    () => toTagActive ? toTagEntries : statsTrackUris ? trackEntries.filter(([uri]) => statsTrackUris.has(uri)) : trackEntries,
+    [toTagActive, toTagEntries, trackEntries, statsTrackUris],
   );
   // Opening a new set from Stats starts from clear filters, so the list shows exactly what Stats
   // counted, and brings the list into view so it's clear where the tracks went. Runs once per
@@ -428,7 +450,7 @@ const TrackList: React.FC<TrackListProps> = ({
     () => buildTagPositionLookup(taxonomy),
     [taxonomy],
   );
-  const trackInfo = useMemo(() => buildTrackInfoMap(trackEntries), [trackEntries]);
+  const trackInfo = useMemo(() => buildTrackInfoMap(toTagActive ? [...trackEntries, ...toTagEntries] : trackEntries), [toTagActive, trackEntries, toTagEntries]);
 
   const filterTagBySearch = (tagName: string) => {
     if (!tagSearchTerm || typeof tagSearchTerm !== "string") return true;
@@ -453,8 +475,9 @@ const TrackList: React.FC<TrackListProps> = ({
         normalizedCamelotKeyFilters,
         searchTerm,
         ...songDetailFilters,
-      }),
+      }, taxonomy),
     [
+      taxonomy,
       listedEntries,
       trackInfo,
       includeTagClauses,
@@ -495,6 +518,7 @@ const TrackList: React.FC<TrackListProps> = ({
   const sortHighlight = useNewFeatureHighlight(
     "track-list-sort-community-people",
     community.available && effectiveSortBy !== SORT_OPTIONS.COMMUNITY_PEOPLE,
+    "3.4.0",
   );
   const player = usePlayerNow();
   // Read the saved Tagged by others check now, so switching to it doesn't flash an empty panel first.
@@ -503,45 +527,42 @@ const TrackList: React.FC<TrackListProps> = ({
     if (othersTabAvailable) void preloadTaggedByOthers(getDesktopSyncConfiguration()?.accountId || null);
   }, [othersTabAvailable]);
   // Once after the update, for connected members: the "Tagged by others" tab is marked New until they open it.
-  const othersTabHighlight = useNewFeatureHighlight("track-list-tagged-by-others-view", community.available && !!taggedByOthersView && !statsTrackSet);
+  const othersTabHighlight = useNewFeatureHighlight("track-list-tagged-by-others-view", community.available && !!taggedByOthersView && !statsTrackSet, "3.4.0");
   useEffect(() => {
     if (othersActive && othersTabHighlight.show) othersTabHighlight.dismiss();
   }, [othersActive, othersTabHighlight]);
-  const [savedCommunityFilter, setCommunityFilter] = useLocalStorage<CommunityFilter>("tagify:trackListCommunityFilter", "off");
-  // Like the sort, a saved Community filter is kept but ignored on a computer that isn't connected.
-  const communityFilter: CommunityFilter = community.available && COMMUNITY_FILTERS.includes(savedCommunityFilter) ? savedCommunityFilter : "off";
-  const hasTagsIDont = useCallback((uri: string, data: TrackListTrackData) => {
-    const others = community.others.get(uri);
-    if (!others) return false;
-    const own = new Set(getResolvedTrackTags(data, tagDisplayLookup).map((tag) => sameTagNameKey(tag.displayName)));
-    return others.tags.some((tag) => !own.has(sameTagNameKey(tag.label)));
-  }, [community.others, tagDisplayLookup]);
-  const communityMatching = useMemo(() => {
-    if (communityFilter === "off") return matchingTracks;
-    return matchingTracks.filter(([uri, data]) => (communityFilter === "tagged" ? community.others.has(uri) : hasTagsIDont(uri, data)));
-  }, [matchingTracks, communityFilter, community.others, hasTagsIDont]);
-  // How many songs each choice would show among the songs the other filters keep.
-  const communityFilterCounts = useMemo(() => (community.available ? {
-    tagged: collapseRecordingEntries(matchingTracks.filter(([uri]) => community.others.has(uri)), recordingKeys).length,
-    new_tags: collapseRecordingEntries(matchingTracks.filter(([uri, data]) => hasTagsIDont(uri, data)), recordingKeys).length,
-  } : { tagged: 0, new_tags: 0 }), [community.available, community.others, matchingTracks, hasTagsIDont, recordingKeys]);
-  const toggleCommunityFilter = (choice: Exclude<CommunityFilter, "off">) => setCommunityFilter(communityFilter === choice ? "off" : choice);
-  const filterCount = activeFilterCount + (communityFilter !== "off" ? 1 : 0);
+  const filterCount = activeFilterCount;
   const clearEveryFilter = () => {
     clearAllFilters();
-    setCommunityFilter("off");
   };
   // Counted once each time the list goes from no tag filter to a tag filter, with the sort in use then.
   // A filter restored when the page opens is not counted.
   const hasTagFilter = activeTagFilters.length > 0 || excludedTagFilters.length > 0;
+  const communityTagQuery = useMemo(
+    () => tagSearchQuery(includeTagClauses, (tagId) => taxonomy.tagsById[tagId]?.name || ""),
+    [includeTagClauses, taxonomy],
+  );
+  // "On Community": asked once here so the "Your library | On Community (N)" switch above the list can show
+  // the count (Alex's pick 1A, 2026-11-23: scrolling all the way down to reach it was bad UX).
+  const communityTagShown = !!communityTagSearch && !statsTrackSet && !toTagActive && communityTagQuery.tags.length > 0;
+  const communityTagResults = useCommunityTagSearch({ tags: communityTagQuery.tags, match: communityTagQuery.match, enabled: communityTagShown, viewer: communityTagSearch?.viewer ?? "" });
+  const communityTagFound = communityTagShown && communityTagResults.phase === "done" && communityTagResults.total > 0;
+  const communityTagCount = `${communityTagResults.total.toLocaleString()}${communityTagResults.capped ? "+" : ""}`;
+  const tagSearchNew = useTagSearchNewLabel();
+  const [tagSearchView, setTagSearchView] = useState<"library" | "community">("library");
+  const showingCommunityTags = communityTagShown && tagSearchView === "community";
+  const openCommunityTags = () => {
+    tagSearchNew.dismiss();
+    setTagSearchView("community");
+  };
   const hadTagFilter = useRef(hasTagFilter);
   useEffect(() => {
     if (hasTagFilter && !hadTagFilter.current) recordProductInteraction("tag_filter_used", { sort: sortDetail(effectiveSortBy) });
     hadTagFilter.current = hasTagFilter;
   }, [hasTagFilter, effectiveSortBy]);
   const filteredTracks = useMemo(
-    () => collapseRecordingEntries(sortTrackEntries(communityMatching, trackInfo, { sortBy: effectiveSortBy, sortOrder, communityPeople }), recordingKeys),
-    [communityMatching, trackInfo, effectiveSortBy, sortOrder, communityPeople, recordingKeys],
+    () => collapseRecordingEntries(sortTrackEntries(matchingTracks, trackInfo, { sortBy: effectiveSortBy, sortOrder, communityPeople }), recordingKeys),
+    [matchingTracks, trackInfo, effectiveSortBy, sortOrder, communityPeople, recordingKeys],
   );
   const allSortedTracks = filteredTracks;
   // Not connected: other members' tags on a few of these songs, with adding locked until they connect.
@@ -617,12 +638,45 @@ const TrackList: React.FC<TrackListProps> = ({
     [allCamelotKeys],
   );
 
-  const getTagDisplayInfo = (fullTagId: string): TagDisplayInfo =>
-    allUniqueTagsMap.get(fullTagId) ||
-    filterTagDisplayLookup.get(fullTagId) || {
-      displayName: fullTagId,
-      accentId: null,
-    };
+  // Category terms ("Any Genre", "No Mood"), offered in the "Filter by
+  // category" menu next to the tag search.
+  const tagGroupOptions = useMemo(() => {
+    const options = buildTagGroupFilterOptions(taxonomy).filter((option) =>
+      option.tagIds.some((tagId) => allUniqueTagsMap.has(tagId)),
+    );
+    const nameCounts = new Map<string, number>();
+    options.forEach((option) => nameCounts.set(option.name, (nameCounts.get(option.name) ?? 0) + 1));
+    return options.map((option) => ({
+      ...option,
+      label: (nameCounts.get(option.name) ?? 0) > 1 ? option.path.join(" / ") : option.name,
+    }));
+  }, [allUniqueTagsMap, taxonomy]);
+  const tagGroupOptionsByTerm = useMemo(
+    () => new Map(tagGroupOptions.map((option) => [option.termId, option])),
+    [tagGroupOptions],
+  );
+  const getTagDisplayInfo = (fullTagId: string): TagDisplayInfo => {
+    const groupOption = tagGroupOptionsByTerm.get(fullTagId);
+    if (groupOption) return { displayName: groupOption.label, accentId: null };
+    if (getTagGroupFilterGroupId(fullTagId) !== null) {
+      const groupId = getTagGroupFilterGroupId(fullTagId)!;
+      const name = taxonomy.categoriesById[groupId]?.name ?? taxonomy.subcategoriesById[groupId]?.name ?? taxonomy.foldersById?.[groupId]?.name;
+      return { displayName: name ?? "Category unavailable", accentId: null };
+    }
+    return (
+      allUniqueTagsMap.get(fullTagId) ||
+      filterTagDisplayLookup.get(fullTagId) || {
+        displayName: fullTagId,
+        accentId: null,
+      }
+    );
+  };
+  /** "Rock" / "NOT Rock" for tags; "Any Genre" / "No Genre" for categories. */
+  const getFilterTermLabel = (termId: string, excluded: boolean): string => {
+    const name = getTagDisplayInfo(termId).displayName;
+    if (getTagGroupFilterGroupId(termId) === null) return name;
+    return excluded ? `No ${name}` : `Any ${name}`;
+  };
 
   const activeTagDisplayNames = activeTagFilters.map((fullTagId) =>
     getTagDisplayInfo(fullTagId).displayName,
@@ -633,6 +687,7 @@ const TrackList: React.FC<TrackListProps> = ({
       connectors: clauseConnectors,
     },
     (tagId) => getTagDisplayInfo(tagId).displayName,
+    taxonomy,
   );
   const resolvedSelectedClauseIndex =
     selectedClauseIndex !== null &&
@@ -681,6 +736,7 @@ const TrackList: React.FC<TrackListProps> = ({
         connectors: [],
       },
       (tagId) => getTagDisplayInfo(tagId).displayName,
+      taxonomy,
     );
   const selectedClausePreview = selectedClause
     ? formatClausePreview(selectedClause)
@@ -781,13 +837,15 @@ const TrackList: React.FC<TrackListProps> = ({
             appliedTags.map(({ tagId, state }) => {
               const tagInfo = getTagDisplayInfo(tagId);
               const isExcluded = state === "NOT";
+              const isGroup = getTagGroupFilterGroupId(tagId) !== null;
+              const termLabel = getFilterTermLabel(tagId, isExcluded);
 
               return (
                 <button
                   key={`${clauseIndex}-${state}-${tagId}`}
                   className={`${styles.appliedFilterChip} ${
                     isExcluded ? styles.appliedFilterChipNegative : ""
-                  } ${
+                  } ${isGroup ? styles.appliedFilterChipCategory : ""} ${
                     tagInfo.accentId ? styles.appliedFilterChipAccented : ""
                   }`}
                   style={buildTagAccentCssVars(
@@ -795,11 +853,11 @@ const TrackList: React.FC<TrackListProps> = ({
                     customAccentsById,
                   )}
                   onClick={() => onRemoveTagFilter(tagId)}
-                  aria-label={`${state} ${tagInfo.displayName} applied filter`}
-                  title={`Remove "${tagInfo.displayName}" filter`}
+                  aria-label={isGroup ? `${termLabel} applied filter` : `${state} ${tagInfo.displayName} applied filter`}
+                  title={`Remove "${termLabel}" filter`}
                 >
                   <span className={styles.appliedFilterName}>
-                    {tagInfo.displayName}
+                    {termLabel}
                   </span>
                 </button>
               );
@@ -810,6 +868,162 @@ const TrackList: React.FC<TrackListProps> = ({
             </span>
           )}
         </div>
+      </div>
+    );
+  };
+  const renderBasicTagChip = (fullTagId: string, tagInfo: TagDisplayInfo) => {
+          const location = tagLocationLookup.get(fullTagId);
+          const isMatch = location?.lane === "include";
+          const isNot = location?.lane === "exclude";
+
+          return (
+            <button
+              key={fullTagId}
+              className={`${styles.tagFilter} ${
+                tagInfo.accentId ? styles.tagFilterAccented : ""
+              } ${
+                isMatch ? styles.tagFilterSelected : ""
+              } ${
+                isNot ? styles.tagFilterSelectedNegative : ""
+              }`}
+              style={buildTagAccentCssVars(
+                tagInfo.accentId,
+                customAccentsById,
+              )}
+              onClick={() => handleBasicCatalogTagClick(fullTagId)}
+              aria-label={
+                isMatch
+                  ? `MATCH ${tagInfo.displayName}`
+                  : isNot
+                    ? `NOT ${tagInfo.displayName}`
+                    : tagInfo.displayName
+              }
+              title={
+                isMatch
+                  ? `Click to exclude "${tagInfo.displayName}"`
+                  : isNot
+                    ? `Click to remove "${tagInfo.displayName}" filter`
+                    : `Click to match "${tagInfo.displayName}"`
+              }
+            >
+              <span className={styles.tagFilterLabel}>
+                {tagInfo.displayName}
+              </span>
+            </button>
+          );
+  };
+  const renderComplexTagChip = (fullTagId: string, tagInfo: TagDisplayInfo) => {
+          const location = tagLocationLookup.get(fullTagId);
+          const isInSelectedClause =
+            location?.clauseIndex === resolvedSelectedClauseIndex;
+          const isMatch =
+            isInSelectedClause &&
+            location?.lane === "include";
+          const isNot =
+            isInSelectedClause &&
+            location?.lane === "exclude";
+          const isInAnotherClause =
+            location !== undefined &&
+            location.clauseIndex !== resolvedSelectedClauseIndex;
+          const statusLabel = isMatch
+            ? "MATCH"
+            : isNot
+              ? "NOT"
+              : isInAnotherClause
+                ? `G${(location?.clauseIndex ?? 0) + 1} ${
+                    location?.lane === "exclude" ? "NOT" : "MATCH"
+                  }`
+                : null;
+
+          return (
+            <button
+              key={fullTagId}
+              className={`${styles.tagFilter} ${
+                tagInfo.accentId ? styles.tagFilterAccented : ""
+              } ${
+                isMatch ? styles.tagFilterSelected : ""
+              } ${
+                isNot ? styles.tagFilterSelectedNegative : ""
+              } ${
+                isInAnotherClause
+                  ? styles.tagFilterElsewhere
+                  : ""
+              }`}
+              style={buildTagAccentCssVars(
+                tagInfo.accentId,
+                customAccentsById,
+              )}
+              onClick={() => handleCatalogTagClick(fullTagId)}
+              aria-label={statusLabel
+                ? `${statusLabel} ${tagInfo.displayName}`
+                : tagInfo.displayName}
+              title={
+                isMatch
+                  ? `Click to exclude "${tagInfo.displayName}" in ${selectedClauseLabel}`
+                  : isNot
+                    ? `Click to remove "${tagInfo.displayName}" from ${selectedClauseLabel}`
+                    : isInAnotherClause
+                      ? `Click to move "${tagInfo.displayName}" into Match in ${selectedClauseLabel}`
+                      : `Click to match "${tagInfo.displayName}" in ${selectedClauseLabel}`
+              }
+            >
+              <span className={styles.tagFilterLabel}>
+                {tagInfo.displayName}
+              </span>
+            </button>
+          );
+  };
+  /** Adds "Any X" (include) or "No X" (exclude) to the clause being edited. */
+  const applyCategoryTerm = (termId: string, lane: "include" | "exclude", mode: "basic" | "complex") => {
+    if (mode === "basic" && includeTagClauses.length === 0) {
+      onReplaceTagFilterFormula(
+        {
+          clauses: [{
+            tagIds: lane === "include" ? [termId] : [],
+            excludedTagIds: lane === "exclude" ? [termId] : [],
+            operator: basicTagFilterOperator,
+          }],
+          connectors: [],
+        },
+        { selectedClauseIndex: 0 },
+      );
+      return;
+    }
+    onMoveTagToClauseLane(termId, lane, mode === "basic" ? 0 : resolvedSelectedClauseIndex ?? undefined);
+  };
+  const renderCategorySelect = (mode: "basic" | "complex") =>
+    tagGroupOptions.length > 0 ? (
+      <select
+        className={styles.categorySelect}
+        aria-label="Filter by category"
+        value=""
+        onChange={(event) => {
+          const [lane, termId] = event.target.value.split("|");
+          if (termId) applyCategoryTerm(termId, lane === "exclude" ? "exclude" : "include", mode);
+        }}
+      >
+        <option value="">Filter by category…</option>
+        <optgroup label="Songs with any tag in">
+          {tagGroupOptions.map((option) => (
+            <option key={`any-${option.termId}`} value={`include|${option.termId}`}>
+              {`${"\u00a0\u00a0".repeat(option.depth)}Any ${option.name}`}
+            </option>
+          ))}
+        </optgroup>
+        <optgroup label="Songs missing a category">
+          {tagGroupOptions.map((option) => (
+            <option key={`no-${option.termId}`} value={`exclude|${option.termId}`}>
+              {`${"\u00a0\u00a0".repeat(option.depth)}No ${option.name}`}
+            </option>
+          ))}
+        </optgroup>
+      </select>
+    ) : null;
+  const renderTagLibraryBody = (mode: "basic" | "complex") => {
+    const renderChip = mode === "basic" ? renderBasicTagChip : renderComplexTagChip;
+    return (
+      <div className={styles.tagFilters}>
+        {visibleTagEntries.map(([fullTagId, tagInfo]) => renderChip(fullTagId, tagInfo))}
       </div>
     );
   };
@@ -835,27 +1049,10 @@ const TrackList: React.FC<TrackListProps> = ({
     onSetIncludeClauseOperator(0, operator);
     onSelectClause(0);
   };
-  const handleEditorModeChange = (nextMode: TagFilterEditorMode) => {
-    if (nextMode === tagFilterEditorMode) {
-      return;
-    }
-
-    if (nextMode === "complex") {
-      setTagFilterEditorMode("complex");
-      if (includeTagClauses.length > 0) {
-        onSelectClause(resolvedSelectedClauseIndex ?? 0);
-      }
-      return;
-    }
-
-    if (canUseBasicMode) {
-      setTagFilterEditorMode("basic");
-      onSelectClause(includeTagClauses.length > 0 ? 0 : null);
-      return;
-    }
-
+  /** With advanced filters off, a saved multi-group formula can be folded into one group. */
+  const handleCombineIntoOneGroup = () => {
     const confirmed = window.confirm(
-      'Switching to Basic mode will collapse your current multi-group logic into one Match Any/All filter. Continue?',
+      "Combine your tag groups into one Match Any/All filter? The groups can't be brought back.",
     );
     if (!confirmed) {
       return;
@@ -865,14 +1062,7 @@ const TrackList: React.FC<TrackListProps> = ({
     onReplaceTagFilterFormula(nextFormula, {
       selectedClauseIndex: nextFormula.clauses.length > 0 ? 0 : null,
     });
-    setTagFilterEditorMode("basic");
   };
-
-  useEffect(() => {
-    if (!canUseBasicMode && tagFilterEditorMode === "basic") {
-      setTagFilterEditorMode("complex");
-    }
-  }, [canUseBasicMode, tagFilterEditorMode, setTagFilterEditorMode]);
 
   const handleCreatePlaylist = async (
     playlistName: string,
@@ -954,10 +1144,12 @@ const TrackList: React.FC<TrackListProps> = ({
         });
       try {
         await onCreateSmartPlaylist(smartPlaylistCriteria);
+        // Local files on this computer were added with the rest; only others are left to add by hand.
+        const { addable, localElsewhere } = await addableHere(trackUris);
         Spicetify.showNotification(
-          `Created smart playlist "${playlistName}" with ${trackUris.filter((uri) => !uri.startsWith("spotify:local:")).length} ${trackUris.filter((uri) => !uri.startsWith("spotify:local:")).length === 1 ? "track" : "tracks"}.${trackUris.some((uri) => uri.startsWith("spotify:local:")) ? " Local tracks need to be added manually." : ""}`,
+          `Created smart playlist "${playlistName}" with ${addable.length} ${addable.length === 1 ? "track" : "tracks"}.${localElsewhere.length ? " Local tracks need to be added manually." : ""}`,
         );
-        if (!trackUris.some((uri) => uri.startsWith("spotify:local:"))) {
+        if (!localElsewhere.length) {
           Spicetify.Platform.History.push(`/playlist/${playlistId}`);
         }
       } catch (error) {
@@ -975,13 +1167,6 @@ const TrackList: React.FC<TrackListProps> = ({
       setShowCreatePlaylistModal(true);
     }
   };
-
-  const handledCreatePlaylistRequest = useRef(createPlaylistRequest);
-  useEffect(() => {
-    if (createPlaylistRequest === handledCreatePlaylistRequest.current) return;
-    handledCreatePlaylistRequest.current = createPlaylistRequest;
-    if (filteredTracks.length > 0) setShowCreatePlaylistModal(true);
-  }, [createPlaylistRequest, filteredTracks.length]);
 
   const handleCloseCreatePlaylistModal = () => {
     setShowCreatePlaylistModal(false);
@@ -1004,11 +1189,6 @@ const TrackList: React.FC<TrackListProps> = ({
       setCamelotKeyFilters(playlist.criteria.camelotKeyFilters ?? []);
       setSongDetailFilters(playlist.criteria);
       setShowFilterOptions(true);
-      setShowAdvancedFilters(
-        playlist.criteria.bpmMinFilter !== null ||
-          playlist.criteria.bpmMaxFilter !== null ||
-          (playlist.criteria.camelotKeyFilters?.length ?? 0) > 0,
-      );
       setEditingSmartPlaylist(playlist);
       setShowSmartPlaylistModal(false);
     },
@@ -1021,7 +1201,6 @@ const TrackList: React.FC<TrackListProps> = ({
       setEnergyMaxFilter,
       setEnergyMinFilter,
       setRatingFilters,
-      setShowAdvancedFilters,
       setShowFilterOptions,
       setSongDetailFilters,
     ],
@@ -1043,7 +1222,7 @@ const TrackList: React.FC<TrackListProps> = ({
         Spicetify.Platform.History.push(`/playlist/${created.playlistId}`);
         return;
       }
-      const matchingTrackUris = collectMatchingTrackUris(tracks, playlist.criteria);
+      const matchingTrackUris = collectMatchingTrackUris(tracks, playlist.criteria, taxonomy);
       const playlistId =
         (await onCreatePlaylist(
           matchingTrackUris,
@@ -1142,35 +1321,7 @@ const TrackList: React.FC<TrackListProps> = ({
     }
   };
 
-  const navigateToArtist = async (artistName: string, trackUri: string) => {
-    try {
-      if (trackUri.startsWith("spotify:local:")) {
-        Spicetify.showNotification(
-          "Cannot navigate to artist for local files",
-          true,
-        );
-        return;
-      }
-
-      const artists = await spotifyService.getTrackArtists(trackUri);
-      const artist = artists.find((a) => a.name === artistName);
-
-      if (artist?.uri) {
-        const artistId = artist.uri.split(":").pop();
-        if (artistId) {
-          Spicetify.Platform.History.push(`/artist/${artistId}`);
-          return;
-        }
-      }
-
-      // fallback: search for the artist
-      Spicetify.Platform.History.push(
-        `/search/${encodeURIComponent(artistName)}/artists`,
-      );
-    } catch (error) {
-      console.error("Error navigating to artist:", error);
-    }
-  };
+  const navigateToArtist = (artistName: string, trackUri: string) => openSpotifyArtist(artistName, trackUri);
 
   const playAllFilteredTracks = async (): Promise<void> => {
     if (allSortedTracks.length === 0) return;
@@ -1181,7 +1332,8 @@ const TrackList: React.FC<TrackListProps> = ({
 
   return (
     <div ref={listContainerRef} className={styles.container} data-tagify-track-list="">
-      <div className={styles.filterControlsGrid}>
+      <div className={styles.toolbar}>
+      <div className={styles.filterControlsGrid} data-toolbar-part="top" data-view-tabs-row={(taggedByOthersView || toTagTabShown) && !statsTrackSet ? "" : undefined}>
         {/* HEADER */}
         <div className={styles.filterControlsLeftGrid}>
           <div className={styles.header}>
@@ -1207,18 +1359,31 @@ const TrackList: React.FC<TrackListProps> = ({
                 </>
               ) : (
                 <>
-                  {taggedByOthersView ? (
-                    <div className={styles.viewTabs} role="tablist" aria-label="Songs to show">
-                      <button type="button" role="tab" aria-selected={!othersActive} className={`${styles.viewTab} ${othersActive ? "" : styles.viewTabActive}`} onClick={() => setSavedView("tagged")}>
+                  {taggedByOthersView || toTagTabShown ? (
+                    <div ref={viewTabsRef} className={styles.viewTabs} role="tablist" aria-label="Songs to show">
+                      <button type="button" role="tab" aria-selected={!othersActive && !toTagActive} className={`${styles.viewTab} ${othersActive || toTagActive ? "" : styles.viewTabActive}`} onClick={() => setSavedView("tagged")} data-tip="tagged-tab">
                         Tagged Tracks
                       </button>
-                      <button type="button" role="tab" aria-selected={othersActive} className={`${styles.viewTab} ${othersActive ? styles.viewTabActive : ""}`} onClick={() => setSavedView("others")}>
-                        Tagged by others
-                        {othersTabHighlight.show ? <span className={styles.viewTabNew}>New</span> : null}
-                      </button>
+                      {taggedByOthersView ? (
+                        <button type="button" role="tab" aria-selected={othersActive} className={`${styles.viewTab} ${othersActive ? styles.viewTabActive : ""}`} onClick={() => setSavedView("others")} data-tip="others-tab">
+                          Tagged by others
+                          {othersTabHighlight.show ? <span className={styles.viewTabNew}>New</span> : null}
+                        </button>
+                      ) : null}
+                      {toTagTabShown ? (
+                        <button type="button" role="tab" aria-selected={toTagActive} className={`${styles.viewTab} ${toTagActive ? styles.viewTabActive : ""}`} onClick={() => setSavedView("toTag")}>
+                          To Tag
+                        </button>
+                      ) : null}
                     </div>
-                  ) : <h2 className={styles.title}>Tagged Tracks</h2>}
-                  {othersActive ? null : (
+                  ) : <h2 className={styles.title} data-tip="tagged-tab">Tagged Tracks</h2>}
+                  {othersActive ? null : toTagActive ? (
+                    <span className={styles.trackCount}>
+                      {filterCount > 0 || searchTerm.trim() !== ""
+                        ? `${filteredTracks.length}/${listedUniqueCount} ${listedUniqueCount === 1 ? "song" : "songs"}`
+                        : `${listedUniqueCount} ${listedUniqueCount === 1 ? "song" : "songs"}`}
+                    </span>
+                  ) : (
                     <span className={styles.trackCount}>
                       {filterCount > 0 || searchTerm.trim() !== ""
                         ? `${filteredTracks.length}/${
@@ -1262,6 +1427,7 @@ const TrackList: React.FC<TrackListProps> = ({
               editingSmartPlaylist ? styles.saveSmartPlaylistButton : ""
             }`}
             onClick={handleCreatePlaylistClick}
+            data-tip="create-playlist"
             {...((filteredTracks.length > 0 || editingSmartPlaylist) && {
               title: editingSmartPlaylist
                 ? `Save filters to ${editingSmartPlaylist.playlistName}`
@@ -1278,6 +1444,7 @@ const TrackList: React.FC<TrackListProps> = ({
             <button
               className={styles.smartPlaylistButton}
               onClick={handleSmartPlaylistClick}
+              data-tip="smart-playlists"
               title={`Smart Playlists (${smartPlaylists.length})`}
             >
               <FontAwesomeIcon icon={faBoltLightning} />
@@ -1298,83 +1465,88 @@ const TrackList: React.FC<TrackListProps> = ({
         </>}
       </div>
 
-      {othersActive ? <div className={styles.othersView} role="tabpanel">{taggedByOthersView}</div> : <>
-      {/* FILTER CONTROLS */}
-      <div className={styles.filterControlsGrid}>
-        {/* Left zone - Filter toggle. A list from Stats already is the filter; search and sorting still apply. */}
-        {!statsTrackSet && (
-          <div className={styles.filterControlsLeftGrid}>
-            <button
-              className={`${styles.filterToggle} ${
-                showFilterOptions ? styles.filterToggleActive : ""
-              }`}
-              onClick={() => setShowFilterOptions(!showFilterOptions)}
-            >
-              Filters{" "}
-              {filterCount > 0 && (
-                <span className={styles.filterBadge}>{filterCount}</span>
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* Center zone - active formula */}
-        {/* Right zone - Sort controls */}
-        <div className={styles.filterControlsRightGrid}>
-          <label className={`form-label ${styles.sortLabel}`}>Sort by:</label>
-          <span className={styles.sortSelectWrap}>
-          <select
-            value={effectiveSortBy}
-            onChange={(e) => {
-              setSortBy(e.target.value as SortOption);
-              if (e.target.value === SORT_OPTIONS.COMMUNITY_PEOPLE) {
-                recordProductInteraction("track_list_sort_changed", { sort: "community_people", after_highlight: sortHighlight.show ? "yes" : "no" });
-              }
-              if (sortHighlight.show) sortHighlight.dismiss();
-            }}
-            onBlur={() => { if (sortHighlight.show) sortHighlight.dismiss(); }}
-            className={`form-select ${sortHighlight.show ? styles.sortSelectNew : ""}`}
-          >
-            <option value={SORT_OPTIONS.DATE_MODIFIED}>Last updated</option>
-            <option value={SORT_OPTIONS.DATE_CREATED}>Date created</option>
-            <option value={SORT_OPTIONS.ALPHABETICAL}>Name</option>
-            <option value={SORT_OPTIONS.RATING}>Rating</option>
-            <option value={SORT_OPTIONS.ENERGY}>Energy</option>
-            <option value={SORT_OPTIONS.BPM}>BPM</option>
-            {community.available && (
-              <option value={SORT_OPTIONS.COMMUNITY_PEOPLE}>
-                {sortHighlight.show ? "Most tagged by others (new)" : "Most tagged by others"}
-              </option>
-            )}
-          </select>
-          {sortHighlight.show && <span className={styles.sortNewBadge} aria-hidden="true">New</span>}
-          </span>
-
-          <button
-            className={styles.sortOrderButton}
-            onClick={() =>
-              setSortOrder(
-                sortOrder == SORT_ORDERS.ASC
-                  ? SORT_ORDERS.DESC
-                  : SORT_ORDERS.ASC,
-              )
-            }
-            title={`Sort ${
-              sortOrder === SORT_ORDERS.ASC ? "descending" : "ascending"
-            }`}
-          >
-            {sortOrder === SORT_ORDERS.ASC ? "↑" : "↓"}
-          </button>
-          {effectiveSortBy === SORT_OPTIONS.COMMUNITY_PEOPLE && community.status === "checking" && (
-            <span className={styles.communitySortStatus} role="status">Checking Community…</span>
+      {othersActive ? null : <>
+        {/* FILTER CONTROLS */}
+        <div className={styles.filterControlsGrid} data-toolbar-part="bottom">
+          {/* Left zone - Filter toggle. A list from Stats already is the filter; search and sorting still apply. */}
+          {!statsTrackSet && (
+            <div className={styles.filterControlsLeftGrid}>
+              <button
+                className={`${styles.filterToggle} ${
+                  showFilterOptions ? styles.filterToggleActive : ""
+                }`}
+                onClick={() => setShowFilterOptions(!showFilterOptions)}
+                data-tip="tag-filters"
+              >
+                Filters{" "}
+                {filterCount > 0 && (
+                  <span className={styles.filterBadge}>{filterCount}</span>
+                )}
+              </button>
+            </div>
           )}
+
+          {/* Center zone - active formula */}
+          {/* Right zone - Sort controls */}
+          <div className={styles.filterControlsRightGrid}>
+            <label className={`form-label ${styles.sortLabel}`}>Sort by:</label>
+            <span className={styles.sortSelectWrap}>
+            <select
+              value={effectiveSortBy}
+              onChange={(e) => {
+                setSortBy(e.target.value as SortOption);
+                if (e.target.value === SORT_OPTIONS.COMMUNITY_PEOPLE) {
+                  recordProductInteraction("track_list_sort_changed", { sort: "community_people", after_highlight: sortHighlight.show ? "yes" : "no" });
+                }
+                if (sortHighlight.show) sortHighlight.dismiss();
+              }}
+              onBlur={() => { if (sortHighlight.show) sortHighlight.dismiss(); }}
+              className={`form-select ${sortHighlight.show ? styles.sortSelectNew : ""}`}
+            >
+              <option value={SORT_OPTIONS.DATE_MODIFIED}>Last updated</option>
+              <option value={SORT_OPTIONS.DATE_CREATED}>Date created</option>
+              <option value={SORT_OPTIONS.ALPHABETICAL}>Name</option>
+              <option value={SORT_OPTIONS.RATING}>Rating</option>
+              <option value={SORT_OPTIONS.ENERGY}>Energy</option>
+              <option value={SORT_OPTIONS.BPM}>BPM</option>
+              {community.available && (
+                <option value={SORT_OPTIONS.COMMUNITY_PEOPLE}>
+                  {sortHighlight.show ? "Most tagged by others (new)" : "Most tagged by others"}
+                </option>
+              )}
+            </select>
+            {sortHighlight.show && <span className={styles.sortNewBadge} aria-hidden="true">New</span>}
+            </span>
+
+            <button
+              className={styles.sortOrderButton}
+              onClick={() =>
+                setSortOrder(
+                  sortOrder == SORT_ORDERS.ASC
+                    ? SORT_ORDERS.DESC
+                    : SORT_ORDERS.ASC,
+                )
+              }
+              title={`Sort ${
+                sortOrder === SORT_ORDERS.ASC ? "descending" : "ascending"
+              }`}
+            >
+              {sortOrder === SORT_ORDERS.ASC ? "↑" : "↓"}
+            </button>
+            {effectiveSortBy === SORT_OPTIONS.COMMUNITY_PEOPLE && community.status === "checking" && (
+              <span className={styles.communitySortStatus} role="status">Checking Community…</span>
+            )}
+          </div>
         </div>
+      </>}
       </div>
+
+      {othersActive ? <div className={styles.othersView} role="tabpanel">{taggedByOthersView}</div> : <>
       {showFilterOptions && !statsTrackSet && (
         <div className={styles.filterOptions}>
           <div className={styles.filterOptionsTopRow}>
             {allRatings.size > 0 ? (
-              <div className={`${styles.filterSection} ${styles.filterPrimarySection} ${community.available ? styles.ratingSectionOneLine : ""}`}>
+              <div className={`${styles.filterSection} ${styles.filterPrimarySection}`}>
                 <h3 className={styles.filterSectionTitle}>Rating</h3>
                 <div>
                   {Array.from(allRatings)
@@ -1405,26 +1577,6 @@ const TrackList: React.FC<TrackListProps> = ({
               </div>
             ) : null}
 
-            {community.available && (
-              <div className={`${styles.filterSection} ${styles.communityFilterSection}`}>
-                <h3 className={styles.filterSectionTitle}>Community</h3>
-                <div className={styles.communityFilterButtons}>
-                  {(["tagged", "new_tags"] as const).map((choice) => (
-                    <button
-                      key={choice}
-                      type="button"
-                      className={`${styles.ratingFilter} ${communityFilter === choice ? styles.active : ""}`}
-                      aria-pressed={communityFilter === choice}
-                      onClick={() => toggleCommunityFilter(choice)}
-                      title={choice === "tagged" ? "Only songs other members tagged" : "Only songs where other members used a tag your song doesn't have"}
-                    >
-                      {COMMUNITY_FILTER_LABELS[choice]} <span className={styles.communityFilterCount}>{communityFilterCounts[choice]}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className={styles.filterOptionsActions}>
               {filterCount > 0 ? (
                 <button
@@ -1434,30 +1586,14 @@ const TrackList: React.FC<TrackListProps> = ({
                   Clear All
                 </button>
               ) : null}
-
-              <button
-                className={`${styles.advancedFiltersToggle} ${
-                  showAdvancedFilters ? styles.advancedFiltersToggleActive : ""
-                }`}
-                onClick={() =>
-                  setShowAdvancedFilters((previousValue) => !previousValue)
-                }
-                title={
-                  showAdvancedFilters
-                    ? "Hide advanced filters"
-                    : "Show advanced filters"
-                }
-              >
-                Advanced
-              </button>
             </div>
           </div>
 
-          {/* Energy and BPM filters in a horizontal container */}
+          {/* Energy, BPM, Length and Released on one line, or two and two when the window is narrower. */}
           <div className={styles.filterSectionsRow}>
             {allEnergyLevels.size > 0 && (
               <div className={styles.filterSection}>
-                <h3 className={styles.filterSectionTitle}>Energy Level</h3>
+                <h3 className={styles.filterSectionTitle}>Energy</h3>
                 <div className={styles.rangeFilter}>
                   <div className={"form-field"}>
                     <label className={"form-label"}>From:</label>
@@ -1509,7 +1645,7 @@ const TrackList: React.FC<TrackListProps> = ({
             {/* BPM Range Filter */}
             {allBpmValues.size > 0 && (
               <div className={styles.filterSection}>
-                <h3 className={styles.filterSectionTitle}>BPM Range</h3>
+                <h3 className={styles.filterSectionTitle}>BPM</h3>
                 <div className={styles.rangeFilter}>
                   <div className={"form-field"}>
                     <label className={"form-label"}>From:</label>
@@ -1604,7 +1740,7 @@ const TrackList: React.FC<TrackListProps> = ({
           </div>
           <SongDetailsProgressBar progress={songDetailsFill} />
 
-          {showAdvancedFilters && (
+          {(advancedFilters || normalizedCamelotKeyFilters.length > 0) && (
             <div
               className={`${styles.filterSection} ${styles.keyFilterSection}`}
             >
@@ -1666,147 +1802,73 @@ const TrackList: React.FC<TrackListProps> = ({
           )}
 
           {allUniqueTagsMap.size > 0 && (
-            <div className={styles.filterSection}>
-              <div className={styles.tagSectionHeader}>
-                <h3 className={styles.filterSectionTitle}>Tags</h3>
-                <div className={styles.filterModeToggle}>
-                  <button
-                    className={`${styles.filterModeButton} ${
-                      tagFilterEditorMode === "basic"
-                        ? styles.activeFilterMode
-                        : ""
-                    }`}
-                    onClick={() => handleEditorModeChange("basic")}
-                    title="Use the simple one-group tag filter"
-                  >
-                    Basic
-                  </button>
-                  <button
-                    className={`${styles.filterModeButton} ${
-                      tagFilterEditorMode === "complex"
-                        ? styles.activeFilterMode
-                        : ""
-                    }`}
-                    onClick={() => handleEditorModeChange("complex")}
-                    title="Use multi-group AND/OR logic"
-                  >
-                    Complex
-                  </button>
+            <div className={`${styles.filterSection} ${styles.tagsFilterSection}`}>
+              {tagFilterEditorMode === "complex" ? (
+                <div className={styles.tagSectionHeader}>
+                  <h3 className={styles.filterSectionTitle}>Tags</h3>
                 </div>
-              </div>
+              ) : null}
 
               <div className={styles.groupBuilder}>
 
-                {tagFilterEditorMode === "basic" ? (
-                  <>
-                      <div className={styles.editorPanel}>
-                        <div className={styles.editorPanelHeader}>
-                          {renderAppliedTagFilters(basicClause, 0)}
-                          <div className={styles.editorPanelControls}>
-                          <div className={styles.operatorToggle}>
-                            <button
-                              className={`${styles.operatorToggleButton} ${
-                                basicClause.operator === TAG_FILTER_OPERATORS.OR
-                                  ? styles.operatorToggleButtonActive
-                                  : ""
-                              }`}
-                              onClick={() =>
-                                handleSetBasicClauseOperator(
-                                  TAG_FILTER_OPERATORS.OR,
-                                )
-                              }
-                            >
-                              Match Any
-                            </button>
-                            <button
-                              className={`${styles.operatorToggleButton} ${
-                                basicClause.operator === TAG_FILTER_OPERATORS.AND
-                                  ? styles.operatorToggleButtonActive
-                                  : ""
-                              }`}
-                              onClick={() =>
-                                handleSetBasicClauseOperator(
-                                  TAG_FILTER_OPERATORS.AND,
-                                )
-                              }
-                            >
-                              Match All
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
+                {tagFilterEditorMode === "basic" && !canUseBasicMode ? (
+                  <div className={styles.logicEmptyState}>
+                    <p className={styles.groupBuilderEmpty}>
+                      These tag filters use groups: {activeTagFormula}. Turn on
+                      advanced filters to edit them.
+                    </p>
+                    <div className={styles.logicWorkspaceActions}>
+                      <button
+                        className={styles.addGroupButton}
+                        onClick={() => setAdvancedFilters(true)}
+                      >
+                        Turn on advanced filters
+                      </button>
+                      <button
+                        className={styles.addGroupButton}
+                        onClick={handleCombineIntoOneGroup}
+                      >
+                        Combine into one group
+                      </button>
                     </div>
-
-                    <div className={styles.tagLibrary}>
-                      <div className={styles.tagLibraryHeader}>
-                        <div className={styles.tagLibraryMeta}>
-                          <span className={styles.tagLibraryEyebrow}>
-                            Tag library
-                          </span>
-                          <p className={styles.tagLibraryHelp}>
-                            Click a tag to cycle it through{" "}
-                            <strong>Match → NOT → off</strong>.
-                          </p>
-                        </div>
-                        <div className={styles.tagLibraryControls}>
-                          <div className={styles.tagSearch}>
-                            <input
-                              type="text"
-                              placeholder="Search tags in library..."
-                              value={tagSearchTerm}
-                              onChange={(e) => setTagSearchTerm(e.target.value)}
-                              className={styles.tagSearchInput}
-                            />
-                          </div>
-                        </div>
+                  </div>
+                ) : tagFilterEditorMode === "basic" ? (
+                  <div className={styles.basicTags}>
+                    <div className={styles.basicTagBar}>
+                      <h3 className={styles.filterSectionTitle}>Tags</h3>
+                      <div className={styles.tagSearch}>
+                        <input
+                          type="text"
+                          placeholder="Search tags in library..."
+                          value={tagSearchTerm}
+                          onChange={(e) => setTagSearchTerm(e.target.value)}
+                          className={styles.tagSearchInput}
+                        />
                       </div>
-
-                      <div className={styles.tagFilters}>
-                        {visibleTagEntries.map(([fullTagId, tagInfo]) => {
-                          const location = tagLocationLookup.get(fullTagId);
-                          const isMatch = location?.lane === "include";
-                          const isNot = location?.lane === "exclude";
-
-                          return (
-                            <button
-                              key={fullTagId}
-                              className={`${styles.tagFilter} ${
-                                tagInfo.accentId ? styles.tagFilterAccented : ""
-                              } ${
-                                isMatch ? styles.tagFilterSelected : ""
-                              } ${
-                                isNot ? styles.tagFilterSelectedNegative : ""
-                              }`}
-                              style={buildTagAccentCssVars(
-                                tagInfo.accentId,
-                                customAccentsById,
-                              )}
-                              onClick={() => handleBasicCatalogTagClick(fullTagId)}
-                              aria-label={
-                                isMatch
-                                  ? `MATCH ${tagInfo.displayName}`
-                                  : isNot
-                                    ? `NOT ${tagInfo.displayName}`
-                                    : tagInfo.displayName
-                              }
-                              title={
-                                isMatch
-                                  ? `Click to exclude "${tagInfo.displayName}"`
-                                  : isNot
-                                    ? `Click to remove "${tagInfo.displayName}" filter`
-                                    : `Click to match "${tagInfo.displayName}"`
-                              }
-                            >
-                              <span className={styles.tagFilterLabel}>
-                                {tagInfo.displayName}
-                              </span>
-                            </button>
-                          );
-                        })}
+                      {renderCategorySelect("basic")}
+                      <div className={styles.operatorToggle}>
+                        {[TAG_FILTER_OPERATORS.OR, TAG_FILTER_OPERATORS.AND].map((operator) => (
+                          <button
+                            key={`basic-operator-${operator}`}
+                            className={`${styles.operatorToggleButton} ${
+                              basicClause.operator === operator ? styles.operatorToggleButtonActive : ""
+                            }`}
+                            onClick={() => handleSetBasicClauseOperator(operator)}
+                          >
+                            {operator === TAG_FILTER_OPERATORS.OR ? "Match Any" : "Match All"}
+                          </button>
+                        ))}
                       </div>
                     </div>
-                  </>
+                    {basicClause.tagIds.length + basicClause.excludedTagIds.length > 0
+                      ? renderAppliedTagFilters(basicClause, 0)
+                      : null}
+                    <p className={styles.tagLibraryHelp}>
+                      Click a tag to cycle it through{" "}
+                      <strong>Match → NOT → off</strong>.
+                    </p>
+                    {renderTagLibraryBody("basic")}
+                  </div>
                 ) : (
                   <>
                     <div className={styles.logicWorkspaceHeader}>
@@ -2038,7 +2100,7 @@ const TrackList: React.FC<TrackListProps> = ({
                             {selectedClauseLabel}.
                           </p>
                         </div>
-                        <div className={styles.tagLibraryControls}>
+                        <div className={`${styles.tagLibraryControls} ${styles.tagLibraryControlsWithCategory}`}>
                           <div className={styles.tagSearch}>
                             <input
                               type="text"
@@ -2048,72 +2110,11 @@ const TrackList: React.FC<TrackListProps> = ({
                               className={styles.tagSearchInput}
                             />
                           </div>
+                          {renderCategorySelect("complex")}
                         </div>
                       </div>
 
-                      <div className={styles.tagFilters}>
-                        {visibleTagEntries.map(([fullTagId, tagInfo]) => {
-                          const location = tagLocationLookup.get(fullTagId);
-                          const isInSelectedClause =
-                            location?.clauseIndex === resolvedSelectedClauseIndex;
-                          const isMatch =
-                            isInSelectedClause &&
-                            location?.lane === "include";
-                          const isNot =
-                            isInSelectedClause &&
-                            location?.lane === "exclude";
-                          const isInAnotherClause =
-                            location !== undefined &&
-                            location.clauseIndex !== resolvedSelectedClauseIndex;
-                          const statusLabel = isMatch
-                            ? "MATCH"
-                            : isNot
-                              ? "NOT"
-                              : isInAnotherClause
-                                ? `G${(location?.clauseIndex ?? 0) + 1} ${
-                                    location?.lane === "exclude" ? "NOT" : "MATCH"
-                                  }`
-                                : null;
-
-                          return (
-                            <button
-                              key={fullTagId}
-                              className={`${styles.tagFilter} ${
-                                tagInfo.accentId ? styles.tagFilterAccented : ""
-                              } ${
-                                isMatch ? styles.tagFilterSelected : ""
-                              } ${
-                                isNot ? styles.tagFilterSelectedNegative : ""
-                              } ${
-                                isInAnotherClause
-                                  ? styles.tagFilterElsewhere
-                                  : ""
-                              }`}
-                              style={buildTagAccentCssVars(
-                                tagInfo.accentId,
-                                customAccentsById,
-                              )}
-                              onClick={() => handleCatalogTagClick(fullTagId)}
-                              aria-label={statusLabel
-                                ? `${statusLabel} ${tagInfo.displayName}`
-                                : tagInfo.displayName}
-                              title={
-                                isMatch
-                                  ? `Click to exclude "${tagInfo.displayName}" in ${selectedClauseLabel}`
-                                  : isNot
-                                    ? `Click to remove "${tagInfo.displayName}" from ${selectedClauseLabel}`
-                                    : isInAnotherClause
-                                      ? `Click to move "${tagInfo.displayName}" into Match in ${selectedClauseLabel}`
-                                      : `Click to match "${tagInfo.displayName}" in ${selectedClauseLabel}`
-                              }
-                            >
-                              <span className={styles.tagFilterLabel}>
-                                {tagInfo.displayName}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
+                      {renderTagLibraryBody("complex")}
                     </div>
                   </>
                 )}
@@ -2123,12 +2124,30 @@ const TrackList: React.FC<TrackListProps> = ({
         </div>
       )}
 
+      {communityTagShown && communityTagSearch ? (
+        <div className={styles.communityTagSwitch} role="tablist" aria-label="Songs tagged this way">
+          <button type="button" role="tab" aria-selected={tagSearchView === "library"} className={`${styles.communityTagOption} ${tagSearchView === "library" ? styles.communityTagOptionOn : ""}`} onClick={() => setTagSearchView("library")}>
+            Your library
+          </button>
+          <button type="button" role="tab" aria-selected={tagSearchView === "community"} className={`${styles.communityTagOption} ${tagSearchView === "community" ? styles.communityTagOptionOn : ""}`} onClick={openCommunityTags}>
+            On Community{communityTagFound ? ` (${communityTagCount})` : ""}
+            {tagSearchNew.show ? <span className={styles.communityTagNew}>New</span> : null}
+          </button>
+        </div>
+      ) : null}
+      {showingCommunityTags && communityTagSearch ? (
+        <CommunityTagSearch tags={communityTagQuery.tags} match={communityTagQuery.match} viewer={communityTagSearch.viewer} search={communityTagResults} bare
+          onPlay={communityTagSearch.onPlay} onConnect={communityTagSearch.onConnect} onShare={communityTagSearch.onShare} />
+      ) : null}
+
       {/* TRACK LIST */}
       {notePreviews.error && <PrivateNotePreviewError onRetry={notePreviews.retry} />}
-      <div className={styles.trackList}>
+      <div className={styles.trackList} hidden={showingCommunityTags}>
         {sortedTracksVisible.length === 0 ? (
           <p className={styles.noTracks}>
-            {Object.keys(deferredTracks).length === 0
+            {toTagActive && toTagList.length === 0
+              ? "Nothing to tag. Right-click a song in Spotify and choose Add to To Tag to come back to it here."
+              : Object.keys(deferredTracks).length === 0
               ? "No tagged tracks yet. Start tagging your favorite tracks!"
               : "No tracks match your filters."}
           </p>
@@ -2178,7 +2197,7 @@ const TrackList: React.FC<TrackListProps> = ({
                 id={`track-item-${uri}`}
                 className={`${styles.trackItem} ${
                   isActiveTrack ? styles.activeTrackItem : styles.trackItemLockable
-                }`}
+                } ${toTagActive ? styles.trackItemWithDone : ""}`}
                 // Clicking a song locks it in the editor above, as in "Tagged by others"; its own
                 // controls (Play, tags, links, ratings) keep their own clicks.
                 tabIndex={isActiveTrack ? undefined : 0}
@@ -2199,6 +2218,18 @@ const TrackList: React.FC<TrackListProps> = ({
                 <CoverPlay name={displayInfo.name} current={player.uri === uri} playing={player.uri === uri && player.playing} onPlay={() => onPlayTrack(uri)} size={TRACK_COVER_SIZE}>
                   <TrackCover imageUrl={isLocalFile ? null : trackData.albumImageUrl} />
                 </CoverPlay>
+                {/* Done sits in the card's top right (Alex's pick C, 2026-11-22). */}
+                {toTagActive ? (
+                  <button
+                    type="button"
+                    className={styles.toTagDone}
+                    onClick={() => removeFromToTag([uri])}
+                    title="Done: take this song off your To Tag list"
+                    aria-label={`Done: take ${displayInfo.name} off your To Tag list`}
+                  >
+                    <FontAwesomeIcon icon={faCheck} aria-hidden="true" />
+                  </button>
+                ) : null}
                 <div className={styles.trackItemBody}>
                 <div className={styles.trackItemInfo}>
                   <div className={styles.trackItemIdentity}>
@@ -2263,7 +2294,6 @@ const TrackList: React.FC<TrackListProps> = ({
                         )}
                     </div>
                   </div>
-
                 </div>
 
                 {/* TWO-ROW METADATA SECTION */}
@@ -2320,8 +2350,8 @@ const TrackList: React.FC<TrackListProps> = ({
                             aria-expanded={open}
                             aria-controls={`track-community-${uri}`}
                             title={open ? "Hide other members' tags"
-                              : teased ? `${communityPeopleTitle(others)}\nConnect to Tagify Community to add the ones you like`
-                              : othersTagsLocked ? `${communityPeopleTitle(others)}\nShare your tags on Community to see them all and add the ones you like`
+                              : teased ? `${communityPeopleTitle(others)}\nCreate account or sign in to add the ones you like`
+                              : othersTagsLocked ? `${communityPeopleTitle(others)}\n${allTagsHidden ? "All your tags are hidden. Show some of them" : "Share your tags on Community"} to see them all and add the ones you like`
                               : `${communityPeopleTitle(others)}\nClick to see them all and add the ones you like`}
                             onClick={() => {
                               if (!open && !othersTagsLocked && !teased) recordProductInteraction("track_list_others_opened");
@@ -2350,35 +2380,7 @@ const TrackList: React.FC<TrackListProps> = ({
                         );
                       })()}
 
-                      {/* Timestamp display */}
-                      <div className={styles.trackItemTimestampsInline}>
-                        {trackData.dateCreated && (
-                          <div className={styles.timestampWithIcon}>
-                            <span className={styles.timestampIcon}>📅</span>
-                            <span
-                              className={styles.trackItemTimestamp}
-                              title={`Created: ${new Date(
-                                trackData.dateCreated,
-                              ).toLocaleString()}`}
-                            >
-                              {formatTimestamp(trackData.dateCreated)}
-                            </span>
-                          </div>
-                        )}
-                        {trackData.dateModified && (
-                          <div className={styles.timestampWithIcon}>
-                            <span className={styles.timestampIcon}>✏️</span>
-                            <span
-                              className={styles.trackItemTimestamp}
-                              title={`Last updated: ${new Date(
-                                trackData.dateModified,
-                              ).toLocaleString()}`}
-                            >
-                              {formatTimestamp(trackData.dateModified)}
-                            </span>
-                          </div>
-                        )}
-                      </div>
+                      <RowTimestamps created={trackData.dateCreated} modified={trackData.dateModified} />
                     </div>
                   </div>
 
@@ -2465,7 +2467,7 @@ const TrackList: React.FC<TrackListProps> = ({
           })
         )}
       </div>
-      {allSortedTracks.length > sortedTracksVisible.length && (
+      {allSortedTracks.length > sortedTracksVisible.length && !showingCommunityTags && (
         <div ref={observerRef} className={styles.loadMoreContainer}>
           <button
             className={styles.loadMoreButton}

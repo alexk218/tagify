@@ -6,6 +6,7 @@ export function getSmartPlaylistRatingRemoval({
   trackUris,
   tracks,
   rating,
+  taxonomy = null,
 }) {
   if (!playlist?.isActive || !playlist.criteria.ratingFilters.length) return null;
   const members = new Set(playlist.smartPlaylistTrackUris);
@@ -13,8 +14,8 @@ export function getSmartPlaylistRatingRemoval({
     const track = tracks[uri];
     return (
       members.has(uri) && track && track.rating !== rating &&
-      evaluateTrackMatchesCriteria(track, playlist.criteria) &&
-      !evaluateTrackMatchesCriteria({ ...track, rating }, playlist.criteria)
+      evaluateTrackMatchesCriteria(track, playlist.criteria, taxonomy) &&
+      !evaluateTrackMatchesCriteria({ ...track, rating }, playlist.criteria, taxonomy)
     );
   });
   if (!removedTrackUris.length) return null;

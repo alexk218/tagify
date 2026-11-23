@@ -117,6 +117,19 @@
   background: rgb(255 255 255 / 9%);
 }
 
+/* The member's @handle on the profile button. A long one ends in an ellipsis. */
+.handleText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions .secondaryAction {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .connectionPanel {
   padding-top: 16px;
   border-top: 1px solid rgb(255 255 255 / 8%);
@@ -148,69 +161,19 @@
   background: #f1b36f;
 }
 
-.connectionStatus button,
-.disconnectActions button {
+.connectionStatus button {
+  padding: 2px 4px;
   border: 0;
   background: transparent;
   color: var(--spice-text);
   font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
 }
 
-.connectionStatus button {
-  padding: 2px 4px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.disconnectConfirmation {
-  display: grid;
-  gap: 12px;
-}
-
-.disconnectConfirmation > div:first-child {
-  display: grid;
-  gap: 3px;
-}
-
-.disconnectConfirmation strong {
-  color: var(--spice-text);
-  font-size: 13px;
-}
-
-.disconnectConfirmation span {
-  color: var(--spice-subtext);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.disconnectActions {
-  display: flex;
-  gap: 8px;
-}
-
-.disconnectActions button {
-  min-height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--spice-button-disabled);
-  border-radius: 999px;
-}
-
-.disconnectActions button:disabled {
-  cursor: wait;
-  opacity: 0.6;
-}
-
-.disconnectActions .disconnectConfirmButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-color: rgb(255 92 92 / 42%);
-  color: #ff8a8a;
-}
-
-.disconnectError {
-  margin: 10px 0 0;
+.errorMessage {
+  margin: -6px 0 0;
   color: #ff8a8a;
   font-size: 12px;
 }

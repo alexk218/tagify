@@ -196,6 +196,24 @@ describe("library stats", () => {
     expect(pick({ kind: "tag", tagId: "tag_loud" }, "30d")).toEqual([]);
   });
 
+  it("counts linked versions of one song once, on the day the song was first tagged", () => {
+    const identity = { isrc: "USABC2400001", artistIds: ["a".repeat(22)], durationMs: 180000, name: "Song" };
+    const linked = (dateCreated: number) => track({ tagIds: ["tag_calm"], rating: 4, dateCreated, dateModified: dateCreated, recordingIdentity: identity, recordingGroupId: "group" });
+    const data = library();
+    data.tracks = {
+      ["spotify:track:" + "o".repeat(22)]: linked(at(9, 1)),
+      // Versions Tagify saved when it found them in a playlist today.
+      ["spotify:track:" + "p".repeat(22)]: linked(at(10, 11)),
+      ["spotify:track:" + "q".repeat(22)]: linked(at(10, 11)),
+      ["spotify:track:" + "r".repeat(22)]: { ...linked(at(10, 11)), recordingReuseDisabled: true },
+    };
+    const stats = computeLibraryStats(data, "all", NOW);
+    expect(stats.overview.taggedTracks).toBe(2);
+    expect(stats.activity.days.find((day) => day.date === "2026-09-01")?.count).toBe(1);
+    // Only the version kept apart on purpose counts today.
+    expect(stats.activity.days.at(-1)).toEqual({ date: "2026-10-11", count: 1 });
+  });
+
   describe("tracks dated when Tagify started keeping dates", () => {
     // Before the first release, every track already in a library got this exact moment when
     // dates were introduced.

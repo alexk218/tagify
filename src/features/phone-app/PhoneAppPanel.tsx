@@ -3,6 +3,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faAndroid, faApple } from "@fortawesome/free-brands-svg-icons";
 import { faCheck } from "@fortawesome/free-solid-svg-icons";
 import { ANDROID_APP_QR, ANDROID_APP_URL, IPHONE_APP_QR, IPHONE_APP_URL, type QrCode } from "./phoneAppLinks";
+// eslint-disable-next-line css-modules/no-unused-class -- shared between the panel and its popover
 import styles from "./PhoneApp.module.css";
 
 export type PhoneStore = "app_store" | "google_play";
@@ -29,6 +30,10 @@ export function PhoneAppQr({ code, label, size = 112 }: { code: QrCode; label: s
 }
 
 interface PhoneAppPanelProps {
+  /** Whether this computer is connected to a Tagify account, which the phone apps sign in with. */
+  connected: boolean;
+  accountLabel: string | null;
+  onConnect: () => void;
   androidReleased: boolean;
   androidNotify: boolean;
   onStore: (store: PhoneStore) => void;
@@ -37,14 +42,31 @@ interface PhoneAppPanelProps {
 }
 
 /** QR codes plus store links: people click on a computer but install on their phone. */
-export function PhoneAppPanel({ androidReleased, androidNotify, onStore, onNotifyAndroid, onHide }: PhoneAppPanelProps) {
+export function PhoneAppPanel({ connected, accountLabel, onConnect, androidReleased, androidNotify, onStore, onNotifyAndroid, onHide }: PhoneAppPanelProps) {
   return (
     <div className={styles.panel}>
       <h3 id="tagify-phone-title" className={styles.title}>Tagify on your phone</h3>
-      <p className={styles.lead}>
-        Tag the song that&apos;s playing from your phone. Sign in with your Community account and your tags
-        reach this computer too.
-      </p>
+      {connected ? (
+        <p className={styles.lead}>
+          Tag the song that&apos;s playing from your phone. Sign in on your phone with the Tagify account this
+          computer uses{accountLabel ? <> (<strong className={styles.account}>{accountLabel}</strong>)</> : null}, and your
+          tags show up in both places.
+        </p>
+      ) : (
+        <>
+          <p className={styles.lead}>
+            The phone app works with your Tagify account. Connect this computer first, so the songs you&apos;ve
+            tagged here are on your phone and what you tag there comes back here.
+          </p>
+          <div className={styles.step}>
+            <p className={styles.stepTitle}><span className={styles.stepNumber}>1.</span> Connect this computer to your Tagify account</p>
+            <button type="button" className={styles.connectButton} onClick={onConnect}>
+              Create account or sign in
+            </button>
+          </div>
+          <p className={styles.stepTitle}><span className={styles.stepNumber}>2.</span> Get the app and sign in with the same account</p>
+        </>
+      )}
 
       <div className={styles.app}>
         <PhoneAppQr code={IPHONE_APP_QR} label="QR code for Tagify on the App Store" />

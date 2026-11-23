@@ -7,10 +7,11 @@ import {
   syncAccountId,
   type CommunityOnlySmartPlaylist,
 } from "@/services/sync/SmartPlaylistCommunityList";
-import { COMMUNITY_PAGES_ORIGIN, openCommunityUrl } from "@/features/community/communityLinks";
+import { COMMUNITY_PAGES_ORIGIN } from "@/features/community/communityLinks";
 import type { SmartPlaylistFilterCriteria } from "@/features/smart-playlists/model/smartPlaylist.types";
 import { formatCondensedDate } from "@/utils/formatters";
 import styles from "./SmartPlaylistModal.module.css";
+import { openCommunityUrlSignedIn } from "@/features/community/communityWebsiteLink";
 
 // Smart playlists made on Community that Tagify can't change itself (everyone's tags, one person's
 // tag, or Length / Released rules set on Community). Alex, 2026-11-17, on the Picks row
@@ -39,7 +40,7 @@ export function useCommunityOnlySmartPlaylists(): CommunityOnlySmartPlaylist[] {
 export const COMMUNITY_SMART_PLAYLISTS_URL = `${COMMUNITY_PAGES_ORIGIN}/library/playlists`;
 
 export function openSmartPlaylistsOnCommunity(): void {
-  openCommunityUrl(COMMUNITY_SMART_PLAYLISTS_URL);
+  void openCommunityUrlSignedIn(COMMUNITY_SMART_PLAYLISTS_URL);
 }
 
 /** Where the songs come from, when it isn't your own tags (a rule like any other). */
@@ -125,7 +126,6 @@ export function useNewFromCommunity(ids: string[]): Set<string> {
       ids.forEach((id) => seen.add(id));
       localStorage.setItem(key, JSON.stringify([...seen]));
     } catch { /* best effort */ }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, idsKey]);
   return useMemo(() => new Set(key ? ids.filter((id) => !seenAtOpen?.has(id)) : []), [key, idsKey, seenAtOpen]);
 }

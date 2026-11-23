@@ -1,6 +1,8 @@
 import "@/features/onboarding/preview/installSandbox";
 import { announceSavedTracks } from "@/extensions/extensionEdits";
 import { useAutomaticRecordingReuse } from "@/features/recording-reuse/hooks/useAutomaticRecordingReuse";
+import { useNearRecording } from "@/features/recording-reuse/hooks/useNearRecording";
+import { useAlbumNearRecordings } from "@/features/recording-reuse/hooks/useAlbumNearRecordings";
 import { useRecordingLibrary } from "@/features/recording-reuse/hooks/useRecordingLibrary";
 import { RecordingConflicts } from "@/features/recording-reuse/components/RecordingConflicts";
 import { recordingAnnotations } from "@/features/recording-reuse/utils/recordingReuse";
@@ -47,6 +49,7 @@ import { trackService } from "./services/TrackService";
 import { StatsLoading, StatsSheet, StatsWorkspace, useStatsBaseline, type StatsTrackSet } from "@/features/library-stats";
 import { UpdateBanner, useUpdateChecker } from "@/features/update-check";
 import { CommunityUpdates } from "@/features/community-updates/CommunityUpdates";
+import type { CommunityLock } from "@/features/track-session/components/TrackDetailsCommunity";
 import { MultiTrackDetails, useMultiTrackTagging } from "@/features/multi-track-tagging";
 import { useSmartPlaylists } from "@/features/smart-playlists";
 import SmartPlaylistTagChoices from "@/features/smart-playlists/components/SmartPlaylistTagChoices";
@@ -73,26 +76,29 @@ import { graphqlRateLimiter } from "./utils/RateLimiter";
 import { spotifyApiService } from "./services/SpotifyApiService";
 import { revealElement } from "@/utils/revealElement";
 import { communityPairing } from "@/features/community/communityPairing";
-import { FirstSongCard } from "@/features/onboarding/components/FirstSongCard";
+import { FirstRunTip, firstRunTipCopy } from "@/features/onboarding/components/FirstRunTip";
+import type { HowToTipId } from "@/features/onboarding/firstRunTips";
+import { useFirstRunTips } from "@/features/onboarding/hooks/useFirstRunTips";
+import { TasteQuestion } from "@/features/onboarding/components/TasteQuestion";
+import { useTasteQuestion } from "@/features/onboarding/hooks/useTasteQuestion";
+import { useHowToTips } from "@/features/onboarding/hooks/useHowToTips";
+import { howToTipCopy } from "@/features/onboarding/howToTips";
 import type { CommunityMatch, CommunityMatchTag } from "@/features/onboarding/services/communityMatches";
-import { FirstRunPayoffCard } from "@/features/onboarding/components/FirstRunPayoffCard";
-import { useFirstRun } from "@/features/onboarding/hooks/useFirstRun";
 import { OnboardingPreviewBanner } from "@/features/onboarding/preview/OnboardingPreviewBanner";
-import { quickTags } from "@/features/onboarding/services/firstRun";
 import type { SpotifyTrack } from "@/types/SpotifyTypes";
 import { isSameTagName } from "@tagify/community-contracts";
 import { removeTags } from "@/features/tag-data/utils/tagManager.taxonomy";
 import type { MergedTag } from "@/features/community/taggedByOthers/TaggedByOthersRows";
 import { TagsTriedHere, tagIsUnused } from "@/features/community/taggedByOthers/tagsTriedHere";
-import { TAG_FILTER_LANES } from "@/features/filter-state/hooks/useFilterState";
 
 // Invite to Community once a first tagging session has shown what tags are for.
 const COMMUNITY_INVITE_MIN_TAGGED = 5;
-import { pruneTagFilterFormula } from "@/utils/tagFilterGroups";
+import { buildTagGroupFilterIdSet, pruneTagFilterFormula } from "@/utils/tagFilterGroups";
 import { buildCategoryTree, buildValidTagIdSet } from "@/utils/tagTaxonomy";
 import {
   CommunityConnectPrompt,
   CommunityPublishPrompt,
+  CommunityRatingSharingQuestion,
   CommunityOnboardingModal,
   CloudSyncModal,
   CloudRecoveryModal,
@@ -105,9 +111,10 @@ import {
 } from "@/features/community";
 import { useReconnectionState } from "@/features/community/ReconnectionApproval";
 import { othersTagsWaitForSharing } from "@/features/community/useCommunitySharing";
-import { openCommunityUrl } from "@/features/community/communityLinks";
+import { hidesEveryTag, setSharingLockReason } from "@/features/community/sharingLockReason";
 import { communitySwitchOn } from "@/features/community/communitySwitches";
 import { flushCommunityTagAddCredits, queueCommunityTagAddCredits } from "@/features/community/communityTagAddCredits";
+import { flushLikedSaveCredits } from "@/features/community/communityLikedSaveCredits";
 import { TaggedByOthersSection, USABLE_BEFORE_SHARING, type TaggedByOthersPreview } from "@/features/community/taggedByOthers/TaggedByOthersSection";
 import {
   communityTeaserPreview,
@@ -117,11 +124,13 @@ import {
   type CommunityTeaserSurface,
 } from "@/features/community/taggedByOthers/communityTeaserPreview";
 import { RewindPrompt, REWIND_URL, useRewindPrompt } from "@/features/rewind";
-import { AndroidReleaseNotice, openPhoneStore, recordPhoneAppStoreClicked, useAndroidReleaseNotice } from "@/features/phone-app";
+import { AndroidReleaseNotice, CONNECT_FOR_PHONE_EVENT, SpotifyShareTip, openPhoneStore, recordPhoneAppStoreClicked, useAndroidReleaseNotice, useSpotifyShareTip } from "@/features/phone-app";
 import { Users } from "lucide-react";
 import { syncRuntime, type SyncStatus } from "@/services/sync/SyncRuntime";
 import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncPairingService } from "@/services/sync/SyncPairingService";
+import { openCommunityUrlSignedIn } from "@/features/community/communityWebsiteLink";
+import { NotificationBell } from "@/features/community/notifications/NotificationBell";
 
 const EMPTY_TRACK_DETAILS_DATA = {
   rating: 0,
@@ -205,6 +214,7 @@ function App() {
   const othersTagsSharingGate = useMemo(() => communitySwitchOn("othersTagsSharingGate"), [syncStatus, syncConnected]);
   // Not connected: a preview of how other members tagged some of their Liked Songs (switch starts off).
   const communityTeasers = useMemo(() => !syncConnected && communitySwitchOn("communityTeasers"), [syncStatus, syncConnected]);
+  const communityTagSearchOn = useMemo(() => communitySwitchOn("communityTagSearch"), [syncStatus, syncConnected]);
   const communitySharing = useCommunitySharing({
     connected: syncConnected,
     status: syncStatus,
@@ -212,7 +222,7 @@ function App() {
       // The track list's "Tagged by others" and "N others" need to know whether the member shares their tags.
       || ((othersTagsSharingGate || taggedByOthersInTrackList) && activeView === "tracks"),
   });
-  const tagsNotShared = othersTagsWaitForSharing(syncConnected, communitySharing);
+  const tagsNotPublished = othersTagsWaitForSharing(syncConnected, communitySharing);
   const [activePlaylistUri, setActivePlaylistUri] = useState<string | null>(null);
   const [activePlaylistMetadata, setActivePlaylistMetadata] =
     useState<PlaylistMetadata | null>(null);
@@ -254,6 +264,7 @@ function App() {
     setEnergy,
     setBpm,
     setCamelotKey,
+    fillMissingAudioFeatures,
     updateBpm,
     applyBatchTagUpdates,
     findTagName,
@@ -342,6 +353,14 @@ function App() {
     handleSelectTrackForTagging,
     activeTrack,
   } = useTrackState(tagData.tracks);
+  // Published with every tag hidden counts as keeping tags private (Alex, 2026-11-23), so the locks apply.
+  const tagsAllHidden = useMemo(
+    () => syncConnected && communitySharing.state === "public"
+      && hidesEveryTag(tagData.tracks, tagData.taxonomy, communitySharing.policy),
+    [syncConnected, communitySharing.state, communitySharing.policy, tagData.tracks, tagData.taxonomy],
+  );
+  const tagsNotShared = tagsNotPublished || tagsAllHidden;
+  useEffect(() => setSharingLockReason(tagsAllHidden ? "all-hidden" : "private"), [tagsAllHidden]);
 
   const {
     isMultiTagging,
@@ -405,22 +424,19 @@ function App() {
     () => Object.keys(tagData.tracks).length,
     [tagData.tracks],
   );
-  // A library with nothing tagged starts from its own Liked Songs instead of an empty page.
-  // After a few tagged songs, people who started there are shown what tags are for: a filter, then a playlist.
-  const { showFirstSongCard, payoffTag, startFirstRun, startTaggingOnCard, startFromCommunityList, finishFirstRun } = useFirstRun({ tagData, isLoading, isMultiTagging });
-  const [createPlaylistRequest, setCreatePlaylistRequest] = useState(0);
-  const pickFirstSong = useCallback((uri: string) => {
-    startFirstRun();
-    void handleSelectTrackForTagging(uri);
-    // The song's details load after the switch and push the picker down, so reveal it again once they settle.
-    for (const delay of [300, 1200]) {
-      setTimeout(() => revealElement(document.querySelector("[data-tagify-tag-selector]")), delay);
-    }
-  }, [handleSelectTrackForTagging, startFirstRun]);
+  // The most songs any one tag is on: the playlist tip waits until a filter has enough to show.
+  const mostSongsOnOneTag = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const track of Object.values(tagData.tracks)) for (const tagId of new Set(track.tagIds)) counts.set(tagId, (counts.get(tagId) ?? 0) + 1);
+    return Math.max(0, ...counts.values());
+  }, [tagData.tracks]);
+  const ratedTrackCount = useMemo(() => Object.values(tagData.tracks).filter((track) => track.rating > 0 || track.energy > 0).length, [tagData.tracks]);
   // The people who put members' tags on a song earn curator points once sync has sent the tags.
   useEffect(() => {
     if (syncStatus !== "idle") return;
     void flushCommunityTagAddCredits(getDesktopSyncConfiguration(), (path, options) => syncRuntime.communityRequest(path, options));
+    // Songs saved to Liked Songs from On Community that Community hasn't taken yet.
+    void flushLikedSaveCredits(getDesktopSyncConfiguration(), (path, options) => syncRuntime.communityRequest(path, options));
   }, [syncStatus]);
   // Members' tags on a Liked Song become the member's own tags (the same-named one when they have it), then go on the song.
   const placeMembersTags = useCallback(async (match: CommunityMatch, tags: CommunityMatchTag[]) => {
@@ -446,35 +462,8 @@ function App() {
     }]);
     creditMembersTags(match.track.uri, tags.map((tag) => tag.label));
   }, [applyBatchTagUpdates, refreshPersistedTagData]);
-  const addMembersTags = useCallback(async (match: CommunityMatch, tags: CommunityMatchTag[]) => {
-    startTaggingOnCard();
-    await placeMembersTags(match, tags);
-  }, [placeMembersTags, startTaggingOnCard]);
-  // "Tag your first song": one click adds or removes one of the member's own tags, and the card
-  // stays until the payoff, like members' tags.
-  const firstSongQuickTags = useMemo(() => quickTags(tagData.taxonomy), [tagData.taxonomy]);
-  const firstSongTagIdsOf = useCallback((uri: string) => tagData.tracks[uri]?.tagIds ?? [], [tagData.tracks]);
-  const quickTagFirstSong = useCallback(async (track: SpotifyTrack, tagId: string, add: boolean) => {
-    startTaggingOnCard();
-    const albumImageUrl = track.album?.images?.[0]?.url;
-    await applyBatchTagUpdates([{
-      trackUri: track.uri,
-      toAdd: add ? [tagId] : [],
-      toRemove: add ? [] : [tagId],
-      tagMethod: "typed",
-      trackDetails: { name: track.name, artists: track.artists.map((artist) => artist.name).join(", ") },
-      albumDetails: {
-        albumName: track.album?.name,
-        albumUri: track.album?.uri ?? null,
-        albumImageUrl: albumImageUrl?.startsWith("https://") ? albumImageUrl : null,
-      },
-    }]);
-  }, [applyBatchTagUpdates, startTaggingOnCard]);
-  // The same tags from Community's "Your songs, tagged by others"; a library past its first run stays past it.
-  const addCommunityListTags = useCallback(async (match: CommunityMatch, tags: CommunityMatchTag[]) => {
-    startFromCommunityList();
-    await placeMembersTags(match, tags);
-  }, [placeMembersTags, startFromCommunityList]);
+  // The same tags from Community's "Your songs, tagged by others".
+  const addCommunityListTags = placeMembersTags;
   // "Tagged by others" in the track list: a members' tag goes on or comes off the song, locked in the
   // editor so Undo/Redo covers it like any edit there.
   const tagsTriedHere = useRef(new TagsTriedHere());
@@ -498,7 +487,6 @@ function App() {
       for (const tagId of (tagData.tracks[uri]?.tagIds ?? []).filter(same)) await toggleTagSingleTrack(uri, tagId, metadata);
       return;
     }
-    startFromCommunityList();
     let tagId = Object.keys(tagData.taxonomy.tagsById).find(same);
     if (!tagId) {
       await flushLocalPersistence();
@@ -511,7 +499,7 @@ function App() {
     }
     await toggleTagSingleTrack(uri, tagId, metadata, "copied");
     creditMembersTags(uri, tag.spellings);
-  }, [lockMembersSong, refreshPersistedTagData, startFromCommunityList, tagData.taxonomy, tagData.tracks, toggleTagSingleTrack]);
+  }, [lockMembersSong, refreshPersistedTagData, tagData.taxonomy, tagData.tracks, toggleTagSingleTrack]);
   // Members' tags on a song in the track list, from its open Community details.
   const addTrackListCommunityTags = useCallback(async (uri: string, tags: CommunityMatchTag[]) => {
     const track = tagData.tracks[uri];
@@ -535,21 +523,6 @@ function App() {
     setActiveView("tracks");
     void handleSelectTrackForTagging(uri);
   }, [handleSelectTrackForTagging]);
-  const payoffFiltered = !!payoffTag && activeTagFilters.length === 1 && activeTagFilters[0] === payoffTag.id;
-  const showPayoffSongs = () => {
-    if (!payoffTag) return;
-    clearTagFilters();
-    moveTagToClauseLane(payoffTag.id, TAG_FILTER_LANES.INCLUDE);
-    setActiveView("tracks");
-    setTimeout(() => revealElement(document.querySelector("[data-tagify-track-list]")), 300);
-  };
-  const makePayoffPlaylist = () => {
-    if (!payoffFiltered) showPayoffSongs();
-    setCreatePlaylistRequest((request) => request + 1);
-    // Reaching Create Playlist completes the first run, whether or not they save it.
-    finishFirstRun();
-  };
-  const dismissPayoff = finishFirstRun;
   const categoryTree = useMemo(
     () => buildCategoryTree(tagData.taxonomy),
     [tagData.taxonomy],
@@ -584,6 +557,7 @@ function App() {
 
 
   useFontAwesome();
+
 
   const openCommunityWorkspace = useCallback(() => {
     if (cloudRecoveryPending) {
@@ -625,6 +599,12 @@ function App() {
     setShowCloudSync(false);
     setCommunitySetupEntry(entry);
   }, [cloudRecoveryPending]);
+  // The phone app panel and Mobile tagging ask for this: the phone apps only work with a Tagify account.
+  useEffect(() => {
+    const connectForPhone = () => connectCommunity("phone_app");
+    window.addEventListener(CONNECT_FOR_PHONE_EVENT, connectForPhone);
+    return () => window.removeEventListener(CONNECT_FOR_PHONE_EVENT, connectForPhone);
+  }, [connectCommunity]);
   const connectFromTeaser = useCallback((surface: CommunityTeaserSurface) => {
     recordCommunityTeaserConnectClicked(surface);
     connectCommunity(`teaser_${surface}`);
@@ -632,6 +612,7 @@ function App() {
 
   // Asked once per Spotify session, and only once the track list is open, so Liked Songs aren't read for nothing.
   const [teaserPreview, setTeaserPreview] = useState<TaggedByOthersPreview | null>(null);
+  const [teaserPreviewLoading, setTeaserPreviewLoading] = useState(false);
   useEffect(() => {
     if (syncConnected) {
       forgetCommunityTeaserPreview();
@@ -640,8 +621,11 @@ function App() {
     }
     if (!communityTeasers || activeView !== "tracks") return;
     let current = true;
-    void communityTeaserPreview().then((preview) => { if (current) setTeaserPreview(preview); });
-    return () => { current = false; };
+    setTeaserPreviewLoading(true);
+    void communityTeaserPreview().then((preview) => {
+      if (current) setTeaserPreview(preview);
+    }).finally(() => { if (current) setTeaserPreviewLoading(false); });
+    return () => { current = false; setTeaserPreviewLoading(false); };
   }, [syncConnected, communityTeasers, activeView]);
   const teaserRows = useMemo(
     () => (communityTeasers && teaserPreview
@@ -656,17 +640,23 @@ function App() {
     setCommunitySetupEntry((current) => current ?? connection.entry);
   }), []);
 
+  // A Spotify update signed this computer out, and Community is waiting for
+  // the member to approve reconnecting it: Cloud Sync shows the code to check.
+  const reconnection = useReconnectionState();
+
+  // Someone not connected yet goes straight to Tagify account setup, the one way to sign in.
   const openCloudSync = useCallback(() => {
     if (cloudRecoveryPending) {
       setShowCloudRecovery(true);
       return;
     }
+    if (!getDesktopSyncConfiguration() && !reconnection) {
+      connectCommunity("sync");
+      return;
+    }
     setShowCloudSync(true);
-  }, [cloudRecoveryPending]);
+  }, [cloudRecoveryPending, reconnection, connectCommunity]);
 
-  // A Spotify update signed this computer out, and Community is waiting for
-  // the member to approve reconnecting it: Cloud Sync shows the code to check.
-  const reconnection = useReconnectionState();
   const reconnectionShownFor = useRef<string | null>(null);
   useEffect(() => {
     if (reconnection?.status !== "waiting" || isLoading) return;
@@ -687,10 +677,14 @@ function App() {
     setShowCloudSync(false);
     setShareSurface(surface);
   }, [cloudRecoveryPending, connectCommunity]);
-
-  const disconnectCommunitySync = useCallback(async () => {
-    await (window.TagifySync || syncRuntime).unlinkLocal();
-  }, []);
+  // Every Community-locked feature: not connected asks to connect, connected but not sharing their
+  // tags asks to share them, with the same limit (Alex, 2026-11-22).
+  const trackDetailsCommunityLock = useMemo<CommunityLock | undefined>(
+    () => (communityTeasers ? { ask: "connect", onAct: () => connectFromTeaser("track_details") }
+      : othersTagsSharingGate && tagsNotShared ? { ask: "share", onAct: () => openCommunitySharing("workspace") }
+        : undefined),
+    [communityTeasers, connectFromTeaser, othersTagsSharingGate, tagsNotShared, openCommunitySharing],
+  );
 
   useEffect(() => {
     const handleSyncStatus = (event: Event) => {
@@ -1023,6 +1017,13 @@ function App() {
     [activeTrackUri, setCamelotKey],
   );
 
+  const handleFillActiveTrackAudioFeatures = useCallback(
+    (features: { bpm: number | null; camelotKey: string | null }) => {
+      if (activeTrackUri) fillMissingAudioFeatures(activeTrackUri, features);
+    },
+    [activeTrackUri, fillMissingAudioFeatures],
+  );
+
   const handleRemoveActiveTrackTag = useCallback(
     (tagId: string) => {
       if (!activeTrackUri) {
@@ -1203,6 +1204,13 @@ function App() {
       const validTagIds = new Set(
         [...buildValidTagIdSet(newTaxonomy), ...buildValidTagIdSet(tagData.taxonomy)].filter((tagId) => !removed.has(tagId)),
       );
+      // Category terms ("Any Genre", "No Mood") stay while their category or
+      // folder exists, including ones created elsewhere since this edit began.
+      const baseGroupIds = base ? buildTagGroupFilterIdSet(base) : new Set<string>();
+      buildTagGroupFilterIdSet(newTaxonomy).forEach((termId) => validTagIds.add(termId));
+      buildTagGroupFilterIdSet(tagData.taxonomy).forEach((termId) => {
+        if (!baseGroupIds.has(termId)) validTagIds.add(termId);
+      });
 
       replaceTaxonomy(newTaxonomy, removedTagIds, base);
       if (removed.size === 0) return;
@@ -1392,6 +1400,8 @@ function App() {
   };
   const recordingConflicts = useRecordingLibrary(tagData.tracks, !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode, onRecordingsChanged);
   const recordingReuseStatus = useAutomaticRecordingReuse(activeView === "tracks" && !isMultiTagging && isDisplayedTrackMusic ? activeTrack : null, tagData.tracks, onRecordingsChanged);
+  const nearRecording = useNearRecording(activeView === "tracks" && !isMultiTagging && isDisplayedTrackMusic ? activeTrack : null, tagData.tracks, recordingReuseStatus, onRecordingsChanged);
+  useAlbumNearRecordings(activeView === "tracks" && !isMultiTagging && isDisplayedTrackMusic ? activeTrack : null, tagData.tracks, nearRecording.hasCandidates || !!nearRecording.linked, onRecordingsChanged);
 
   const trackDataMap = useMemo(() => {
     return Object.fromEntries(
@@ -1462,12 +1472,66 @@ function App() {
   const currentPlaylistFilterState =
     activeView === "albums" ? albumFilterState : playlistFilterState;
   const isLibraryViewActive = !showCommunityWorkspace;
-  // Optional prompts wait until loading, recovery, onboarding and Tagify's own dialogs are out of the way.
+  // "What do you listen to?" for a new library.
+  // It comes once, before the first-run tips, which start right after Continue or Skip.
+  const tasteQuestion = useTasteQuestion({
+    taxonomy: tagData.taxonomy,
+    isLoading,
+    taggedTrackCount,
+    connected: syncConnected,
+    restoreOnOffer: cloudRecoveryPending,
+    showSavedTags: refreshPersistedTagData,
+  });
+  const showTasteQuestion = tasteQuestion.asking &&
+    !migrationProgress && !orchestratorResult?.fallbackMode &&
+    !shouldShowSurvey && !shouldShowPowerUserModal && !showCommunityOnboarding &&
+    !showCloudRecovery && !showCloudSync && shareSurface === null &&
+    !showMigrationModal && !showTagManager && !showStats &&
+    activeView === "tracks" && !showCommunityWorkspace;
+  // Optional prompts wait until loading, recovery, onboarding, the question above and Tagify's own dialogs are out of the way.
   const canShowOptionalPrompts =
     !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode &&
     !shouldShowSurvey && !shouldShowPowerUserModal && !showCommunityOnboarding &&
     !showCloudRecovery && !cloudRecoveryPending && !showCloudSync && shareSurface === null &&
-    !showMigrationModal && !showTagManager && !showStats;
+    !showMigrationModal && !showTagManager && !showStats && !tasteQuestion.asking;
+  // First-run tour that points at the real controls, one at a time.
+  const othersFound = communityTeasers && !syncConnected ? teaserPreview?.total ?? 0 : 0;
+  const tipsEnabled = activeView === "tracks" && !showCommunityWorkspace && !reconnection;
+  const firstRunTips = useFirstRunTips({
+    enabled: canShowOptionalPrompts && tipsEnabled,
+    songShowing: isDisplayedTrackMusic,
+    songLocked: isLocked,
+    taggedSongs: taggedTrackCount,
+    ratedSongs: ratedTrackCount,
+    tagManagerOpen: showTagManager,
+    othersTab: taggedByOthersInTrackList,
+  });
+  // Later tips (a playlist from tags, Smart Playlists) come after the tour, each at its moment.
+  const howToTip = useHowToTips({
+    enabled: canShowOptionalPrompts && tipsEnabled,
+    coreTipPending: firstRunTips.tip !== null,
+    mostSongsOnOneTag,
+    smartPlaylists: smartPlaylists.length,
+  });
+  // The playlist tip points at Filters until a tag filter is on, then at Create Playlist. While the
+  // filter panel is open it steps aside so it doesn't cover the tags.
+  const tagFilterOn = activeTagFilters.length > 0;
+  const [tipFiltersOpened, setTipFiltersOpened] = useState(false);
+  const laterTip = howToTip === "playlist" && !tagFilterOn && tipFiltersOpened ? null : howToTip;
+  const coreTip = firstRunTips.tip;
+  const currentTip = coreTip ?? laterTip;
+  const tipHandlers = useMemo(() => (currentTip ? {
+    onShown: () => firstRunTips.shown(currentTip),
+    onGotIt: () => firstRunTips.gotIt(currentTip),
+    onSkip: () => firstRunTips.skip(currentTip),
+    // Opening Manage Tags, the Tagged by others tab or Smart Playlists is what those tips ask for;
+    // Create Playlist is what the playlist tip asks for.
+    onAnchorClick: currentTip === "manage" || currentTip === "others" || currentTip === "smart"
+      ? () => firstRunTips.acted(currentTip)
+      : currentTip === "playlist"
+        ? (tagFilterOn ? () => firstRunTips.acted("playlist") : () => setTipFiltersOpened(true))
+        : undefined,
+  } : null), [currentTip, tagFilterOn, firstRunTips.shown, firstRunTips.gotIt, firstRunTips.skip, firstRunTips.acted]);
   // "Your Rewind 2026 is ready" takes the Community invitations' place while it applies, so two banners never stack.
   const rewindPrompt = useRewindPrompt({
     enabled: canShowOptionalPrompts && !showCommunityWorkspace && !reconnection,
@@ -1477,9 +1541,13 @@ function App() {
   const androidNotice = useAndroidReleaseNotice({
     enabled: canShowOptionalPrompts && !rewindPrompt.holdsPlace && !showCommunityWorkspace && !reconnection,
   });
+  // "Tag Spotify songs from your phone" (3.4.1), once per computer; the invitations wait for it.
+  const spotifyShareTip = useSpotifyShareTip({
+    enabled: canShowOptionalPrompts && !showCommunityWorkspace && !reconnection,
+  });
   const openRewind = () => {
     rewindPrompt.open();
-    if (syncConnected) openCommunityUrl(REWIND_URL);
+    if (syncConnected) void openCommunityUrlSignedIn(REWIND_URL);
     else connectCommunity("rewind");
   };
   // Only a member who never chose gets the dot; keeping tags private is respected.
@@ -1487,7 +1555,11 @@ function App() {
     !showCommunityWorkspace && shareSurface === null;
   const communityButtonLabel = sharingNeedsChoice
     ? "Open the Tagify Community workspace. Your tags aren't public yet."
-    : "Open the Tagify Community workspace";
+    : syncConnected
+      ? "Open the Tagify Community workspace"
+      : "Open the Tagify Community workspace. Create account or sign in to back up your tags.";
+
+  // WIP until Alex picks the bell's look (NotificationBell.tsx): C joins it to the Community button.
 
   return (
     <div ref={appRootRef} className={styles.container}>
@@ -1539,6 +1611,8 @@ function App() {
               Artists
             </button>
           </div>
+          <div className={styles.headerActions}>
+          {syncConnected ? <NotificationBell /> : null}
           <button
             className={`${styles.communityButton} ${showCommunityWorkspace ? styles.communityButtonActive : ""}`}
             onClick={openCommunityWorkspace}
@@ -1550,6 +1624,7 @@ function App() {
             <span>Community</span>
             {sharingNeedsChoice ? <span className={styles.communityDot} aria-hidden="true" /> : null}
           </button>
+          </div>
         </div>
       </div>
 
@@ -1576,6 +1651,16 @@ function App() {
         </div>
       )}
 
+      {showTasteQuestion && (
+        <TasteQuestion choices={tasteQuestion.choices} onAnswer={tasteQuestion.answer} />
+      )}
+      {currentTip && tipHandlers && (
+        <FirstRunTip
+          key={`${currentTip}-${tagFilterOn}`}
+          {...(coreTip ? firstRunTipCopy(coreTip, { othersFound }) : howToTipCopy(currentTip as HowToTipId, { tagFilterOn }))}
+          {...tipHandlers}
+        />
+      )}
       <CommunityUpdates enabled={canShowOptionalPrompts} />
       {metadataBackfillProgress && metadataBackfillProgress.total > 0 && (
         <div
@@ -1613,6 +1698,8 @@ function App() {
       )}
       {androidNotice.shown && (
         <AndroidReleaseNotice
+          connected={syncConnected}
+          onConnect={() => connectCommunity("phone_app")}
           onOpen={() => {
             recordPhoneAppStoreClicked("google_play", "notice");
             openPhoneStore("google_play");
@@ -1621,14 +1708,25 @@ function App() {
           onDismiss={androidNotice.done}
         />
       )}
+      {spotifyShareTip.shown && (
+        <SpotifyShareTip
+          connected={syncConnected}
+          onConnect={() => {
+            spotifyShareTip.done();
+            connectCommunity("phone_app");
+          }}
+          onGetApp={() => openPhoneStore("app_store")}
+          onClose={spotifyShareTip.done}
+        />
+      )}
       {/* The Community workspace already offers its own Connect button. */}
       <CommunityConnectPrompt
-        enabled={canShowOptionalPrompts && !rewindPrompt.holdsPlace && !androidNotice.holdsPlace && !showCommunityWorkspace && !reconnection && taggedTrackCount >= COMMUNITY_INVITE_MIN_TAGGED}
+        enabled={canShowOptionalPrompts && !rewindPrompt.holdsPlace && !androidNotice.holdsPlace && !spotifyShareTip.holdsPlace && !showCommunityWorkspace && !reconnection && taggedTrackCount >= COMMUNITY_INVITE_MIN_TAGGED}
         connected={syncConnected}
         onConnect={() => connectCommunity("prompt")}
       />
       <CommunityPublishPrompt
-        enabled={canShowOptionalPrompts && !rewindPrompt.holdsPlace && !androidNotice.holdsPlace && !showCommunityWorkspace}
+        enabled={canShowOptionalPrompts && !rewindPrompt.holdsPlace && !androidNotice.holdsPlace && !spotifyShareTip.holdsPlace && !showCommunityWorkspace}
         connected={syncConnected}
         status={syncStatus}
         taggedTrackCount={taggedTrackCount}
@@ -1636,6 +1734,12 @@ function App() {
         tracks={tagData.tracks}
         taxonomy={tagData.taxonomy}
         onReview={() => openCommunitySharing("invitation")}
+      />
+      {/* For members who already share their tags; the publish invitation is for members who haven't, so the two never show together. */}
+      <CommunityRatingSharingQuestion
+        enabled={canShowOptionalPrompts && !rewindPrompt.holdsPlace && !androidNotice.holdsPlace && !showCommunityWorkspace}
+        connected={syncConnected}
+        status={syncStatus}
       />
 
       <SmartPlaylistTagChoices enabled={canShowOptionalPrompts} />
@@ -1674,6 +1778,7 @@ function App() {
         <CloudSyncModal
           sharing={communitySharing}
           onOpenSharing={() => openCommunitySharing("sync")}
+          onConnect={() => connectCommunity("sync")}
           onClose={() => setShowCloudSync(false)}
         />
       )}
@@ -1713,8 +1818,6 @@ function App() {
           tracks={tagData.tracks}
           taxonomy={tagData.taxonomy}
           connectedAccountId={getDesktopSyncConfiguration()?.accountId || null}
-          connectedDeviceId={getDesktopSyncConfiguration()?.deviceId || null}
-          onDisconnect={disconnectCommunitySync}
           // With "Tagged by others" in the track list, the Community tab's card goes away.
           onAddMembersTags={taggedByOthersInTrackList ? undefined : addCommunityListTags}
           onConnectFromLibraryCheck={() => connectCommunity("library_check")}
@@ -1732,28 +1835,6 @@ function App() {
         <div className={styles.content}>
           {activeView === "tracks" ? (
             <>
-              {showFirstSongCard && (
-                <FirstSongCard
-                  currentTrack={currentlyPlayingTrack}
-                  onPick={pickFirstSong}
-                  onAddMembersTags={addMembersTags}
-                  onSeeAllMembersTags={openCommunityWorkspace}
-                  quickTags={firstSongQuickTags}
-                  tagIdsOf={firstSongTagIdsOf}
-                  onQuickTag={quickTagFirstSong}
-                  taggedSongs={taggedTrackCount}
-                />
-              )}
-              {payoffTag && !isMultiTagging && (
-                <FirstRunPayoffCard
-                  taggedSongs={taggedTrackCount}
-                  tag={payoffTag}
-                  filtered={payoffFiltered}
-                  onShowSongs={showPayoffSongs}
-                  onMakePlaylist={makePayoffPlaylist}
-                  onDismiss={dismissPayoff}
-                />
-              )}
               {isMultiTagging &&
               multiTagTracks.length > 0 &&
               multiTrackDraftTags ? (
@@ -1779,8 +1860,10 @@ function App() {
                   onToggleTagForSpecificTrackDraft={toggleTagForSpecificTrackDraft}
                   onCalculateBatchChanges={calculateBatchChanges}
                 />
+              ) : !activeTrack ? (
+                // Nothing playing or locked: say the one step that fills this space.
+                <p className={styles.emptyTrackDetails}><span data-tip="play-song">Play a song and tag it here.</span></p>
               ) : (
-                activeTrack &&
                 isDisplayedTrackMusic && (
                   <TrackDetails
                     recordingReuseStatus={recordingReuseStatus}
@@ -1789,13 +1872,14 @@ function App() {
                     trackData={activeTrackData || EMPTY_TRACK_DETAILS_DATA}
                     taxonomy={tagData.taxonomy}
                     onAddCommunityTags={addTrackListCommunityTags}
-                    onConnectCommunity={communityTeasers ? () => connectFromTeaser("track_details") : undefined}
+                    communityLock={trackDetailsCommunityLock}
                     activeTagFilters={activeTagFilters}
                     excludedTagFilters={excludedTagFilters}
                     onSetRating={handleSetActiveTrackRating}
                     onSetEnergy={handleSetActiveTrackEnergy}
                     onSetBpm={handleSetActiveTrackBpm}
                     onSetCamelotKey={handleSetActiveTrackCamelotKey}
+                    onFillMissingAudioFeatures={handleFillActiveTrackAudioFeatures}
                     onRemoveTag={handleRemoveActiveTrackTag}
                     onToggleTagIncludeOff={toggleTagIncludeOff}
                     onPlayTrack={playTrack}
@@ -1857,7 +1941,6 @@ function App() {
                 onClearStatsTrackSet={() => setStatsTrackSet(null)}
                 onReturnToStats={returnToStats}
                 onCreatePlaylist={createPlaylistFromFilters}
-                createPlaylistRequest={createPlaylistRequest}
                 onCreateSmartPlaylist={createSmartPlaylist}
                 smartPlaylists={smartPlaylists}
                 onSetSmartPlaylists={setSmartPlaylists}
@@ -1881,6 +1964,7 @@ function App() {
                     onConnectCommunity={() => (syncConnected ? openCloudSync()
                       : communityTeasers && teaserPreview ? connectFromTeaser("tab") : connectCommunity("library_check"))}
                     preview={communityTeasers ? teaserPreview ?? undefined : undefined}
+                    previewLoading={communityTeasers && !teaserPreview && teaserPreviewLoading}
                     onAddMembersTags={addCommunityListTags}
                     onToggleTag={toggleMembersTag}
                     onLockSong={lockMembersSong}
@@ -1895,6 +1979,13 @@ function App() {
                 othersTagsLocked={othersTagsSharingGate && tagsNotShared}
                 communityTeaser={teaserRows}
                 onShareTags={() => openCommunitySharing("workspace")}
+                communityTagSearch={communityTagSearchOn ? {
+                  // Asked again whenever connecting or sharing changes what Community returns.
+                  viewer: `${syncConnected ? getDesktopSyncConfiguration()?.accountId || "connected" : "signed-out"}:${tagsNotShared ? "not-sharing" : "sharing"}`,
+                  onConnect: () => connectCommunity("teaser_tag_search"),
+                  onShare: () => openCommunitySharing("workspace"),
+                  onPlay: (uri) => void trackService.playTrack(uri),
+                } : undefined}
               />
             </>
           ) : isPlaylistEntityView ? (

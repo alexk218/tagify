@@ -6,6 +6,7 @@ export { CloudRecoveryModal, isCloudRecoveryStatus } from "./CloudRecoveryModal"
 export { CommunityOnboardingModal } from "./CommunityOnboardingModal";
 export { CommunityConnectPrompt } from "./CommunityConnectPrompt";
 export { CommunityPublishPrompt } from "./CommunityPublishPrompt";
+export { CommunityRatingSharingQuestion } from "./CommunityRatingSharingQuestion";
 export { CommunityShareDialog } from "./CommunityShareDialog";
 export { useCommunitySharing } from "./useCommunitySharing";
 export type { SharingSurface } from "./communityPublication";

@@ -8,6 +8,7 @@ import { canAskToPublish, COMMUNITY_PUBLISH_PROMPT_PREFIX } from "../communityPu
 import { syncRuntime } from "@/services/sync/SyncRuntime";
 import { recordProductInteraction } from "@/features/product-analytics/productAnalytics";
 import { getUsageAccountDigest } from "@/features/discovery-survey/services/tagifyUsage";
+import { KEEP_PRIVATE_CONSEQUENCE } from "../communitySyncCopy";
 
 vi.mock("@/features/discovery-survey/services/tagifyUsage", () => ({
   getUsageAccountDigest: vi.fn(),
@@ -103,8 +104,9 @@ describe("Community publish invitation", () => {
 
     expect(invitation()).toBeInTheDocument();
     expect(invitation()).toHaveAccessibleDescription(
-      "Tagify is backing up your library, but your Community profile stays empty until you choose what to share. 2 tags on 5 songs would appear. Your tags and star ratings would be public. Private notes stay private. You can hide any tag or folder first.",
+      "Tagify is backing up your library, but your Community profile stays empty until you choose what to share. 2 tags on 5 songs would appear. Private notes stay private. You can hide any tag or folder first.",
     );
+    expect(screen.queryByRole("checkbox")).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(recordProductInteraction).toHaveBeenCalledWith("community_publish_prompt_shown");
     const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "{}");
@@ -142,7 +144,7 @@ describe("Community publish invitation", () => {
     await settle();
 
     fireEvent.click(screen.getByRole("button", { name: "Review and publish" }));
-    expect(onReview).toHaveBeenCalledOnce();
+    expect(onReview.mock.calls).toEqual([[]]);
     expect(invitation()).toBeNull();
 
     communityRequest.mockImplementation(async (_path, options) => ({ policy: { ...(options?.body as { policy: object }).policy, revision: 5 } }));
@@ -239,7 +241,7 @@ describe("Community publish invitation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Keep my tags private" }));
     expect(screen.getByRole("region", { name: "Keep your tags private?" })).toHaveAccessibleDescription(
-      "Tagify keeps backing up your library and won't ask again. You can publish any time from Community in Tagify.",
+      `${KEEP_PRIVATE_CONSEQUENCE} You can publish any time from Community in Tagify.`,
     );
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(invitation()).toBeInTheDocument();

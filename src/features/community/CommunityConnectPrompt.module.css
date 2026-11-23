@@ -1,7 +1,7 @@
 .prompt {
   align-items: center;
-  background: rgb(155 140 255 / 10%);
-  border: 1px solid rgb(155 140 255 / 26%);
+  background: var(--spice-main-elevated);
+  border: 1px solid rgba(var(--spice-rgb-text), 0.1);
   border-radius: 8px;
   color: var(--spice-text);
   display: flex;
@@ -27,9 +27,9 @@
 
 .icon {
   align-items: center;
-  background: rgb(155 140 255 / 18%);
+  background: rgba(var(--spice-rgb-text), 0.1);
   border-radius: 50%;
-  color: #c3b9ff;
+  color: var(--spice-text);
   display: inline-flex;
   flex: 0 0 auto;
   height: 32px;
@@ -66,7 +66,7 @@
 
 .primary,
 .secondary {
-  border: 1px solid rgb(255 255 255 / 18%);
+  border: 1px solid var(--spice-misc);
   border-radius: 8px;
   color: var(--spice-text);
   cursor: pointer;
@@ -78,21 +78,22 @@
 }
 
 .primary {
-  background: #7566d8;
-  border-color: #9b8cff;
-  color: white;
+  background: var(--spice-button);
+  border-color: var(--spice-button);
+  color: #000;
 }
 
 .primary:hover {
-  background: #8474e4;
+  background: var(--spice-button-active);
+  border-color: var(--spice-button-active);
 }
 
 .secondary {
-  background: rgb(255 255 255 / 5%);
+  background: transparent;
 }
 
 .secondary:hover {
-  background: rgb(255 255 255 / 10%);
+  border-color: var(--spice-text);
 }
 
 .quiet {
@@ -125,10 +126,31 @@
   margin: 2px 0 0;
 }
 
+.inlineLink {
+  background: transparent;
+  border: 0;
+  color: var(--spice-text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.inlineLink:hover {
+  color: var(--spice-text);
+}
+
+.inlineLink:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
+}
+
 .quiet:focus-visible,
 .primary:focus-visible,
 .secondary:focus-visible {
-  outline: 2px solid #c3b9ff;
+  outline: 2px solid var(--spice-text);
   outline-offset: 2px;
 }
 

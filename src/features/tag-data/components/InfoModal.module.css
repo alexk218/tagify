@@ -1883,3 +1883,43 @@
   color: var(--spice-accent);
   text-decoration: underline;
 }
+
+/* "Show tips again" in Getting Started: a line of text and a plain outlined button. */
+.showTipsAgain {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+}
+
+.showTipsAgain p {
+  margin: 0;
+  color: var(--spice-subtext);
+  font-size: 14px;
+}
+
+.showTipsAgainButton {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 6px 16px;
+  color: var(--spice-text);
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 500px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.showTipsAgainButton:hover {
+  border-color: var(--spice-text);
+}
+
+.showTipsAgainButton:focus-visible {
+  outline: 2px solid var(--spice-text);
+  outline-offset: 2px;
+}

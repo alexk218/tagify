@@ -130,6 +130,43 @@ describe("reading songs' releases", () => {
   });
 });
 
+describe("saving songs' recording identities from the same reads", () => {
+  const identity = (isrc: string) => ({ isrc, artistIds: [id("artist", 1)], leadArtistId: id("artist", 1), durationMs: 200_000, name: "Song" });
+
+  it("hands every identity a read returned to be saved once per page, without extra reads", async () => {
+    const rememberIdentities = vi.fn(async () => {});
+    const trackRelease = vi.fn(async (uri: string) => uri === trackUri(2)
+      ? { isrc: null, albumUri: albumUri(1) }
+      : { isrc: "JPE561200583", albumUri: albumUri(1), identity: identity("JPE561200583") });
+    const source = sources({
+      trackRelease, rememberIdentities,
+      // A song with its ISRC and album saved is never read, so it has nothing new to save.
+      knownSongs: vi.fn(async () => new Map([[trackUri(3), { isrc: "GBDUW0000059", albumUri: albumUri(1) }]])),
+    });
+    const result = await resolveSongReleases([track(1), track(2), track(3)], source, new Map());
+    expect(result.found).toHaveLength(3);
+    expect(result.reads).toBe(3);
+    expect(trackRelease).toHaveBeenCalledTimes(2);
+    expect(rememberIdentities).toHaveBeenCalledTimes(1);
+    expect(rememberIdentities).toHaveBeenCalledWith({ [trackUri(1)]: identity("JPE561200583") });
+  });
+
+  it("saves what was read before a stop, skips saving when nothing was read, and never fails the run over it", async () => {
+    const rememberIdentities = vi.fn(async () => { throw new Error("disk full"); });
+    const trackRelease = vi.fn()
+      .mockResolvedValueOnce({ isrc: "JPE561200583", albumUri: albumUri(1), identity: identity("JPE561200583") })
+      .mockRejectedValueOnce(Object.assign(new Error("429"), { status: 429 }));
+    const stopped = await resolveSongReleases([track(1), track(2)], sources({ trackRelease, rememberIdentities }), new Map());
+    expect(stopped).toMatchObject({ halted: "spotify" });
+    expect(stopped.found).toHaveLength(1);
+    expect(rememberIdentities).toHaveBeenCalledWith({ [trackUri(1)]: identity("JPE561200583") });
+
+    const nothing = vi.fn(async () => {});
+    await resolveSongReleases([track(1)], sources({ rememberIdentities: nothing, trackRelease: vi.fn(async () => ({ isrc: null, albumUri: albumUri(1) })) }), new Map());
+    expect(nothing).not.toHaveBeenCalled();
+  });
+});
+
 describe("sending song releases", () => {
   const deviceId = "41900000-0000-4000-8000-000000000011";
   const session = async () => ({ apiBaseUrl: "https://community.test", accessToken: "token", deviceId });

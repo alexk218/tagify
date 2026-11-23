@@ -8,6 +8,7 @@ import { CatalogFillFailures, type CatalogFillCause } from "./CatalogFillFailure
 import { splitOutsideLibrary, type CatalogFillAllowance } from "./CommunityCatalogFill";
 import type { SendSession } from "./SpotifyLibrarySender";
 import { syncClientHeaders } from "./SyncClientHeaders";
+import type { RecordingIdentity } from "@/types/tagData";
 
 // Community names the album on each song page and gives every Spotify version of one recording
 // (the same ISRC) a single page. Its Spotify Web API quota is too small to look that up for every
@@ -33,8 +34,11 @@ export interface SpotifyAlbumRelease { name: unknown; type: unknown; date: unkno
 export interface SongReleaseSources {
   /** The ISRC and album Tagify already saved for these songs. No request. */
   knownSongs(trackUris: string[]): Promise<Map<string, { isrc?: string | null; albumUri?: string | null }>>;
-  /** One desktop metadata read: the song's ISRC (null when Spotify lists none) and its album. Undefined when Spotify can't say. */
-  trackRelease(trackUri: string): Promise<{ isrc: string | null; albumUri: string | null } | undefined>;
+  /**
+   * One desktop metadata read: the song's ISRC (null when Spotify lists none), its album and, when the
+   * answer describes it fully, its recording identity. Undefined when Spotify can't say.
+   */
+  trackRelease(trackUri: string): Promise<{ isrc: string | null; albumUri: string | null; identity?: RecordingIdentity } | undefined>;
   /** One read per album, shared by every song on it. */
   albumRelease(albumUri: string): Promise<SpotifyAlbumRelease | null>;
   /** Takes one of the hour's background reads for this identity; false when none are left or Spotify asked Tagify to wait. */
@@ -43,6 +47,11 @@ export interface SongReleaseSources {
   pace?(): Promise<void>;
   /** Songs Community asks about that aren't in this library: the same reads, under this allowance. */
   outsideLibrary?: CatalogFillAllowance;
+  /**
+   * Saves the recording identities those reads already returned on the songs saved in this library,
+   * so same-song linking can match them by ISRC. No request; never changes annotations or dates.
+   */
+  rememberIdentities?(identities: Record<string, RecordingIdentity>): Promise<void>;
 }
 
 export interface SongReleaseRun {
@@ -115,6 +124,7 @@ export async function resolveSongReleases(
   albums = new Map<string, SongReleaseAlbumV1 | null>(), now = Date.now(), failures = new CatalogFillFailures(),
 ): Promise<{ found: SongReleaseReportItemV1[]; reads: number; halted: "budget" | "spotify" | null }> {
   const found: SongReleaseReportItemV1[] = [];
+  const identities: Record<string, RecordingIdentity> = {};
   let reads = 0;
   let halted: "budget" | "spotify" | null = null;
   const read = async <T>(identity: string, request: () => Promise<T>): Promise<T | null> => {
@@ -139,6 +149,7 @@ export async function resolveSongReleases(
       const answer = await read(`track:${uriOf(entity)}`, () => sources.trackRelease(uriOf(entity)));
       if (halted) break;
       if (!answer) { remember(entity); continue; }
+      if (answer.identity) identities[uriOf(entity)] = answer.identity;
       isrc = normalizeIsrc(answer.isrc);
       albumUri = albumIdOf(answer.albumUri) ? answer.albumUri : albumUri;
     }
@@ -151,6 +162,10 @@ export async function resolveSongReleases(
     const album = albums.get(albumUri);
     if (!album) { remember(entity); continue; }
     found.push({ entity, isrc, album });
+  }
+  // Saved even when the run stopped partway: each identity came from a read already made.
+  if (sources.rememberIdentities && Object.keys(identities).length) {
+    try { await sources.rememberIdentities(identities); } catch (error) { console.debug("Tagify: Song identities weren't saved; they're read again later", error); }
   }
   return { found, reads, halted };
 }

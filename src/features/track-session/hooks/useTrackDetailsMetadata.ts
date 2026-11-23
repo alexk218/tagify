@@ -27,6 +27,10 @@ interface UseTrackDetailsMetadataOptions {
   trackData: TrackDetailsTrackData;
   onSetBpm: (bpm: number | null) => void;
   onSetCamelotKey: (camelotKey: string | null) => void;
+  /** Fills BPM/key the song is missing without counting as an edit. */
+  onFillMissingAudioFeatures: (
+    features: Pick<ExtendedTrackMetadata, "bpm" | "camelotKey">,
+  ) => void;
 }
 
 function createBaseMetadata(sourceContext: string | null): ExtendedTrackMetadata {
@@ -74,6 +78,7 @@ export function useTrackDetailsMetadata({
   trackData,
   onSetBpm,
   onSetCamelotKey,
+  onFillMissingAudioFeatures,
 }: UseTrackDetailsMetadataOptions) {
   const [contextUri, setContextUri] = useState<string | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState(true);
@@ -87,6 +92,11 @@ export function useTrackDetailsMetadata({
   const metadataTrackUriRef = useRef<string | null>(null);
   const onSetBpmRef = useRef(onSetBpm);
   const onSetCamelotKeyRef = useRef(onSetCamelotKey);
+  const onFillMissingAudioFeaturesRef = useRef(onFillMissingAudioFeatures);
+
+  useEffect(() => {
+    onFillMissingAudioFeaturesRef.current = onFillMissingAudioFeatures;
+  }, [onFillMissingAudioFeatures]);
 
   useEffect(() => {
     onSetBpmRef.current = onSetBpm;
@@ -234,16 +244,15 @@ export function useTrackDetailsMetadata({
         if (isCancelled) return;
         const { bpm, camelotKey } = audioFeatureMetadata;
 
-        if (hasPersistedTrackData) {
-          if (trackData.bpm === null && bpm !== null) {
-            onSetBpmRef.current(bpm);
-          }
-          if (
-            normalizeCamelotKey(trackData.camelotKey) === null &&
-            camelotKey !== null
-          ) {
-            onSetCamelotKeyRef.current(camelotKey);
-          }
+        // Opening a song isn't an edit: fill what's missing without moving
+        // it in Last Updated sorting or adding an Undo step.
+        if (
+          hasPersistedTrackData &&
+          ((trackData.bpm === null && bpm !== null) ||
+            (normalizeCamelotKey(trackData.camelotKey) === null &&
+              camelotKey !== null))
+        ) {
+          onFillMissingAudioFeaturesRef.current({ bpm, camelotKey });
         }
 
         if (isCancelled) {
@@ -304,12 +313,14 @@ export function useTrackDetailsMetadata({
 
     const normalizedTrackKey = normalizeCamelotKey(trackData.camelotKey);
 
-    if (trackData.bpm === null && trackMetadata.bpm !== null) {
-      onSetBpmRef.current(trackMetadata.bpm);
-    }
-
-    if (normalizedTrackKey === null && trackMetadata.camelotKey !== null) {
-      onSetCamelotKeyRef.current(trackMetadata.camelotKey);
+    if (
+      (trackData.bpm === null && trackMetadata.bpm !== null) ||
+      (normalizedTrackKey === null && trackMetadata.camelotKey !== null)
+    ) {
+      onFillMissingAudioFeaturesRef.current({
+        bpm: trackMetadata.bpm,
+        camelotKey: trackMetadata.camelotKey,
+      });
     }
   }, [
     displayedTrack.uri,

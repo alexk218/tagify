@@ -27,6 +27,23 @@ it("sends the latest single-song values to Smart Playlists after an immediate un
   expect(sync).not.toHaveBeenCalled();
 });
 
+it("fills a song's missing BPM and key from Track Details without moving it in Last Updated or adding an Undo step", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const { trackEditHistory } = await import("@/services/TrackEditHistory");
+  trackEditHistory.clear();
+  const uri = `spotify:track:${"b".repeat(22)}`;
+  const original = { name: "Song", artists: "Artist", rating: 0, energy: 3, bpm: null, tagIds: ["tag_house"], dateCreated: 10, dateModified: 20 };
+  const latestTagDataRef = { current: { ...defaultTagData, tracks: { [uri]: original } } as TagDataStructure };
+  const sync = vi.fn();
+  const { result } = renderHook(() => useTagDataTrackActions({ tagData: latestTagDataRef.current, latestTagDataRef, setTagData: vi.fn(), emitUserTrackAddedEvent: vi.fn(), onSyncTrack: sync, onSyncMultipleTracks: undefined }));
+  trackEditHistory.select("single", [uri]);
+  act(() => { result.current.fillMissingAudioFeatures(uri, { bpm: 123, camelotKey: "11A" }); });
+  expect(latestTagDataRef.current.tracks[uri]).toMatchObject({ bpm: 123, camelotKey: "11A", dateCreated: 10, dateModified: 20 });
+  expect(trackEditHistory.getSnapshot().undo).toEqual([]);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(sync).toHaveBeenCalledWith(uri, latestTagDataRef.current.tracks[uri]);
+});
+
 it("sends restored bulk values rather than an older saved batch to Smart Playlists", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const uri = `spotify:track:${"a".repeat(22)}`;

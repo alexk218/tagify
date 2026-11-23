@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { useFilterState } from "@/features/filter-state";
@@ -10,6 +10,7 @@ import TrackList from "../TrackList";
 import type { TrackListTrackData } from "@/features/track-session/model/trackList.types";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { emptyPrivateNote } from "@/services/sync/PrivateNotes";
+import { setAdvancedFilters } from "@/features/filter-state/advancedFiltersSetting";
 
 const taxonomy: TagTaxonomy = {
   categoryOrder: ["genre"],
@@ -60,7 +61,6 @@ interface TrackListHarnessProps {
   statsTrackSet?: { id: number; label: string; trackUris: string[]; reveal?: "list" | "track" } | null;
   onClearStatsTrackSet?: () => void;
   onReturnToStats?: () => void;
-  createPlaylistRequest?: number;
 }
 
 function TrackListHarness({
@@ -76,7 +76,6 @@ function TrackListHarness({
   statsTrackSet = null,
   onClearStatsTrackSet = vi.fn(),
   onReturnToStats = vi.fn(),
-  createPlaylistRequest,
 }: TrackListHarnessProps = {}) {
   const filters = useFilterState("tracks");
   const { createPlaylistFromFilters } = usePlaylistState();
@@ -132,7 +131,6 @@ function TrackListHarness({
       statsTrackSet={statsTrackSet}
       onClearStatsTrackSet={onClearStatsTrackSet}
       onReturnToStats={onReturnToStats}
-      createPlaylistRequest={createPlaylistRequest}
     />
   );
 }
@@ -171,7 +169,7 @@ describe("TrackList tag filtering", () => {
     expect(onClearStatsTrackSet).toHaveBeenCalledTimes(1);
 
     rerender(<TrackListHarness />);
-    expect(screen.getByRole("heading", { name: "Tagged Tracks" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Tagged Tracks" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByPlaceholderText("Search tracks...")).toHaveValue("");
     expect(screen.getByRole("button", { name: /^Filters/ })).toBeInTheDocument();
   });
@@ -231,19 +229,6 @@ describe("TrackList tag filtering", () => {
     vi.stubGlobal("IntersectionObserver", IntersectionObserverMock);
   });
 
-  it("opens Create Playlist when the first-run card asks for it, once per request", async () => {
-    const { rerender } = render(<TrackListHarness createPlaylistRequest={0} />);
-    expect(screen.queryByRole("heading", { name: "Create Playlist" })).toBeNull();
-
-    rerender(<TrackListHarness createPlaylistRequest={1} />);
-    expect(await screen.findByRole("heading", { name: "Create Playlist" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "Create Playlist" })).toBeNull());
-
-    rerender(<TrackListHarness createPlaylistRequest={1} />);
-    expect(screen.queryByRole("heading", { name: "Create Playlist" })).toBeNull();
-  });
-
   it("saves a new smart-playlist rule before opening its Spotify playlist", async () => {
     const user = userEvent.setup();
     const historyPush = vi.spyOn(Spicetify.Platform.History, "push");
@@ -279,6 +264,27 @@ describe("TrackList tag filtering", () => {
       createSpotifyPlaylist.mockRestore();
       addSpotifyTracks.mockRestore();
     }
+  });
+
+  it("filters by a whole category from the menu next to the tag search", async () => {
+    const user = userEvent.setup();
+    render(<TrackListHarness tracks={{
+      "spotify:track:house": { name: "House Track", artists: "A", rating: 5, energy: 8, bpm: 124, tagIds: ["house"] },
+      "spotify:track:plain": { name: "Plain Track", artists: "B", rating: 3, energy: 0, bpm: 90, tagIds: [] },
+    }} />);
+    await user.click(screen.getByRole("button", { name: /^Filters/ }));
+    const menu = screen.getByRole("combobox", { name: "Filter by category" });
+    const option = (label: string) => within(menu).getAllByRole("option").find((node) => node.textContent?.trim() === label) as HTMLOptionElement;
+
+    await user.selectOptions(menu, option("No Genre"));
+    expect(await screen.findByText("Plain Track")).toBeInTheDocument();
+    expect(screen.queryByText("House Track")).not.toBeInTheDocument();
+    expect(menu).toHaveValue("");
+
+    await user.click(screen.getByRole("button", { name: /Clear/i }));
+    await user.selectOptions(menu, option("Any Genre"));
+    expect(await screen.findByText("House Track")).toBeInTheDocument();
+    expect(screen.queryByText("Plain Track")).not.toBeInTheDocument();
   });
 
   it("cycles a tag through Match, NOT, and off without a separate NOT lane", async () => {
@@ -340,17 +346,51 @@ describe("TrackList tag filtering", () => {
       expect(screen.getByText("Chill Track")).toBeInTheDocument();
     });
     expect(houseFilter).toHaveAccessibleName("House");
-    expect(
-      within(screen.getByLabelText("Applied tag filters")).queryByRole("button"),
-    ).not.toBeInTheDocument();
+    // With nothing applied, the applied-filters row is gone.
+    expect(screen.queryByLabelText("Applied tag filters")).not.toBeInTheDocument();
   });
 
-  it("uses the same click cycle inside a complex filter group", async () => {
+  it("has no Basic/Complex switch or Advanced button; Settings decides", async () => {
     const user = userEvent.setup();
     render(<TrackListHarness />);
 
     await user.click(screen.getByRole("button", { name: /^Filters/ }));
-    await user.click(screen.getByRole("button", { name: "Complex" }));
+    expect(screen.queryByRole("button", { name: "Complex" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Advanced" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Group" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Camelot Keys")).not.toBeInTheDocument();
+
+    act(() => setAdvancedFilters(true));
+    expect(screen.getByRole("button", { name: "Add Group" })).toBeInTheDocument();
+    expect(screen.getByText("Camelot Keys")).toBeInTheDocument();
+  });
+
+  it("keeps a saved multi-group formula applied when advanced filters are off", async () => {
+    const user = userEvent.setup();
+    setAdvancedFilters(true);
+    render(<TrackListHarness />);
+
+    await user.click(screen.getByRole("button", { name: /^Filters/ }));
+    await user.click(screen.getByRole("button", { name: "Start Filtering" }));
+    await user.click(screen.getByRole("button", { name: "House" }));
+    await user.click(screen.getByRole("button", { name: "Add Group" }));
+    await user.click(screen.getByRole("button", { name: "Chill" }));
+
+    act(() => setAdvancedFilters(false));
+    expect(screen.getByText(/These tag filters use groups/)).toBeInTheDocument();
+    expect(screen.queryByText("House Track")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Turn on advanced filters" }));
+    expect(screen.getByRole("button", { name: "Add Group" })).toBeInTheDocument();
+  });
+
+  it("uses the same click cycle inside a complex filter group", async () => {
+    const user = userEvent.setup();
+    setAdvancedFilters(true);
+    render(<TrackListHarness />);
+
+    await user.click(screen.getByRole("button", { name: /^Filters/ }));
+    await user.click(screen.getByRole("button", { name: "Start Filtering" }));
 
     const houseFilter = screen.getByRole("button", { name: "House" });
     await user.click(houseFilter);

@@ -21,6 +21,13 @@ export function matchesQueueGap(track: TrackData | undefined, gap: QueueGap, cat
   return !tags.length || noRating || noEnergy;
 }
 
+/** Spotify's "added" time for a Liked Songs or playlist item: an ISO date (Spotify 1.2.92), or ms. */
+function addedDate(raw: unknown): { addedAt?: number } {
+  const value = raw && typeof raw === "object" && "timestamp" in raw ? Number((raw as { timestamp: unknown }).timestamp) : raw;
+  const at = typeof value === "string" ? Date.parse(value) : typeof value === "number" ? value : NaN;
+  return Number.isFinite(at) && at > 0 ? { addedAt: at } : {};
+}
+
 export function normalizeQueuePage(page: unknown, offset: number): TaggingQueuePage {
   const value = page as { items?: unknown[]; total?: number; totalLength?: number; next?: unknown };
   if (!Array.isArray(value?.items)) throw new Error("Spotify couldn't return this part of your library. Please try again.");
@@ -52,6 +59,7 @@ export function normalizeQueuePage(page: unknown, offset: number): TaggingQueueP
           return url ? [{ url }] : [];
         }) : [] },
       duration_ms: typeof duration === "number" && Number.isFinite(duration) && duration > 0 ? duration : 0,
+      ...addedDate(wrapper.addedAt ?? track.addedAt),
     });
   }
   const hasMore = total !== null ? offset + items.length < total : "next" in value ? !!value.next : items.length === 50;

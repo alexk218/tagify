@@ -212,28 +212,6 @@
   background: #1a7ee0;
 }
 
-/* With the Community filter beside it, the ratings keep one line and Community moves down when there isn't room. */
-.ratingSectionOneLine {
-  min-width: fit-content;
-}
-
-/* Only as wide as its two buttons. */
-.communityFilterSection {
-  flex: 0 0 auto;
-}
-
-.communityFilterButtons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.communityFilterCount {
-  margin-left: 4px;
-  opacity: 0.7;
-  font-size: 0.9em;
-}
-
 .keyFilterSection {
   min-width: 180px;
 }
@@ -280,30 +258,6 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.advancedFiltersToggle {
-  background: rgb(0 0 0 / 24%);
-  color: var(--spice-text);
-  border: 1px solid rgb(255 255 255 / 16%);
-  border-radius: 999px;
-  padding: 5px 12px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s ease;
-  align-self: flex-start;
-}
-
-.advancedFiltersToggle:hover {
-  background: rgb(255 255 255 / 10%);
-  border-color: rgb(255 255 255 / 24%);
-}
-
-.advancedFiltersToggleActive {
-  background: rgb(30 144 255 / 18%);
-  border-color: rgb(30 144 255 / 42%);
 }
 
 .camelotLinePanel {
@@ -1166,37 +1120,6 @@
   background: rgb(0 0 0 / 18%);
 }
 
-.filterModeToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px;
-  border-radius: 999px;
-  border: 1px solid rgb(255 255 255 / 12%);
-  background: rgb(0 0 0 / 24%);
-}
-
-.filterModeButton {
-  background: transparent;
-  color: var(--spice-subtext);
-  border: none;
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.filterModeButton:hover {
-  color: var(--spice-text);
-}
-
-.activeFilterMode {
-  background: rgb(30 144 255 / 18%);
-  color: var(--spice-text);
-}
-
 .filterModeHelp {
   margin: 0;
   color: var(--spice-subtext);
@@ -1557,11 +1480,16 @@
   opacity: 0.8;
 }
 
+/* The dates take what is left of the line, so they never push onto a line of their own; when that
+   is too short for them, only their icons show (the full date on hover). Alex, 2026-11-23 (pick 2A). */
 .trackItemTimestampsInline {
+  container: row-dates / inline-size;
+  flex: 1 0 40px;
+  justify-content: flex-end;
+  padding-left: 10px;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
   font-size: 10px;
   color: var(--spice-subtext);
   opacity: 0.6;
@@ -1576,13 +1504,20 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  /* A date never breaks inside; when the line is full, the dates move down together. */
+  /* A date never breaks inside. */
   white-space: nowrap;
 }
 
+@container row-dates (max-width: 250px) {
+  .trackItemTimestamp {
+    display: none;
+  }
+}
+
 .timestampIcon {
-  font-size: 8px;
-  opacity: 0.7;
+  display: inline-flex;
+  align-items: center;
+  color: var(--spice-subtext);
 }
 
 .trackItemTimestampsInline .trackItemTimestamp {
@@ -1706,12 +1641,6 @@
   .keySectionHeader {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .advancedFiltersToggle {
-    width: 100%;
-    justify-content: center;
-    display: flex;
   }
 }
 
@@ -1992,6 +1921,26 @@
   min-width: 0;
 }
 
+/* With the view tabs showing, they get a row of their own and stay on one line;
+   underneath, Play / Create Playlist / Smart Playlists stay centered and search on the right. */
+@media (width > 768px) {
+  .filterControlsGrid[data-view-tabs-row] {
+    grid-template-areas:
+      "left left left"
+      ". center right";
+  }
+}
+
+/* Narrow panel: the grid turns into wrapping rows; the tabs keep a full row. */
+.filterControlsGrid[data-view-tabs-row] .filterControlsLeftGrid {
+  flex: 1 0 100%;
+}
+
+.filterControlsGrid[data-view-tabs-row] .viewTabs {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
 /* Matches the sort dropdown's one-time "New" badge. */
 .viewTabNew {
   display: inline-block;
@@ -2006,4 +1955,328 @@
   line-height: 14px;
   text-transform: uppercase;
   vertical-align: 3px;
+}
+
+/* Category terms ("Any Genre", "No Mood") in the tag library. */
+.categorySelect {
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  background: rgb(0 0 0 / 20%);
+  color: var(--spice-text);
+  font-size: 13px;
+}
+
+.categorySelect option,
+.categorySelect optgroup {
+  background: var(--spice-main);
+  color: var(--spice-text);
+}
+
+/* "No Mood" already says it; no strike-through. */
+.appliedFilterChipCategory {
+  text-decoration: none;
+}
+
+/* Done in the card's top right: a small square check button (Alex's pick C, 2026-11-22).
+   The title column keeps clear of it so long titles wrap before the button. */
+.toTagDone {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 4px;
+  background: none;
+  color: var(--spice-subtext);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.toTagDone:hover {
+  border-color: rgb(255 255 255 / 40%);
+  color: var(--spice-text);
+}
+
+.toTagDone:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
+}
+
+.trackItemWithDone .trackItemTextInfo {
+  padding-right: 30px;
+}
+
+/* Layout C: search and category menu share one row. */
+.tagLibraryControlsWithCategory {
+  flex-wrap: nowrap;
+}
+
+.tagLibraryControlsWithCategory .tagSearchInput {
+  width: min(200px, 28vw);
+}
+
+
+/* The toolbar in two rows (Alex's pick A, 2026-11-23): tabs, count and search on top; Filters,
+   Play / Create Playlist / Smart Playlists (centered) and sort below. Narrow panels keep stacked rows. */
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@container (width > 680px) {
+  .toolbar {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    grid-template-areas:
+      "tabs tabs search"
+      "filters actions sort";
+    column-gap: 12px;
+    row-gap: 14px;
+    align-items: center;
+  }
+
+  .toolbar > [data-toolbar-part] {
+    display: contents;
+  }
+
+  .toolbar > [data-toolbar-part="top"] > .filterControlsLeftGrid { grid-area: tabs; }
+  .toolbar > [data-toolbar-part="top"] > .filterControlsCenterGrid { grid-area: actions; }
+  .toolbar > [data-toolbar-part="top"] > .filterControlsRightGrid { grid-area: search; }
+  .toolbar > [data-toolbar-part="bottom"] > .filterControlsLeftGrid { grid-area: filters; }
+  .toolbar > [data-toolbar-part="bottom"] > .filterControlsRightGrid { grid-area: sort; }
+
+  /* The count sits on the tabs' line instead of under it. */
+  .toolbar .titleSection {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 16px;
+  }
+
+  .toolbar .trackCount {
+    margin-top: 0;
+  }
+}
+
+/* "On Community" ways in above the list while a tag filter is on (Alex's pick 1A). */
+.communityTagSwitch {
+  display: inline-flex;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.communityTagOption {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 500px;
+  background: rgb(255 255 255 / 7%);
+  color: var(--spice-text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.communityTagOption:hover {
+  background: rgb(255 255 255 / 12%);
+}
+
+.communityTagOptionOn,
+.communityTagOptionOn:hover {
+  background: var(--spice-text);
+  color: var(--spice-main);
+}
+
+/* Plain "New" until the member first opens On Community: text in the accent color, nothing else. */
+.communityTagNew {
+  margin-left: 6px;
+  color: var(--spice-button);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.communityTagOptionOn .communityTagNew {
+  color: inherit;
+}
+
+/* Calmer Filters (Alex's pick A, 2026-11-23): compact rows, one tag bar, no inner boxes or uppercase labels. */
+.tagsFilterSection {
+  min-width: 0;
+}
+
+.filterOptions {
+  gap: 14px;
+}
+
+.filterOptions .filterSectionTitle {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Each filter on one line: "Energy [Any] – [Any]". */
+.filterOptions .filterOptionsTopRow {
+  gap: 10px 28px;
+  align-items: center;
+}
+
+/* Energy, BPM, Length and Released in one row, two and two when narrower, one per line when narrow. */
+.filterOptions .filterSectionsRow {
+  display: grid;
+  grid-template-columns: repeat(4, max-content);
+  gap: 10px 14px;
+  align-items: center;
+}
+
+@container (width < 848px) {
+  .filterOptions .filterSectionsRow {
+    grid-template-columns: repeat(2, max-content);
+    column-gap: 28px;
+  }
+
+  /* Same label width, so the second row's dropdowns line up under the first. */
+  .filterOptions .filterSectionsRow > .filterSection > .filterSectionTitle {
+    min-width: 4.4em;
+  }
+}
+
+@container (width < 510px) {
+  .filterOptions .filterSectionsRow {
+    grid-template-columns: max-content;
+  }
+}
+
+.filterOptions .filterOptionsTopRow > .filterSection,
+.filterOptions .filterSectionsRow > .filterSection {
+  flex: 0 0 auto;
+  min-width: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Rating may shrink so its stars wrap on narrow windows instead of running off the edge. */
+.filterOptions .filterOptionsTopRow > .filterPrimarySection {
+  flex: 0 1 auto;
+}
+
+.filterOptions .filterPrimarySection > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.filterOptions .ratingFilter {
+  padding: 2px 6px;
+}
+
+.filterOptions .rangeFilter {
+  gap: 3px;
+}
+
+.filterOptions .rangeFilter :global(.form-select) {
+  padding: 4px 4px 4px 6px;
+}
+
+.filterOptions .rangeFilter :global(.form-label) {
+  display: none;
+}
+
+.filterOptions .rangeFilter > :global(.form-field) + :global(.form-field)::before {
+  content: "–";
+  color: var(--spice-subtext);
+  margin-right: 3px;
+}
+
+.filterOptions .rangeFilter > :global(.form-field) {
+  display: flex;
+  align-items: center;
+}
+
+.basicTags {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.basicTagBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.basicTagBar > .operatorToggle {
+  margin-left: auto;
+}
+
+.basicTags .appliedFilters {
+  flex: none;
+}
+
+.basicTags .tagLibraryHelp {
+  font-size: 12px;
+}
+
+/* Advanced filters: one help line above the tags, no boxed formula, groups or keys. */
+.filterOptions .editorPanel,
+.filterOptions .tagLibrary {
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.filterOptions .tagLibraryEyebrow,
+.filterOptions .appliedFiltersLabel,
+.filterOptions .logicBuilderIntro,
+.filterOptions .editorPanelMeta {
+  display: none;
+}
+
+.filterOptions .editorPanelEyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.filterOptions .logicWorkspaceHeader {
+  align-items: center;
+}
+
+.filterOptions .logicWorkspaceActions {
+  margin-left: 0;
+}
+
+.filterOptions .formulaBadge {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.filterOptions .formulaBadgeLabel {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.filterOptions .formulaBadgeValue {
+  font-size: 13px;
+}
+
+.filterOptions .camelotLinePanel {
+  padding: 0;
+  border: none;
+  background: none;
 }

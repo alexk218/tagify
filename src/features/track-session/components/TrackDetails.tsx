@@ -2,12 +2,11 @@ import { PrivateNote } from "@/features/private-notes/components/PrivateNote";
 import { getDesktopSyncConfiguration, getTagifyDatabaseName } from "@/services/sync/SyncLocalState";
 import React, { useCallback, useMemo, useState } from "react";
 import styles from "./TrackDetails.module.css";
-import communityLinkStyles from "../../community/CommunityEntityLink.module.css";
 import { TagTaxonomy } from "@/types/tagData";
 import { formatTimestamp } from "@/utils/formatters";
 import ReactStars from "react-rating-stars-component";
 import { SpotifyTrack } from "@/types/SpotifyTypes";
-import { ExternalLink, Lock, LockOpen } from "lucide-react";
+import { Lock, LockOpen } from "lucide-react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faStar, faStarHalf } from "@fortawesome/free-solid-svg-icons";
 import { normalizeCamelotKey } from "@/utils/camelotKey";
@@ -21,12 +20,12 @@ import {
   organizeTrackTagsByCategory,
 } from "@/features/track-session/utils/trackDetails.tags";
 import { buildTagAccentCssVars } from "@/features/tag-data";
-import { getCommunityEntityUrl } from "@/features/community";
 import type { CommunityMatchTag } from "@/features/onboarding/services/communityMatches";
 import { communityTagDestination } from "@/features/onboarding/services/communityTagPlacement";
 import { sameTagNameKey } from "@tagify/community-contracts";
-import { TrackDetailsCommunity } from "./TrackDetailsCommunity";
+import { TrackDetailsCommunity, type CommunityLock } from "./TrackDetailsCommunity";
 import { AlbumProgressLine } from "@/features/playlist-state";
+import { ToTagButton } from "@/features/to-tag/ToTagButton";
 
 interface TrackDetailsProps {
   recordingReuseStatus?: "idle" | "checking" | "unavailable";
@@ -38,6 +37,7 @@ interface TrackDetailsProps {
   onSetEnergy: (energy: number) => void;
   onSetBpm: (bpm: number | null) => void;
   onSetCamelotKey: (camelotKey: string | null) => void;
+  onFillMissingAudioFeatures: (features: { bpm: number | null; camelotKey: string | null }) => void;
   onRemoveTag: (tagId: string) => void;
   activeTagFilters: string[];
   excludedTagFilters: string[];
@@ -55,8 +55,8 @@ interface TrackDetailsProps {
   } | null;
   /** Adds members' tags from Community to the song, filed the same way as the track list's Tagged by others. */
   onAddCommunityTags?: (uri: string, tags: CommunityMatchTag[]) => Promise<void>;
-  /** Not connected to Community: members' tags stay read-only and a line asks them to connect. */
-  onConnectCommunity?: () => void;
+  /** Adding others' tags waits on Community: connect, or share their own tags first. */
+  communityLock?: CommunityLock;
 }
 
 const TrackDetails: React.FC<TrackDetailsProps> = ({
@@ -71,6 +71,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   onSetEnergy,
   onSetBpm,
   onSetCamelotKey,
+  onFillMissingAudioFeatures,
   onRemoveTag,
   onToggleTagIncludeOff,
   onPlayTrack,
@@ -79,7 +80,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   onSwitchToCurrentTrack,
   albumProgress,
   onAddCommunityTags,
-  onConnectCommunity,
+  communityLock,
 }: TrackDetailsProps) => {
   const artistNames = useMemo(
     () =>
@@ -102,6 +103,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
     trackData,
     onSetBpm,
     onSetCamelotKey,
+    onFillMissingAudioFeatures,
   });
   const { navigateToAlbum, navigateToArtist, navigateToContext } =
     useTrackNavigation({
@@ -111,13 +113,6 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
     });
   const [isEditingBpm, setIsEditingBpm] = useState(false);
   const [editBpmValue, setEditBpmValue] = useState<string>("");
-  const communityUrl = getCommunityEntityUrl(displayedTrack.uri || "");
-  // Known once Community has answered for this track (the From Community section below asks).
-  const [communityPage, setCommunityPage] = useState<{ entityUri: string; found: boolean } | null>(null);
-  const handleCommunityAvailability = useCallback((entityUri: string, _hasPerspectives: boolean, found: boolean) => {
-    setCommunityPage({ entityUri, found });
-  }, []);
-  const hasCommunityEntity = communityPage?.entityUri === displayedTrack.uri && communityPage.found;
   const songTagKeys = useMemo(
     () => new Set(trackData.tagIds.map((id) => taxonomy.tagsById?.[id]?.name).filter((name): name is string => Boolean(name)).map(sameTagNameKey)),
     [taxonomy, trackData.tagIds],
@@ -217,20 +212,10 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
   return (
     <div className={styles.container}>
       <div className={styles.lockControlContainer}>
-
-
-        {communityUrl && hasCommunityEntity ? (
-          <a
-            className={communityLinkStyles.communityLink}
-            href={communityUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open this track in Tagify Community"
-            aria-label="Open this track in Tagify Community"
-          >
-            <ExternalLink size={14} aria-hidden="true" />
-          </a>
-        ) : null}
+        <ToTagButton
+          uri={displayedTrack.uri || ""}
+          details={{ name: displayedTrack.name, artists: artistNames, album: displayedTrack.album?.name }}
+        />
         {isLocked &&
           currentlyPlayingTrack &&
           currentlyPlayingTrack.uri !== displayedTrack.uri && (
@@ -497,7 +482,7 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
         {/* Right side - Controls and metadata */}
         <div className={styles.controlsContainer}>
           {/* Rating */}
-          <div className={styles.controlSection}>
+          <div className={styles.controlSection} data-tip="rate">
             <label className={styles.label}>
               Rating: {trackData.rating > 0 ? trackData.rating : ""}
             </label>
@@ -704,9 +689,8 @@ const TrackDetails: React.FC<TrackDetailsProps> = ({
         libraryTagKeys={libraryTagKeys}
         destinationOf={destinationOf}
         ownHandle={ownCommunityHandle}
-        onAvailabilityChange={handleCommunityAvailability}
         onAdd={onAddCommunityTags ? (tags) => onAddCommunityTags(displayedTrack.uri, tags) : undefined}
-        onConnect={onConnectCommunity}
+        lock={communityLock}
       />
     </div>
   );

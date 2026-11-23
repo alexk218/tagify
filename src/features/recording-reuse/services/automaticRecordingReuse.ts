@@ -1,9 +1,10 @@
 import type { RecordingIdentity, TrackData } from "@/types/tagData";
 import { spotifyApiService } from "@/services/SpotifyApiService";
+import { spotifyService } from "@/services/SpotifyService";
 import { trackEditHistory } from "@/services/TrackEditHistory";
 import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { flushLocalPersistence, getTagifyDatabaseName, isLocalPersistencePaused } from "@/services/sync/SyncLocalState";
-import { recordingAnnotations, recordingConflict, recordingName, sameRecording } from "../utils/recordingReuse";
+import { baseRecordingName, nearRecording, notSameRecording, recordingAnnotations, recordingConflict, sameRecording, similarRecording } from "../utils/recordingReuse";
 
 export type RecordingReuseStatus = "idle" | "checking" | "unavailable";
 export const RECORDING_REUSE_EVENT = "tagify:recordingReuse";
@@ -80,11 +81,25 @@ function requestRetryAt(account: string) {
   const calls = [...value.foreground, ...value.background].sort((a, b) => a - b);
   return Math.max(value.blockedUntil, calls.length >= 60 ? calls[0] + MINUTE : 0);
 }
-export function recordingIdentityFor(uri: string, saved?: RecordingIdentity, options: { priority?: Priority; isCurrent?: () => boolean } = {}) {
-  if (saved) return Promise.resolve(saved);
+/** The saved request window and cooldown, so a reload can't reset the shared budget. */
+async function restoreBudget(account: string) {
+  if (!rate(account).restored) {
+    const window = await indexedDBStorage.getRecordingLookup("request-window", account);
+    if (!rate(account).restored) {
+      Object.assign(rate(account), { foreground: window?.foreground || [], background: window?.background || [], restored: true });
+    }
+  }
+  const outage = await indexedDBStorage.getRecordingLookup("cooldown", account);
+  rate(account).blockedUntil = Math.max(rate(account).blockedUntil, outage?.retryAt || 0);
+}
+export function recordingIdentityFor(uri: string, saved?: RecordingIdentity, options: { priority?: Priority; isCurrent?: () => boolean; requireLead?: boolean } = {}) {
+  // Near matches need the lead artist, which identities saved before 3.4.1 lack:
+  // those songs are looked up once more and the cached identity gains it.
+  const requireLead = options.requireLead === true;
+  if (saved && (!requireLead || saved.leadArtistId)) return Promise.resolve(saved);
   const state = shared();
   const account = getTagifyDatabaseName();
-  const key = `${account}:${uri}`;
+  const key = `${account}:${uri}${requireLead ? ":lead" : ""}`;
   const interest = options.isCurrent || (() => true);
   const existing = state.identities.get(key);
   if (existing && existing.until > Date.now() && !(existing.priority === "background" && !existing.pending && options.priority !== "background")) {
@@ -99,16 +114,9 @@ export function recordingIdentityFor(uri: string, saved?: RecordingIdentity, opt
       try {
         const cached = await indexedDBStorage.getRecordingLookup(uri, account);
         if (!active()) { entry.until = 0; resolve(undefined); return; }
-        if (cached?.identity) { resolve(cached.identity); return; }
+        if (cached?.identity && (!requireLead || cached.identity.leadArtistId)) { resolve(cached.identity); return; }
         if ((cached?.retryAt || 0) > Date.now()) throw new RecordingLookupDeferred(cached!.retryAt!);
-        if (!rate(account).restored) {
-          const window = await indexedDBStorage.getRecordingLookup("request-window", account);
-          if (!rate(account).restored) {
-            Object.assign(rate(account), { foreground: window?.foreground || [], background: window?.background || [], restored: true });
-          }
-        }
-        const outage = await indexedDBStorage.getRecordingLookup("cooldown", account);
-        rate(account).blockedUntil = Math.max(rate(account).blockedUntil, outage?.retryAt || 0);
+        await restoreBudget(account);
         await new Promise<void>((finish, fail) => {
           state.queue.push({ account, priority: () => entry.priority, active,
             defer: until => { entry.until = until; if (until) fail(new RecordingLookupDeferred(until)); else finish(); },
@@ -122,7 +130,8 @@ export function recordingIdentityFor(uri: string, saved?: RecordingIdentity, opt
                   const identity = await spotifyApiService.getRecordingIdentity(uri, undefined, { priority: entry.priority, feature: "recording-matching" });
                   const failures = (cached?.failures || 0) + 1;
                   const retryAt = Date.now() + Math.min(FAILURE_DELAY * 2 ** (failures - 1), 30 * MINUTE);
-                  await indexedDBStorage.cacheRecordingLookup(uri, identity ? { identity } : { retryAt, failures }, account);
+                  // A refresh that finds nothing keeps the identity already cached.
+                  if (identity || !cached?.identity) await indexedDBStorage.cacheRecordingLookup(uri, identity ? { identity } : { retryAt, failures }, account);
                   entry.until = identity ? Infinity : retryAt;
                   resolve(identity); finish();
                 } catch (error) {
@@ -165,24 +174,198 @@ export function recordingIdentityFor(uri: string, saved?: RecordingIdentity, opt
   return entry.identity;
 }
 
-const titleIndexes = new WeakMap<Record<string, TrackData>, Map<string, [string, TrackData][]>>();
-export function automaticRecordingCandidates(track: RecordingReuseTrack, tracks: Record<string, TrackData>) {
+/**
+ * A song's Spotify play count, read now through the same queue, per-minute budget and
+ * cooldown as identity lookups. Never saved: a count is only compared within one check.
+ * Undefined when Spotify gives no count, the budget is spent or the check is no longer current.
+ */
+async function playCountFor(uri: string, isCurrent: () => boolean): Promise<number | undefined> {
+  const state = shared();
+  const account = getTagifyDatabaseName();
+  const active = () => account === getTagifyDatabaseName() && !isLocalPersistencePaused() && isCurrent();
+  try {
+    await restoreBudget(account);
+    if (!active()) return;
+    return await new Promise<number | undefined>(resolve => {
+      state.queue.push({ account, priority: () => "foreground", active, defer: () => resolve(undefined),
+        run: () => void (async () => {
+          try {
+            const budget = rate(account);
+            await indexedDBStorage.cacheRecordingLookup("request-window", { foreground: [...budget.foreground], background: [...budget.background] }, account);
+            resolve(active() ? await spotifyService.getTrackPlayCount(uri) : undefined);
+          } catch (error) {
+            console.debug("Tagify: Couldn't read a song's play count", error);
+            resolve(undefined);
+          } finally {
+            state.running--;
+            drain();
+          }
+        })(),
+      });
+      drain();
+    });
+  } catch (error) {
+    console.debug("Tagify: Couldn't read a song's play count", error);
+    return;
+  }
+}
+/** Below this, two different releases can share a count by chance. */
+export const SAME_PLAY_COUNT_FLOOR = 10_000;
+/**
+ * Spotify gives every release of one recording the same play count, so two near matches
+ * with identical counts above the floor are the same song. Both counts are read now.
+ */
+async function samePlayCount(a: string, b: string, isCurrent: () => boolean) {
+  const first = await playCountFor(a, isCurrent);
+  if (first === undefined || first < SAME_PLAY_COUNT_FLOOR || !isCurrent()) return false;
+  const second = await playCountFor(b, isCurrent);
+  return second === first && isCurrent();
+}
+
+const candidateIndexes = new WeakMap<Record<string, TrackData>, { titles: Map<string, [string, TrackData][]>; isrcs: Map<string, [string, TrackData][]> }>();
+function candidateIndex(tracks: Record<string, TrackData>) {
+  let index = candidateIndexes.get(tracks);
+  if (!index) {
+    index = { titles: new Map(), isrcs: new Map() };
+    for (const [otherUri, data] of Object.entries(tracks)) {
+      if (!/^spotify:track:[A-Za-z0-9]{22}$/.test(otherUri) || data.recordingReuseDisabled) continue;
+      const title = baseRecordingName(data.recordingIdentity?.name || data.name || "");
+      for (const [map, key] of [[index.titles, title], [index.isrcs, data.recordingIdentity?.isrc]] as const) {
+        if (!key) continue;
+        const members = map.get(key) || []; members.push([otherUri, data]); map.set(key, members);
+      }
+    }
+    candidateIndexes.set(tracks, index);
+  }
+  return index;
+}
+/**
+ * Saved songs that might be the same recording: the same title once "(feat. …)" and
+ * "[From …]" credits are removed, or the same ISRC when both songs' identities are already
+ * known. A lookup shortcut only; sameRecording decides. `isrc` is the song's own ISRC when it
+ * was looked up but isn't saved on it (a song not in the library yet).
+ */
+export function automaticRecordingCandidates(track: RecordingReuseTrack, tracks: Record<string, TrackData>, lookedUpIsrc?: string) {
   const { uri, name } = track;
   if (!/^spotify:track:[A-Za-z0-9]{22}$/.test(uri) || !name || tracks[uri]?.recordingReuseDisabled) return [];
-  let titles = titleIndexes.get(tracks);
+  const index = candidateIndex(tracks);
+  const isrc = tracks[uri]?.recordingIdentity?.isrc || lookedUpIsrc;
+  const found = new Map([...(index.titles.get(baseRecordingName(name)) || []), ...(isrc && index.isrcs.get(isrc) || [])]);
+  found.delete(uri);
+  return [...found];
+}
+const baseTitleIndexes = new WeakMap<Record<string, TrackData>, Map<string, [string, TrackData][]>>();
+const MAX_NEAR_CANDIDATES = 4;
+/**
+ * Saved songs whose title matches once credits and "[From …]" are removed. Like the
+ * title index, this is a lookup shortcut, never evidence that two songs are the same.
+ */
+export function nearRecordingCandidates(track: RecordingReuseTrack, tracks: Record<string, TrackData>) {
+  const { uri, name } = track;
+  if (!/^spotify:track:[A-Za-z0-9]{22}$/.test(uri) || !name || tracks[uri]?.recordingReuseDisabled) return [];
+  let titles = baseTitleIndexes.get(tracks);
   if (!titles) {
     titles = new Map();
     for (const [otherUri, data] of Object.entries(tracks)) {
       if (!/^spotify:track:[A-Za-z0-9]{22}$/.test(otherUri) || data.recordingReuseDisabled) continue;
-      const title = recordingName(data.recordingIdentity?.name || data.name || "");
+      const title = baseRecordingName(data.recordingIdentity?.name || data.name || "");
+      if (!title) continue;
       const members = titles.get(title) || []; members.push([otherUri, data]); titles.set(title, members);
     }
-    titleIndexes.set(tracks, titles);
+    baseTitleIndexes.set(tracks, titles);
   }
-  return (titles.get(recordingName(name)) || []).filter(([otherUri]) => otherUri !== uri);
+  const group = tracks[uri]?.recordingGroupId;
+  return (titles.get(baseRecordingName(name)) || []).filter(([otherUri, data]) => otherUri !== uri &&
+    (!group || data.recordingGroupId !== group) && !notSameRecording(uri, tracks[uri], otherUri, data)).slice(0, MAX_NEAR_CANDIDATES);
 }
-function needsCheck(track: RecordingReuseTrack, tracks: Record<string, TrackData>) {
-  return automaticRecordingCandidates(track, tracks).some(([, data]) => !tracks[track.uri]?.recordingGroupId || data.recordingGroupId !== tracks[track.uri].recordingGroupId);
+export interface NearRecordingMatch {
+  uri: string;
+  /** The saved song that is the same song, with every copy already linked to it. */
+  data: TrackData;
+  proposals: Record<string, { identity: RecordingIdentity; annotations: string; details?: Partial<TrackData> }>;
+}
+/**
+ * A saved song that is another release of the song being viewed (a single and its album
+ * cut, for example) that exact-copy linking won't combine, confirmed by an identical
+ * Spotify play count so it can link without asking. Pairs whose ratings or energy differ,
+ * or whose counts don't match, are left apart and never surfaced. Looks up only the viewed
+ * song and at most a few same-title candidates.
+ */
+export async function findNearRecording(track: RecordingReuseTrack, tracks: Record<string, TrackData>, isCurrent = () => true): Promise<NearRecordingMatch | undefined> {
+  const account = getTagifyDatabaseName();
+  const active = () => isCurrent() && account === getTagifyDatabaseName() && !isLocalPersistencePaused();
+  if (!nearRecordingCandidates(track, tracks).length) return;
+  const { uri } = track;
+  const candidates = nearRecordingCandidates(track, tracks).map(([id]) => id);
+  const saved = await indexedDBStorage.getRecordingTracks([uri, ...candidates], account);
+  if (!active()) return;
+  const remaining = nearRecordingCandidates(track, saved).filter(([id]) => candidates.includes(id));
+  if (!remaining.length) return;
+  const identity = await recordingIdentityFor(uri, saved[uri]?.recordingIdentity, { isCurrent: active, requireLead: true });
+  if (!identity || !active()) return;
+  for (const [otherUri, data] of remaining) {
+    const other = await recordingIdentityFor(otherUri, data.recordingIdentity, { isCurrent: active, requireLead: true });
+    if (!active()) return;
+    // Exact copies are linked by the automatic check; only what that leaves apart is checked here.
+    if (!other || sameRecording(identity, other) || !nearRecording(identity, other)) continue;
+    // Copies already linked to either song join the link, so every copy keeps sharing tags.
+    const groups = [data.recordingGroupId, saved[uri]?.recordingGroupId].filter((id): id is string => !!id);
+    const linked = groups.length ? await indexedDBStorage.getRecordingGroupTracksStrict(groups, account) : {};
+    if (!active()) return;
+    const members: [string, TrackData][] = [[otherUri, data], ...Object.entries(linked).filter(([id]) => id !== uri && id !== otherUri)];
+    // Saving checks every pair; keep only a link that will save.
+    if (members.some(([id, member]) => id !== otherUri && !(nearRecording(identity, member.recordingIdentity) || similarRecording(identity, member.recordingIdentity)))) continue;
+    const proposals: NearRecordingMatch["proposals"] = {
+      [uri]: { identity, annotations: recordingAnnotations(saved[uri]), details: { name: track.name, ...track.details } },
+    };
+    for (const [id, member] of members) proposals[id] = { identity: id === otherUri ? other : member.recordingIdentity!, annotations: recordingAnnotations(member) };
+    const all = [saved[uri], ...members.map(([, member]) => member)].filter(Boolean) as TrackData[];
+    // Different ratings or energy would need a choice, so those stay apart without reading play counts.
+    if (all.some(a => all.some(b => recordingConflict(a, b)))) continue;
+    const samePlays = await samePlayCount(uri, otherUri, active);
+    if (!active()) return;
+    if (samePlays) return { uri: otherUri, data, proposals };
+  }
+}
+export interface AlbumNearRecordingMatch extends NearRecordingMatch {
+  /** The album's song this match was found for. */
+  track: RecordingReuseTrack;
+}
+const MAX_ALBUM_TRACKS = 60;
+/**
+ * Same-song matches (see findNearRecording) for the songs on one album, so a whole album of
+ * singles links at once. Only the album's own songs are checked, each against the saved
+ * songs that share its title; nothing is searched for. A song already in one match is never
+ * in another, so every match saves on its own.
+ */
+export async function findAlbumNearRecordings(albumTracks: RecordingReuseTrack[], tracks: Record<string, TrackData>, isCurrent = () => true): Promise<AlbumNearRecordingMatch[]> {
+  const found: AlbumNearRecordingMatch[] = [];
+  const offered = new Set<string>();
+  for (const track of albumTracks.slice(0, MAX_ALBUM_TRACKS)) {
+    if (!isCurrent()) return [];
+    if (offered.has(track.uri) || !nearRecordingCandidates(track, tracks).length) continue;
+    const match = await findNearRecording(track, tracks, isCurrent);
+    if (!isCurrent()) return [];
+    if (!match || Object.keys(match.proposals).some(uri => offered.has(uri))) continue;
+    Object.keys(match.proposals).forEach(uri => offered.add(uri));
+    found.push({ ...match, track });
+  }
+  return found;
+}
+/**
+ * Whether the viewed song is worth one identity lookup although no saved song shares its title:
+ * its own identity isn't known yet, and some other saved song has an ISRC it could share (a
+ * translated or romanized title, for example). The answer is cached, so each song is read once.
+ */
+function worthIsrcLookup(track: RecordingReuseTrack, tracks: Record<string, TrackData>) {
+  const { uri } = track;
+  if (!/^spotify:track:[A-Za-z0-9]{22}$/.test(uri) || !track.name || tracks[uri]?.recordingReuseDisabled || tracks[uri]?.recordingIdentity) return false;
+  if (automaticRecordingCandidates(track, tracks).length) return false;
+  for (const members of candidateIndex(tracks).isrcs.values()) if (members.some(([id]) => id !== uri)) return true;
+  return false;
+}
+function needsCheck(track: RecordingReuseTrack, tracks: Record<string, TrackData>, lookedUpIsrc?: string) {
+  return automaticRecordingCandidates(track, tracks, lookedUpIsrc).some(([, data]) => !tracks[track.uri]?.recordingGroupId || data.recordingGroupId !== tracks[track.uri].recordingGroupId);
 }
 export function recordingReuseSignature(track: RecordingReuseTrack, tracks: Record<string, TrackData>) {
   const entry = (uri: string) => [uri, tracks[uri]?.name, tracks[uri]?.artists, tracks[uri]?.recordingReuseDisabled, tracks[uri]?.recordingGroupId, tracks[uri]?.recordingIdentity, recordingAnnotations(tracks[uri])];
@@ -224,7 +407,27 @@ export async function checkAutomaticRecordingReuse(track: RecordingReuseTrack, t
       }
     } catch (error) { console.debug("Tagify: Song details could not be remembered", error); return; }
   }
-  if (!needsCheck(track, tracks) || !subscriber.active()) return Promise.resolve();
+  // A song whose title matches nothing saved can still share an ISRC with a saved song. One
+  // background lookup (queued behind what the user is checking, and cached) finds it; no
+  // "checking" status is shown, since most songs match nothing.
+  let lookedUpIsrc: string | undefined;
+  if (subscriber.active() && worthIsrcLookup(track, tracks)) {
+    let identity: RecordingIdentity | undefined;
+    try { identity = await recordingIdentityFor(uri, undefined, { priority: "background", isCurrent: subscriber.active }); }
+    catch (error) { console.debug("Tagify: Song check will try again later", error); return; }
+    if (!identity || !subscriber.active()) return;
+    if (tracks[uri]) {
+      // A saved song keeps the identity, so the library check also finds it by ISRC.
+      try {
+        await flushLocalPersistence();
+        if (!subscriber.active()) return;
+        const changes = await indexedDBStorage.rememberRecordingIdentities({ [uri]: identity }, account);
+        if (!subscriber.active()) return;
+        if (Object.keys(changes).length) { tracks = { ...tracks, ...changes }; await onChanged(changes, {}); }
+      } catch (error) { console.debug("Tagify: Song identity could not be remembered", error); return; }
+    } else lookedUpIsrc = identity.isrc;
+  }
+  if (!needsCheck(track, tracks, lookedUpIsrc) || !subscriber.active()) return Promise.resolve();
   const key = `${account}:${uri}`;
   const existing = state.checks.get(key);
   if (existing) { existing.subscribers.add(subscriber); return existing.promise; }
@@ -242,9 +445,9 @@ export async function checkAutomaticRecordingReuse(track: RecordingReuseTrack, t
     try {
       await flushLocalPersistence();
       if (!active()) return;
-      const candidates = automaticRecordingCandidates(track, tracks).map(([id]) => id);
+      const candidates = automaticRecordingCandidates(track, tracks, lookedUpIsrc).map(([id]) => id);
       const saved = await indexedDBStorage.getRecordingTracks([uri, ...candidates], account);
-      if (!active() || !needsCheck(track, saved)) return;
+      if (!active() || !needsCheck(track, saved, lookedUpIsrc)) return;
       const identity = await recordingIdentityFor(uri, saved[uri]?.recordingIdentity, { isCurrent: active });
       if (!identity) { unavailable(); return; }
       if (!active()) return;
@@ -254,7 +457,7 @@ export async function checkAutomaticRecordingReuse(track: RecordingReuseTrack, t
       const matched: TrackData[] = saved[uri] ? [saved[uri]] : [];
       const identities: Record<string, RecordingIdentity> = saved[uri] ? { [uri]: identity } : {};
       try {
-        for (const [otherUri, data] of automaticRecordingCandidates(track, saved).sort((a, b) => Number(!a[1].recordingIdentity) - Number(!b[1].recordingIdentity))) {
+        for (const [otherUri, data] of automaticRecordingCandidates(track, saved, lookedUpIsrc).sort((a, b) => Number(!a[1].recordingIdentity) - Number(!b[1].recordingIdentity))) {
           if (!active()) return;
           let other: RecordingIdentity | undefined;
           try { other = await recordingIdentityFor(otherUri, data.recordingIdentity, { isCurrent: active }); }

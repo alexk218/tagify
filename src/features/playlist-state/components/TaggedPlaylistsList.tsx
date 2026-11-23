@@ -390,7 +390,7 @@ const TaggedPlaylistsList: React.FC<TaggedPlaylistsListProps> = ({
         evaluateTagFilterFormula(effectiveTagIdsByUri.get(playlistUri) || [], {
           clauses: includeTagClauses,
           connectors: clauseConnectors,
-        });
+        }, taxonomy);
       const matchesRating =
         ratingFilters.length === 0 || ratingFilters.includes(playlist.rating || 0);
       const playlistEnergy = playlist.energy || 0;

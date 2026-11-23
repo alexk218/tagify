@@ -1,7 +1,7 @@
 /* The year's number, where the Community invitations show their icon. */
 .number {
   align-items: baseline;
-  border-right: 1px solid rgb(155 140 255 / 26%);
+  border-right: 1px solid rgba(var(--spice-rgb-text), 0.1);
   display: grid;
   flex: 0 0 auto;
   gap: 1px;
@@ -10,7 +10,7 @@
 }
 
 .number strong {
-  color: #c3b9ff;
+  color: var(--spice-text);
   font-size: 26px;
   font-variant-numeric: tabular-nums;
   font-weight: 800;

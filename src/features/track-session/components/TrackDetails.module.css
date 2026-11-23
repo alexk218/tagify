@@ -738,7 +738,8 @@
 
 /* The track actions take their own row only where they would otherwise cover the rating. */
 @container (max-width: 820px) {
-  .container:has(.switchTrackButton) .lockControlContainer { position: static; align-self: flex-end; }
+  .container:has(.switchTrackButton) .lockControlContainer,
+  .container:has(.ratingContainer .clearButton):has([data-to-tag-labelled]) .lockControlContainer { position: static; align-self: flex-end; }
 }
 
 /* Cards too narrow for two columns stack the details and controls below the track actions. */

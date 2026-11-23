@@ -112,4 +112,27 @@ describe("inline editor presentation", () => {
     expect(control).toBeEmptyDOMElement();
     expect(control.style.display).toBe("none");
   });
+
+  it("keeps the To Tag icon right after the stars and energy in every mode", () => {
+    const extra = document.createElement("button");
+    extra.className = "tagify-to-tag-icon";
+
+    const combined = render({ trailingExtra: extra });
+    const trailing = combined.querySelector(".tagify-inline-trailing");
+    expect(Array.from(trailing.children, (child) => child.className)).toEqual([
+      "tagify-energy-rating-label",
+      "tagify-to-tag-icon",
+    ]);
+
+    // Re-rendering moves the same icon instead of losing it.
+    renderInlineEditorPresentation(combined, { rating: 2, trailingExtra: extra, onRate: vi.fn() });
+    expect(combined.querySelectorAll(".tagify-to-tag-icon")).toHaveLength(1);
+
+    const stars = render({ displayMode: "stars", trailingExtra: extra });
+    expect(stars.lastElementChild).toBe(extra);
+
+    const disabled = render({ displayMode: "disabled", trailingExtra: extra });
+    expect(disabled.style.display).toBe("inline-flex");
+    expect(Array.from(disabled.children)).toEqual([extra]);
+  });
 });

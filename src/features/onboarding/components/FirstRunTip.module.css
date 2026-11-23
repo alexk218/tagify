@@ -1,0 +1,92 @@
+.tip {
+  position: fixed;
+  z-index: 9000;
+  box-sizing: border-box;
+  padding: 16px;
+  color: var(--spice-text, #fff);
+  background: #1f1f1f;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 8px;
+  box-shadow: 0 16px 32px rgb(0 0 0 / 50%), 0 2px 6px rgb(0 0 0 / 40%);
+  font-family: inherit;
+}
+
+/* The arrow: a rotated square in the card's colours, on the side facing the control. */
+.tip::before {
+  content: "";
+  position: absolute;
+  left: var(--tip-arrow-left, 24px);
+  width: 12px;
+  height: 12px;
+  background: inherit;
+  transform: rotate(45deg);
+}
+
+.below::before {
+  top: -7px;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  border-left: 1px solid rgb(255 255 255 / 8%);
+}
+
+.above::before {
+  bottom: -7px;
+  border-right: 1px solid rgb(255 255 255 / 8%);
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+}
+
+.title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.body {
+  margin: 0 0 14px;
+  color: var(--spice-subtext, #b3b3b3);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.skip,
+.gotIt {
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 500px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.skip {
+  color: var(--spice-subtext, #b3b3b3);
+  background: transparent;
+}
+
+.skip:hover {
+  color: var(--spice-text, #fff);
+}
+
+.gotIt {
+  color: #000;
+  background: #fff;
+}
+
+.gotIt:hover {
+  background: #e8e8e8;
+}
+
+.skip:focus-visible,
+.gotIt:focus-visible {
+  outline: 2px solid var(--spice-text, #fff);
+  outline-offset: 2px;
+}

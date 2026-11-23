@@ -22,7 +22,7 @@ const base: TrackListFilterInputs = {
   includeTagClauses: [], clauseConnectors: [], ratingFilters: [], energyMinFilter: null, energyMaxFilter: null,
   bpmMinFilter: null, bpmMaxFilter: null, normalizedCamelotKeyFilters: [], searchTerm: "",
 };
-const uris = (filters: Partial<TrackListFilterInputs>) => filterTrackEntries(entries, info, { ...base, ...filters }).map(([uri]) => uri);
+const uris = (filters: Partial<TrackListFilterInputs>) => filterTrackEntries(entries, info, { ...base, ...filters }, null).map(([uri]) => uri);
 
 describe("length and release year filters", () => {
   it("keeps every song when no length or year filter is set", () => {
@@ -56,7 +56,7 @@ describe("length and release year filters", () => {
 
     const remaster: TrackListEntry = ["spotify:track:remaster", { rating: 0, energy: 0, bpm: null, tagIds: ["tag_a"], releaseDate: "2011-03-01", originalReleaseDate: "1977" }];
     const withRemaster = [...entries, remaster];
-    const filtered = (filters: Partial<TrackListFilterInputs>) => filterTrackEntries(withRemaster, { ...info, "spotify:track:remaster": { name: "remaster", artists: "x" } }, { ...base, ...filters }).map(([uri]) => uri);
+    const filtered = (filters: Partial<TrackListFilterInputs>) => filterTrackEntries(withRemaster, { ...info, "spotify:track:remaster": { name: "remaster", artists: "x" } }, { ...base, ...filters }, null).map(([uri]) => uri);
     expect(filtered({ releaseYearMinFilter: 1970, releaseYearMaxFilter: 1979 })).toEqual(["spotify:track:remaster"]);
     expect(filtered({ releaseYearMinFilter: 2010, releaseYearMaxFilter: 2019 })).toEqual([]);
     expect([...collectTrackFilterData(withRemaster, new Map()).allReleaseYears].sort()).toEqual([1977, 1995, 2008, 2023]);

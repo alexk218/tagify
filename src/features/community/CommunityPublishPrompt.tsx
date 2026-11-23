@@ -11,7 +11,6 @@ import {
   fetchPublicationPolicy,
   keepTagsPrivate,
   plural,
-  PUBLISH_RATINGS_LINE,
   publicationState,
   publicTagSummary,
 } from "./communityPublication";
@@ -21,7 +20,8 @@ import {
   readCommunityPublishPromptHistory,
   recordCommunityPublishPromptAsk,
 } from "./communityPublishPromptHistory";
-import { communityErrorMessage } from "./communitySyncCopy";
+import { communityErrorMessage, KEEP_PRIVATE_CONSEQUENCE } from "./communitySyncCopy";
+// eslint-disable-next-line css-modules/no-unused-class -- shared with the Community invitations
 import styles from "./CommunityConnectPrompt.module.css";
 
 /** Delay after other dialogs close, so the invitation never flashes between two of them. */
@@ -40,6 +40,7 @@ interface CommunityPublishPromptProps {
   lastUserTrackAddedEvent: UserTrackAddedEvent | null;
   tracks: Record<string, TrackData>;
   taxonomy: TagTaxonomy;
+  /** Opens the sharing window. */
   onReview: () => void;
 }
 
@@ -190,7 +191,7 @@ export function CommunityPublishPrompt({ enabled, connected, status, taggedTrack
         <div className={styles.text}>
           <h2 id="community-publish-prompt-title" className={styles.title}>Keep your tags private?</h2>
           <p id="community-publish-prompt-description" className={styles.description}>
-            Tagify keeps backing up your library and won't ask again. You can publish any time from Community in Tagify.
+            {KEEP_PRIVATE_CONSEQUENCE} You can publish any time from Community in Tagify.
           </p>
           {error ? <p className={styles.error} role="alert">{error}</p> : null}
         </div>
@@ -210,7 +211,7 @@ export function CommunityPublishPrompt({ enabled, connected, status, taggedTrack
         <p id="community-publish-prompt-description" className={styles.description}>
           Tagify is backing up your library, but your Community profile stays empty until you choose what to share.
           {" "}{plural(invitation.tags, "tag")} on {plural(invitation.songs, "song")} would appear.
-          {" "}{PUBLISH_RATINGS_LINE}
+          {" "}Private notes stay private.
           {" "}You can hide any tag or folder first.
         </p>
       </div>

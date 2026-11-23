@@ -1,4 +1,5 @@
 import React from "react";
+import { IN_APP_SIGN_UP_SWITCH_KEY } from "../inAppSignUp";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
@@ -25,6 +26,8 @@ const configuration = {
 describe("CloudSyncModal revoked device recovery", () => {
   beforeEach(() => {
     localStorage.clear();
+    // These cover the browser-page connect flow; CommunityEmailSignIn.test.tsx covers signing in inside Tagify.
+    localStorage.setItem(IN_APP_SIGN_UP_SWITCH_KEY, "off");
     setDesktopSyncConfiguration(configuration);
     vi.spyOn(window, "open").mockReturnValue(null);
   });
@@ -46,7 +49,7 @@ describe("CloudSyncModal revoked device recovery", () => {
       getStatus: () => status, getInitialMergePreview: () => null, getBackupHealth: () => null, syncNow,
     } as unknown as NonNullable<typeof window.TagifySync>;
     const onOpenSharing = vi.fn();
-    const { rerender } = render(<CloudSyncModal sharing={sharingStub(policyFixture({ reviewedAt: null }))} onOpenSharing={onOpenSharing} onClose={vi.fn()} />);
+    const { rerender } = render(<CloudSyncModal sharing={sharingStub(policyFixture({ reviewedAt: null }))} onOpenSharing={onOpenSharing} onConnect={vi.fn()} onClose={vi.fn()} />);
 
     // A pending sharing choice no longer blocks backing up.
     expect(screen.getByText("Up to date")).toBeInTheDocument();
@@ -65,12 +68,12 @@ describe("CloudSyncModal revoked device recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Publish my tags" }));
     expect(onOpenSharing).toHaveBeenCalledTimes(1);
 
-    rerender(<CloudSyncModal sharing={sharingStub(policyFixture())} onOpenSharing={onOpenSharing} onClose={vi.fn()} />);
+    rerender(<CloudSyncModal sharing={sharingStub(policyFixture())} onOpenSharing={onOpenSharing} onConnect={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByText("Your tags: Public")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Change" }));
     expect(onOpenSharing).toHaveBeenCalledTimes(2);
 
-    rerender(<CloudSyncModal sharing={sharingStub(null, { phase: "error" })} onOpenSharing={onOpenSharing} onClose={vi.fn()} />);
+    rerender(<CloudSyncModal sharing={sharingStub(null, { phase: "error" })} onOpenSharing={onOpenSharing} onConnect={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByText("Your tags: Couldn't check")).toBeInTheDocument();
   });
 
@@ -88,7 +91,8 @@ describe("CloudSyncModal revoked device recovery", () => {
     expect(screen.queryByRole("button", { name: "Choose what to share first" })).not.toBeInTheDocument();
 
     rerender(<CommunityOnboardingModal entry="community" sharing={sharingStub(policyFixture())} {...props} />);
-    expect(await screen.findByText("Your Community setup is ready.")).toBeInTheDocument();
+    expect(await screen.findByText("You're connected as Alex")).toBeInTheDocument();
+    expect(screen.getByText(/Get the iPhone app: sign in with the same email./)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View my profile" })).toBeInTheDocument();
   });
 
@@ -119,14 +123,22 @@ describe("CloudSyncModal revoked device recovery", () => {
       interval: 5,
     });
 
-    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onClose={vi.fn()} />);
+    const onConnect = vi.fn();
+    const { unmount } = render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onConnect={onConnect} onClose={vi.fn()} />);
 
     expect(screen.getByText("Device revoked")).toBeInTheDocument();
     expect(screen.getByText("Reconnect required")).toBeInTheDocument();
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    // Reconnecting signs in through the same Tagify account setup as everywhere else.
     fireEvent.click(screen.getByRole("button", { name: "Reconnect device" }));
+    expect(onConnect).toHaveBeenCalledTimes(1);
+    unmount();
 
-    expect(await screen.findByText("ABCD-EFGH")).toBeInTheDocument();
+    render(<CommunityOnboardingModal entry="sync" sharing={sharing()} tracks={tracksFixture()} taxonomy={taxonomyFixture()} onClose={vi.fn()} />);
+    expect(await screen.findByText("Enter your email on the page that opened")).toBeInTheDocument();
+    await waitFor(() => expect(syncPairingService.begin).toHaveBeenCalledTimes(1));
+    expect(window.open).toHaveBeenCalledWith("https://community.tagify.fm/device?code=ABCD-EFGH", "_blank", "noopener,noreferrer");
+    expect(screen.queryByText(/You're connected as/)).not.toBeInTheDocument();
     expect(unlinkLocal).not.toHaveBeenCalled();
   });
 
@@ -139,11 +151,12 @@ describe("CloudSyncModal revoked device recovery", () => {
       unlinkLocal,
     } as unknown as NonNullable<typeof window.TagifySync>;
 
-    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onClose={vi.fn()} />);
+    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onConnect={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Keep data on this device only" }));
 
     await waitFor(() => expect(unlinkLocal).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole("button", { name: "Link Community account" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Create account or sign in" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
   it("does not claim Smart Playlists are protected before app state reaches Community", () => {
@@ -159,7 +172,7 @@ describe("CloudSyncModal revoked device recovery", () => {
       }),
     } as unknown as NonNullable<typeof window.TagifySync>;
 
-    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onClose={vi.fn()} />);
+    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onConnect={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByText(/972 tagged items/)).toBeInTheDocument();
     expect(screen.getByText(/Smart Playlists pending/)).toBeInTheDocument();
@@ -179,11 +192,11 @@ describe("CloudSyncModal revoked device recovery", () => {
       resolveSettingsChoice: async (...args: unknown[]) => { await resolveSettingsChoice(...args); needsChoice = []; },
     } as unknown as NonNullable<typeof window.TagifySync>;
 
-    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onClose={vi.fn()} />);
+    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onConnect={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByText("Choose which saved settings to keep")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Your saved settings changed on another device too" })).toHaveTextContent("Smart Playlists");
-    expect(screen.getByText(/Preferences is too large to back up to Community/)).toBeInTheDocument();
+    expect(screen.getByText(/Preferences is too large to back up to your Tagify account/)).toBeInTheDocument();
     expect(screen.getByText(/Local files haven't backed up yet/)).toBeInTheDocument();
     expect(screen.getByText(/2 items have values Community can't save/)).toBeInTheDocument();
 
@@ -229,7 +242,7 @@ describe("CloudSyncModal revoked device recovery", () => {
       downloadInitialMergeBackup: vi.fn(),
     } as unknown as NonNullable<typeof window.TagifySync>;
 
-    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onClose={vi.fn()} />);
+    render(<CloudSyncModal sharing={sharing()} onOpenSharing={vi.fn()} onConnect={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("radio", { name: "Use this device for differences" }));
     fireEvent.click(screen.getByRole("button", { name: "Combine libraries" }));
     expect(screen.getByRole("button", { name: "Combining libraries…" })).toBeDisabled();
