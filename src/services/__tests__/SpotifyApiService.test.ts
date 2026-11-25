@@ -94,6 +94,25 @@ describe("SpotifyApiService entity metadata", () => {
         .resolves.toEqual(["spotify:track:listed-one", "spotify:track:listed-two"]);
     });
 
+    it("reads every song of an album longer than 1,000 songs", async () => {
+      vi.mocked(Spicetify.GraphQL.Request).mockImplementation((async (_definition: unknown, variables: { offset: number; limit: number }) => {
+        const count = Math.max(0, Math.min(variables.limit, 1_050 - variables.offset));
+        return albumUnion({ tracksV2: { totalCount: 1_050, items: Array.from({ length: count }, (_, index) => ({ track: { uri: `spotify:track:${variables.offset + index}` } })) } });
+      }) as any);
+
+      const uris = await spotifyApiService.getAllTrackUrisInAlbum("album-2");
+      expect(uris).toHaveLength(1_050);
+      expect(uris.at(-1)).toBe("spotify:track:1049");
+    });
+
+    it("fails instead of returning part of an album when a later page doesn't arrive", async () => {
+      vi.mocked(Spicetify.GraphQL.Request)
+        .mockResolvedValueOnce(albumUnion({ tracksV2: { totalCount: 80, items: Array.from({ length: 50 }, (_, index) => ({ track: { uri: `spotify:track:${index}` } })) } }) as any)
+        .mockRejectedValueOnce(new Error("network"));
+
+      await expect(spotifyApiService.getAllTrackUrisInAlbum("album-2")).rejects.toThrow("network");
+    });
+
     it("returns no album details without a Web API request when Spotify's client can't describe the album", async () => {
       delete (Spicetify.GraphQL.Definitions as any).getAlbum;
       await expect(spotifyApiService.getPlaylistMetadata("spotify:album:album-2")).resolves.toBeNull();
@@ -241,6 +260,16 @@ describe("SpotifyApiService entity metadata", () => {
     await expect(
       spotifyApiService.getPlaylistMetadata("spotify:album:album-1"),
     ).resolves.toBeNull();
+  });
+
+  it("fails a playlist read instead of reporting an empty playlist", async () => {
+    const original = (Spicetify.Platform.PlaylistAPI as any).getContents;
+    (Spicetify.Platform.PlaylistAPI as any).getContents = vi.fn().mockRejectedValue(new Error("offline"));
+    try {
+      await expect(spotifyApiService.getAllTrackUrisInPlaylist("broken")).rejects.toThrow("offline");
+    } finally {
+      (Spicetify.Platform.PlaylistAPI as any).getContents = original;
+    }
   });
 
   it("lists current playlist IDs and names through nested rootlist folders", async () => {

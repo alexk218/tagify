@@ -101,7 +101,7 @@ import { runSongReleaseReports } from "./CommunitySongReleases";
 import { runCatalogFillJobs } from "./CommunityCatalogFillJobs";
 import { NOW_PLAYING_LOOKUP_REQUEST_EVENT, NowPlayingLookupScheduler, runNowPlayingLookups } from "./CommunityNowPlayingLookups";
 import { communityNowPlayingLookupSources } from "./CommunityNowPlayingLookupSources";
-import { SpotifySearchLookupScheduler, runSpotifySearchLookups } from "./CommunitySpotifySearchLookups";
+import { SPOTIFY_SEARCH_LOOKUP_REQUEST_EVENT, SpotifySearchLookupScheduler, runSpotifySearchLookups } from "./CommunitySpotifySearchLookups";
 import { communitySpotifySearchLookupSources } from "./CommunitySpotifySearchLookupSources";
 import { communityCatalogFillJobSources } from "./CommunityCatalogFillJobSources";
 import { communitySongReleaseSources } from "./CommunitySongReleaseSources";
@@ -415,6 +415,13 @@ export { syncClientHeaders } from "./SyncClientHeaders";
 const ARTIST_CREDITS_INTERVAL_MS = 3 * 60 * 60_000;
 /** How often Tagify looks again for songs Community knows no album for. */
 const SONG_RELEASES_INTERVAL_MS = 3 * 60 * 60_000;
+/**
+ * After sync sends music, its albums and ISRCs follow within this long instead of on the next
+ * three-hourly run. Until Community knows a song's ISRC it can't fold it into another version of
+ * the same recording, so search showed one song twice (2026-11-25). Runs this close together
+ * batch a tagging spree into one Community request every couple of minutes.
+ */
+const SONG_RELEASES_AFTER_SYNC_MS = 2 * 60_000;
 /** How often Tagify asks Community again for track lists and discographies to fill (catalog filler desktops only). */
 const CATALOG_FILL_INTERVAL_MS = 3 * 60 * 60_000;
 /** At most this often Tagify sends Community the names of music it synced. */
@@ -728,6 +735,8 @@ class SyncRuntime extends EventTarget {
       if (!configuration || !this.started) return { filler: false, lookups: 0, answered: 0, searches: 0, stopped: "signed_out" };
       return runNowPlayingLookups(this.sideSession(configuration), communityNowPlayingLookupSources(), { memory });
     },
+    // Idle polls stretch only while Community's announcement of a new request would reach this desktop.
+    canHearNudges: () => this.isRealtimeSubscribed(),
   });
   /**
    * Running members' Search Spotify when Community can't reach Spotify's Web API (Community hands
@@ -740,6 +749,8 @@ class SyncRuntime extends EventTarget {
       if (!configuration || !this.started) return { filler: false, lookups: 0, answered: 0, searches: 0, stopped: "signed_out" };
       return runSpotifySearchLookups(this.sideSession(configuration), communitySpotifySearchLookupSources(), { memory });
     },
+    // Idle polls stretch only while Community's announcement of a new request would reach this desktop.
+    canHearNudges: () => this.isRealtimeSubscribed(),
   });
   /** Saving songs the member asked for on Community to their Liked Songs, and whether to look again after. */
   private spotifySaves: Promise<void> | null = null;
@@ -748,6 +759,9 @@ class SyncRuntime extends EventTarget {
   private artistCreditsUnsupported = false;
   private songReleases: Promise<void> | null = null;
   private songReleasesRanAt = 0;
+  /** Set when sync sent music, until a song releases run starts after it. */
+  private songReleasesSoon = false;
+  private songReleasesTimer: ReturnType<typeof setTimeout> | null = null;
   private songReleasesUnsupported = false;
   private catalogFill: Promise<void> | null = null;
   private catalogFillRanAt = 0;
@@ -821,6 +835,8 @@ class SyncRuntime extends EventTarget {
     if (this.sessionRefreshTimer) clearTimeout(this.sessionRefreshTimer);
     if (this.songNamesTimer) clearTimeout(this.songNamesTimer);
     this.songNamesTimer = null;
+    if (this.songReleasesTimer) clearTimeout(this.songReleasesTimer);
+    this.songReleasesTimer = null;
     if (this.backgroundReadersTimer) clearTimeout(this.backgroundReadersTimer);
     this.backgroundReadersTimer = null;
     this.catalogFiller = null;
@@ -1086,6 +1102,22 @@ class SyncRuntime extends EventTarget {
       throw Object.assign(new Error(payload.error?.message || response.statusText), { status: response.status });
     }
     return payload;
+  }
+
+  /**
+   * This device's Community session for a request made outside sync, refreshed when it is about to
+   * expire or when Community just refused `refusedToken`. Null when the device isn't connected or its
+   * session can't be renewed.
+   */
+  async requestSession(refusedToken?: string): Promise<DesktopSyncConfiguration | null> {
+    const configuration = getDesktopSyncConfiguration();
+    if (!configuration) return null;
+    if (refusedToken && refusedToken === configuration.accessToken) this.refusedAccessToken = refusedToken;
+    try {
+      return await this.refreshIfNeeded(configuration);
+    } catch {
+      return null;
+    }
   }
 
   async syncNow(automatic = false): Promise<void> {
@@ -1628,7 +1660,12 @@ class SyncRuntime extends EventTarget {
         }
         const outcome = await this.push(configuration);
         // Community now lists this music; its names follow once sync settles.
-        if (outcome.accepted || outcome.snapshot) this.songNamesWanted = true;
+        if (outcome.accepted || outcome.snapshot) {
+          this.songNamesWanted = true;
+          // Its ISRC too, so Community groups it with other versions of the song right away.
+          this.songReleasesSoon = true;
+          this.handleSongReleases(configuration);
+        }
         // Confirming queued edits sends nothing, so there is nothing new to pull.
         caughtUp = outcome.sent === 0 && !outcome.snapshot;
         if (!caughtUp) {
@@ -2631,12 +2668,28 @@ class SyncRuntime extends EventTarget {
    * Sends Community the ISRC and album of songs in this library it knows no release for, read
    * through Spotify's desktop app in the background (Community migration 0261), so song pages name
    * their album and every version of a song shares one page. Only when Community advertises
-   * `songReleases`; once a start, then at most every few hours, never beside the artist credits run.
+   * `songReleases`; once a start, then at most every few hours, and within a couple of minutes of
+   * sync sending music. Never beside the artist credits run.
    */
   private handleSongReleases(configuration: DesktopSyncConfiguration): void {
-    if (!this.started || this.songReleases || this.artistCredits || this.catalogFill || this.songReleasesUnsupported) return;
+    if (!this.started || this.songReleasesUnsupported) return;
     if ((this.capabilities as { songReleases?: { protocolVersion?: unknown } } | null)?.songReleases?.protocolVersion !== 1) return;
-    if (Date.now() - this.songReleasesRanAt < SONG_RELEASES_INTERVAL_MS) return;
+    const since = Date.now() - this.songReleasesRanAt;
+    const due = since >= SONG_RELEASES_INTERVAL_MS || (this.songReleasesSoon && since >= SONG_RELEASES_AFTER_SYNC_MS);
+    const busy = Boolean(this.songReleases || this.artistCredits || this.catalogFill);
+    if (!due || busy) {
+      // Music sent meanwhile is read once the gap passes or the other reader finishes, without waiting for another sync.
+      if (this.songReleasesSoon) {
+        this.songReleasesTimer ??= setTimeout(() => {
+          this.songReleasesTimer = null;
+          this.handleSongReleases(getDesktopSyncConfiguration() ?? configuration);
+        }, due ? SONG_RELEASES_AFTER_SYNC_MS : SONG_RELEASES_AFTER_SYNC_MS - since);
+      }
+      return;
+    }
+    this.songReleasesSoon = false;
+    if (this.songReleasesTimer) clearTimeout(this.songReleasesTimer);
+    this.songReleasesTimer = null;
     this.songReleasesRanAt = Date.now();
     const started = this.beginFillRun("songReleases");
     let outcome: CatalogFillRunOutcome = "error";
@@ -2907,10 +2960,15 @@ class SyncRuntime extends EventTarget {
         })
         .on("broadcast", { event: "desktop_play_request" }, ({ payload }) => this.handleDesktopPlayRequest(payload))
         // A member's Now playing card opened a lookup: a filler asks for it now instead of at its next
-        // 15-second poll (the scheduler ignores this on other desktops and during any back-off).
+        // poll (the scheduler ignores this on other desktops and during any back-off).
         .on("broadcast", { event: NOW_PLAYING_LOOKUP_REQUEST_EVENT }, ({ payload }) => {
           if (payload?.libraryId !== undefined && payload.libraryId !== configuration.libraryId) return;
           this.nowPlayingLookups.nudge();
+        })
+        // Likewise when a member's Search Spotify handed this filler a search Community couldn't run.
+        .on("broadcast", { event: SPOTIFY_SEARCH_LOOKUP_REQUEST_EVENT }, ({ payload }) => {
+          if (payload?.libraryId !== undefined && payload.libraryId !== configuration.libraryId) return;
+          this.spotifySearchLookups.nudge();
         })
         .on("broadcast", { event: "projection_cursor" }, ({ payload }) => {
           if (payload?.libraryId !== configuration.libraryId || !Number.isSafeInteger(payload?.projectionCursor)) return;

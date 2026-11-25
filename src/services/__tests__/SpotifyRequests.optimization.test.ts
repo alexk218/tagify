@@ -186,3 +186,20 @@ it('completes 50,000 additions under the shared limits with exactly 500 writes',
   expect(add.mock.calls.every(call => (call[1] as string[]).length === 100)).toBe(true);
   expect(api.getContents).toHaveBeenCalledOnce();
 });
+it('reads a playlist once when one pass adds and removes songs', async () => {
+  const api = Spicetify.Platform.PlaylistAPI as any;
+  api.getContents.mockResolvedValue({ items: [
+    { uri: 'spotify:track:keep', uid: 'u1' },
+    { uri: 'spotify:track:gone', uid: 'u2' },
+    { uri: 'spotify:track:gone', uid: 'u3' },
+  ] });
+  const remove = vi.fn().mockResolvedValue(undefined); api.remove = remove;
+  const add = vi.fn().mockResolvedValue(undefined); api.add = add;
+  const operation = spotifyApiService.updatePlaylistTracks('add-and-remove', ['spotify:track:keep', 'spotify:track:new'], ['spotify:track:gone']);
+  await vi.runAllTimersAsync();
+  expect(await operation).toEqual({ success: true, added: ['spotify:track:new'], removed: ['spotify:track:gone'] });
+  // Before, the additions read the playlist and the removals read it again.
+  expect(api.getContents).toHaveBeenCalledOnce();
+  expect(remove).toHaveBeenCalledWith('spotify:playlist:add-and-remove', [{ uri: 'spotify:track:gone', uid: 'u2' }, { uri: 'spotify:track:gone', uid: 'u3' }]);
+  expect(add).toHaveBeenCalledWith('spotify:playlist:add-and-remove', ['spotify:track:new'], { after: 'end' });
+});

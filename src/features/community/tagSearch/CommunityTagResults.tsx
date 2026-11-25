@@ -5,14 +5,17 @@ import { getDesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncRuntime } from "@/services/sync/SyncRuntime";
 import { flushLikedSaveCredits, queueLikedSaveCredit } from "../communityLikedSaveCredits";
 import { LockedSongs } from "../taggedByOthers/LockedSongs";
-import { recordCommunityTeaserConnectClicked, recordCommunityTeaserViewed } from "../taggedByOthers/communityTeaserPreview";
+import { PREVIEW_SONGS_SHOWN, recordCommunityTeaserConnectClicked, recordCommunityTeaserViewed } from "../taggedByOthers/communityTeaserPreview";
 import { useCommunityTagSearch, type CommunityTagSearchState } from "./useCommunityTagSearch";
 import { TAG_SEARCH_MAX_TAGS, type TagSearchMatch, type TagSearchSong } from "./tagSearchClient";
 import styles from "./CommunityTagResults.module.css";
 import { ALL_HIDDEN_LOCK, useSharingLockReason } from "@/features/community/sharingLockReason";
 
-/** Songs shown before the lock, for people who aren't connected or don't share their tags (Alex's pick 2A). */
-export const SONGS_BEFORE_LOCK = 5;
+/**
+ * Songs shown before the lock, for people who aren't connected or don't share their tags: as many as
+ * "Your songs" lets them use (Alex, 2026-11-25: "20 on both"). Community sends at most this many.
+ */
+export const SONGS_BEFORE_LOCK = PREVIEW_SONGS_SHOWN;
 
 const count = (value: number) => value.toLocaleString();
 
@@ -45,6 +48,12 @@ interface CommunityTagResultsProps {
   onSaved?: (uri: string, tags: readonly string[]) => void;
   /** Shown as its own tab or view, which already names it: no heading. */
   bare?: boolean;
+  /** The save control says "Save to Liked Songs" in words, under each song, instead of a bare (+). */
+  saveInWords?: boolean;
+  /** Spotify saved a song to Liked Songs from here. */
+  afterSave?: () => void;
+  /** Shown while nothing was found, where the block otherwise says nothing. */
+  emptyText?: string;
 }
 
 export interface LikedSongs {
@@ -104,7 +113,7 @@ function useLikedSongs(uris: readonly string[], likedSongs: LikedSongs) {
  * People who aren't connected, or don't share their tags, see the first few and how many there are,
  * with the rest behind "Create account or sign in" or "Share your tags".
  */
-export function CommunityTagResults({ tags, match, search, onPlay, onConnect, onShare, likedSongs = spotifyLikedSongs, onSaved = creditSave, bare = false }: CommunityTagResultsProps) {
+export function CommunityTagResults({ tags, match, search, onPlay, onConnect, onShare, likedSongs = spotifyLikedSongs, onSaved = creditSave, bare = false, saveInWords = false, emptyText, afterSave }: CommunityTagResultsProps) {
   const allHidden = useSharingLockReason() === "all-hidden";
   const player = usePlayerNow();
   const { phase, songs, total, locked } = search;
@@ -116,7 +125,7 @@ export function CommunityTagResults({ tags, match, search, onPlay, onConnect, on
 
   // Nothing to say when Community has no search (old Community, switched off) or found nothing.
   if (phase === "idle" || (phase === "failed" && (search.failure === "not-available" || search.failure === "paused"))) return null;
-  if (phase === "done" && total === 0) return null;
+  if (phase === "done" && total === 0) return emptyText ? <p className={styles.found} role="status">{emptyText}</p> : null;
 
   return (
     <section className={`${styles.section} ${bare ? styles.bare : ""}`} aria-labelledby="community-tag-results-title" aria-busy={phase === "loading" || undefined}>
@@ -135,7 +144,7 @@ export function CommunityTagResults({ tags, match, search, onPlay, onConnect, on
           {shown.map((song) => (
             <SongRow key={song.uri} song={song} searched={tags} current={player.uri === song.uri} playing={player.uri === song.uri && player.playing}
               onPlay={() => onPlay(song.uri)} saved={liked.has(song.uri)}
-              onSavedChange={(saved) => mark(song.uri, saved)} likedSongs={likedSongs} onSaved={() => onSaved(song.uri, tags)} />
+              onSavedChange={(saved) => mark(song.uri, saved)} likedSongs={likedSongs} onSaved={() => { onSaved(song.uri, tags); afterSave?.(); }} saveInWords={saveInWords} />
           ))}
         </ul>
       ) : null}
@@ -158,7 +167,8 @@ export function CommunityTagResults({ tags, match, search, onPlay, onConnect, on
 /** Tag pills under each cover; more than this and the tile grows past its neighbours. */
 const TAGS_ON_TILE = 4;
 
-function SongRow({ song, searched, current, playing, onPlay, saved, onSavedChange, likedSongs, onSaved }: {
+function SongRow({ song, searched, current, playing, onPlay, saved, onSavedChange, likedSongs, onSaved, saveInWords }: {
+  saveInWords: boolean;
   song: TagSearchSong;
   searched: readonly string[];
   current: boolean;
@@ -183,8 +193,9 @@ function SongRow({ song, searched, current, playing, onPlay, saved, onSavedChang
           <span className={styles.tileLine}>{song.artists.join(", ")}</span>
           <span className={styles.tileLine}>{count(song.people)} {song.people === 1 ? "member" : "members"}</span>
         </div>
-        <SaveToLikedSongs uri={song.uri} name={name} saved={saved} onSavedChange={onSavedChange} likedSongs={likedSongs} onSaved={onSaved} />
+        {saveInWords ? null : <SaveToLikedSongs uri={song.uri} name={name} saved={saved} onSavedChange={onSavedChange} likedSongs={likedSongs} onSaved={onSaved} />}
       </div>
+      {saveInWords ? <SaveToLikedSongs uri={song.uri} name={name} saved={saved} onSavedChange={onSavedChange} likedSongs={likedSongs} onSaved={onSaved} inWords /> : null}
       {tags.length ? (
         <span className={styles.tilePills} aria-label={`Tags: ${song.tags.join(", ")}`}>
           {tags.map((tag) => <span key={tag} className={`${styles.tilePill} ${isSearched(tag) ? styles.tilePillOn : ""}`}>{tag}</span>)}
@@ -202,7 +213,8 @@ const FALLBACK_ICON: Record<string, string> = {
 };
 const spotifyIcon = (name: string) => (typeof Spicetify !== "undefined" && (Spicetify.SVGIcons as Record<string, string> | undefined)?.[name]) || FALLBACK_ICON[name] || "";
 
-function SaveToLikedSongs({ uri, name, saved, onSavedChange, likedSongs, onSaved }: {
+function SaveToLikedSongs({ uri, name, saved, onSavedChange, likedSongs, onSaved, inWords = false }: {
+  inWords?: boolean;
   uri: string;
   name: string;
   saved: boolean;
@@ -234,10 +246,11 @@ function SaveToLikedSongs({ uri, name, saved, onSavedChange, likedSongs, onSaved
   };
   const label = saved ? "Remove from Liked Songs" : "Add to Liked Songs";
   return (
-    <button type="button" className={`${styles.like} ${saved ? styles.liked : ""}`} aria-pressed={saved} aria-label={`${label}: ${name}`} title={label}
+    <button type="button" className={`${inWords ? styles.likeInWords : styles.like} ${saved ? styles.liked : ""}`} aria-pressed={saved} aria-label={`${label}: ${name}`} title={label}
       onClick={() => void toggle()} disabled={busy}>
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="currentColor"
         dangerouslySetInnerHTML={{ __html: spotifyIcon(saved ? LIKED_ICON.added : LIKED_ICON.add) }} />
+      {inWords ? <span>{saved ? "In Liked Songs" : "Save to Liked Songs"}</span> : null}
     </button>
   );
 }
@@ -256,7 +269,7 @@ export function tagSearchQuery(clauses: readonly { tagIds: string[]; operator: s
   return { tags: tags.slice(0, TAG_SEARCH_MAX_TAGS), match };
 }
 
-/** "On Community" for the track list: asks Community while a tag filter is on. */
+/** Songs other members tagged with the given tags: asks Community unless an answer is handed in. */
 export function CommunityTagSearch({ search: given, ...props }: Omit<CommunityTagResultsProps, "search"> & { viewer: string; search?: CommunityTagSearchState }) {
   return given ? <CommunityTagResults {...props} search={given} /> : <AskCommunity {...props} />;
 }

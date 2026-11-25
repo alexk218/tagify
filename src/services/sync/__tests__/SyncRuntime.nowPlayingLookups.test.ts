@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({ createClient: vi.fn() }));
 vi.mock("@supabase/supabase-js", () => ({ createClient: mocks.createClient }));
 vi.mock("../SyncLocalState", async (original) => ({ ...(await original<typeof import("../SyncLocalState")>()), getDesktopSyncConfiguration: () => configuration }));
 import { NOW_PLAYING_LOOKUP_REQUEST_EVENT } from "../CommunityNowPlayingLookups";
+import { SPOTIFY_SEARCH_LOOKUP_REQUEST_EVENT } from "../CommunitySpotifySearchLookups";
 import { syncRuntime } from "../SyncRuntime";
 
 type Handler = (message: { payload: unknown }) => void;
@@ -16,6 +17,7 @@ type RuntimeFixture = {
   started: boolean;
   connectRealtime: (value: typeof configuration) => Promise<void>;
   nowPlayingLookups: { nudge: () => void };
+  spotifySearchLookups: { nudge: () => void };
   stop: () => void;
 };
 
@@ -44,5 +46,17 @@ describe("hearing Now playing lookups on the library channel", () => {
     // An announcement naming another library is not this desktop's.
     handlers.get(NOW_PLAYING_LOOKUP_REQUEST_EVENT)!({ payload: { libraryId: "55555555-5555-4555-8555-555555555555" } });
     expect(nudge).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks the Spotify search lane to look now when Community announces a search", async () => {
+    const nudge = vi.spyOn(runtime.spotifySearchLookups, "nudge");
+    const nowPlaying = vi.spyOn(runtime.nowPlayingLookups, "nudge");
+    await runtime.connectRealtime(configuration);
+    expect(SPOTIFY_SEARCH_LOOKUP_REQUEST_EVENT).toBe("spotify_search_lookup_request");
+    handlers.get(SPOTIFY_SEARCH_LOOKUP_REQUEST_EVENT)!({ payload: { libraryId: configuration.libraryId, requestedAt: "2026-11-24T12:00:00.000Z" } });
+    expect(nudge).toHaveBeenCalledTimes(1);
+    expect(nowPlaying).not.toHaveBeenCalled();
+    handlers.get(SPOTIFY_SEARCH_LOOKUP_REQUEST_EVENT)!({ payload: { libraryId: "55555555-5555-4555-8555-555555555555" } });
+    expect(nudge).toHaveBeenCalledTimes(1);
   });
 });

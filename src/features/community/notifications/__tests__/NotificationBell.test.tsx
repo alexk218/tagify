@@ -10,8 +10,9 @@ vi.mock("@/services/sync/SyncRuntime", () => ({ syncRuntime: { communityRequest:
 vi.mock("../../communityWebsiteLink", () => ({ openCommunityUrlSignedIn: vi.fn(async () => undefined) }));
 
 const SONG = "6a1f0c3e-2b4d-4e8f-9a01-3c5d7e9f1b20";
+// Half a minute past five, so a clock read a moment before or after this line still says "5 min ago".
 const entry = (id: number, read: boolean, text = `Entry ${id}`): CommunityNotification => ({
-  id, kind: "follow", text, createdAt: new Date(Date.now() - 5 * 60_000).toISOString(), read, open: { screen: "profile", handle: "mira" },
+  id, kind: "follow", text, createdAt: new Date(Date.now() - 5.5 * 60_000).toISOString(), read, open: { screen: "profile", handle: "mira" },
 });
 
 describe("notificationUrl", () => {

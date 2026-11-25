@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { recordProductInteraction, type ProductEventDetails } from "@/features/product-analytics/productAnalytics";
 import { spotifyService } from "@/services/SpotifyService";
 import { searchCommunityTags, TagSearchError, type TagSearchFailure, type TagSearchLock, type TagSearchMatch, type TagSearchPage, type TagSearchSong } from "./tagSearchClient";
 
@@ -56,6 +57,14 @@ interface SearchState {
   nextCursor: string | null;
 }
 
+export function searchCompletedDetails(total: number, locked: TagSearchLock | null, tags: number): ProductEventDetails {
+  return {
+    result_bucket: total <= 0 ? "0" : total < 10 ? "1-9" : total < 100 ? "10-99" : "100+",
+    locked: locked ?? "none",
+    tags_bucket: tags <= 1 ? "1" : tags <= 3 ? "2-3" : "4+",
+  };
+}
+
 const IDLE: SearchState = { phase: "idle", songs: [], total: 0, capped: false, locked: null, failure: null, nextCursor: null };
 
 /**
@@ -104,6 +113,8 @@ export function useCommunityTagSearch({ tags, match, enabled, viewer, search = (
         kept.set(key, { at: Date.now(), page: named });
         if (kept.size > KEPT_SEARCHES) kept.delete(kept.keys().next().value!);
         setState({ phase: "done", ...named, failure: null });
+        // Counted when Community answers, not when a kept answer is shown again. Sizes only: never the tags.
+        recordProductInteraction("community_tag_search_completed", searchCompletedDetails(named.total, named.locked, tagsRef.current.length));
       } catch (error) {
         if (controller.signal.aborted) return;
         setState({ ...IDLE, phase: "failed", failure: error instanceof TagSearchError ? error.reason : "unreachable" });

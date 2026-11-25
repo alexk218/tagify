@@ -1,10 +1,12 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TrackInfo } from "@/services/SpotifyService";
 
 const { mockSpotifyService } = vi.hoisted(() => ({
   mockSpotifyService: {
     getBatchTracks: vi.fn(),
+    getTrack: vi.fn(),
   },
 }));
 
@@ -50,7 +52,6 @@ describe("useSpicetifyHistory", () => {
 
     renderHook(() =>
       useSpicetifyHistory({
-        isMultiTagging: false,
         setIsMultiTagging: vi.fn(),
         setMultiTagTracks,
         setLockedTrack: vi.fn(),
@@ -73,5 +74,42 @@ describe("useSpicetifyHistory", () => {
     });
 
     expect(setMultiTagTracks.mock.calls.at(-1)?.[0]).toHaveLength(250);
+  });
+
+  it.each([
+    ["a Spotify song", "spotify:track:single"],
+    ["a local file", "spotify:local:Artist:Album:Song:180"],
+  ])("opening %s while Bulk Tag is open leaves Bulk Tag", async (_, trackUri) => {
+    const trackUris = ["spotify:track:a", "spotify:track:b"];
+    Spicetify.Platform.History.location.state = { trackUris };
+    mockSpotifyService.getBatchTracks.mockResolvedValue({});
+    mockSpotifyService.getTrack.mockResolvedValue(trackInfo);
+    let navigate = () => {};
+    vi.mocked(Spicetify.Platform.History.listen).mockImplementation((listener: () => void) => {
+      navigate = listener;
+      return vi.fn();
+    });
+
+    const { result } = renderHook(() => {
+      const [isMultiTagging, setIsMultiTagging] = useState(false);
+      const [multiTagTracks, setMultiTagTracks] = useState<unknown[]>([]);
+      const [lockedTrack, setLockedTrack] = useState<unknown>(null);
+      useSpicetifyHistory({
+        setIsMultiTagging,
+        setMultiTagTracks,
+        setLockedTrack,
+        setIsLocked: vi.fn(),
+        setLockedMultiTrackUri: vi.fn(),
+      });
+      return { isMultiTagging, multiTagTracks, lockedTrack };
+    });
+    await waitFor(() => expect(result.current.isMultiTagging).toBe(true));
+
+    Spicetify.Platform.History.location.state = { trackUri };
+    act(() => navigate());
+
+    await waitFor(() => expect(result.current.lockedTrack).toEqual(expect.objectContaining({ uri: trackUri })));
+    expect(result.current.isMultiTagging).toBe(false);
+    expect(result.current.multiTagTracks).toEqual([]);
   });
 });

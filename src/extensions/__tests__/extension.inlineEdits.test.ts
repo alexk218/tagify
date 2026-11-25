@@ -17,7 +17,7 @@ import { LIBRARY_UNAVAILABLE_MESSAGE } from "../extensionEdits";
 vi.mock("@/services/sync/SyncRuntime", () => ({ syncRuntime: { start: vi.fn() } }));
 vi.mock("@/services/sync/SyncInstallRecovery", () => ({ restoreDesktopSyncConfiguration: vi.fn(async () => undefined) }));
 vi.mock("@/services/SmartPlaylistSyncService", () => ({
-  smartPlaylistSyncService: { syncTrack: vi.fn(async () => undefined), startBackgroundReconciliation: vi.fn() },
+  smartPlaylistSyncService: { syncTrack: vi.fn(async () => undefined), syncTracks: vi.fn(async () => undefined), startBackgroundReconciliation: vi.fn() },
 }));
 vi.mock("@/services/KeyboardShortcutService", () => ({ keyboardShortcutService: { initialize: vi.fn() } }));
 vi.mock("@/extensions/WelcomeModal", () => ({ welcomeModal: { initialize: vi.fn() } }));
@@ -396,9 +396,16 @@ it("updates all three simultaneous playlist columns when tags are added or remov
     document.querySelector<HTMLButtonElement>(`.tagify-inline-menu button[data-tagify-tag-id="${tag}"]`)!.click();
     document.querySelector(".tagify-inline-menu")?.remove();
   };
+  const { smartPlaylistSyncService } = await import("@/services/SmartPlaylistSyncService");
   try {
     await checkTags([rock]);
+    vi.mocked(smartPlaylistSyncService.syncTracks).mockClear();
+    vi.mocked(smartPlaylistSyncService.syncTrack).mockClear();
     await toggleTag(rows[1], jazz); await checkTags([rock, jazz]);
+    // One edit saves all three releases, and Smart Playlists sync them in one pass, not one per release.
+    expect(smartPlaylistSyncService.syncTracks).toHaveBeenCalledTimes(1);
+    expect(Object.keys(vi.mocked(smartPlaylistSyncService.syncTracks).mock.calls[0][0]).sort()).toEqual([...uris].sort());
+    expect(smartPlaylistSyncService.syncTrack).not.toHaveBeenCalled();
     await toggleTag(rows[2], rock); await checkTags([jazz]);
     rows[1].querySelector<HTMLButtonElement>('[aria-label="Clear 2 star rating"]')!.click();
     await eventually(async () => {
@@ -497,5 +504,41 @@ it("shows how many other people tagged the playing song on Community, with their
   } finally {
     player.data = previous; communityEntities.answers.clear();
     window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+  }
+});
+
+const tagIndicatorLabel = () => control()?.querySelector<HTMLElement>('[aria-label^="Edit applied tags"]')?.getAttribute("aria-label");
+const renameRock = async (name: string) => {
+  expect(await indexedDBStorage.saveTaxonomy((current) => ({
+    ...current, tagsById: { ...current.tagsById, [rock]: { ...current.tagsById[rock], name } },
+  }))).toBe(true);
+  // What the Tagify page announces after the Tag Manager saves.
+  window.dispatchEvent(new CustomEvent("tagify:dataUpdated", { detail: { type: "save" } }));
+};
+
+it("shows a renamed tag on songs in Spotify's views once the Tag Manager saves", async () => {
+  await eventually(() => expect(tagIndicatorLabel()).toBe("Edit applied tags: Rock"));
+  try {
+    await renameRock("Krautrock");
+    await eventually(() => expect(tagIndicatorLabel()).toBe("Edit applied tags: Krautrock"));
+  } finally {
+    await renameRock("Rock");
+    await eventually(() => expect(tagIndicatorLabel()).toBe("Edit applied tags: Rock"));
+  }
+});
+
+it("shows a renamed tag when reading every song fails, and reads the songs again", async () => {
+  await eventually(() => expect(tagIndicatorLabel()).toBe("Edit applied tags: Rock"));
+  const fullRead = vi.spyOn(indexedDBStorage, "loadAllStrict").mockRejectedValueOnce(new Error("read failed"));
+  try {
+    await renameRock("Krautrock");
+    await eventually(() => expect(tagIndicatorLabel()).toBe("Edit applied tags: Krautrock"));
+    // The failed read is retried instead of waiting for a Spotify restart.
+    await eventually(() => expect(fullRead).toHaveBeenCalledTimes(2));
+    await eventually(async () => expect(await fullRead.mock.results[1]?.value).toBeTruthy());
+  } finally {
+    fullRead.mockRestore();
+    await renameRock("Rock");
+    await eventually(() => expect(tagIndicatorLabel()).toBe("Edit applied tags: Rock"));
   }
 });

@@ -464,10 +464,16 @@ export class AudioFeaturesService {
       // Extension kind 222 = audio features in Spotify's extended metadata API.
       const buf = await this.getExtendedMetadata(trackUris, 222, options);
       const msg = audioFeaturesResponse.decode(buf) as any;
-      const responses = Array.isArray(msg.response) ? msg.response : [];
+      const responses: any[] = Array.isArray(msg.response) ? msg.response : [];
+      // Each entry names its song. Spotify can leave songs out, so a position is only trusted when
+      // every entry is unnamed and the counts match; otherwise a gap would shift every later
+      // song's BPM and key onto the wrong song (and cache it there).
+      const byUri = new Map<string, any>();
+      for (const response of responses) if (typeof response?.track === "string" && response.track) byUri.set(response.track, response);
+      const byPosition = byUri.size === 0 && responses.length === trackIds.length;
 
-      results = trackIds.map((_, index) => {
-        const attributes = responses[index]?.attributes?.attributes;
+      results = trackUris.map((uri, index) => {
+        const attributes = (byPosition ? responses[index] : byUri.get(uri))?.attributes?.attributes;
         if (!attributes) return null;
 
         return {

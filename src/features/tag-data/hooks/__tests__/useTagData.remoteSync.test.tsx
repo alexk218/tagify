@@ -126,4 +126,31 @@ describe("showing synced changes while tagging", () => {
     expect(result.current.tagData.tracks[uri].tagIds).toEqual(["rock", "pop", "jazz", "classical"]);
     expect(result.current.tagData.tracks[other].rating).toBe(5);
   });
+
+  // The extension saves song details it looked up (album, length, release date) without touching
+  // ratings or tags. The page has to show them without a reload.
+  it("shows song details the extension saved when nothing else about the song changed", { timeout: 20_000 }, async () => {
+    const { result } = renderHook(() => useTagData());
+    await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 10_000 });
+
+    const detailed = {
+      ...library.tracks[uri],
+      albumName: "Things We Lost in the Fire",
+      albumUri: `spotify:album:${"b".repeat(22)}`,
+      durationMs: 213_000,
+      releaseDate: "2001-01-30",
+    };
+    await act(async () => {
+      await indexedDBStorage.saveTrack(uri, detailed);
+      result.current.applyShortcutTrackUpdate(uri, detailed);
+    });
+    await settle();
+
+    expect(result.current.tagData.tracks[uri]).toMatchObject({
+      albumName: "Things We Lost in the Fire",
+      durationMs: 213_000,
+      releaseDate: "2001-01-30",
+      dateModified: 1_000,
+    });
+  });
 });

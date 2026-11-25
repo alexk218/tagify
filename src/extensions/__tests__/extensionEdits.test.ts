@@ -7,6 +7,8 @@ import { indexedDBStorage } from "@/services/storage/IndexedDBStorageService";
 import { storageService } from "@/services/storage/StorageService";
 import * as tagifyUsage from "@/features/discovery-survey/services/tagifyUsage";
 import {
+  announceSavedTracks,
+  batchSmartPlaylistSync,
   editSavedEntity,
   editSavedTrack,
   EDIT_NOT_SAVED_MESSAGE,
@@ -143,5 +145,56 @@ describe("saving edits to the saved library", () => {
   it("reports a library that can't be read instead of an empty one", async () => {
     vi.spyOn(indexedDBStorage, "loadAllStrict").mockRejectedValueOnce(new Error("read failed"));
     await expect(readSavedLibrary()).rejects.toBeInstanceOf(LibraryUnavailableError);
+  });
+});
+
+describe("Smart Playlist sync for announced songs", () => {
+  const listen = (sync: (updates: Record<string, TrackData | null>) => Promise<void>) => {
+    const listener = batchSmartPlaylistSync(sync);
+    window.addEventListener("tagify:trackChanged", listener);
+    return () => window.removeEventListener("tagify:trackChanged", listener);
+  };
+
+  it("syncs songs saved together as one batch instead of once per song", async () => {
+    const sync = vi.fn().mockResolvedValue(undefined);
+    const stop = listen(sync);
+    try {
+      const saved = { "spotify:track:a": song, "spotify:track:b": { ...song, rating: 5 }, "spotify:track:c": null };
+      announceSavedTracks(saved);
+      await Promise.resolve();
+      expect(sync).toHaveBeenCalledTimes(1);
+      expect(sync).toHaveBeenCalledWith(saved);
+      announceSavedTracks({ "spotify:track:a": { ...song, rating: 1 } });
+      await Promise.resolve();
+      expect(sync).toHaveBeenCalledTimes(2);
+      expect(sync).toHaveBeenLastCalledWith({ "spotify:track:a": { ...song, rating: 1 } });
+    } finally { stop(); }
+  });
+
+  it("doesn't sync again when the saving code already synced", async () => {
+    const sync = vi.fn().mockResolvedValue(undefined);
+    const shown = vi.fn();
+    const stop = listen(sync);
+    window.addEventListener("tagify:trackChanged", shown);
+    try {
+      announceSavedTracks({ "spotify:track:a": song }, "save", { smartPlaylistsSynced: true });
+      await Promise.resolve();
+      expect(sync).not.toHaveBeenCalled();
+      // Views still hear about the saved song.
+      expect(shown).toHaveBeenCalledTimes(1);
+    } finally { stop(); window.removeEventListener("tagify:trackChanged", shown); }
+  });
+
+  it("reports a failed sync without breaking later saves", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sync = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
+    const stop = listen(sync);
+    try {
+      announceSavedTracks({ "spotify:track:a": song });
+      await vi.waitFor(() => expect(error).toHaveBeenCalledWith("Tagify: Error syncing track with smart playlists", expect.any(Error)));
+      announceSavedTracks({ "spotify:track:b": song });
+      await Promise.resolve();
+      expect(sync).toHaveBeenCalledTimes(2);
+    } finally { stop(); error.mockRestore(); }
   });
 });

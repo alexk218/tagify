@@ -14,6 +14,7 @@ import { useAlbumMembership, useAlbumTrackListLookups } from "@/features/playlis
 import { useRatingControlTheme } from "@/hooks/shared/useRatingControlTheme";
 import { useProductAnalyticsView } from "@/features/product-analytics/useProductAnalyticsView";
 import { recordProductInteraction, songsBucket } from "@/features/product-analytics/productAnalytics";
+import { noteFirstSessionSongViewed, startFirstSessionWatch } from "@/features/product-analytics/firstSessionWatch";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./app.module.css";
 import "./styles/globals.css";
@@ -86,6 +87,7 @@ import { howToTipCopy } from "@/features/onboarding/howToTips";
 import type { CommunityMatch, CommunityMatchTag } from "@/features/onboarding/services/communityMatches";
 import { OnboardingPreviewBanner } from "@/features/onboarding/preview/OnboardingPreviewBanner";
 import type { SpotifyTrack } from "@/types/SpotifyTypes";
+import type { TrackData } from "@/types/tagData";
 import { isSameTagName } from "@tagify/community-contracts";
 import { removeTags } from "@/features/tag-data/utils/tagManager.taxonomy";
 import type { MergedTag } from "@/features/community/taggedByOthers/TaggedByOthersRows";
@@ -387,7 +389,6 @@ function App() {
 
   // Set up history tracking and URL param handling
   useSpicetifyHistory({
-    isMultiTagging,
     setIsMultiTagging,
     setMultiTagTracks,
     setLockedTrack,
@@ -543,6 +544,7 @@ function App() {
   );
 
   useTagifyUsage(packageJson.version);
+  useEffect(() => { void startFirstSessionWatch(); }, []);
   // The Sync dialog opens over other screens, usually Community, so it is checked first.
   useProductAnalyticsView(isLoading ? null : showCloudSync && !cloudRecoveryPending ? "cloud_sync_opened" :
     showTagManager ? "tag_manager_opened" : showCommunityWorkspace ? "community_opened" : showStats ? "stats_opened" :
@@ -724,6 +726,7 @@ function App() {
 
   const playTrack = trackService.playTrack;
   const activeTrackUri = activeTrack?.uri ?? null;
+  useEffect(() => { noteFirstSessionSongViewed(activeTrackUri); }, [activeTrackUri]);
   const activeTrackMetadata = useMemo(() => {
     if (!activeTrack) {
       return undefined;
@@ -1378,12 +1381,18 @@ function App() {
     if (!trackEditHistory.hold(session)) throw new Error("Wait for the current edit to finish, then try saving again.");
     try {
       await flushLocalPersistence();
-      const before = (await indexedDBStorage.loadAllStrict()).tracks;
       if (session?.account !== getTagifyDatabaseName()) throw new Error("Your account changed. Reopen your music before saving changes.");
+      // Read only the selected songs and their linked releases, the only songs a bulk save changes.
+      const selected = new Set(updates.map(({ trackUri }) => trackUri));
+      const direct = await indexedDBStorage.getRecordingTracks([...selected], session.account);
+      const groups = [...new Set(Object.values(direct).flatMap(track => track.recordingGroupId ? [track.recordingGroupId] : []))];
+      const before: Record<string, TrackData | null> = { ...(groups.length ? await indexedDBStorage.getRecordingGroupTracksStrict(groups, session.account) : {}), ...direct };
       // Tag origin: one action applied to the selected songs.
-      await applyBatchTagUpdates(updates.map((update) => ({ ...update, tagMethod: "bulk" })));
-      const after = (await indexedDBStorage.loadAllStrict()).tracks;
-      trackEditHistory.record(session, before, after, "saved");
+      const saved = await applyBatchTagUpdates(updates.map((update) => ({ ...update, tagMethod: "bulk" })));
+      const after = { ...before, ...saved };
+      // A linked release that wasn't read beforehand stays out of Undo rather than look newly added.
+      const recorded = Object.keys(saved).filter(uri => Object.hasOwn(before, uri) || selected.has(uri));
+      trackEditHistory.record(session, before, after, "saved", recorded);
       const retagged = [...new Set(updates.map(({ trackUri }) => trackUri))].filter((trackUri) => JSON.stringify(before[trackUri]?.tagIds ?? []) !== JSON.stringify(after[trackUri]?.tagIds ?? [])).length;
       const songs = songsBucket(retagged);
       if (songs) recordProductInteraction("bulk_tag_applied", { songs });
@@ -1395,7 +1404,7 @@ function App() {
     const latest = await indexedDBStorage.getRecordingTracks(Object.keys(changes), account);
     if (account !== getTagifyDatabaseName()) return;
     showSavedRecords({ tracks: Object.fromEntries(Object.keys(changes).map(uri => [uri, latest[uri] || null])) });
-    announceSavedTracks(latest);
+    announceSavedTracks(latest, "save", { smartPlaylistsSynced: true });
     if (Object.keys(syncChanges).length) void syncMultipleTracksWithSmartPlaylists(Object.fromEntries(Object.keys(syncChanges).map(uri => [uri, latest[uri] || null])));
   };
   const recordingConflicts = useRecordingLibrary(tagData.tracks, !isLoading && !migrationProgress && !orchestratorResult?.fallbackMode, onRecordingsChanged);
@@ -1955,8 +1964,9 @@ function App() {
                 taggedByOthersView={taggedByOthersInTrackList ? (
                   <TaggedByOthersSection
                     inTrackList
+                    connected={syncConnected}
                     // A revoked device reconnects first; nothing is checked until then.
-                    connected={syncConnected && syncStatus !== "reauthorize"}
+                    reconnectRequired={syncStatus === "reauthorize"}
                     connectionPending={!syncConnected && Boolean(syncPairingService.getPending())}
                     accountId={getDesktopSyncConfiguration()?.accountId || null}
                     tracks={tagData.tracks}

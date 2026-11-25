@@ -4,9 +4,17 @@ import { describe, expect, it, vi } from "vitest";
 import InfoModal from "../InfoModal";
 
 describe("InfoModal", () => {
-  it("summarizes Tagify 3.4.0 and keeps prior releases available", async () => {
+  it("summarizes Tagify 3.4.2 and keeps prior releases available", async () => {
     render(<InfoModal initialSection="whats-new" onClose={vi.fn()} />);
 
+    expect(screen.getByRole("link", { name: "What's new in Tagify 3.4.2" })).toHaveAttribute("href", "https://github.com/alexk218/tagify/releases/tag/v3.4.2");
+    for (const name of ["One place for others' songs", "Filters there too", "Tags in more than one group", "Faster on big libraries"]) {
+      expect(screen.getByRole("heading", { name })).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByText("What's New in Tagify 3.4.1", { selector: "span" }));
+    expect(screen.getByRole("link", { name: "What's new in Tagify 3.4.1" })).toHaveAttribute("href", "https://github.com/alexk218/tagify/releases/tag/v3.4.1");
+    expect(screen.getByRole("heading", { name: "To Tag list" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("What's New in Tagify 3.4.0", { selector: "span" }));
     expect(screen.getByRole("link", { name: "What's new in Tagify 3.4.0" })).toHaveAttribute("href", "https://github.com/alexk218/tagify/releases/tag/v3.4.0");
     for (const name of ["Tagged by others", "Album covers in your track list", "Smart Playlists with Community", "Tag Manager and more"]) {
       expect(screen.getByRole("heading", { name })).toBeInTheDocument();

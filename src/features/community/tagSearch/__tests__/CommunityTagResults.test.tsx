@@ -2,8 +2,14 @@ import React from "react";
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommunityTagResults, SONGS_BEFORE_LOCK, foundText, tagSearchQuery } from "../CommunityTagResults";
-import { forgetCommunityTagSearches, useCommunityTagSearch, type CommunityTagSearchState } from "../useCommunityTagSearch";
+import { forgetCommunityTagSearches, searchCompletedDetails, useCommunityTagSearch, type CommunityTagSearchState } from "../useCommunityTagSearch";
 import type { TagSearchPage, TagSearchSong } from "../tagSearchClient";
+
+const analytics = vi.hoisted(() => ({ record: vi.fn() }));
+vi.mock("@/features/product-analytics/productAnalytics", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/product-analytics/productAnalytics")>()),
+  recordProductInteraction: analytics.record,
+}));
 
 const song = (index: number): TagSearchSong => ({
   uri: `spotify:track:${String(index).padStart(22, "0")}`, title: `Song ${index}`, artists: ["Artist"], imageUrl: null, people: 2, tags: ["Deep House"],
@@ -20,18 +26,18 @@ const view = (search: CommunityTagSearchState, handlers = { onConnect: vi.fn(), 
 
 describe("On Community results", () => {
   it("not connected: the first songs, the total and Create account or sign in", () => {
-    const handlers = view(state({ songs: songs(5), total: 312, locked: "connect" }));
+    const handlers = view(state({ songs: songs(SONGS_BEFORE_LOCK), total: 312, locked: "connect" }));
     expect(screen.getByRole("heading", { name: "On Community" })).toBeInTheDocument();
     expect(screen.getByText("312 songs tagged Deep House")).toBeInTheDocument();
     expect(screen.getAllByRole("listitem")).toHaveLength(SONGS_BEFORE_LOCK);
-    expect(screen.getByText("307 more songs on Community")).toBeInTheDocument();
+    expect(screen.getByText("292 more songs on Community")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create account or sign in to see all 312" }));
     expect(handlers.onConnect).toHaveBeenCalledTimes(1);
     expect(handlers.onShare).not.toHaveBeenCalled();
   });
 
   it("connected but not sharing: the same limit, asking them to share their tags", () => {
-    const handlers = view(state({ songs: songs(8), total: 40, locked: "share" }));
+    const handlers = view(state({ songs: songs(SONGS_BEFORE_LOCK + 3), total: 40, locked: "share" }));
     expect(screen.getAllByRole("listitem")).toHaveLength(SONGS_BEFORE_LOCK);
     expect(screen.getByText("Others get to see your tags in return.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Share your tags on Community to see all 40" }));
@@ -90,6 +96,29 @@ describe("On Community results", () => {
     await waitFor(() => expect(showNotification).toHaveBeenCalledWith("Spotify couldn't add Song 2 to Liked Songs. Please try again.", true));
     expect(screen.getByRole("button", { name: "Add to Liked Songs: Song 2" }).getAttribute("aria-pressed")).toBe("false");
     expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("in words: Save to Liked Songs under each song, counted once Spotify saved it", async () => {
+    const likedSongs = noLikes();
+    const afterSave = vi.fn();
+    likedSongs.save.mockRejectedValueOnce(new Error("offline"));
+    render(<CommunityTagResults tags={["Deep House"]} match="any" search={state({ songs: songs(1), total: 1 })} likedSongs={likedSongs} onSaved={vi.fn()} afterSave={afterSave}
+      saveInWords onConnect={vi.fn()} onShare={vi.fn()} onPlay={vi.fn()} />);
+    const save = screen.getByRole("button", { name: "Add to Liked Songs: Song 1" });
+    expect(save).toHaveTextContent("Save to Liked Songs");
+    fireEvent.click(save);
+    await waitFor(() => expect(likedSongs.save).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(save).not.toBeDisabled());
+    expect(afterSave).not.toHaveBeenCalled();
+    fireEvent.click(save);
+    await waitFor(() => expect(afterSave).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "Remove from Liked Songs: Song 1" })).toHaveTextContent("In Liked Songs");
+  });
+
+  it("says so when asked to and nothing was found", () => {
+    render(<CommunityTagResults tags={["Deep House"]} match="any" search={state({ total: 0 })} likedSongs={noLikes()} emptyText="No songs tagged Deep House by other members yet."
+      onConnect={vi.fn()} onShare={vi.fn()} onPlay={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("No songs tagged Deep House by other members yet.");
   });
 
   it("shows up to four of each song's tags, the searched ones marked", () => {
@@ -151,6 +180,29 @@ describe("useCommunityTagSearch", () => {
     act(() => result.current.loadMore());
     await waitFor(() => expect(result.current.songs).toHaveLength(3));
     expect(result.current.hasMore).toBe(false);
+  });
+
+  it("counts each answer from Community by size, never by tag, and not a kept answer shown again", async () => {
+    analytics.record.mockClear();
+    const search = vi.fn(async () => page({ total: 312, locked: "share" }));
+    const ask = () => renderHook(() => useCommunityTagSearch({ tags: ["Rock", "Deep House"], match: "any", enabled: true, viewer: "v", search, nameSongs: async (s) => s, settleMs: 0 }));
+    const first = ask();
+    await waitFor(() => expect(first.result.current.phase).toBe("done"));
+    first.unmount();
+    const again = ask();
+    await waitFor(() => expect(again.result.current.phase).toBe("done"));
+    const counted = analytics.record.mock.calls.filter(([event]) => event === "community_tag_search_completed");
+    expect(counted).toEqual([["community_tag_search_completed", { result_bucket: "100+", locked: "share", tags_bucket: "2-3" }]]);
+    expect(searchCompletedDetails(0, null, 1)).toEqual({ result_bucket: "0", locked: "none", tags_bucket: "1" });
+    expect(searchCompletedDetails(9, "connect", 4)).toEqual({ result_bucket: "1-9", locked: "connect", tags_bucket: "4+" });
+    expect(searchCompletedDetails(99, null, 3).result_bucket).toBe("10-99");
+  });
+
+  it("counts nothing when Community can't be reached", async () => {
+    analytics.record.mockClear();
+    const { result } = renderHook(() => useCommunityTagSearch({ tags: ["Rock"], match: "any", enabled: true, viewer: "v", search: async () => { throw new Error("offline"); }, settleMs: 0 }));
+    await waitFor(() => expect(result.current.phase).toBe("failed"));
+    expect(analytics.record).not.toHaveBeenCalled();
   });
 
   it("asks nothing without tags", () => {

@@ -70,6 +70,17 @@ export async function readSavedLibrary(): Promise<TagDataStructure> {
   }
 }
 
+/** Reads saved tags and folders. A failed read throws, like readSavedLibrary. */
+export async function readSavedTaxonomy(): Promise<TagDataStructure["taxonomy"]> {
+  await ensureLibraryReady();
+  try {
+    return await indexedDBStorage.getTaxonomy();
+  } catch (error) {
+    console.error("Tagify: Could not read saved tags", error);
+    throw new LibraryUnavailableError();
+  }
+}
+
 /** One change requested by the user. Only the named fields and tags change. */
 export interface AnnotationEdit {
   /** Sets the star rating; 0 clears it. */
@@ -213,11 +224,45 @@ export async function saveEntityEdit<T extends PlaylistData | ArtistData>(
  * songs. Each song event carries the saved record, never a guess, so views
  * in this bundle show it without reading the whole library again.
  */
-export function announceSavedTracks(saved: Record<string, TrackData | null>, type: TagDataUpdatedEventType = "save"): void {
+export function announceSavedTracks(
+  saved: Record<string, TrackData | null>,
+  type: TagDataUpdatedEventType = "save",
+  options: { smartPlaylistsSynced?: boolean } = {},
+): void {
   const entries = Object.entries(saved);
   if (!entries.length) return;
   dispatchTagDataUpdatedEvent(type, { recordsAnnounced: true });
+  // A caller that already synced Smart Playlists says so, so the extension doesn't sync again.
+  const synced = options.smartPlaylistsSynced ? { smartPlaylistsSynced: true } : {};
   for (const [trackUri, trackData] of entries) {
-    window.dispatchEvent(new CustomEvent("tagify:trackChanged", { detail: { trackUri, trackData, timestamp: Date.now() } }));
+    window.dispatchEvent(new CustomEvent("tagify:trackChanged", { detail: { trackUri, trackData, timestamp: Date.now(), ...synced } }));
   }
+}
+
+/**
+ * Listens for announced songs and syncs Smart Playlists once per save: songs
+ * announced together (one event each) are collected and synced as one batch.
+ */
+export function batchSmartPlaylistSync(
+  sync: (updates: Record<string, TrackData | null>) => Promise<void>,
+): (event: Event) => void {
+  let pending: Record<string, TrackData | null> | null = null;
+  return (event) => {
+    const { trackUri, trackData, smartPlaylistsSynced } = (event as CustomEvent).detail || {};
+    if (typeof trackUri !== "string" || trackData === undefined || smartPlaylistsSynced) return;
+    if (pending) {
+      pending[trackUri] = trackData;
+      return;
+    }
+    pending = { [trackUri]: trackData };
+    queueMicrotask(async () => {
+      const updates = pending!;
+      pending = null;
+      try {
+        await sync(updates);
+      } catch (error) {
+        console.error("Tagify: Error syncing track with smart playlists", error);
+      }
+    });
+  };
 }

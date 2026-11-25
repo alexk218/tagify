@@ -334,12 +334,28 @@ describe("Smart Playlist sync while songs are being tagged", () => {
     expect((await savedPlaylist()).pendingTagChoices).toEqual([]);
   });
 
+  it("reads the whole library once per check, and only Spotify's new songs before that", async () => {
+    const p = playlist({ ratingFilters: [5] });
+    await seed(p, { [songX]: song({ rating: 5 }) });
+    const spotify = spotifyPlaylist([songX]);
+    const full = vi.spyOn(indexedDBStorage, "loadAllStrict");
+    const state = vi.spyOn(indexedDBStorage, "getSmartPlaylistSyncState");
+
+    await new SmartPlaylistSyncService().reconcileAll();
+
+    expect(spotify.read).toHaveBeenCalled();
+    // Before, the check loaded every store once before Spotify and every song again after it.
+    expect(full).not.toHaveBeenCalled();
+    expect(state.mock.calls.filter(([uris]) => uris === undefined)).toHaveLength(1);
+    expect(state.mock.calls.every(([uris]) => uris === undefined || uris.length <= 1)).toBe(true);
+  });
+
   it("changes nothing when the saved library cannot be read", async () => {
     const p = playlist({ ratingFilters: [5] });
     await seed(p, { [songX]: song({ tagIds: [vocal] }) });
     const before = await saved(songX);
     const spotify = spotifyPlaylist([songX]);
-    vi.spyOn(indexedDBStorage, "loadAllStrict").mockRejectedValueOnce(new Error("read failed"));
+    vi.spyOn(indexedDBStorage, "getSmartPlaylistSyncState").mockRejectedValueOnce(new Error("read failed"));
 
     await expect(new SmartPlaylistSyncService().reconcileAll()).rejects.toThrow("read failed");
 

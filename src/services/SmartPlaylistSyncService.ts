@@ -542,8 +542,9 @@ export class SmartPlaylistSyncService {
       playlists = [...playlists.slice(start), ...playlists.slice(0, start)].slice(0, 10);
     }
 
-    // A failed read stops here, before Spotify or any saved song changes.
-    const allTagData = await storageService.loadAllStrict();
+    // A failed read stops here, before Spotify or any saved song changes. The songs are read
+    // after Spotify: only the ones Spotify added here, then the whole library once.
+    const [taxonomy] = await Promise.all([storageService.getTaxonomy(), indexedDBStorage.getSmartPlaylistSyncState([], databaseName)]);
     this.assertAccount();
     const membershipByPlaylistId = new Map<string, string[]>();
     const inboundAdditionsByPlaylistId = new Map<string, string[]>();
@@ -620,12 +621,15 @@ export class SmartPlaylistSyncService {
       return summary;
     }
 
+    const inboundUris = uniqueTrackUris([...inboundAdditionsByPlaylistId.values()].flat());
+    const knownInbound = inboundUris.length ? (await indexedDBStorage.getSmartPlaylistSyncState(inboundUris, databaseName)).tracks : {};
+    this.assertAccount();
     let newDetailsLeft = background ? 50 : Infinity;
     const deferredInbound = new Set<string>();
     const allowedInbound = new Set<string>();
     for (const additions of inboundAdditionsByPlaylistId.values()) {
       for (const uri of additions) {
-        if (allTagData.tracks[uri] || allowedInbound.has(uri) || uri.startsWith("spotify:local:")) allowedInbound.add(uri);
+        if (knownInbound[uri] || allowedInbound.has(uri) || uri.startsWith("spotify:local:")) allowedInbound.add(uri);
         else if (newDetailsLeft > 0) { newDetailsLeft--; allowedInbound.add(uri); }
         else deferredInbound.add(uri);
       }
@@ -636,24 +640,17 @@ export class SmartPlaylistSyncService {
       playlists,
       inboundAdditionsByPlaylistId,
       databaseName,
-      allTagData.tracks,
+      knownInbound,
       options,
     );
     summary.metadataUpdatedCount = inbound.updatedCount;
-
-    for (const [trackUri, trackData] of inbound.tracks) {
-      allTagData.tracks[trackUri] = trackData;
-    }
-    showSmartPlaylistCriteriaAppliedNotifications(
-      inbound.notifications,
-      allTagData.taxonomy,
-    );
+    showSmartPlaylistCriteriaAppliedNotifications(inbound.notifications, taxonomy);
 
     // Spotify reads and metadata lookups can outlive a local edit. Refresh once
     // for the whole pass; individual writes validate their small batch again.
     const latestState = await indexedDBStorage.getSmartPlaylistSyncState(undefined, databaseName);
     this.assertAccount();
-    allTagData.tracks = latestState.tracks;
+    const allTagData = { tracks: latestState.tracks, taxonomy };
     const pendingPlaylists = latestState.playlists;
     playlists = playlists.filter(playlist => sameSmartPlaylistRules(playlist,
       pendingPlaylists.find(item => item.playlistId === playlist.playlistId)));

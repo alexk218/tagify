@@ -71,6 +71,7 @@ export function renderStarRatingControl(
       };
 
       button.type = "button";
+      button.className = "tagify-rating-star-button";
       button.title = defaultLabel;
       button.setAttribute("aria-label", defaultLabel);
       button.setAttribute("aria-pressed", String(isCurrentRating));

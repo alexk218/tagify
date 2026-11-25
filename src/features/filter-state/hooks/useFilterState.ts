@@ -4,6 +4,7 @@ import { TagTaxonomy } from "@/types/tagData";
 import {
   addTagFilterClause,
   findTagFilterLocation,
+  findTagFilterLocations,
   flattenExcludedTagFilterFormula,
   flattenTagFilterFormula,
   normalizeTagFilterFormula,
@@ -15,6 +16,7 @@ import {
   updateTagFilterClauseOperator,
   updateTagFilterConnector,
   withTagInFilterClause,
+  withoutTagInFilterClause,
   withoutTagInFilterFormula,
 } from "@/utils/tagFilterGroups";
 import { findDisplayTagName } from "@/utils/tagTaxonomy";
@@ -217,6 +219,7 @@ export function useFilterState(scope: FilterStateScope = "tracks") {
     setSelectedClauseLane(TAG_FILTER_LANES.INCLUDE);
   };
 
+  /** Puts the tag in a group's Match or Not lane; any other group keeps it. */
   const moveTagToClauseLane = (
     tagId: string,
     lane: TagFilterLane,
@@ -266,7 +269,15 @@ export function useFilterState(scope: FilterStateScope = "tracks") {
     setTagFilterFormula((prev) => withoutTagInFilterFormula(prev, tagId));
   };
 
-  const removeTagFilter = (tagId: string) => {
+  /** Removes the tag from one group, or from every group when none is given. */
+  const removeTagFilter = (tagId: string, clauseIndex?: number) => {
+    if (clauseIndex !== undefined) {
+      setTagFilterFormula((prev) =>
+        withoutTagInFilterClause(prev, tagId, clauseIndex),
+      );
+      return;
+    }
+
     const location = findTagFilterLocation(tagFilterFormula, tagId);
 
     if (location) {
@@ -275,31 +286,30 @@ export function useFilterState(scope: FilterStateScope = "tracks") {
   };
 
   const toggleTagInSelectedClauseLane = (tagId: string) => {
-    const location = findTagFilterLocation(tagFilterFormula, tagId);
     const resolvedSelectedClauseIndex = ensureSelectedClause();
     const targetLane = selectedClauseLane;
+    const location = findTagFilterLocations(tagFilterFormula, tagId).find(
+      (candidate) => candidate.clauseIndex === resolvedSelectedClauseIndex,
+    );
 
-    if (location) {
-      if (
-        resolvedSelectedClauseIndex !== -1 &&
-        (location.clauseIndex !== resolvedSelectedClauseIndex ||
-          location.lane !== targetLane)
-      ) {
-        moveTagToClauseLane(tagId, targetLane, resolvedSelectedClauseIndex);
-        return;
-      }
-
-      removeTagFromFormula(tagId);
+    if (location?.lane === targetLane) {
+      removeTagFilter(tagId, location.clauseIndex);
       return;
     }
 
-    moveTagToClauseLane(tagId, targetLane);
+    moveTagToClauseLane(
+      tagId,
+      targetLane,
+      resolvedSelectedClauseIndex === -1 ? undefined : resolvedSelectedClauseIndex,
+    );
   };
 
   const toggleTagIncludeOff = (tagId: string) => {
-    const location = findTagFilterLocation(tagFilterFormula, tagId);
+    const isMatchedSomewhere = findTagFilterLocations(tagFilterFormula, tagId).some(
+      (location) => location.lane === TAG_FILTER_LANES.INCLUDE,
+    );
 
-    if (location?.lane === TAG_FILTER_LANES.INCLUDE) {
+    if (isMatchedSomewhere) {
       removeTagFromFormula(tagId);
       return;
     }
@@ -375,7 +385,9 @@ export function useFilterState(scope: FilterStateScope = "tracks") {
   };
 
   const moveTagToClauseOppositeLane = (tagId: string, clauseIndex: number) => {
-    const location = findTagFilterLocation(tagFilterFormula, tagId);
+    const location = findTagFilterLocations(tagFilterFormula, tagId).find(
+      (candidate) => candidate.clauseIndex === clauseIndex,
+    );
     const targetLane =
       location?.lane === TAG_FILTER_LANES.EXCLUDE
         ? TAG_FILTER_LANES.INCLUDE

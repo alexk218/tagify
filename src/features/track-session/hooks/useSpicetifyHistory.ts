@@ -21,7 +21,6 @@ function isHistoryListenAvailable(): boolean {
 }
 
 export function useSpicetifyHistory({
-  isMultiTagging,
   setIsMultiTagging,
   setMultiTagTracks,
   setLockedTrack,
@@ -36,6 +35,14 @@ export function useSpicetifyHistory({
     let selectionRevision = 0;
     let controller = new AbortController();
     let previousSelection = "";
+    // A single song replaces Bulk Tag. This listener lives for the whole session, so it can't read
+    // `isMultiTagging` (that value is the one from the first render); clearing is harmless when
+    // Bulk Tag isn't open.
+    const leaveBulkTagging = () => {
+      setIsMultiTagging(false);
+      setMultiTagTracks([]);
+      setLockedMultiTrackUri(null);
+    };
     const checkForTrackUris = async () => {
 
       const location = Spicetify.Platform.History
@@ -89,6 +96,7 @@ export function useSpicetifyHistory({
           if (trackUri.startsWith("spotify:local:")) {
             setLockedTrack(createLocalSpotifyTrack(trackUri));
             setIsLocked(true);
+            leaveBulkTagging();
             return;
           }
 
@@ -98,11 +106,7 @@ export function useSpicetifyHistory({
           if (trackData) {
             setLockedTrack(createSpotifyTrackFromTrackInfo(trackUri, trackData));
             setIsLocked(true);
-
-            if (isMultiTagging) {
-              setMultiTagTracks([]);
-              setIsMultiTagging(false);
-            }
+            leaveBulkTagging();
           }
         } catch (error) {
           if (signal.aborted) return;

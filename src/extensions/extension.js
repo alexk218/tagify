@@ -17,9 +17,11 @@ import {
 } from "../features/tag-data/utils/tagData.events";
 import {
   announceSavedTracks,
+  batchSmartPlaylistSync,
   assertEditsAllowed,
   LibraryUnavailableError,
   readSavedLibrary,
+  readSavedTaxonomy,
   saveTrackEdits,
 } from "./extensionEdits";
 import { restoreDesktopSyncConfiguration } from "../services/sync/SyncInstallRecovery";
@@ -125,6 +127,18 @@ function findUriInObject(root, maxDepth = 6) {
   const EXTENSION_SETTINGS_KEY = "tagify:extensionSettings";
   const SETTINGS_CHANGED_EVENT = "tagify:settingsChanged";
   const DATA_UPDATED_EVENT = "tagify:dataUpdated";
+  // A library read that takes longer than this is treated as failed and retried.
+  const LIBRARY_REFRESH_TIMEOUT_MS = 60_000;
+  const LIBRARY_REFRESH_RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
+  const withTimeout = (promise, ms) => {
+    let timer;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out after ${ms} ms`)), ms);
+      }),
+    ]).finally(() => clearTimeout(timer));
+  };
   const SMART_PLAYLIST_SYNC_EVENT = "tagify:trackChanged";
   const PLAYLIST_CHANGED_EVENT = "tagify:playlistChanged";
   const ARTIST_CHANGED_EVENT = "tagify:artistChanged";
@@ -134,14 +148,7 @@ function findUriInObject(root, maxDepth = 6) {
     smartPlaylistCache = playlists;
   });
 
-  window.addEventListener(SMART_PLAYLIST_SYNC_EVENT, async (event) => {
-    const { trackUri, trackData } = event.detail;
-    try {
-      await smartPlaylistSyncService.syncTrack(trackUri, trackData);
-    } catch (error) {
-      console.error("Tagify: Error syncing track with smart playlists", error);
-    }
-  });
+  window.addEventListener(SMART_PLAYLIST_SYNC_EVENT, batchSmartPlaylistSync((updates) => smartPlaylistSyncService.syncTracks(updates)));
 
   // ! SET TO TRUE TO DEBUG
   const DEBUG_MODE = false;
@@ -459,17 +466,15 @@ function findUriInObject(root, maxDepth = 6) {
         return [];
       }
 
-      if (Array.isArray(track.tags)) {
-        return track.tags;
+      // Names come from the current tag list, so renamed tags show right away.
+      const tagIds = Array.isArray(track.tagIds)
+        ? track.tagIds.filter((tagId) => typeof tagId === "string")
+        : [];
+      if (tagIds.length > 0) {
+        return tagIds.map((tagId) => getExtensionTagForId(tagId, state.tagLookup));
       }
 
-      if (Array.isArray(track.tagIds)) {
-        return track.tagIds
-          .filter((tagId) => typeof tagId === "string")
-          .map((tagId) => getExtensionTagForId(tagId, state.tagLookup));
-      }
-
-      return [];
+      return Array.isArray(track.tags) ? track.tags : [];
     },
 
     getPlaylistTags(playlist) {
@@ -477,17 +482,15 @@ function findUriInObject(root, maxDepth = 6) {
         return [];
       }
 
-      if (Array.isArray(playlist.tags)) {
-        return playlist.tags;
+      // Names come from the current tag list, so renamed tags show right away.
+      const tagIds = Array.isArray(playlist.tagIds)
+        ? playlist.tagIds.filter((tagId) => typeof tagId === "string")
+        : [];
+      if (tagIds.length > 0) {
+        return tagIds.map((tagId) => getExtensionTagForId(tagId, state.tagLookup));
       }
 
-      if (Array.isArray(playlist.tagIds)) {
-        return playlist.tagIds
-          .filter((tagId) => typeof tagId === "string")
-          .map((tagId) => getExtensionTagForId(tagId, state.tagLookup));
-      }
-
-      return [];
+      return Array.isArray(playlist.tags) ? playlist.tags : [];
     },
 
     getArtistTags(artist) {
@@ -495,17 +498,15 @@ function findUriInObject(root, maxDepth = 6) {
         return [];
       }
 
-      if (Array.isArray(artist.tags)) {
-        return artist.tags;
+      // Names come from the current tag list, so renamed tags show right away.
+      const tagIds = Array.isArray(artist.tagIds)
+        ? artist.tagIds.filter((tagId) => typeof tagId === "string")
+        : [];
+      if (tagIds.length > 0) {
+        return tagIds.map((tagId) => getExtensionTagForId(tagId, state.tagLookup));
       }
 
-      if (Array.isArray(artist.tagIds)) {
-        return artist.tagIds
-          .filter((tagId) => typeof tagId === "string")
-          .map((tagId) => getExtensionTagForId(tagId, state.tagLookup));
-      }
-
-      return [];
+      return Array.isArray(artist.tags) ? artist.tags : [];
     },
 
     resolveTagById(tagId) {
@@ -568,6 +569,25 @@ function findUriInObject(root, maxDepth = 6) {
     async loadTaxonomy() {
       const taxonomy = await storageService.getTaxonomy();
       state.libraryVersion += 1;
+      this.showTaxonomy(taxonomy);
+    },
+
+    /**
+     * Reads saved tags and folders before the rest of the library, so renamed,
+     * recoloured or moved tags show even while all songs are still being read.
+     * @returns {Promise<boolean>} whether the tag list changed
+     */
+    async refreshTagList() {
+      const version = ++state.libraryVersion;
+      const taxonomy = await readSavedTaxonomy();
+      // A newer read or a saved edit already updated what is shown.
+      if (version !== state.libraryVersion) return false;
+      if (JSON.stringify(taxonomy ?? null) === JSON.stringify(state.taxonomy)) return false;
+      this.showTaxonomy(taxonomy);
+      return true;
+    },
+
+    showTaxonomy(taxonomy) {
       state.tagCategories = this.buildCategoryTreeFromTaxonomy(taxonomy);
       state.taxonomy = taxonomy && typeof taxonomy === "object" ? taxonomy : null;
       state.tagLookup = buildExtensionTagLookup(state.tagCategories, taxonomy);
@@ -2263,7 +2283,12 @@ function findUriInObject(root, maxDepth = 6) {
       const hide = "display: none !important;";
       const spotifyColumns = Array.from({ length: 11 }, (_, offset) => offset + 2).map((index) =>
         `[data-tagify-hidden-columns~="${index}"] [aria-colindex="${index}"]:not(.tagify-info):not(.tagify-header) { ${hide} }`);
+      // Spotify re-renders rows and can wipe the inline template Tagify set on
+      // them, which wraps the last column onto a second line. In a watched grid
+      // every row holding a Tagify cell takes the grid's template from here.
+      const tagifyRow = '[data-tagify-column] :has(> .tagify-info), [data-tagify-column] :has(> .tagify-header)';
       style.textContent = [
+        `${tagifyRow} { grid-template-columns: var(${TAGIFY_GRID_TEMPLATE_PROPERTY}) !important; }`,
         `[data-tagify-column="hidden"] .tagify-info, [data-tagify-column="hidden"] .tagify-header { ${hide} }`,
         ...spotifyColumns,
       ].join("\n");
@@ -2453,8 +2478,8 @@ function findUriInObject(root, maxDepth = 6) {
       void checkAutomaticRecordingReuse(track, tracks, async (changes, syncChanges = changes) => {
         utils.showSavedRecords({ tracks: changes });
         inlineEditor.refreshTracks(Object.keys(changes));
-        announceSavedTracks(changes);
-        await Promise.all(Object.entries(syncChanges).map(([trackUri, trackData]) => smartPlaylistSyncService.syncTrack(trackUri, trackData)));
+        announceSavedTracks(changes, "save", { smartPlaylistsSynced: true });
+        if (Object.keys(syncChanges).length) await smartPlaylistSyncService.syncTracks(syncChanges);
       }, isCurrent);
     },
 
@@ -4286,12 +4311,23 @@ function findUriInObject(root, maxDepth = 6) {
   // Changes saved elsewhere (the Tagify page, sync, Smart Playlists) mark
   // the shown library stale. It is read again once, shortly after the latest
   // change, with at most one read at a time; edits never wait for it.
+  /**
+   * Reads the library again after changes saved elsewhere (the Tagify page,
+   * sync). One read runs at a time. A read that fails or never finishes is
+   * retried a few times and never blocks later refreshes, so changes such as a
+   * renamed tag show without restarting Spotify.
+   */
   const libraryRefresh = {
     timer: null,
     running: false,
     stale: false,
+    failures: 0,
     schedule(delay = 200) {
       this.stale = true;
+      this.failures = 0;
+      this.start(delay);
+    },
+    start(delay) {
       if (this.timer || this.running) return;
       this.timer = setTimeout(() => {
         this.timer = null;
@@ -4301,16 +4337,32 @@ function findUriInObject(root, maxDepth = 6) {
     async run() {
       this.running = true;
       this.stale = false;
+      let failed = false;
       try {
-        if (await utils.loadTaggedTracks()) {
+        if (await withTimeout(utils.refreshTagList(), LIBRARY_REFRESH_TIMEOUT_MS)) {
+          refreshLibraryViews();
+        }
+        if (await withTimeout(utils.loadTaggedTracks(), LIBRARY_REFRESH_TIMEOUT_MS)) {
+          this.failures = 0;
           refreshLibraryViews();
         } else if (state.libraryAvailable) {
           // Saved edits were shown during the read; read once more.
           this.stale = true;
+        } else {
+          failed = true;
         }
+      } catch (error) {
+        if (!(error instanceof LibraryUnavailableError)) {
+          console.error("Tagify: Could not refresh the saved library", error);
+        }
+        failed = true;
       } finally {
         this.running = false;
-        if (this.stale) this.schedule();
+        if (this.stale) {
+          this.start(200);
+        } else if (failed && this.failures < LIBRARY_REFRESH_RETRY_DELAYS_MS.length) {
+          this.start(LIBRARY_REFRESH_RETRY_DELAYS_MS[this.failures++]);
+        }
       }
     },
   };

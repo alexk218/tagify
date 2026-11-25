@@ -23,6 +23,7 @@ export * from "./restoreDetails";
 export * from "./spotifyListChoice";
 export * from "./catalogFill";
 export * from "./catalogFillRuns";
+export * from "./lookupIdlePoll";
 export * from "./nowPlayingLookups";
 export * from "./spotifySearchLookups";
 export * from "./starterTags";

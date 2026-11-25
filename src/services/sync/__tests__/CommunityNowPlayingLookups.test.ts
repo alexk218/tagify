@@ -5,6 +5,7 @@ import {
   LOOKUP_NUDGE_MIN_GAP_MS, NOT_A_FILLER_RECHECK_MS, NOW_PLAYING_LOOKUP_DAILY_SEARCHES, NOW_PLAYING_LOOKUP_POLL_MS, NowPlayingLookupScheduler, newNowPlayingLookupMemory,
   runNowPlayingLookups, withinLookupDailyCap, type NowPlayingLookupRun, type NowPlayingLookupSources,
 } from "../CommunityNowPlayingLookups";
+import { LOOKUP_IDLE_POLL_CAP_MS } from "../CommunityLookupLane";
 
 const deviceId = "11111111-1111-4111-8111-111111111111";
 const session = async () => ({ apiBaseUrl: "https://community.test", accessToken: "token", deviceId });
@@ -311,5 +312,92 @@ describe("Now playing lookup nudges", () => {
     value.nudge();
     expect(armedIn()).toBeNull();
     expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Now playing lookup idle polls", () => {
+  function idle(options: { hears?: () => boolean } = {}) {
+    let clock = 1_000_000;
+    let armed: { fire: () => void; at: number } | null = null;
+    const waits: number[] = [];
+    const finishes: Array<(run: Partial<NowPlayingLookupRun>) => void> = [];
+    const run = vi.fn(() => new Promise<NowPlayingLookupRun>((resolve) => {
+      finishes.push((result) => resolve({ filler: true, lookups: 0, answered: 0, searches: 0, ...result }));
+    }));
+    const value = new NowPlayingLookupScheduler({
+      run, now: () => clock, canHearNudges: options.hears ?? (() => true),
+      setTimer: (fire, ms) => { armed = { fire, at: clock + ms }; waits.push(ms); return armed; },
+      clearTimer: (timer) => { if (armed === timer) armed = null; },
+    });
+    const finish = async (result: Partial<NowPlayingLookupRun> = {}) => { finishes.shift()!(result); await value.pending; };
+    const fire = async () => { const due = armed!; clock = due.at; armed = null; due.fire(); await Promise.resolve(); };
+    const armedIn = () => (armed ? armed.at - clock : null);
+    return { value, run, waits, finish, fire, armedIn };
+  }
+  const announced = { idlePollMaxMs: 90_000 };
+
+  it("stretches empty polls up to what Community allows while it announces requests", async () => {
+    const { value, waits, finish, fire } = idle();
+    value.poll();
+    await finish(announced);
+    for (let i = 0; i < 4; i++) { await fire(); await finish(announced); }
+    expect(waits).toEqual([30_000, 60_000, 90_000, 90_000, 90_000]);
+  });
+
+  it("never stretches past five minutes, whatever Community allows", async () => {
+    const { value, waits, finish, fire } = idle();
+    value.poll();
+    await finish({ idlePollMaxMs: 30 * 60_000 });
+    for (let i = 0; i < 5; i++) { await fire(); await finish({ idlePollMaxMs: 30 * 60_000 }); }
+    expect(waits).toEqual([30_000, 60_000, 120_000, 240_000, LOOKUP_IDLE_POLL_CAP_MS, LOOKUP_IDLE_POLL_CAP_MS]);
+  });
+
+  it("starts over at 15 seconds after a poll that found requests", async () => {
+    const { value, waits, finish, fire } = idle();
+    value.poll();
+    await finish(announced);
+    await fire(); await finish(announced);
+    await fire(); await finish({ ...announced, lookups: 2, searches: 2, answered: 2 });
+    await fire(); await finish(announced);
+    expect(waits).toEqual([30_000, 60_000, NOW_PLAYING_LOOKUP_POLL_MS, 30_000]);
+  });
+
+  it("answers a nudge at once during a stretched wait, then starts the stretch over", async () => {
+    const { value, run, waits, finish, fire, armedIn } = idle();
+    value.poll();
+    await finish(announced);
+    await fire(); await finish(announced);
+    expect(armedIn()).toBe(60_000);
+    value.nudge();
+    // The last run started just now, so the nudge's run waits out the least gap, not the minute.
+    expect(armedIn()).toBe(LOOKUP_NUDGE_MIN_GAP_MS);
+    await fire();
+    expect(run).toHaveBeenCalledTimes(3);
+    await finish(announced);
+    expect(waits).toEqual([30_000, 60_000, LOOKUP_NUDGE_MIN_GAP_MS, 30_000]);
+  });
+
+  it("keeps polling every 15 seconds when Community announces nothing or the desktop isn't listening", async () => {
+    let listening = false;
+    const { value, waits, finish, fire } = idle({ hears: () => listening });
+    value.poll();
+    await finish(announced);
+    await fire(); await finish(announced);
+    listening = true;
+    await fire(); await finish({});
+    await fire(); await finish(announced);
+    listening = false;
+    await fire(); await finish(announced);
+    expect(waits).toEqual([NOW_PLAYING_LOOKUP_POLL_MS, NOW_PLAYING_LOOKUP_POLL_MS, NOW_PLAYING_LOOKUP_POLL_MS, 30_000, NOW_PLAYING_LOOKUP_POLL_MS]);
+  });
+
+  it("starts the stretch over after a back-off", async () => {
+    const { value, waits, finish, fire } = idle();
+    value.poll();
+    await finish(announced);
+    await fire(); await finish(announced);
+    await fire(); await finish({ stopped: "network" });
+    await fire(); await finish(announced);
+    expect(waits).toEqual([30_000, 60_000, 60_000, 30_000]);
   });
 });

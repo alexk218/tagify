@@ -135,6 +135,16 @@ export async function runMetadataBackfill({ batchDelayMs = 1000, maxTracksPerRun
     await storageService.initialize();
   }
 
+  // With every allowance used, nothing could be looked up, so skip reading the whole library.
+  const budget = sessionBudget();
+  const trackLimit = Math.min(50, Math.max(0, maxTracksPerRun));
+  const allowances: Array<[Set<string>, number, string]> = [
+    [budget.tracks, trackLimit, "backfill-tracks"], [budget.playlists, 20, "backfill-playlists"], [budget.artists, 20, "backfill-artists"],
+  ];
+  if (allowances.every(([used, limit, feature]) => used.size >= limit || !spotifyBackgroundPolicy.hasCapacity(feature, limit))) {
+    return 0;
+  }
+
   const tagData = await storageService.loadAll();
   if (!tagData) {
     return 0;
@@ -161,8 +171,7 @@ export async function runMetadataBackfill({ batchDelayMs = 1000, maxTracksPerRun
       return hasTagData && ((generalAllowed && (needsMetadata || needsAudioFeatures)) || (albumAllowed && needsAlbum));
     },
   );
-  const budget = sessionBudget();
-  const tracksToBackfill = reserve(eligibleTracks, budget.tracks, Math.min(50, Math.max(0, maxTracksPerRun)), "backfill-tracks");
+  const tracksToBackfill = reserve(eligibleTracks, budget.tracks, trackLimit, "backfill-tracks");
   const remaining = Math.max(0, eligibleTracks.length - tracksToBackfill.length);
   const playlistsToBackfill = reserve(Object.entries(tagData.playlists).filter(
     ([uri, playlist]) =>

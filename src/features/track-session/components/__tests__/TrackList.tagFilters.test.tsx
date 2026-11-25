@@ -414,6 +414,35 @@ describe("TrackList tag filtering", () => {
     expect(screen.queryByText("Must not have")).not.toBeInTheDocument();
   });
 
+  it("adds a tag that is already in another group to the selected group too", async () => {
+    const user = userEvent.setup();
+    setAdvancedFilters(true);
+    render(<TrackListHarness />);
+
+    await user.click(screen.getByRole("button", { name: /^Filters/ }));
+    await user.click(screen.getByRole("button", { name: "Start Filtering" }));
+    await user.click(screen.getByRole("button", { name: "House" }));
+    await user.click(screen.getByRole("button", { name: "Add Group" }));
+    await user.click(screen.getByRole("button", { name: "Chill" }));
+    await user.click(screen.getByRole("button", { name: "G1 MATCH House" }));
+
+    // Group 2 is selected: House is in it now, and still in group 1.
+    expect(screen.getByRole("button", { name: "MATCH House" })).toBeInTheDocument();
+    const groupTwoApplied = screen.getByLabelText("Applied tag filters");
+    expect(
+      within(groupTwoApplied).getByRole("button", { name: "MATCH House applied filter" }),
+    ).toBeInTheDocument();
+    // House AND (Chill OR House): only the House song matches.
+    expect(screen.getByText("House Track")).toBeInTheDocument();
+    expect(screen.queryByText("Chill Track")).not.toBeInTheDocument();
+
+    // Removing House from group 2 leaves it in group 1.
+    await user.click(
+      within(groupTwoApplied).getByRole("button", { name: "MATCH House applied filter" }),
+    );
+    expect(screen.getByRole("button", { name: "G1 MATCH House" })).toBeInTheDocument();
+  });
+
   it("turns an applied MATCH or NOT filter off with one click", async () => {
     const user = userEvent.setup();
     render(<TrackListHarness />);

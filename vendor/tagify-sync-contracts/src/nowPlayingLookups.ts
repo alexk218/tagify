@@ -5,6 +5,8 @@
 // never who is playing them) and says whether it is a filler; POST sends what the search found:
 // the same song's Spotify track id, or null when Spotify has no song with the same title, version
 // and artist. Every other desktop is told it isn't a filler and handed nothing.
+import { parseLookupIdlePollMaxMs } from "./lookupIdlePoll";
+
 export const NOW_PLAYING_LOOKUPS_PROTOCOL_VERSION = 1 as const;
 export const MAX_NOW_PLAYING_LOOKUPS = 10;
 export const MAX_NOW_PLAYING_LOOKUP_ANSWERS = 10;
@@ -23,7 +25,12 @@ export interface NowPlayingLookupV1 {
   artists: string[];
   album: string | null;
 }
-export interface NowPlayingLookupsV1 { filler: boolean; lookups: NowPlayingLookupV1[] }
+export interface NowPlayingLookupsV1 {
+  filler: boolean;
+  lookups: NowPlayingLookupV1[];
+  /** See lookupIdlePoll.ts: set only when Community announces each new request. */
+  idlePollMaxMs?: number;
+}
 /** `spotifyTrackId` null: Spotify was searched and has no song with the same title, version and artist. */
 export interface NowPlayingLookupAnswerV1 { requestId: string; spotifyTrackId: string | null }
 export interface NowPlayingLookupAnswersV1 {
@@ -71,7 +78,8 @@ export function parseNowPlayingLookups(value: unknown): NowPlayingLookupsV1 {
     .filter((lookup, index, all) => all.findIndex((other) => other.requestId === lookup.requestId) === index);
   // An answer from before `filler` was sent counts as a filler's only when it hands out lookups.
   const filler = value.filler === undefined ? value.lookups.length > 0 : value.filler;
-  return { filler, lookups: filler ? lookups : [] };
+  const idlePollMaxMs = filler ? parseLookupIdlePollMaxMs(value.idlePollMaxMs) : undefined;
+  return { filler, lookups: filler ? lookups : [], ...(idlePollMaxMs !== undefined ? { idlePollMaxMs } : {}) };
 }
 
 export function assertNowPlayingLookupAnswers(value: unknown): asserts value is NowPlayingLookupAnswersV1 {

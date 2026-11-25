@@ -1,5 +1,6 @@
-import { getDesktopSyncConfiguration, type DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
+import type { DesktopSyncConfiguration } from "@/services/sync/SyncLocalState";
 import { syncClientHeaders } from "@/services/sync/SyncClientHeaders";
+import { syncRuntime } from "@/services/sync/SyncRuntime";
 import { COMMUNITY_ORIGIN } from "../communityLinks";
 
 /**
@@ -50,6 +51,8 @@ export class TagSearchError extends Error {
 const SPOTIFY_ID = /^[0-9A-Za-z]{22}$/;
 
 type Session = Pick<DesktopSyncConfiguration, "apiBaseUrl" | "accessToken"> | null;
+/** The device's session, renewed when it is about to expire or Community refused `refusedToken`. */
+type SessionSource = (refusedToken?: string) => Session | Promise<Session>;
 
 /** Reads Community's answer; songs it can't read are left out, an answer it can't read is an error. */
 export function tagSearchPageOf(payload: unknown): TagSearchPage | null {
@@ -96,15 +99,15 @@ export function tagSearchUrl(origin: string, tags: readonly string[], match: Tag
  * tell whether the member shares their tags; others ask the public Community address.
  */
 export async function searchCommunityTags(tags: readonly string[], {
-  match = "any", cursor = null, request = fetch, session = () => getDesktopSyncConfiguration(), signal,
+  match = "any", cursor = null, request = fetch, session = (refusedToken) => syncRuntime.requestSession(refusedToken), signal,
 }: {
   match?: TagSearchMatch;
   cursor?: string | null;
   request?: typeof fetch;
-  session?: () => Session;
+  session?: SessionSource;
   signal?: AbortSignal;
 } = {}): Promise<TagSearchPage> {
-  const current = session();
+  const current = await session();
   const origin = current?.apiBaseUrl || COMMUNITY_ORIGIN;
   const ask = async (token: string | undefined) => {
     try {
@@ -115,8 +118,14 @@ export async function searchCommunityTags(tags: readonly string[], {
     }
   };
   let response = await ask(current?.accessToken || undefined);
-  // A device session Community no longer accepts: ask as someone who isn't connected.
-  if (response.status === 401 && current?.accessToken) response = await ask(undefined);
+  if (response.status === 401 && current?.accessToken) {
+    // Community refused the device's session (it expired, or the clock is off): renew it once and ask
+    // again. Only a session that can't be renewed asks as someone who isn't connected.
+    const renewed = await session(current.accessToken);
+    const token = renewed?.accessToken && renewed.accessToken !== current.accessToken ? renewed.accessToken : undefined;
+    response = await ask(token);
+    if (response.status === 401 && token) response = await ask(undefined);
+  }
   // A Community from before the search answers 404; with it switched off, 503.
   if (response.status === 404 || response.status === 405) throw new TagSearchError("not-available");
   if (response.status === 503) throw new TagSearchError("paused");

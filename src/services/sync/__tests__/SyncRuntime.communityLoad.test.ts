@@ -46,6 +46,7 @@ type RuntimeFixture = {
   noteLiveSync: (response: unknown) => void;
   handleVisibilityChange: () => void;
   communityRequest: (path: string) => Promise<unknown>;
+  requestSession: (refusedToken?: string) => Promise<DesktopSyncConfiguration | null>;
 };
 
 function newRuntime(started = true): RuntimeFixture {
@@ -306,6 +307,28 @@ describe("refreshing the session before it expires", () => {
     await vi.advanceTimersByTimeAsync(60 * 60_000 - SESSION_REFRESH_AHEAD_MS);
     expect(refreshes()).toBe(2);
     expect(client.channel).toHaveBeenCalledTimes(1);
+  });
+
+  it("renews the session for a request Community refused, and only that session", async () => {
+    const { refreshes } = refreshAnswers();
+    const runtime = track(newRuntime(false));
+
+    expect((await runtime.requestSession())?.accessToken).toBe("device-token-1");
+    expect(refreshes()).toBe(0);
+    // A token the device already replaced isn't renewed again.
+    expect((await runtime.requestSession("device-token-0"))?.accessToken).toBe("device-token-1");
+    expect(refreshes()).toBe(0);
+    expect((await runtime.requestSession("device-token-1"))?.accessToken).toBe("device-token-2");
+    expect(refreshes()).toBe(1);
+    expect(getDesktopSyncConfiguration()?.accessToken).toBe("device-token-2");
+  });
+
+  it("gives a request no session when it can't be renewed", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ error: "invalid_grant" }, { status: 400 }));
+    const runtime = track(newRuntime(false));
+    await expect(runtime.requestSession("device-token-1")).resolves.toBeNull();
+    setDesktopSyncConfiguration(null);
+    await expect(runtime.requestSession()).resolves.toBeNull();
   });
 
   it("leaves the session alone without a live connection; requests refresh it themselves", async () => {

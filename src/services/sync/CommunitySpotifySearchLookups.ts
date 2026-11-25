@@ -21,6 +21,11 @@ import type { SendSession } from "./SpotifyLibrarySender";
 // Spotify's first refusal or while Spotify asks Tagify to wait (CommunityLookupLane.ts).
 
 export const SPOTIFY_SEARCH_LOOKUP_FEATURE = "community-spotify-search-lookups";
+/**
+ * Community's broadcast on the filler's private library channel when a search opens (payload
+ * `{ libraryId, requestedAt }`, no search text): the filler asks for it now rather than at its next poll.
+ */
+export const SPOTIFY_SEARCH_LOOKUP_REQUEST_EVENT = "spotify_search_lookup_request";
 /** Searches for members' Search Spotify in an hour (the shared background reservations). */
 export const SPOTIFY_SEARCH_LOOKUP_HOURLY_SEARCHES = 60;
 /** Searches for members' Search Spotify in a UTC day on this computer. */
@@ -46,7 +51,7 @@ function spotifySearchLane(sources: SpotifySearchLookupSources): LookupLane<Spot
     route: "/api/v2/sync/spotify-search-lookups",
     protocolVersion: SPOTIFY_SEARCH_LOOKUPS_PROTOCOL_VERSION,
     answersPerPost: MAX_SPOTIFY_SEARCH_LOOKUP_ANSWERS,
-    parse: (value) => { const parsed = parseSpotifySearchLookups(value); return { filler: parsed.filler, requests: parsed.searches }; },
+    parse: (value) => { const parsed = parseSpotifySearchLookups(value); return { filler: parsed.filler, requests: parsed.searches, idlePollMaxMs: parsed.idlePollMaxMs }; },
     identity: (search) => `spotify-search-lookup:${search.requestId}`,
     canSearch: (search) => !!sources.searches[search.kind],
     search: async (search) => {

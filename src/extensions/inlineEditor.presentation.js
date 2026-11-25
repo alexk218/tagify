@@ -39,7 +39,38 @@ function createRatingControl({ rating, compact, getRateActionLabel, onRate }) {
   return ratingControl;
 }
 
-export function renderInlineEditorPresentation(
+// The parts of the controls that take keyboard focus, in the order they appear.
+const FOCUSABLE_PARTS = [
+  ".tagify-energy-control",
+  ".tagify-rating-star-button",
+  ".tagify-energy-rating-label",
+];
+
+/** Which focusable part of the controls has focus, so it can have it again once they're rebuilt. */
+function focusedPart(control) {
+  const active = control.ownerDocument?.activeElement;
+  if (!active || active === control || !control.contains(active)) return null;
+  for (const selector of FOCUSABLE_PARTS) {
+    const index = Array.from(control.querySelectorAll(selector)).indexOf(active);
+    if (index >= 0) return { selector, index };
+  }
+  return null;
+}
+
+/**
+ * Draws the inline controls. Saving a rating or energy draws them again, so the part that had
+ * keyboard focus gets it back: arrow keys keep adjusting energy and Tab moves on from the same star.
+ */
+export function renderInlineEditorPresentation(control, options) {
+  const part = focusedPart(control);
+  renderPresentation(control, options);
+  if (!part) return;
+  const parts = control.querySelectorAll(part.selector);
+  const target = parts[Math.min(part.index, parts.length - 1)];
+  target?.focus({ preventScroll: true });
+}
+
+function renderPresentation(
   control,
   {
     rating = 0,

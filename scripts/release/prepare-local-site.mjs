@@ -9,13 +9,7 @@ const INSTALLER_REPOSITORY = 'alexk218/tagify-installer';
 const PLATFORM_ASSETS = { mac: 'TagifyInstaller-mac.dmg', windows: 'TagifyInstaller.exe' };
 // Public files from landing-page. Tests, notes and tooling there are never uploaded.
 /** Where tagify.fm/invite (the invite link Tagify 3.3.1 and earlier shared) now sends friends. */
-export const INVITE_DESTINATION = 'https://community.tagify.fm/join';
-/**
- * Community's addresses for the general invite. Community is moving to tagify.fm
- * (packages/tagify-community/docs/DOMAIN_MOVE_PLAN.md); afterwards community.tagify.fm/join
- * redirects there, so either one serving the invite counts as live.
- */
-export const INVITE_PAGES = ['https://community.tagify.fm/join', 'https://tagify.fm/join'];
+export const INVITE_DESTINATION = 'https://tagify.fm/join';
 /**
  * The release host's own address. Once Community serves tagify.fm, this project keeps only the
  * update files and download redirects there; every other page goes to the same path on tagify.fm.
@@ -55,14 +49,8 @@ export function selectDownloads(releases) {
  * Community answers unknown paths with a 200 "not found", so the page must be the general invite.
  */
 export async function assertInviteDestinationLive(fetchPage = fetch) {
-  let url = INVITE_DESTINATION;
-  let response = await fetchPage(url, { redirect: 'manual' });
-  // After the move, the old address answers with one redirect to the invite's new home.
-  const location = response.headers?.get?.('location');
-  if ([301, 308].includes(response.status) && location && INVITE_PAGES.includes(new URL(location, url).href)) {
-    url = new URL(location, url).href;
-    response = await fetchPage(url, { redirect: 'manual' });
-  }
+  const url = INVITE_DESTINATION;
+  const response = await fetchPage(url, { redirect: 'manual' });
   const live = response.status === 200 && (await response.text()).includes(`<link rel="canonical" href="${url}"/>`);
   if (!live) throw Error(`${url} isn't the general invite yet (answered ${response.status}); deploy Community's general invite before tagify.fm, so tagify.fm/invite doesn't lead to a missing page.`);
 }

@@ -51,7 +51,7 @@ function nowPlayingLane(sources: NowPlayingLookupSources): LookupLane<NowPlaying
     route: "/api/v2/sync/now-playing-lookups",
     protocolVersion: NOW_PLAYING_LOOKUPS_PROTOCOL_VERSION,
     answersPerPost: MAX_NOW_PLAYING_LOOKUP_ANSWERS,
-    parse: (value) => { const parsed = parseNowPlayingLookups(value); return { filler: parsed.filler, requests: parsed.lookups }; },
+    parse: (value) => { const parsed = parseNowPlayingLookups(value); return { filler: parsed.filler, requests: parsed.lookups, idlePollMaxMs: parsed.idlePollMaxMs }; },
     identity: (lookup) => `now-playing-lookup:${lookup.requestId}`,
     search: async (lookup) => {
       const results = await sources.search(lookupSearchTerm(lookup));

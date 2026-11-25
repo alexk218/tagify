@@ -40,6 +40,11 @@ export class SpotifyBackgroundPolicy {
     if (state.until > Date.now() || entries.length >= limit || entries.some(entry => entry.id === id)) return false;
     entries.push({ id, at: Date.now() }); state.attempts[feature] = entries; this.save(state); return true;
   }
+  /** Whether `reserve` could accept anything for this feature right now. */
+  hasCapacity(feature: string, limit: number): boolean {
+    const state = this.read();
+    return state.until <= Date.now() && (state.attempts[feature]?.length ?? 0) < limit;
+  }
   reservationRetryAt(feature: string, identity: string, limit: number): number {
     const state = this.read(), entries = state.attempts[feature] ?? [], id = requestFingerprint(identity);
     const same = entries.find(entry => entry.id === id);

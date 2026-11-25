@@ -6,6 +6,7 @@ import type { TagTaxonomy, TrackData } from "@/types/tagData";
 import { ROWS_PER_STEP, TaggedByOthersSection, checkedSummary, previewFoundText, checkedWhen, taggedByText } from "../TaggedByOthersSection";
 import type { TaggedByOthersMatch, TaggedByOthersOutcome } from "../taggedByOthersScan";
 import type { SavedCheck, TaggedByOthersStore } from "../taggedByOthersStore";
+import { OthersHomeContext, type OthersHomeReports } from "../../othersHome/othersHomeContext";
 import { CHECK_AGAIN_AFTER_MS, forgetTaggedByOthers, preloadTaggedByOthers, type TaggedByOthersCheck, type TaggedByOthersPlaylistCheck } from "../useTaggedByOthers";
 
 vi.mock("@/features/product-analytics/productAnalytics", async (original) => ({ ...(await original<typeof import("@/features/product-analytics/productAnalytics")>()), recordProductInteraction: vi.fn() }));
@@ -466,6 +467,21 @@ describe("the check saved on this computer", () => {
     await waitFor(() => expect(kept.saved()).toBeNull());
     expect(screen.queryByText("Song 7")).not.toBeInTheDocument();
   });
+
+  it("keeps the hidden songs and the saved check until the member really disconnects", async () => {
+    const kept = memoryStore(saved(HOUR));
+    const hiddenStore = { load: vi.fn(() => []), save: vi.fn(), clear: vi.fn() };
+    const view = renderSection(vi.fn(done({})), { store: kept.store, now: () => NOW, hiddenStore });
+    await screen.findByText("Song 7");
+
+    view.rerender(<TaggedByOthersSection connected reconnectRequired accountId="account-a" tracks={tracks} taxonomy={taxonomy} store={kept.store}
+      hiddenStore={hiddenStore} onConnectCommunity={vi.fn()} onAddMembersTags={vi.fn()} />);
+    expect(screen.queryByText("Song 7")).not.toBeInTheDocument();
+    await act(async () => { await Promise.resolve(); });
+    expect(hiddenStore.clear).not.toHaveBeenCalled();
+    expect(kept.store.clear).not.toHaveBeenCalled();
+    expect(kept.saved()).not.toBeNull();
+  });
 });
 
 describe("reloading Spotify part way through a check", () => {
@@ -710,6 +726,28 @@ describe("in the track list, where tags come off again", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show all songs" }));
     expect(screen.getByText("Song 2")).toBeInTheDocument();
     expect(screen.getByText("Song 3")).toBeInTheDocument();
+  });
+
+  it("inside Tagged by others, shows only songs with the tags chosen above both lists, and leaves picking names to that bar", async () => {
+    const songs = [match(2, ["Chill"]), match(3, ["Focus"]), match(4, ["Late night"])];
+    const onChoose = vi.fn();
+    const onTagNames = vi.fn();
+    const reports: OthersHomeReports = { onTagNames, tags: { chosen: { tags: ["focus", "Late night"], match: "any" }, onChoose } };
+    render(
+      <OthersHomeContext.Provider value={reports}>
+        <TaggedByOthersSection connected accountId="account-a" tracks={tracks} taxonomy={taxonomy} check={done({ checked: 3, matches: songs })} store={memoryStore().store}
+          onConnectCommunity={vi.fn()} onAddMembersTags={vi.fn().mockResolvedValue(undefined)} onOpenSong={vi.fn()} {...editable()} />
+      </OthersHomeContext.Provider>,
+    );
+    expect(await screen.findByText("Song 3")).toBeInTheDocument();
+    expect(screen.getByText("Song 4")).toBeInTheDocument();
+    expect(screen.queryByText("Song 2")).not.toBeInTheDocument();
+    // The names others used go up to the bar, which offers them; the list keeps only its own filter chip.
+    await waitFor(() => expect(onTagNames).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ label: "Chill", songs: 1 })])));
+    expect(within(screen.getByRole("group", { name: "Show songs others tagged" })).getAllByRole("button").map((chip) => chip.textContent)).toEqual(["Not tagged by me yet"]);
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by artist" }), { target: { value: "Artist 2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show all songs" }));
+    expect(onChoose).toHaveBeenCalledWith({ tags: [], match: "any" });
   });
 
   it("locks a song in the editor when its row is clicked", async () => {

@@ -113,14 +113,14 @@ import {
 } from "@/features/track-session/model/trackList.types";
 import { buildTagAccentCssVars } from "@/features/tag-data";
 import { useLocalStorage } from "@/hooks/shared/useLocalStorage";
-import { setAdvancedFilters, useAdvancedFilters } from "@/features/filter-state/advancedFiltersSetting";
+import { setAdvancedFilters, useAdvancedFilters } from "@/features/filter-state";
 import { removeFromToTag, useToTagList } from "@/features/to-tag/toTagStore";
 import { useFillToTagNames } from "@/features/to-tag/useFillToTagNames";
 import { collapseRecordingEntries, recordingDisplayKeys } from "@/features/recording-reuse/utils/recordingLibrary";
 import { buildValidTagIdSet } from "@/utils/tagTaxonomy";
-import { CommunityTagSearch, tagSearchQuery } from "@/features/community/tagSearch/CommunityTagResults";
+import { foundText, tagSearchQuery } from "@/features/community/tagSearch/CommunityTagResults";
+import { OthersHome, type ChosenTags, type OthersEntry, type OthersHomeView } from "@/features/community/othersHome/OthersHome";
 import { useCommunityTagSearch } from "@/features/community/tagSearch/useCommunityTagSearch";
-import { useTagSearchNewLabel } from "@/features/community/tagSearch/tagSearchNewLabel";
 import { usePrivateNotePreviews } from "@/features/private-notes/hooks/usePrivateNotePreviews";
 import { PrivateNotePreview, PrivateNotePreviewError } from "@/features/private-notes/components/PrivateNotePreview";
 import { TrackCover } from "./TrackCover";
@@ -215,7 +215,8 @@ interface TrackListProps {
     connectorIndex: number,
     operator: "AND" | "OR",
   ) => void;
-  onRemoveTagFilter: (fullTagId: string) => void;
+  /** With a group index, removes the tag from that group only. */
+  onRemoveTagFilter: (fullTagId: string, clauseIndex?: number) => void;
   onToggleTagIncludeOff: (fullTagId: string) => void;
   onMoveTagToClauseLane: (
     fullTagId: string,
@@ -276,8 +277,8 @@ interface TrackListProps {
    */
   communityTeaser?: { others: ReadonlyMap<string, TaggedByOthersItem>; found?: number; onConnect: () => void };
   /**
-   * "On Community" under the list's own songs while a tag filter is on: songs other members tagged
-   * that way (switch `communityTagSearch`). `viewer` changes when who is asking changes (connected, sharing).
+   * Songs other members tagged a chosen way that the member doesn't have: "New to you" under "Tagged by others",
+   * and the line under the toolbar that leads there while a tag filter is on (switch `communityTagSearch`). `viewer` changes when who is asking changes (connected, sharing).
    */
   communityTagSearch?: { viewer: string; onConnect: () => void; onShare: () => void; onPlay: (uri: string) => void };
 }
@@ -542,19 +543,50 @@ const TrackList: React.FC<TrackListProps> = ({
     () => tagSearchQuery(includeTagClauses, (tagId) => taxonomy.tagsById[tagId]?.name || ""),
     [includeTagClauses, taxonomy],
   );
-  // "On Community": asked once here so the "Your library | On Community (N)" switch above the list can show
-  // the count (Alex's pick 1A, 2026-11-23: scrolling all the way down to reach it was bad UX).
-  const communityTagShown = !!communityTagSearch && !statsTrackSet && !toTagActive && communityTagQuery.tags.length > 0;
+  // Asked once here so the line under the toolbar can say how many songs other members tagged this way.
+  const communityTagShown = !!communityTagSearch && !!taggedByOthersView && !statsTrackSet && !toTagActive && !othersActive && communityTagQuery.tags.length > 0;
   const communityTagResults = useCommunityTagSearch({ tags: communityTagQuery.tags, match: communityTagQuery.match, enabled: communityTagShown, viewer: communityTagSearch?.viewer ?? "" });
   const communityTagFound = communityTagShown && communityTagResults.phase === "done" && communityTagResults.total > 0;
-  const communityTagCount = `${communityTagResults.total.toLocaleString()}${communityTagResults.capped ? "+" : ""}`;
-  const tagSearchNew = useTagSearchNewLabel();
-  const [tagSearchView, setTagSearchView] = useState<"library" | "community">("library");
-  const showingCommunityTags = communityTagShown && tagSearchView === "community";
-  const openCommunityTags = () => {
-    tagSearchNew.dismiss();
-    setTagSearchView("community");
+  // "Tagged by others" holds two lists: the member's songs others tagged, and songs tagged a chosen way that are new to them.
+  const [othersHomeView, setOthersHomeView] = useLocalStorage<OthersHomeView>("tagify:taggedByOthers:homeView", "yours");
+  const [othersChosenTags, setOthersChosenTags] = useState<ChosenTags>({ tags: [], match: "any" });
+  // The member's own tag names, most used first, offered under "New to you".
+  const ownTagNames = useMemo(() => {
+    if (!othersActive || !communityTagSearch) return [];
+    const uses = new Map<string, number>();
+    for (const track of Object.values(tracks)) for (const id of track.tagIds ?? []) uses.set(id, (uses.get(id) ?? 0) + 1);
+    return [...uses].sort((a, b) => b[1] - a[1]).map(([id]) => taxonomy.tagsById[id]?.name?.trim() ?? "").filter(Boolean);
+  }, [othersActive, communityTagSearch, tracks, taxonomy]);
+  // How the member got to the list that's showing: counted once each time it shows.
+  const othersEntry = useRef<OthersEntry>("restored");
+  const othersCameBy = useRef<OthersEntry>("restored");
+  const othersViewShown: OthersHomeView = communityTagSearch ? othersHomeView : "yours";
+  useEffect(() => {
+    if (!othersActive) return;
+    othersCameBy.current = othersEntry.current;
+    othersEntry.current = "restored";
+    recordProductInteraction("tagged_by_others_view_opened", { view: othersViewShown === "new" ? "new_to_you" : "your_songs", entry: othersCameBy.current });
+  }, [othersActive, othersViewShown]);
+  const openOthers = () => {
+    othersEntry.current = "tab";
+    setSavedView("others");
   };
+  const chooseOthersView = (view: OthersHomeView) => {
+    othersEntry.current = "tab";
+    setOthersHomeView(view);
+  };
+  const openNewToYou = () => {
+    othersEntry.current = "filter_link";
+    setOthersChosenTags({ tags: communityTagQuery.tags, match: communityTagQuery.match });
+    setOthersHomeView("new");
+    setSavedView("others");
+  };
+  const othersTab = taggedByOthersView ? (
+    <button type="button" role="tab" aria-selected={othersActive} className={`${styles.viewTab} ${othersActive ? styles.viewTabActive : ""}`} onClick={openOthers} data-tip="others-tab">
+      Tagged by others
+      {othersTabHighlight.show ? <span className={styles.viewTabNew}>New</span> : null}
+    </button>
+  ) : null;
   const hadTagFilter = useRef(hasTagFilter);
   useEffect(() => {
     if (hasTagFilter && !hadTagFilter.current) recordProductInteraction("tag_filter_used", { sort: sortDetail(effectiveSortBy) });
@@ -697,20 +729,36 @@ const TrackList: React.FC<TrackListProps> = ({
       : includeTagClauses.length > 0
         ? 0
         : null;
+  // A tag can sit in several groups; this lists every group it is in.
   const tagLocationLookup = useMemo(() => {
-    const lookup = new Map<string, { clauseIndex: number; lane: "include" | "exclude" }>();
+    const lookup = new Map<
+      string,
+      Array<{ clauseIndex: number; lane: "include" | "exclude" }>
+    >();
+    const add = (tagId: string, clauseIndex: number, lane: "include" | "exclude") => {
+      const locations = lookup.get(tagId) ?? [];
+      locations.push({ clauseIndex, lane });
+      lookup.set(tagId, locations);
+    };
 
     includeTagClauses.forEach((clause, clauseIndex) => {
-      clause.tagIds.forEach((tagId) => {
-        lookup.set(tagId, { clauseIndex, lane: "include" });
-      });
-      clause.excludedTagIds.forEach((tagId) => {
-        lookup.set(tagId, { clauseIndex, lane: "exclude" });
-      });
+      clause.tagIds.forEach((tagId) => add(tagId, clauseIndex, "include"));
+      clause.excludedTagIds.forEach((tagId) => add(tagId, clauseIndex, "exclude"));
     });
 
     return lookup;
   }, [includeTagClauses]);
+  const getTagLocationInClause = (fullTagId: string, clauseIndex: number | null) =>
+    clauseIndex === null
+      ? undefined
+      : tagLocationLookup
+          .get(fullTagId)
+          ?.find((location) => location.clauseIndex === clauseIndex);
+  const getTagOtherClauses = (fullTagId: string, clauseIndex: number | null) =>
+    (tagLocationLookup.get(fullTagId) ?? []).filter(
+      (location) => location.clauseIndex !== clauseIndex,
+    );
+
   const selectedClause =
     resolvedSelectedClauseIndex !== null
       ? includeTagClauses[resolvedSelectedClauseIndex] ?? null
@@ -754,21 +802,18 @@ const TrackList: React.FC<TrackListProps> = ({
     resolvedSelectedClauseIndex === null
       ? "group 1"
       : `group ${resolvedSelectedClauseIndex + 1}`;
+  /** Match → NOT → off within one group; any other group keeps the tag. */
   const cycleCatalogTag = (
     fullTagId: string,
     targetClauseIndex: number | null,
   ) => {
-    const location = tagLocationLookup.get(fullTagId);
+    const location = getTagLocationInClause(fullTagId, targetClauseIndex);
 
-    if (
-      location &&
-      targetClauseIndex !== null &&
-      location.clauseIndex === targetClauseIndex
-    ) {
+    if (location && targetClauseIndex !== null) {
       if (location.lane === "include") {
         onMoveTagToClauseLane(fullTagId, "exclude", targetClauseIndex);
       } else {
-        onRemoveTagFilter(fullTagId);
+        onRemoveTagFilter(fullTagId, targetClauseIndex);
       }
       return;
     }
@@ -783,7 +828,7 @@ const TrackList: React.FC<TrackListProps> = ({
     cycleCatalogTag(fullTagId, resolvedSelectedClauseIndex);
   };
   const handleBasicCatalogTagClick = (fullTagId: string) => {
-    const location = tagLocationLookup.get(fullTagId);
+    const location = getTagLocationInClause(fullTagId, 0);
 
     if (location?.clauseIndex === 0) {
       cycleCatalogTag(fullTagId, 0);
@@ -852,7 +897,7 @@ const TrackList: React.FC<TrackListProps> = ({
                     tagInfo.accentId,
                     customAccentsById,
                   )}
-                  onClick={() => onRemoveTagFilter(tagId)}
+                  onClick={() => onRemoveTagFilter(tagId, clauseIndex)}
                   aria-label={isGroup ? `${termLabel} applied filter` : `${state} ${tagInfo.displayName} applied filter`}
                   title={`Remove "${termLabel}" filter`}
                 >
@@ -872,7 +917,7 @@ const TrackList: React.FC<TrackListProps> = ({
     );
   };
   const renderBasicTagChip = (fullTagId: string, tagInfo: TagDisplayInfo) => {
-          const location = tagLocationLookup.get(fullTagId);
+          const location = getTagLocationInClause(fullTagId, 0);
           const isMatch = location?.lane === "include";
           const isNot = location?.lane === "exclude";
 
@@ -913,27 +958,35 @@ const TrackList: React.FC<TrackListProps> = ({
           );
   };
   const renderComplexTagChip = (fullTagId: string, tagInfo: TagDisplayInfo) => {
-          const location = tagLocationLookup.get(fullTagId);
-          const isInSelectedClause =
-            location?.clauseIndex === resolvedSelectedClauseIndex;
-          const isMatch =
-            isInSelectedClause &&
-            location?.lane === "include";
-          const isNot =
-            isInSelectedClause &&
-            location?.lane === "exclude";
-          const isInAnotherClause =
-            location !== undefined &&
-            location.clauseIndex !== resolvedSelectedClauseIndex;
+          const location = getTagLocationInClause(
+            fullTagId,
+            resolvedSelectedClauseIndex,
+          );
+          const otherLocations = getTagOtherClauses(
+            fullTagId,
+            resolvedSelectedClauseIndex,
+          );
+          const isMatch = location?.lane === "include";
+          const isNot = location?.lane === "exclude";
+          const isInAnotherClause = !location && otherLocations.length > 0;
+          const otherGroupsLabel = otherLocations
+            .map((other) => `group ${other.clauseIndex + 1}`)
+            .join(", ");
           const statusLabel = isMatch
             ? "MATCH"
             : isNot
               ? "NOT"
               : isInAnotherClause
-                ? `G${(location?.clauseIndex ?? 0) + 1} ${
-                    location?.lane === "exclude" ? "NOT" : "MATCH"
-                  }`
+                ? otherLocations
+                    .map(
+                      (other) =>
+                        `G${other.clauseIndex + 1} ${
+                          other.lane === "exclude" ? "NOT" : "MATCH"
+                        }`,
+                    )
+                    .join(" ")
                 : null;
+          const elsewhereTitle = `In ${otherGroupsLabel}. Click to also match "${tagInfo.displayName}" in ${selectedClauseLabel}`;
 
           return (
             <button
@@ -963,7 +1016,7 @@ const TrackList: React.FC<TrackListProps> = ({
                   : isNot
                     ? `Click to remove "${tagInfo.displayName}" from ${selectedClauseLabel}`
                     : isInAnotherClause
-                      ? `Click to move "${tagInfo.displayName}" into Match in ${selectedClauseLabel}`
+                      ? elsewhereTitle
                       : `Click to match "${tagInfo.displayName}" in ${selectedClauseLabel}`
               }
             >
@@ -1364,12 +1417,8 @@ const TrackList: React.FC<TrackListProps> = ({
                       <button type="button" role="tab" aria-selected={!othersActive && !toTagActive} className={`${styles.viewTab} ${othersActive || toTagActive ? "" : styles.viewTabActive}`} onClick={() => setSavedView("tagged")} data-tip="tagged-tab">
                         Tagged Tracks
                       </button>
-                      {taggedByOthersView ? (
-                        <button type="button" role="tab" aria-selected={othersActive} className={`${styles.viewTab} ${othersActive ? styles.viewTabActive : ""}`} onClick={() => setSavedView("others")} data-tip="others-tab">
-                          Tagged by others
-                          {othersTabHighlight.show ? <span className={styles.viewTabNew}>New</span> : null}
-                        </button>
-                      ) : null}
+                      {/* Other members' songs right after the member's own tagged songs; To Tag last. */}
+                      {othersTab}
                       {toTagTabShown ? (
                         <button type="button" role="tab" aria-selected={toTagActive} className={`${styles.viewTab} ${toTagActive ? styles.viewTabActive : ""}`} onClick={() => setSavedView("toTag")}>
                           To Tag
@@ -1541,7 +1590,13 @@ const TrackList: React.FC<TrackListProps> = ({
       </>}
       </div>
 
-      {othersActive ? <div className={styles.othersView} role="tabpanel">{taggedByOthersView}</div> : <>
+      {othersActive ? (
+        <div className={styles.othersView} role="tabpanel">
+          <OthersHome yourSongs={taggedByOthersView} tagSearch={communityTagSearch} ownTags={ownTagNames}
+            view={othersHomeView} onView={chooseOthersView} chosen={othersChosenTags} onChoose={setOthersChosenTags}
+            onSongSaved={() => recordProductInteraction("community_song_saved_to_liked", { entry: othersCameBy.current })} />
+        </div>
+      ) : <>
       {showFilterOptions && !statsTrackSet && (
         <div className={styles.filterOptions}>
           <div className={styles.filterOptionsTopRow}>
@@ -2124,25 +2179,16 @@ const TrackList: React.FC<TrackListProps> = ({
         </div>
       )}
 
-      {communityTagShown && communityTagSearch ? (
-        <div className={styles.communityTagSwitch} role="tablist" aria-label="Songs tagged this way">
-          <button type="button" role="tab" aria-selected={tagSearchView === "library"} className={`${styles.communityTagOption} ${tagSearchView === "library" ? styles.communityTagOptionOn : ""}`} onClick={() => setTagSearchView("library")}>
-            Your library
-          </button>
-          <button type="button" role="tab" aria-selected={tagSearchView === "community"} className={`${styles.communityTagOption} ${tagSearchView === "community" ? styles.communityTagOptionOn : ""}`} onClick={openCommunityTags}>
-            On Community{communityTagFound ? ` (${communityTagCount})` : ""}
-            {tagSearchNew.show ? <span className={styles.communityTagNew}>New</span> : null}
-          </button>
-        </div>
-      ) : null}
-      {showingCommunityTags && communityTagSearch ? (
-        <CommunityTagSearch tags={communityTagQuery.tags} match={communityTagQuery.match} viewer={communityTagSearch.viewer} search={communityTagResults} bare
-          onPlay={communityTagSearch.onPlay} onConnect={communityTagSearch.onConnect} onShare={communityTagSearch.onShare} />
+      {communityTagFound ? (
+        <button type="button" className={styles.othersBridge} onClick={openNewToYou}>
+          {foundText(communityTagResults.total, communityTagQuery.tags, communityTagQuery.match, communityTagResults.capped)} by others
+          <span aria-hidden="true"> →</span>
+        </button>
       ) : null}
 
       {/* TRACK LIST */}
       {notePreviews.error && <PrivateNotePreviewError onRetry={notePreviews.retry} />}
-      <div className={styles.trackList} hidden={showingCommunityTags}>
+      <div className={styles.trackList}>
         {sortedTracksVisible.length === 0 ? (
           <p className={styles.noTracks}>
             {toTagActive && toTagList.length === 0
@@ -2467,7 +2513,7 @@ const TrackList: React.FC<TrackListProps> = ({
           })
         )}
       </div>
-      {allSortedTracks.length > sortedTracksVisible.length && !showingCommunityTags && (
+      {allSortedTracks.length > sortedTracksVisible.length && (
         <div ref={observerRef} className={styles.loadMoreContainer}>
           <button
             className={styles.loadMoreButton}

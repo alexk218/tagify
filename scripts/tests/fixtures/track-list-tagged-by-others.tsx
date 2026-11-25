@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import TrackList from "@/features/track-session/components/TrackList";
 import { TaggedByOthersSection } from "@/features/community/taggedByOthers/TaggedByOthersSection";
@@ -19,6 +19,10 @@ import "@/styles/globals.css";
 //  &connected=0                  not connected to Community (no lookups); with
 //  &teaser=1                     the preview for people who aren't connected, on both the
 //                                "Tagged by others" view and Tagged Tracks rows (switch communityTeasers on)
+//  &layout=1                     "Your songs | New to you" under Tagged by others, with Community's tag search
+//                                faked and a richer set of own tags; &filter=<tag name> starts with that tag filter,
+//                                &sub=new opens "New to you", &search=none|fail is what the tag search answers,
+//                                &long=1 adds very long tag names
 // The view's rows toggle members' tags, lock a song (blue), and open a playlist picker of five own playlists.
 const params = new URLSearchParams(location.search);
 const view = params.get("view") ?? "others";
@@ -26,6 +30,10 @@ const shared = params.get("shared") === "1";
 const off = params.get("off") === "1";
 const connected = params.get("connected") !== "0";
 const teaser = params.get("teaser") === "1";
+const layout = params.get("layout");
+const startFilter = params.get("filter");
+const searchAnswer = params.get("search") ?? "ok";
+const longNames = params.get("long") === "1";
 const ORIGIN = "https://community.tagify.fm";
 const ACCOUNT = "9ca88f9f-1ff9-4f1f-8dad-fbd7191d78e7";
 
@@ -44,6 +52,11 @@ localStorage.setItem(capabilitiesCacheKey(ORIGIN), JSON.stringify({ cachedAt: Da
   ...(off ? { taggedByOthersTrackList: false, othersTagsSharingGate: false } : {}),
 } }));
 localStorage.setItem("tagify:trackListView", view === "others" ? "others" : "tagged");
+if (layout) {
+  localStorage.setItem("tagify:taggedByOthers:homeView", JSON.stringify(params.get("sub") === "new" ? "new" : "yours"));
+  // The "New" marks are not what is being compared.
+  localStorage.setItem("tagify:switch:communityTagSearch", "on");
+}
 
 const idOf = (index: number) => index.toString(36).padStart(22, "0");
 const NAMES = ["Midnight City", "Open Eye Signal", "Teardrop", "Nightcall", "Glue", "Roygbiv", "Innerbloom", "Windowlicker", "Porcelain", "Strobe"];
@@ -59,7 +72,7 @@ Object.assign(window, { Spicetify: {
   showNotification: () => {}, Player: { data: null },
   Platform: {
     username: "fixture-track-list", History: { push: () => {} },
-    LibraryAPI: { getTracks: async ({ offset, limit }: { offset: number; limit: number }) => ({ items: LIKED.slice(offset, offset + limit), offset, limit, totalLength: LIKED.length }) },
+    LibraryAPI: { contains: async (...uris: string[]) => uris.map((_, position) => position === 2), getTracks: async ({ offset, limit }: { offset: number; limit: number }) => ({ items: LIKED.slice(offset, offset + limit), offset, limit, totalLength: LIKED.length }) },
   },
 } });
 
@@ -72,10 +85,27 @@ const TAGS = [
   { label: "Driving", people: 2, path: "Activity / Driving" },
   { label: "Synthwave", people: 1, path: "Genre & Style / Synthwave" },
 ];
+// Community's tag search, faked: songs the member doesn't have, five and a lock for people who don't share.
+const FOUND = [["Neverender", "Justice, Tame Impala"], ["Disco Ulysses", "Vulfpeck"], ["Get Lucky", "Daft Punk"], ["Cola", "CamelPhat, Elderbrook"], ["Lady (Hear Me Tonight)", "Modjo"],
+  ["Music Sounds Better with You", "Stardust"], ["Sing It Back", "Moloko"], ["Around the World", "Daft Punk"], ["Finally", "Kings of Tomorrow"], ["Gypsy Woman", "Crystal Waters"],
+  ["You Don't Know Me", "Armand Van Helden"], ["Flat Beat", "Mr. Oizo"]];
+const tagSearchAnswer = async (url: URL) => {
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  if (searchAnswer === "fail") return new Response("{}", { status: 500 });
+  const wanted = url.searchParams.getAll("tag");
+  const locked = !connected ? "connect" : shared ? null : "share";
+  const total = searchAnswer === "none" ? 0 : 37;
+  const items = (total ? FOUND : []).slice(0, locked ? 5 : 12).map(([title, artists], position) => ({
+    spotifyTrackId: (position + 900).toString(36).padStart(22, "0"), title, artists: artists.split(", "), imageUrl: `https://i.scdn.co/image/fixture-found-${position % 6}`,
+    people: 9 - (position % 7), tags: [...wanted.slice(0, 2), ...["Disco", "Groovy", "Warm-up"].slice(0, position % 3)].map((label) => ({ label, people: 1 })),
+  }));
+  return new Response(JSON.stringify({ items, totalCount: total, totalCountCapped: false, locked, nextCursor: !locked && total ? "next" : null }), { status: 200, headers: { "content-type": "application/json" } });
+};
 const index = new Map(LIKED.map((song, position) => [song.uri.slice("spotify:track:".length), position] as const));
 const isTagged = (position: number) => position < 8 || position % 9 === 0;
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input instanceof Request ? input.url : input);
+  if (url.startsWith(`${ORIGIN}/api/v2/desktop/tag-search`)) return tagSearchAnswer(new URL(url));
   if (!url.startsWith(`${ORIGIN}/api/v2/sync/tagged-by-others`)) return new Response("{}", { status: 404 });
   const body = JSON.parse(String(init?.body ?? "{}")) as { songs?: string[] };
   await new Promise((resolve) => setTimeout(resolve, 60));
@@ -88,13 +118,19 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   return new Response(JSON.stringify({ items }), { status: 200, headers: { "content-type": "application/json" } });
 };
 
-const taxonomy = buildTaxonomyFromCategoryTree([{ id: "mood", name: "Mood", subcategories: [{ id: "feel", name: "Feel", tags: [{ id: "chill", name: "Chill" }, { id: "happy", name: "Happy" }, { id: "dark", name: "Dark" }] }] }]);
+const taxonomy = buildTaxonomyFromCategoryTree([{ id: "mood", name: "Mood", subcategories: [{ id: "feel", name: "Feel", tags: [{ id: "chill", name: "Chill" }, { id: "happy", name: "Happy" }, { id: "dark", name: "Dark" },
+  ...(layout ? ["Funky", "Late night", "Driving", "Warm-up", "Peak time", "Melodic", "Vocal", "Groovy", "Deep House", "Sunrise", "Focus"].map((name) => ({ id: name.toLowerCase().replace(/[^a-z]+/g, "-"), name })) : []),
+  ...(longNames ? [{ id: "long-a", name: "Songs for the very last hour of an open air when the sun comes up" }, { id: "long-b", name: "Übertrieben langer deutscher Schlagwortname ohne Leerzeichenpause" }] : []),
+] }] }]);
 const tagId = (name: string) => Object.values(taxonomy.tagsById).find((tag) => tag.name.toLowerCase() === name)!.id;
 const tagged = (position: number, names: string[], rating: number) => [LIKED[position].uri, {
   name: LIKED[position].name, artists: LIKED[position].artists[0].name, albumName: "Album", albumImageUrl: `https://i.scdn.co/image/fixture-${position % 6}`, rating, energy: 5 + position % 4, bpm: 118 + position, tagIds: names.map(tagId),
   dateCreated: Date.now() - (10 - position) * 86_400_000, dateModified: Date.now() - (10 - position) * 3_600_000,
 }] as const;
 const tracks = Object.fromEntries([tagged(0, ["chill"], 4.5), tagged(3, ["dark"], 4), tagged(5, ["happy", "chill"], 3.5), tagged(12, ["happy"], 3),
+  ...(layout ? [tagged(14, ["funky", "groovy", "warm-up"], 4), tagged(15, ["funky", "late night"], 5), tagged(16, ["driving", "melodic", "funky"], 3.5), tagged(17, ["peak time", "vocal"], 4),
+    tagged(18, ["deep house", "sunrise", "focus", "funky"], 4.5), tagged(19, ["late night", "melodic"], 3)] : []),
+  ...(longNames ? [tagged(20, ["songs for the very last hour of an open air when the sun comes up", "übertrieben langer deutscher schlagwortname ohne leerzeichenpause", "funky"], 4)] : []),
   // Not connected: more tagged songs, so "first 5 rows only" has rows past the fifth.
   ...(connected ? [] : [tagged(1, ["happy"], 4), tagged(2, ["dark", "chill"], 3), tagged(4, ["chill"], 0), tagged(6, ["happy"], 5), tagged(7, ["dark"], 2),
     tagged(8, ["chill"], 3), tagged(9, ["happy", "dark"], 4), tagged(10, ["chill"], 0)]),
@@ -129,6 +165,9 @@ function Fixture() {
   // Members' tags go on and come off the song here, as the app does through the editor.
   const [library, setLibrary] = useState({ tracks, taxonomy });
   const [activeUri, setActiveUri] = useState<string | null>(null);
+  useEffect(() => {
+    for (const name of (startFilter ?? "").split(",").filter(Boolean)) filters.toggleBasicTagFilter(tagId(name.toLowerCase()));
+  }, []);
   const toggle = async (match: { track: { uri: string; name: string; artists: { name: string }[] } }, tag: { label: string }, on: boolean) => {
     note(`${on ? "add" : "remove"} ${tag.label} ${on ? "to" : "from"} ${match.track.name}`);
     setActiveUri(match.track.uri);
@@ -157,6 +196,7 @@ function Fixture() {
         )}
         othersTagsLocked={connected && !off && !shared}
         onShareTags={() => note("share")}
+        communityTagSearch={layout ? { viewer: `${connected ? "me" : "signed-out"}:${shared ? "sharing" : "not-sharing"}`, onConnect: () => note("connect"), onShare: () => note("share"), onPlay: (uri) => note(`play ${uri}`) } : undefined}
         communityTeaser={connected ? undefined : { others: teaserOthers, onConnect: () => note("connect") }}
       />
       <output aria-label="Fixture log" hidden>{JSON.stringify(log)}</output>

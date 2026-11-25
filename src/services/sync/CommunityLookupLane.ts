@@ -12,6 +12,13 @@ import { syncClientHeaders } from "./SyncClientHeaders";
 
 /** How often a filler asks Community for requests. */
 export const LOOKUP_POLL_MS = 15_000;
+/**
+ * The longest a filler waits between polls that find nothing, whatever Community allows. Polls only
+ * stretch while Community says it announces each new request (`idlePollMaxMs`) and the desktop is
+ * listening for that announcement: 15 seconds, doubling after each empty poll, up to the smaller of
+ * the two.
+ */
+export const LOOKUP_IDLE_POLL_CAP_MS = 5 * 60_000;
 /** The least time between a run and a run a nudge starts after it. */
 export const LOOKUP_NUDGE_MIN_GAP_MS = 1_000;
 /** How often a desktop Community says isn't a filler asks again. */
@@ -42,6 +49,8 @@ export interface LookupRun {
   stopped?: LookupStop;
   /** Community's or Spotify's Retry-After, in seconds, when one was given. */
   retryAfterSeconds?: number;
+  /** How long Community lets a filler wait between polls that find nothing (it announces new requests). */
+  idlePollMaxMs?: number;
 }
 
 /** What one scheduler remembers between runs. */
@@ -62,7 +71,7 @@ export interface LookupLane<Request extends { requestId: string }, Answer> {
   /** The most answers one POST may carry. */
   answersPerPost: number;
   /** Community's GET answer. Throws when it isn't one. */
-  parse(value: unknown): { filler: boolean; requests: Request[] };
+  parse(value: unknown): { filler: boolean; requests: Request[]; idlePollMaxMs?: number };
   /** The reservation identity for one request's search. */
   identity(request: Request): string;
   /** False when this Tagify can't search for it yet: it isn't searched or answered, and Community expires it. */
@@ -146,6 +155,7 @@ export async function runLookupLane<Request extends { requestId: string }, Answe
     catch (error) { throw error instanceof Stop ? error : new Stop("network"); }
     run.filler = parsed.filler;
     run.lookups = parsed.requests.length;
+    if (parsed.idlePollMaxMs !== undefined) run.idlePollMaxMs = parsed.idlePollMaxMs;
     for (const item of parsed.requests) {
       if (memory.answers.has(item.requestId)) {
         answers.push([item.requestId, memory.answers.get(item.requestId)!]);
@@ -232,6 +242,11 @@ const BACKOFF = {
 
 export interface LookupSchedulerOptions<Memory> {
   run: (memory: Memory) => Promise<LookupRun>;
+  /**
+   * Whether this desktop would hear Community announce a new request now (its library channel is
+   * joined). Polls only stretch while it would; without it a filler polls every 15 seconds.
+   */
+  canHearNudges?: () => boolean;
   setTimer?: (callback: () => void, ms: number) => unknown;
   clearTimer?: (timer: unknown) => void;
   now?: () => number;
@@ -240,14 +255,18 @@ export interface LookupSchedulerOptions<Memory> {
 /**
  * Runs a lane: once when sync starts, then every 15 seconds while Community says this desktop is a
  * filler, every few hours while it says it isn't, and after a quiet, growing wait when Community or
- * Spotify can't be asked. A nudge (Community announcing a new request) asks sooner, but only in place
- * of an ordinary filler poll. One run at a time; nothing after sync stops.
+ * Spotify can't be asked. While Community announces new requests and this desktop is listening, polls
+ * that find nothing stretch (see LOOKUP_IDLE_POLL_CAP_MS). A nudge (Community announcing a new
+ * request) asks sooner, but only in place of an ordinary or stretched filler poll, and starts the
+ * stretch over. One run at a time; nothing after sync stops.
  */
 export class LookupScheduler<Memory> {
   private running: Promise<void> | null = null;
   private timer: unknown = null;
   private stopped = true;
   private failures: Partial<Record<"unsupported" | "network" | "spotify", number>> = {};
+  /** Clean filler polls in a row that found nothing while polls could stretch. */
+  private idleRuns = 0;
   /** The last run finished cleanly as a filler, so the wait is the ordinary poll and not a back-off. */
   private nudgeable = false;
   /** A nudge arrived during a run: one more run follows it. */
@@ -277,6 +296,8 @@ export class LookupScheduler<Memory> {
     // Whether it is heard depends on how the run ends (see trigger).
     if (this.running) { this.followUp = true; return; }
     if (!this.nudgeable) return;
+    // A request is open: the next empty poll waits 15 seconds again, not the stretched wait.
+    this.idleRuns = 0;
     const due = Math.max(this.now(), this.lastRunAt + LOOKUP_NUDGE_MIN_GAP_MS);
     // A timer that fires by then (an earlier nudge's) already covers this one.
     if (this.timer && this.timerDueAt <= due) return;
@@ -296,6 +317,7 @@ export class LookupScheduler<Memory> {
     if (this.timer) this.clearTimer(this.timer);
     this.timer = null;
     this.failures = {};
+    this.idleRuns = 0;
     this.nudgeable = false;
     this.followUp = false;
   }
@@ -332,6 +354,15 @@ export class LookupScheduler<Memory> {
     })();
   }
 
+  /** A clean filler run: 15 seconds, or a stretched wait after polls that keep finding nothing. */
+  private fillerPoll(run: LookupRun): number {
+    const canStretch = run.lookups === 0 && run.idlePollMaxMs !== undefined && (this.options.canHearNudges?.() ?? false);
+    if (!canStretch) { this.idleRuns = 0; return LOOKUP_POLL_MS; }
+    this.idleRuns += 1;
+    const longest = Math.max(LOOKUP_POLL_MS, Math.min(run.idlePollMaxMs!, LOOKUP_IDLE_POLL_CAP_MS));
+    return Math.min(longest, LOOKUP_POLL_MS * 2 ** Math.min(this.idleRuns, 10));
+  }
+
   private growing(kind: "unsupported" | "network" | "spotify"): number {
     const failures = (this.failures[kind] ?? 0) + 1;
     this.failures[kind] = failures;
@@ -343,8 +374,10 @@ export class LookupScheduler<Memory> {
     if (run.stopped !== "unsupported") delete this.failures.unsupported;
     if (run.stopped !== "network" && run.stopped !== "throttled") delete this.failures.network;
     if (run.stopped !== "spotify") delete this.failures.spotify;
+    if (run.stopped === undefined && run.filler) return this.fillerPoll(run);
+    this.idleRuns = 0;
     switch (run.stopped) {
-      case undefined: return run.filler ? LOOKUP_POLL_MS : NOT_A_FILLER_RECHECK_MS;
+      case undefined: return NOT_A_FILLER_RECHECK_MS;
       case "unsupported": return this.growing("unsupported");
       case "network": case "throttled": return Math.max(this.growing("network"), asked);
       case "spotify": return this.growing("spotify");

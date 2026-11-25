@@ -201,18 +201,25 @@ export function buildTagifyGridTemplate(nativeTemplate, { show, trackNames, colu
     .join(" ");
 }
 
+const INSERTED_COLUMN_ATTRIBUTE = "data-tagify-inserted-column";
+
 export function insertSpotifyColumn(layout, column, gridTemplate) {
   const { container, lastColumn, columnIndex } = layout;
   const originalIndex = lastColumn.getAttribute("aria-colindex");
   const originalTemplate = container.style.getPropertyValue("grid-template-columns");
   const originalPriority = container.style.getPropertyPriority("grid-template-columns");
   column.setAttribute("aria-colindex", String(columnIndex));
+  column.setAttribute(INSERTED_COLUMN_ATTRIBUTE, "");
   lastColumn.setAttribute("aria-colindex", String(columnIndex + 1));
   container.insertBefore(column, lastColumn);
   // Preserve Spotify's positioning/height styles, including virtualized row wrappers.
   container.style.setProperty("grid-template-columns", gridTemplate, "important");
   return () => {
     column.remove();
+    // Spotify can drop a cell and Tagify re-adds one to the same row. That
+    // newer cell owns the row's template now, so a stale restore leaves it be.
+    const replacement = Array.from(container.children).some((child) => child.hasAttribute(INSERTED_COLUMN_ATTRIBUTE));
+    if (replacement) return;
     lastColumn.setAttribute("aria-colindex", originalIndex);
     if (originalTemplate) container.style.setProperty("grid-template-columns", originalTemplate, originalPriority);
     else container.style.removeProperty("grid-template-columns");

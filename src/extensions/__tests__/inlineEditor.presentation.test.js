@@ -135,4 +135,44 @@ describe("inline editor presentation", () => {
     expect(disabled.style.display).toBe("inline-flex");
     expect(Array.from(disabled.children)).toEqual([extra]);
   });
+
+  it("keeps keyboard focus on energy while arrow keys change it, as the saved value redraws the controls", () => {
+    const control = document.createElement("div");
+    document.body.appendChild(control);
+    const saved = [];
+    const draw = (energy) => renderInlineEditorPresentation(control, {
+      energy,
+      displayMode: "energy",
+      onEnergy: (next) => { saved.push(next); draw(next); },
+    });
+    draw(7);
+    control.querySelector(".tagify-energy-control").focus();
+
+    for (let press = 0; press < 2; press += 1) {
+      document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    }
+
+    expect(saved).toEqual([8, 9]);
+    expect(document.activeElement).toBe(control.querySelector(".tagify-energy-control"));
+    control.remove();
+  });
+
+  it("keeps keyboard focus on the star that was chosen once the rating redraws the controls", async () => {
+    const control = document.createElement("div");
+    document.body.appendChild(control);
+    const draw = (rating) => renderInlineEditorPresentation(control, {
+      rating,
+      displayMode: "stars",
+      onRate: (next) => { draw(next); },
+    });
+    draw(2);
+    const stars = () => Array.from(control.querySelectorAll(".tagify-rating-star-button"));
+    stars()[6].focus();
+    stars()[6].click();
+    await Promise.resolve();
+
+    expect(control.querySelector('[aria-pressed="true"]')?.getAttribute("aria-label")).toBe("Clear 3.5 star rating");
+    expect(document.activeElement).toBe(stars()[6]);
+    control.remove();
+  });
 });

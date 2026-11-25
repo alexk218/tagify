@@ -174,10 +174,14 @@ function normalizeOperator(value: unknown): TagFilterOperator {
     : TAG_FILTER_OPERATORS.OR;
 }
 
+/**
+ * A tag may sit in several groups (so "(A AND B) OR (A AND C)" can be built),
+ * but only once within a group: in Match or in Not, never both.
+ */
 function normalizeClause(
   clause: Partial<TagFilterClause> | null | undefined,
-  seenTagIds: Set<string>,
 ): TagFilterClause | null {
+  const seenTagIds = new Set<string>();
   const normalizeTagIdsForLane = (tagIds: unknown): string[] =>
     dedupeTagIds(Array.isArray(tagIds) ? tagIds : []).filter((tagId) => {
       if (seenTagIds.has(tagId)) {
@@ -207,13 +211,12 @@ export function normalizeTagFilterFormula(
 ): TagFilterFormula {
   const clauses = Array.isArray(formula?.clauses) ? formula.clauses : [];
   const connectors = Array.isArray(formula?.connectors) ? formula.connectors : [];
-  const seenTagIds = new Set<string>();
   const normalizedClauses: TagFilterClause[] = [];
   const normalizedConnectors: TagFilterOperator[] = [];
   let hasPreviousClause = false;
 
   clauses.forEach((clause, clauseIndex) => {
-    const normalizedClause = normalizeClause(clause, seenTagIds);
+    const normalizedClause = normalizeClause(clause);
 
     if (!normalizedClause) {
       return;
@@ -404,6 +407,24 @@ export function findTagFilterLocation(
   return null;
 }
 
+/** Every group the tag sits in, in group order. */
+export function findTagFilterLocations(
+  formula: TagFilterFormula,
+  tagId: string,
+): TagFilterLocation[] {
+  const locations: TagFilterLocation[] = [];
+
+  formula.clauses.forEach((clause, clauseIndex) => {
+    if (clause.tagIds.includes(tagId)) {
+      locations.push({ clauseIndex, lane: "include" });
+    } else if (clause.excludedTagIds.includes(tagId)) {
+      locations.push({ clauseIndex, lane: "exclude" });
+    }
+  });
+
+  return locations;
+}
+
 export function updateTagFilterClauseOperator(
   formula: TagFilterFormula,
   clauseIndex: number,
@@ -494,6 +515,36 @@ export function withoutTagInFilterFormula(
   return nextFormula;
 }
 
+/** Takes the tag out of one group only; a group left empty is removed. */
+export function withoutTagInFilterClause(
+  formula: TagFilterFormula,
+  tagId: string,
+  clauseIndex: number,
+): TagFilterFormula {
+  const clause = formula.clauses[clauseIndex];
+  if (!clause) return formula;
+
+  const nextClause = {
+    ...clause,
+    tagIds: clause.tagIds.filter((candidateTagId) => candidateTagId !== tagId),
+    excludedTagIds: clause.excludedTagIds.filter(
+      (candidateTagId) => candidateTagId !== tagId,
+    ),
+  };
+
+  if (nextClause.tagIds.length === 0 && nextClause.excludedTagIds.length === 0) {
+    return removeTagFilterClause(formula, clauseIndex);
+  }
+
+  return {
+    ...formula,
+    clauses: formula.clauses.map((candidate, index) =>
+      index === clauseIndex ? nextClause : candidate,
+    ),
+  };
+}
+
+/** Puts the tag in one group's Match or Not lane; any other group keeps it. */
 export function withTagInFilterClause(
   formula: TagFilterFormula,
   tagId: string,
@@ -504,8 +555,21 @@ export function withTagInFilterClause(
     lane?: "include" | "exclude";
   } = {},
 ): TagFilterFormula {
-  const baseFormula = withoutTagInFilterFormula(formula, tagId);
   const targetLane = options.lane ?? "include";
+  const baseFormula: TagFilterFormula = {
+    ...formula,
+    clauses: formula.clauses.map((clause, index) =>
+      index === targetClauseIndex
+        ? {
+            ...clause,
+            tagIds: clause.tagIds.filter((candidate) => candidate !== tagId),
+            excludedTagIds: clause.excludedTagIds.filter(
+              (candidate) => candidate !== tagId,
+            ),
+          }
+        : clause,
+    ),
+  };
 
   if (targetClauseIndex < 0 || targetClauseIndex >= baseFormula.clauses.length) {
     return addTagFilterClause(

@@ -5,6 +5,8 @@
 // kind only, never who searched) and says whether it is a filler; POST sends one page of what the
 // search found, in the shape Community stores Web API answers in (`SpotifySearchItem`, 0257), or an
 // empty list when Spotify found nothing. Every other desktop is told it isn't a filler and handed nothing.
+import { parseLookupIdlePollMaxMs } from "./lookupIdlePoll";
+
 export const SPOTIFY_SEARCH_LOOKUPS_PROTOCOL_VERSION = 1 as const;
 export const MAX_SPOTIFY_SEARCH_LOOKUPS = 10;
 export const MAX_SPOTIFY_SEARCH_LOOKUP_ANSWERS = 10;
@@ -26,7 +28,12 @@ export interface SpotifySearchLookupV1 {
   query: string;
   kind: SpotifySearchLookupKind;
 }
-export interface SpotifySearchLookupsV1 { filler: boolean; searches: SpotifySearchLookupV1[] }
+export interface SpotifySearchLookupsV1 {
+  filler: boolean;
+  searches: SpotifySearchLookupV1[];
+  /** See lookupIdlePoll.ts: set only when Community announces each new search. */
+  idlePollMaxMs?: number;
+}
 
 /** A song, album or artist as the search listed it; `artists` is empty for an artist. */
 export interface SpotifySearchLookupItemV1 {
@@ -71,7 +78,8 @@ export function parseSpotifySearchLookups(value: unknown): SpotifySearchLookupsV
     || value.searches.length > MAX_SPOTIFY_SEARCH_LOOKUPS) throw new Error("Invalid Spotify search lookups");
   const searches = value.searches.map(searchOf).filter((search): search is SpotifySearchLookupV1 => !!search)
     .filter((search, index, all) => all.findIndex((other) => other.requestId === search.requestId) === index);
-  return { filler: value.filler, searches: value.filler ? searches : [] };
+  const idlePollMaxMs = value.filler ? parseLookupIdlePollMaxMs(value.idlePollMaxMs) : undefined;
+  return { filler: value.filler, searches: value.filler ? searches : [], ...(idlePollMaxMs !== undefined ? { idlePollMaxMs } : {}) };
 }
 
 const isName = (value: unknown): value is string =>

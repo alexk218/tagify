@@ -1,7 +1,6 @@
 import { SpotifyTrack } from "@/types/SpotifyTypes";
 
 export interface UseSpicetifyHistoryProps {
-  isMultiTagging: boolean;
   setIsMultiTagging: (isMultiTagging: boolean) => void;
   setMultiTagTracks: (tracks: SpotifyTrack[]) => void;
   setLockedTrack: (track: SpotifyTrack | null) => void;

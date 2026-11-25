@@ -31,6 +31,11 @@ function tracklist(layout) {
   return getSpotifyTracklists()[0];
 }
 
+function layoutColumnIndexReset(row) {
+  const cells = row.querySelectorAll('[aria-colindex]');
+  cells[cells.length - 1].setAttribute("aria-colindex", "4");
+}
+
 describe("Spotify tracklist layouts", () => {
   it.each(["legacy", "modern", "aliased"])("finds and enhances %s rows without changing other Spotify styles", (mode) => {
     const grid = tracklist(mode);
@@ -54,6 +59,25 @@ describe("Spotify tracklist layouts", () => {
     expect(column.isConnected).toBe(false);
     expect(layout.lastColumn.getAttribute("aria-colindex")).toBe("4");
     expect(layout.container.style.cssText).toBe(previousStyle);
+  });
+
+  it("keeps the row's template when a stale cell is restored after a newer one was added", () => {
+    const grid = tracklist("modern");
+    const [row] = getSpotifyTrackRows(grid);
+    const first = document.createElement("div");
+    const restoreFirst = insertSpotifyColumn(getSpotifyRowLayout(row), first, "16px 3fr 2fr 150px 1fr");
+    // Spotify drops the cell; Tagify adds a fresh one to the same row.
+    first.remove();
+    layoutColumnIndexReset(row);
+    const layout = getSpotifyRowLayout(row);
+    const second = document.createElement("div");
+    insertSpotifyColumn(layout, second, "16px 3fr 2fr 150px 1fr");
+
+    restoreFirst();
+
+    expect(second.isConnected).toBe(true);
+    expect(layout.container.style.getPropertyValue("grid-template-columns")).toBe("16px 3fr 2fr 150px 1fr");
+    expect(layout.lastColumn.getAttribute("aria-colindex")).toBe("5");
   });
 
   it("does not enhance unrelated grids outside Spotify's tracklist surfaces", () => {

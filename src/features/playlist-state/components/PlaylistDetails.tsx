@@ -48,7 +48,7 @@ interface PlaylistDetailsProps {
   onOpenPlaylist: (playlistUri: string) => void;
   onRefreshMetadata: (playlistUri: string) => void;
   onLoadTrackUris: (playlistUri: string) => Promise<string[]>;
-  onApplyTrackUpdates: (updates: BatchTagUpdate[]) => Promise<void>;
+  onApplyTrackUpdates: (updates: BatchTagUpdate[]) => Promise<unknown>;
   /** Opens one of the album's tracks for rating or tagging. */
   onTagTrack: (trackUri: string) => void;
   /** Rates one of the album's tracks, saving it with the album if it's new. */

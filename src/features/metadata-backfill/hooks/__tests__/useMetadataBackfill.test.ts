@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { resetMetadataBackfillSessionForTests, runMetadataBackfill, useMetadataBackfill } from "@/features/metadata-backfill/hooks/useMetadataBackfill";
 import { TagDataStructure } from "@/types/tagData";
+import { spotifyBackgroundPolicy } from "@/services/SpotifyBackgroundPolicy";
 import { createEmptyTaxonomy, TAG_DATA_SCHEMA_VERSION } from "@/utils/tagTaxonomy";
 
 const {
@@ -57,6 +58,27 @@ describe("runMetadataBackfill", () => {
     mockStorageService.saveTracks.mockResolvedValue(true);
     mockStorageService.savePlaylists.mockResolvedValue(true);
     mockStorageService.saveArtists.mockResolvedValue(true);
+  });
+
+  it("doesn't read the library when every lookup allowance is used up", async () => {
+    const capacity = vi.spyOn(spotifyBackgroundPolicy, "hasCapacity").mockReturnValue(false);
+    try {
+      await expect(runMetadataBackfill()).resolves.toBe(0);
+      await expect(runMetadataBackfill({ maxTracksPerRun: 0 })).resolves.toBe(0);
+      expect(mockStorageService.loadAll).not.toHaveBeenCalled();
+      expect(capacity).toHaveBeenCalledWith("backfill-tracks", 50);
+      expect(capacity).toHaveBeenCalledWith("backfill-playlists", 20);
+      expect(capacity).toHaveBeenCalledWith("backfill-artists", 20);
+    } finally { capacity.mockRestore(); }
+  });
+
+  it("still reads the library while any allowance is left", async () => {
+    const capacity = vi.spyOn(spotifyBackgroundPolicy, "hasCapacity").mockImplementation((feature) => feature === "backfill-artists");
+    mockStorageService.loadAll.mockResolvedValue({ schemaVersion: TAG_DATA_SCHEMA_VERSION, taxonomy: createEmptyTaxonomy(), tracks: {}, playlists: {}, artists: {} });
+    try {
+      await expect(runMetadataBackfill()).resolves.toBe(0);
+      expect(mockStorageService.loadAll).toHaveBeenCalledTimes(1);
+    } finally { capacity.mockRestore(); }
   });
 
   it("repairs placeholder metadata for tagged playlists, albums, and artists", async () => {

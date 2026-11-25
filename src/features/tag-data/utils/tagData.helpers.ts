@@ -8,33 +8,32 @@ import {
 } from "@/types/tagData";
 import { normalizeCamelotKey } from "@/utils/camelotKey";
 
+function isSameValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  const leftKeys = Object.keys(left).filter((key) => (left as Record<string, unknown>)[key] !== undefined);
+  const rightKeys = Object.keys(right).filter((key) => (right as Record<string, unknown>)[key] !== undefined);
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key) => isSameValue((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key]));
+}
+
+/**
+ * Whether two saved copies of a song say the same thing, so the page can skip showing one again.
+ * Every field counts (album, length, release dates and song matching included): a change to any of
+ * them has to reach the page.
+ */
 export function areTrackDataEqual(
   currentTrack: TrackData,
   incomingTrack: TrackData,
 ): boolean {
-  if (
-    currentTrack.rating !== incomingTrack.rating ||
-    currentTrack.energy !== incomingTrack.energy ||
-    currentTrack.bpm !== incomingTrack.bpm ||
-    normalizeCamelotKey(currentTrack.camelotKey) !==
-      normalizeCamelotKey(incomingTrack.camelotKey) ||
-    currentTrack.dateCreated !== incomingTrack.dateCreated ||
-    currentTrack.dateModified !== incomingTrack.dateModified ||
-    currentTrack.name !== incomingTrack.name ||
-    currentTrack.artists !== incomingTrack.artists ||
-    currentTrack.backfillAttempts !== incomingTrack.backfillAttempts ||
-    currentTrack.tagIds.length !== incomingTrack.tagIds.length
-  ) {
+  if (normalizeCamelotKey(currentTrack.camelotKey) !== normalizeCamelotKey(incomingTrack.camelotKey)) {
     return false;
   }
-
-  for (let index = 0; index < currentTrack.tagIds.length; index += 1) {
-    if (currentTrack.tagIds[index] !== incomingTrack.tagIds[index]) {
-      return false;
-    }
-  }
-
-  return true;
+  return isSameValue(
+    { ...currentTrack, camelotKey: undefined },
+    { ...incomingTrack, camelotKey: undefined },
+  );
 }
 
 export function isTrackEmpty(trackData: TrackData): boolean {

@@ -1209,7 +1209,7 @@ describe("SmartPlaylistSyncService", () => {
       window.dispatchEvent(new Event("focus"));
       await vi.advanceTimersByTimeAsync(300_000);
       expect(mocks.indexed.getAllSmartPlaylists).not.toHaveBeenCalled();
-      expect(mocks.storage.loadAllStrict).not.toHaveBeenCalled();
+      expect(mocks.storage.getTaxonomy).not.toHaveBeenCalled();
       expect(mocks.spotifyApi.getAllTrackUrisInPlaylistStrict).not.toHaveBeenCalled();
       expect(vi.getTimerCount()).toBe(0);
 
@@ -1254,11 +1254,11 @@ describe("SmartPlaylistSyncService", () => {
       expect(mocks.spotifyApi.getAllTrackUrisInPlaylistStrict).toHaveBeenCalledTimes(1);
       finish([]);
       await settle();
-      expect(mocks.storage.loadAllStrict).toHaveBeenCalledTimes(1);
+      expect(mocks.storage.getTaxonomy).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(299_999);
-      expect(mocks.storage.loadAllStrict).toHaveBeenCalledTimes(1);
+      expect(mocks.storage.getTaxonomy).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(1);
-      expect(mocks.storage.loadAllStrict).toHaveBeenCalledTimes(2);
+      expect(mocks.storage.getTaxonomy).toHaveBeenCalledTimes(2);
     });
 
     it("rechecks visibility when a pass was queued behind a manual edit", async () => {
@@ -1274,7 +1274,7 @@ describe("SmartPlaylistSyncService", () => {
       await editing;
       await settle();
       expect(mocks.spotifyApi.getAllTrackUrisInPlaylistStrict).not.toHaveBeenCalled();
-      expect(mocks.storage.loadAllStrict).not.toHaveBeenCalled();
+      expect(mocks.storage.getTaxonomy).not.toHaveBeenCalled();
       expect(vi.getTimerCount()).toBe(0);
     });
 
@@ -1344,13 +1344,13 @@ describe("SmartPlaylistSyncService", () => {
     });
 
     it("recovers from a failed pass without building a retry queue", async () => {
-      mocks.storage.loadAllStrict.mockRejectedValueOnce(new Error("temporarily unavailable"));
+      mocks.storage.getTaxonomy.mockRejectedValueOnce(new Error("temporarily unavailable"));
       vi.spyOn(console, "error").mockImplementation(() => {});
       service.startBackgroundReconciliation();
       await settle();
-      expect(mocks.storage.loadAllStrict).toHaveBeenCalledTimes(1);
+      expect(mocks.storage.getTaxonomy).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(300_000);
-      expect(mocks.storage.loadAllStrict).toHaveBeenCalledTimes(2);
+      expect(mocks.storage.getTaxonomy).toHaveBeenCalledTimes(2);
       expect(vi.getTimerCount()).toBe(1);
     });
   });

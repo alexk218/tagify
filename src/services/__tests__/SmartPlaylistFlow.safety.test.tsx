@@ -155,7 +155,7 @@ describe("smart playlist safety across storage, Community and Spotify", () => {
     const p = playlist({ smartPlaylistTrackUris: [spotifyUri] });
     await seed(p);
     vi.mocked(storageService.loadAll).mockRestore();
-    vi.spyOn(indexedDBStorage, "loadAllStrict").mockRejectedValueOnce(new Error("Read failed"));
+    vi.spyOn(indexedDBStorage, "getTaxonomy").mockRejectedValueOnce(new Error("Read failed"));
     const members = spotifyMembership([spotifyUri]);
     await expect(new SmartPlaylistSyncService().reconcileAll()).rejects.toThrow("Read failed");
     expect(members()).toEqual([spotifyUri]);

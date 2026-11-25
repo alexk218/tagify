@@ -15,6 +15,8 @@ import { requestSpicetifyGraphQL } from "@/services/spicetifyGraphQL";
 const ALBUM_GRAPHQL_PAGE_SIZE = 50;
 // Ten pages cover even very long compilations without endless paging.
 const ALBUM_TRACK_PAGE_LIMIT = 10;
+/** Pages of album song URIs read before giving up (10,000 songs); never a silently partial album. */
+const ALBUM_URI_PAGE_LIMIT = 200;
 
 export interface PlaylistTrackUpdateOptions extends RequestOptions {
   beforeWrite?: (uris: string[], action: "add" | "remove") => Promise<void>;
@@ -854,20 +856,16 @@ class SpotifyApiService {
    * Get all track URIs in a playlist using Platform API
    */
   getAllTrackUrisInPlaylist = async (playlistId: string): Promise<string[]> => {
-    try {
-      const playlistUri = `spotify:playlist:${playlistId}`;
-      const contents = await spotifyRead<any>(`desktop:playlist:getContents:${JSON.stringify([playlistUri])}`, () => (
-        Spicetify.Platform.PlaylistAPI as any
-      ).getContents(playlistUri));
+    // A failed read throws: an empty list would read as an empty playlist.
+    const playlistUri = `spotify:playlist:${playlistId}`;
+    const contents = await spotifyRead<any>(`desktop:playlist:getContents:${JSON.stringify([playlistUri])}`, () => (
+      Spicetify.Platform.PlaylistAPI as any
+    ).getContents(playlistUri));
+    if (!Array.isArray(contents?.items)) throw new Error("Spotify didn't list this playlist's songs");
 
-      return contents.items
-        .filter((item: any) => item.uri)
-        .map((item: any) => item.uri);
-    } catch (error) {
-      throwIfSpotifyRequestStopped(error);
-      console.error("Error fetching tracks in playlist:", error);
-      return [];
-    }
+    return contents.items
+      .filter((item: any) => item.uri)
+      .map((item: any) => item.uri);
   };
 
   /**
@@ -946,8 +944,12 @@ class SpotifyApiService {
     return [...uris];
   };
 
-  private readPlaylistMembership = async (playlistId: string, options?: RequestOptions): Promise<string[]> => {
-    const contents = { items: await this.readPlaylistItems(playlistId, options) };
+  private readPlaylistMembership = async (playlistId: string, options?: RequestOptions): Promise<string[]> =>
+    this.rememberPlaylistItems(await this.readPlaylistItems(playlistId, options));
+
+  /** Keeps the artists and rule facts a playlist read shows, and returns its song URIs in order. */
+  private rememberPlaylistItems = (items: any[]): string[] => {
+    const contents = { items };
       trackArtistIdentitiesStore.rememberMany(contents.items.flatMap((item: { uri?: string; link?: string; artists?: Array<{ uri?: string; link?: string; name?: string }> }) => {
         const uri = item.uri ?? item.link;
         const artists = (Array.isArray(item.artists) ? item.artists : []).flatMap((artist): TrackArtist[] => {
@@ -964,76 +966,77 @@ class SpotifyApiService {
   };
 
 
-  /** All track URIs in an album from Spotify's own client API (see getAlbumMetadata). */
+  /**
+   * All track URIs in an album from Spotify's own client API (see getAlbumMetadata). Empty only
+   * when Spotify's client can't list albums here; a failed read throws instead of returning part
+   * of the album or nothing, so callers never act on fewer songs than the album has.
+   */
   getAllTrackUrisInAlbum = async (albumUriOrId: string): Promise<string[]> =>
     this.getAllTrackUrisInAlbumFromGraphQL(albumUriOrId);
 
   private getAllTrackUrisInAlbumFromGraphQL = async (
     albumUriOrId: string,
   ): Promise<string[]> => {
-    try {
-      const albumId = this.extractAlbumId(albumUriOrId);
-      const albumUri = albumUriOrId.startsWith("spotify:album:")
-        ? albumUriOrId
-        : `spotify:album:${albumId}`;
-      const { GraphQL, Locale } = Spicetify;
-      const locale = Locale?.getLocale?.() || "en";
-      const definitions = [
-        GraphQL.Definitions.queryAlbumTrackUris,
-        GraphQL.Definitions.queryAlbumTracks,
-        GraphQL.Definitions.getAlbumNameAndTracks,
-        GraphQL.Definitions.getAlbum,
-      ].filter(Boolean);
+    const albumId = this.extractAlbumId(albumUriOrId);
+    const albumUri = albumUriOrId.startsWith("spotify:album:")
+      ? albumUriOrId
+      : `spotify:album:${albumId}`;
+    const { GraphQL, Locale } = Spicetify;
+    const locale = Locale?.getLocale?.() || "en";
+    const definitions = [
+      GraphQL.Definitions.queryAlbumTrackUris,
+      GraphQL.Definitions.queryAlbumTracks,
+      GraphQL.Definitions.getAlbumNameAndTracks,
+      GraphQL.Definitions.getAlbum,
+    ].filter(Boolean);
 
-      if (!albumId || definitions.length === 0) {
-        return [];
-      }
-
-      const trackUris = new Set<string>();
-      let offset = 0;
-      const limit = 50;
-
-      for (const definition of definitions) {
-        trackUris.clear();
-        offset = 0;
-
-        for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
-          const response = await requestSpicetifyGraphQL<any>(definition, {
-            id: albumId,
-            uri: albumUri,
-            albumUri,
-            locale,
-            offset,
-            limit,
-          });
-          const album = this.findAlbumMetadataNode(response?.data, albumUri);
-          const pageItems = (album?.tracksV2 ?? album?.tracks)?.items;
-          if (!Array.isArray(pageItems)) break;
-          // Only the songs the album lists. A song from a removed release also names
-          // the song Spotify plays in its place; taking both tagged each song twice.
-          pageItems.forEach((item: { track?: { uri?: unknown }; uri?: unknown } | null) => {
-            const trackUri = item?.track?.uri ?? item?.uri;
-            if (typeof trackUri === "string" && trackUri.startsWith("spotify:track:")) trackUris.add(trackUri);
-          });
-
-          if (pageItems.length < limit) {
-            break;
-          }
-
-          offset += limit;
-        }
-
-        if (trackUris.size > 0) {
-          return Array.from(trackUris);
-        }
-      }
-
-      return [];
-    } catch (error) {
-      throwIfSpotifyRequestStopped(error);
-      console.error("Error fetching tracks in album:", error);
+    if (!albumId || definitions.length === 0) {
       return [];
     }
+
+    const trackUris = new Set<string>();
+    let offset = 0;
+    const limit = 50;
+
+    for (const definition of definitions) {
+      trackUris.clear();
+      offset = 0;
+
+      let complete = false;
+      for (let pageIndex = 0; pageIndex < ALBUM_URI_PAGE_LIMIT; pageIndex += 1) {
+        const response = await requestSpicetifyGraphQL<any>(definition, {
+          id: albumId,
+          uri: albumUri,
+          albumUri,
+          locale,
+          offset,
+          limit,
+        });
+        const album = this.findAlbumMetadataNode(response?.data, albumUri);
+        const pageItems = (album?.tracksV2 ?? album?.tracks)?.items;
+        if (!Array.isArray(pageItems)) break;
+        // Only the songs the album lists. A song from a removed release also names
+        // the song Spotify plays in its place; taking both tagged each song twice.
+        pageItems.forEach((item: { track?: { uri?: unknown }; uri?: unknown } | null) => {
+          const trackUri = item?.track?.uri ?? item?.uri;
+          if (typeof trackUri === "string" && trackUri.startsWith("spotify:track:")) trackUris.add(trackUri);
+        });
+
+        if (pageItems.length < limit) {
+          complete = true;
+          break;
+        }
+
+        offset += limit;
+      }
+
+      if (trackUris.size > 0) {
+        if (!complete) throw new Error("Spotify listed more of this album's songs than Tagify can read at once");
+        return Array.from(trackUris);
+      }
+    }
+
+    return [];
   };
 
   isTrackInPlaylist = async (
@@ -1190,9 +1193,12 @@ class SpotifyApiService {
     const api = Spicetify.Platform.PlaylistAPI as any;
     try {
       assertSpotifyWriteSettled(uri);
-      const membership = new Set(knownMembership ?? (additions.length ? await this.getAllTrackUrisInPlaylistStrict(playlistId, 0, options) : []));
-      if (removals.length) {
-        const contents = { items: (await this.readPlaylistItems(playlistId, options)).map(item => ({ uri: item.uri ?? item.link, uid: item.uid })) };
+      // Removals need each occurrence's uid, which the same read also gives membership for, so a
+      // pass that adds and removes reads the playlist once.
+      const playlistItems = removals.length ? await this.readPlaylistItems(playlistId, options) : undefined;
+      const membership = new Set(knownMembership ?? (!additions.length ? [] : playlistItems ? this.rememberPlaylistItems(playlistItems) : await this.getAllTrackUrisInPlaylistStrict(playlistId, 0, options)));
+      if (playlistItems) {
+        const contents = { items: playlistItems.map(item => ({ uri: item.uri ?? item.link, uid: item.uid })) };
         const removing = new Set(removals);
         const items = contents.items.filter((item: any) => removing.has(item.uri));
         if (items.some((item: any) => !item.uid)) throw new Error("Spotify did not identify the songs to remove");

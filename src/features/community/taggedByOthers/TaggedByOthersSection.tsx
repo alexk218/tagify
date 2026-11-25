@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Check, ListMusic, RefreshCw } from "lucide-react";
 import { isSameTagName, sameTagNameKey } from "@tagify/community-contracts";
 import type { CommunityMatch, CommunityMatchTag } from "@/features/onboarding/services/communityMatches";
@@ -7,6 +7,7 @@ import { LISTS_MAX_SONGS } from "@/services/sync/SpotifyLibrarySender";
 import type { TagTaxonomy, TrackData } from "@/types/tagData";
 import { plural } from "../communityPublication";
 import { communitySwitchOn } from "../communitySwitches";
+import { OthersHomeContext } from "../othersHome/othersHomeContext";
 import { PREVIEW_SONGS_SHOWN, recordCommunityTeaserViewed } from "./communityTeaserPreview";
 import type { TaggedByOthersMatch, TaggedByOthersOutcome, TaggedByOthersStop } from "./taggedByOthersScan";
 import connectStyles from "./ConnectButton.module.css";
@@ -32,6 +33,11 @@ export const USABLE_BEFORE_SHARING = PREVIEW_SONGS_SHOWN;
 
 interface TaggedByOthersSectionProps {
   connected: boolean;
+  /**
+   * Connected, but this computer must reconnect first. Nothing is checked until then, and nothing
+   * saved (the hidden songs, the last check) is forgotten: only a real disconnect ends the list.
+   */
+  reconnectRequired?: boolean;
   /** An approval code is waiting in the browser. */
   connectionPending?: boolean;
   /** The member's Community account; a different account never sees this one's results. */
@@ -184,6 +190,13 @@ function savePlaylistChoice(account: string, chosen: readonly string[]) {
   try { localStorage.setItem(PLAYLISTS_KEY + account, JSON.stringify(chosen)); } catch { /* Ticked again next time. */ }
 }
 
+/** Whether other members tagged a song with any (or all) of these names. */
+function taggedWith(match: CommunityMatch, names: readonly string[], how: "any" | "all"): boolean {
+  if (!names.length) return true;
+  const has = (name: string) => match.tags.some((tag) => isSameTagName(tag.label, name));
+  return how === "all" ? names.every(has) : names.some(has);
+}
+
 /** The names other members used across these songs, by how many songs carry each, same names merged. */
 export function topTagNames(matches: readonly CommunityMatch[]): { label: string; songs: number }[] {
   const names = new Map<string, { label: string; songs: number; best: number }>();
@@ -211,14 +224,15 @@ export function topArtists(matches: readonly CommunityMatch[]): { name: string; 
 const folded = (text: string) => text.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase();
 
 /** The songs in the member's Liked Songs that other members tagged, with those tags one tap from their own library. */
-export function TaggedByOthersSection({ connected, connectionPending = false, onConnectCommunity, store = taggedByOthersStore, preview, previewLoading = false, ...rest }: TaggedByOthersSectionProps) {
+export function TaggedByOthersSection({ connected: signedIn, reconnectRequired = false, connectionPending = false, onConnectCommunity, store = taggedByOthersStore, preview, previewLoading = false, ...rest }: TaggedByOthersSectionProps) {
   // Disconnecting ends the list: nothing of it is kept in memory or on this computer.
   useEffect(() => {
-    if (connected) return;
+    if (signedIn) return;
     forgetTaggedByOthers();
     void store.clear();
     (rest.hiddenStore ?? hiddenSongsStore).clear(null);
-  }, [connected, store, rest.hiddenStore]);
+  }, [signedIn, store, rest.hiddenStore]);
+  const connected = signedIn && !reconnectRequired;
 
   if (connected) return <Results store={store} {...rest} />;
   if (preview && preview.songs.length > 0 && !connectionPending && communitySwitchOn("communityTeasers")) {
@@ -269,6 +283,8 @@ function Preview({ preview, inTrackList, onConnect, onPlaySong }: {
   const usable = songs;
   const more = total - usable.length;
   useEffect(() => recordCommunityTeaserViewed("tab", total), [total]);
+  const reports = useContext(OthersHomeContext);
+  useEffect(() => { reports.onFound?.(total); }, [reports, total]);
   return (
     <section className={`${styles.section} ${inTrackList ? styles.inTrackList : ""}`} aria-labelledby="tagged-by-others-title">
       <div className={styles.card}>
@@ -368,6 +384,13 @@ function Results({
   const likedOnly = scope === "liked";
   const checking = phase === "checking";
   const found = matches.length;
+  // The view around this list shows the count on its "Your songs" option.
+  const reports = useContext(OthersHomeContext);
+  useEffect(() => { if (view.phase === "done" || found > 0) reports.onFound?.(found); }, [reports, found, view.phase]);
+  // Inside "Tagged by others" the tags chosen above both lists filter this one; elsewhere, one name picked here.
+  const sharedTags = reports.tags;
+  const wantedTags = useMemo(() => (sharedTags ? sharedTags.chosen.tags : tagFilter ? [tagFilter] : []), [sharedTags, tagFilter]);
+  const wantedMatch = sharedTags?.chosen.match ?? "any";
   const query = folded(search.trim());
   const visibleMatches = useMemo(() => (onToggleTag ? matches.filter((match) => !hiddenSet.has(match.track.uri)) : matches), [matches, hiddenSet, onToggleTag]);
   const tagNames = useMemo(() => topTagNames(visibleMatches), [visibleMatches]);
@@ -376,16 +399,17 @@ function Results({
     const kept = visibleMatches.filter((match) =>
       (!query || folded(match.track.name).includes(query) || match.track.artists.some((artist) => folded(artist.name).includes(query)))
       && (!notTaggedOnly || touched.has(match.track.uri) || !(tracks[match.track.uri]?.tagIds?.length))
-      && (!tagFilter || match.tags.some((tag) => isSameTagName(tag.label, tagFilter)))
+      && taggedWith(match, wantedTags, wantedMatch)
       && (!artistFilter || match.track.artists.some((artist) => artist.name === artistFilter)));
     // Songs most members tagged first, or the ones added to Spotify most recently (songs without a
     // date, from checks saved before dates were kept, go last); ties keep the order Spotify lists them in.
     return kept.sort((a, b) => (choices.sort === "members" ? b.people - a.people : (b.track.addedAt ?? 0) - (a.track.addedAt ?? 0))
       || a.position - b.position);
-  }, [visibleMatches, query, choices.sort, notTaggedOnly, touched, tracks, tagFilter, artistFilter]);
+  }, [visibleMatches, query, choices.sort, notTaggedOnly, touched, tracks, wantedTags, wantedMatch, artistFilter]);
+  useEffect(() => { reports.onTagNames?.(tagNames); }, [reports, tagNames]);
   const hiddenMatches = useMemo(() => matches.filter((match) => hiddenSet.has(match.track.uri)), [matches, hiddenSet]);
-  const filtering = !!query || !!tagFilter || !!artistFilter || notTaggedOnly;
-  const clearFilters = () => { setSearch(""); setTagFilter(null); setArtistFilter(null); choose({ notTaggedOnly: false }); };
+  const filtering = !!query || wantedTags.length > 0 || !!artistFilter || notTaggedOnly;
+  const clearFilters = () => { setSearch(""); setTagFilter(null); sharedTags?.onChoose({ tags: [], match: "any" }); setArtistFilter(null); choose({ notTaggedOnly: false }); };
 
   const sectionClass = `${styles.section} ${inTrackList ? styles.inTrackList : ""}`;
   const titleClass = inTrackList ? styles.visuallyHidden : styles.title;
@@ -497,7 +521,7 @@ function Results({
                 <option value="recent">Recently added</option>
               </select>
             </div>
-            {tagNames.length > 1 || editable ? (
+            {(!sharedTags && tagNames.length > 1) || editable ? (
               <div className={styles.tagFilters} role="group" aria-label="Show songs others tagged">
                 {editable ? (
                   <>
@@ -505,10 +529,10 @@ function Results({
                       onClick={() => setNotTaggedOnly(!choices.notTaggedOnly)}>
                       {choices.notTaggedOnly ? <Check size={13} strokeWidth={2.5} aria-hidden="true" /> : null}Not tagged by me yet
                     </button>
-                    {tagNames.length > 1 ? <span className={styles.chipDivider} aria-hidden="true" /> : null}
+                    {!sharedTags && tagNames.length > 1 ? <span className={styles.chipDivider} aria-hidden="true" /> : null}
                   </>
                 ) : null}
-                {(tagNames.length > 1 ? shownTagNames : []).map(({ label, songs }) => {
+                {(!sharedTags && tagNames.length > 1 ? shownTagNames : []).map(({ label, songs }) => {
                   const selected = !!tagFilter && isSameTagName(tagFilter, label);
                   return (
                     <button key={label} type="button" className={`${styles.tagFilter} ${selected ? styles.tagFilterOn : ""}`} aria-pressed={selected}
@@ -517,7 +541,7 @@ function Results({
                     </button>
                   );
                 })}
-                {tagNames.length > TAG_NAMES_SHOWN ? (
+                {!sharedTags && tagNames.length > TAG_NAMES_SHOWN ? (
                   <button type="button" className={styles.tagFilterMore} aria-expanded={allTagNames} onClick={() => setAllTagNames((current) => !current)}>
                     {allTagNames ? "Fewer" : `+${(tagNames.length - TAG_NAMES_SHOWN).toLocaleString()} more`}
                   </button>

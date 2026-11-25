@@ -76,7 +76,8 @@ export function useTagDataTrackActions({
       nextData = { ...nextData, tracks: tracks as Record<string, TrackData> };
       // Linked releases keep the method of the edit they copy.
       if (tagMethod) noteRecordTagMethods(current, { ...edits, ...expanded }, tagMethod);
-      trackEditHistory.record(session, current, nextData.tracks, "saved");
+      // Only the edited songs and their linked releases can differ.
+      trackEditHistory.record(session, current, nextData.tracks, "saved", [...Object.keys(edits), ...Object.keys(expanded)]);
       latestTagDataRef.current = nextData;
       setTagData(nextData);
     },
@@ -249,6 +250,7 @@ export function useTagDataTrackActions({
         // Undo or another edit may have happened since this batch was saved.
         onSyncMultipleTracks?.(Object.fromEntries(Object.keys(finalTrackDataMap).map(uri => [uri, latestTagDataRef.current.tracks[uri] || null])));
       }, TRACK_SYNC_DELAY_MS);
+      return finalTrackDataMap;
     },
     [refreshPersistedTagData, commitDataSnapshot, emitUserTrackAddedEvent, latestTagDataRef, onSyncMultipleTracks],
   );

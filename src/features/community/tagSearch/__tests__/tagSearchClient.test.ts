@@ -57,11 +57,23 @@ describe("Community tag search request", () => {
     await expect(searchCommunityTags(["Rock"], { session: () => null, request: answer({}, status) })).rejects.toEqual(new TagSearchError(reason as never));
   });
 
-  it("asks again without the session when Community no longer accepts it", async () => {
+  it("renews a session Community refused and asks again with the new one", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [], totalCount: 0, locked: null })));
+    const session = vi.fn((refused?: string) => ({ apiBaseUrl: "https://api.example", accessToken: refused === "old" ? "new" : "old" }));
+    const page = await searchCommunityTags(["Rock"], { request, session });
+    expect(session).toHaveBeenLastCalledWith("old");
+    expect(page.locked).toBeNull();
+    expect(((request.mock.calls[1] as unknown as [string, RequestInit])[1].headers as Record<string, string>).authorization).toBe("Bearer new");
+  });
+
+  it("asks without the session only when it can't be renewed", async () => {
     const request = vi.fn()
       .mockResolvedValueOnce(new Response("{}", { status: 401 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [], totalCount: 0, locked: "connect" })));
-    const page = await searchCommunityTags(["Rock"], { request, session: () => ({ apiBaseUrl: "https://api.example", accessToken: "old" }) });
+    const session = vi.fn((refused?: string) => (refused ? null : { apiBaseUrl: "https://api.example", accessToken: "old" }));
+    const page = await searchCommunityTags(["Rock"], { request, session });
     expect(page.locked).toBe("connect");
     expect(((request.mock.calls[1] as unknown as [string, RequestInit])[1].headers as Record<string, string>).authorization).toBeUndefined();
   });

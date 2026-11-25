@@ -17,8 +17,9 @@ import { capabilitiesCacheKey } from "@/services/sync/SyncRuntime";
  *   never connected has no capability list to read, so Community controls this one with its own
  *   switch `desktop_tagged_by_others_preview`: while that is off, the preview route answers "paused"
  *   and every surface stays as it is without a preview.
- * - `communityTagSearch`: while a tag filter is on, the track list shows songs other members tagged
- *   that way on Community ("On Community"). People who aren't connected, or don't share their tags,
+ * - `communityTagSearch`: "Tagged by others" gets "Your songs | New to you"; New to you shows songs other
+ *   members tagged with the tags the member chooses, and a tag filter on Tagged Tracks shows one line
+ *   leading there (Alex's pick 1A, 2026-11-24). People who aren't connected, or don't share their tags,
  *   see the first few and the count. Songs show as a cover shelf with tag pills (Alex's pick, 2026-11-22).
  *   Community's own tag-search switch also pauses it: the route then answers "paused" and nothing shows.
  *

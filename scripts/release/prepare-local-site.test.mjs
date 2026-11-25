@@ -65,14 +65,14 @@ test('every link preview image is part of the upload and small enough for WhatsA
 test('the old invite link sends friends to Community, before page links are matched to files', () => {
   const routes = siteRoutes({ mac: { url: 'https://github.com/mac' }, windows: { url: 'https://github.com/windows' } }, {});
   const invite = routes.findIndex(route => route.src === '^/invite/?$');
-  assert.equal(INVITE_DESTINATION, 'https://community.tagify.fm/join');
+  assert.equal(INVITE_DESTINATION, 'https://tagify.fm/join');
   assert.equal(routes[invite].status, 302);
   assert.equal(routes[invite].headers.Location, INVITE_DESTINATION);
   assert.ok(invite < routes.findIndex(route => route.handle === 'filesystem'));
 });
 
 test('refuses to deploy the invite redirect before Community serves the general invite', async () => {
-  const generalInvite = '<head><link rel="canonical" href="https://community.tagify.fm/join"/></head>';
+  const generalInvite = '<head><link rel="canonical" href="https://tagify.fm/join"/></head>';
   const answering = (status, body = generalInvite) => async (url, options) => {
     assert.equal(url, INVITE_DESTINATION);
     assert.equal(options.redirect, 'manual');
@@ -111,21 +111,6 @@ test('compares versions numerically', () => {
 test('rejects downloads hosted outside the GitHub release or without a digest', () => {
   const offsite = { tag_name: 'v2.0.0', draft: false, prerelease: false, assets: [asset('v2.0.0', 'TagifyInstaller-mac.dmg', 'https://tagify.fm/releases/manager/v2.0.0/TagifyInstaller-mac.dmg'), { ...asset('v2.0.0', 'TagifyInstaller.exe'), digest: null }] };
   assert.throws(() => selectDownloads([offsite]), /No verified mac installer/);
-});
-
-test('after Community moves to tagify.fm, the old invite address redirecting there still counts as live', async () => {
-  const moved = '<head><link rel="canonical" href="https://tagify.fm/join"/></head>';
-  const answers = {
-    'https://community.tagify.fm/join': { status: 308, headers: new Headers({ location: 'https://tagify.fm/join' }), text: async () => '' },
-    'https://tagify.fm/join': { status: 200, headers: new Headers(), text: async () => moved },
-  };
-  await assertInviteDestinationLive(async (url) => answers[url]);
-  // A redirect anywhere else isn't the invite.
-  const elsewhere = { ...answers, 'https://community.tagify.fm/join': { ...answers['https://community.tagify.fm/join'], headers: new Headers({ location: 'https://example.com/join' }) } };
-  await assert.rejects(assertInviteDestinationLive(async (url) => elsewhere[url]), /answered 308/);
-  // The new page must name itself as canonical.
-  const wrong = { ...answers, 'https://tagify.fm/join': { status: 200, headers: new Headers(), text: async () => '<title>Tagify</title>' } };
-  await assert.rejects(assertInviteDestinationLive(async (url) => wrong[url]), /tagify\.fm\/join isn't the general invite yet/);
 });
 
 test('the release host keeps only update files and downloads, and sends every other page to tagify.fm', () => {

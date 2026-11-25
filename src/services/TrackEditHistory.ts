@@ -8,10 +8,21 @@ export type EditSession = { id: string; key: string; account: string; mode: Edit
 export type TrackEditEntry = BulkUndoEntry & { kind: "saved" | "draft" };
 const annotation = (track?: TrackData | null) => JSON.stringify([track?.rating || 0, track?.energy || 0, track?.bpm ?? null, track?.camelotKey ?? null, [...(track?.tagIds || [])].sort()]);
 export const editSelectionKey = (mode: EditMode, uris: string[], account = getTagifyDatabaseName()) => JSON.stringify([account, mode, [...new Set(uris)].sort()]);
-export function editChanges(before: Record<string, TrackData | null>, after: Record<string, TrackData | null>) {
-  return Object.fromEntries([...new Set([...Object.keys(before), ...Object.keys(after)])]
-    .filter(uri => annotation(before[uri]) !== annotation(after[uri]))
-    .map(uri => [uri, { before: structuredClone(before[uri] || null), after: structuredClone(after[uri] || null) }]));
+/**
+ * The songs whose annotations differ. With `uris`, only those songs are compared, so a
+ * single-song edit doesn't compare the whole library; records that are the same object
+ * on both sides are unchanged and skipped either way.
+ */
+export function editChanges(before: Record<string, TrackData | null>, after: Record<string, TrackData | null>, uris?: Iterable<string>) {
+  const changes: BulkUndoEntry["changes"] = {};
+  const compare = (uri: string) => {
+    if (before[uri] === after[uri] || Object.hasOwn(changes, uri) || annotation(before[uri]) === annotation(after[uri])) return;
+    changes[uri] = { before: structuredClone(before[uri] || null), after: structuredClone(after[uri] || null) };
+  };
+  if (uris) { for (const uri of uris) compare(uri); return changes; }
+  for (const uri of Object.keys(after)) if (before[uri] !== after[uri]) compare(uri);
+  for (const uri of Object.keys(before)) if (after[uri] === undefined) compare(uri);
+  return changes;
 }
 
 /** Only the current visit to a song/selection is reversible. Saved music is never reset. */
@@ -42,9 +53,10 @@ export class TrackEditHistory {
     return session?.mode && session.key === editSelectionKey(mode, uris) ? session : null;
   }
   isCurrent(session: EditSession | null) { return !!session && this.state.session?.id === session.id && session.account === getTagifyDatabaseName(); }
-  record(session: EditSession | null, before: Record<string, TrackData | null>, after: Record<string, TrackData | null>, kind: TrackEditEntry["kind"]) {
+  /** `uris` limits the comparison to the songs an edit touched; the session's own songs are always included. */
+  record(session: EditSession | null, before: Record<string, TrackData | null>, after: Record<string, TrackData | null>, kind: TrackEditEntry["kind"], uris?: Iterable<string>) {
     if (!this.isCurrent(session)) return;
-    const changes = editChanges(before, after);
+    const changes = editChanges(before, after, uris && new Set([...session!.uris, ...uris]));
     const undo = kind === "saved" && session?.mode === "bulk" ? this.state.undo.filter(entry => entry.kind !== "draft") : this.state.undo;
     if (!Object.keys(changes).length) { if (undo !== this.state.undo) this.update({ ...this.state, undo, redo: [] }); return; }
     const entry = { id: crypto.randomUUID(), createdAt: Date.now(), changes, kind };

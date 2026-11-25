@@ -2064,47 +2064,6 @@
   }
 }
 
-/* "On Community" ways in above the list while a tag filter is on (Alex's pick 1A). */
-.communityTagSwitch {
-  display: inline-flex;
-  gap: 8px;
-  margin: 4px 0 12px;
-}
-
-.communityTagOption {
-  min-height: 32px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 500px;
-  background: rgb(255 255 255 / 7%);
-  color: var(--spice-text);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.communityTagOption:hover {
-  background: rgb(255 255 255 / 12%);
-}
-
-.communityTagOptionOn,
-.communityTagOptionOn:hover {
-  background: var(--spice-text);
-  color: var(--spice-main);
-}
-
-/* Plain "New" until the member first opens On Community: text in the accent color, nothing else. */
-.communityTagNew {
-  margin-left: 6px;
-  color: var(--spice-button);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.communityTagOptionOn .communityTagNew {
-  color: inherit;
-}
-
 /* Calmer Filters (Alex's pick A, 2026-11-23): compact rows, one tag bar, no inner boxes or uppercase labels. */
 .tagsFilterSection {
   min-width: 0;
@@ -2279,4 +2238,29 @@
   padding: 0;
   border: none;
   background: none;
+}
+
+/* From a tag filter to the songs other members tagged that way: one quiet line where the list starts. */
+.othersBridge {
+  background: transparent;
+  border: 0;
+  color: var(--spice-subtext);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 4px;
+  margin: 4px 0 12px;
+  padding: 0;
+  text-decoration: none;
+}
+
+.othersBridge:hover {
+  color: var(--spice-text);
+  text-decoration: underline;
+}
+
+.othersBridge:focus-visible {
+  outline: 2px solid var(--spice-button);
+  outline-offset: 2px;
 }

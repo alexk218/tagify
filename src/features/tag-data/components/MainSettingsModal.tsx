@@ -18,7 +18,7 @@ import { syncRuntime } from "@/services/sync/SyncRuntime";
 import { startOnboardingPreview } from "@/features/onboarding/preview/onboardingPreview";
 import { useOnboardingPreviewAccess } from "@/features/onboarding/preview/onboardingPreviewAccess";
 import { setPrivateNotesShown, usePrivateNotesShown } from "@/features/private-notes/privateNotesSetting";
-import { setAdvancedFilters, useAdvancedFilters } from "@/features/filter-state/advancedFiltersSetting";
+import { setAdvancedFilters, useAdvancedFilters } from "@/features/filter-state";
 
 interface MainSettingsModalProps {
   onClose: () => void;

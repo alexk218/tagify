@@ -1,6 +1,7 @@
 import config from "./config.json";
 import packageJson from "@/package";
 import { getUsageAccountDigest } from "@/features/discovery-survey/services/tagifyUsage";
+import { observeFirstSessionEvent } from "./firstSession";
 
 export const ANALYTICS_CHOICE_EVENT = "tagify:analytics-choice";
 const PREFIX = "tagify:product-analytics:v1:";
@@ -8,14 +9,14 @@ const MAX_AGE = 7 * 86400000;
 const MAX_EVENTS = 200;
 const HOSTS = ["https://us.i.posthog.com", "https://eu.i.posthog.com"];
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
-const EVENTS = ["tagify_opened", "tagify_present", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened", "update_banner_shown", "update_instructions_opened", "update_download_clicked", "update_banner_dismissed", "community_publish_prompt_shown", "community_publish_prompt_reminder_shown", "community_publish_prompt_snoozed", "community_publish_prompt_published", "community_profile_published", "community_publish_kept_private", "community_share_opened", "community_sharing_stopped", "community_sharing_resumed", "community_connect_prompt_shown", "community_connect_prompt_dismissed", "community_setup_opened", "community_connect_started", "community_connect_completed", "community_connect_failed", "invite_opened", "invite_link_copied", "first_run_shown", "first_run_song_picked", "first_run_members_checked", "first_run_members_tag_added", "community_library_check_completed", "community_library_tag_added", "first_run_payoff_shown", "first_run_payoff_reached", "first_run_tip_shown", "first_run_tip_done", "welcome_popup_shown", "taste_packs_shown", "taste_pack_added", "taste_packs_skipped", "rewind_prompt_shown", "rewind_prompt_opened", "phone_app_panel_opened", "phone_app_store_clicked", "phone_app_button_hidden", "android_notify_requested", "android_release_notice_shown", "community_rating_sharing_asked", "community_rating_sharing_answered", "track_list_others_opened", "track_list_members_tag_added", "track_list_community_link_opened", "track_list_sort_changed", "smart_playlist_created", "smart_playlist_refreshed", "note_saved", "bulk_tag_applied", "suggested_tag_used", "auto_tags_applied", "energy_set", "tag_filter_used", "album_apply_to_tracks", "tagged_by_others_song_played", "tagged_by_others_tag_toggled", "tagged_by_others_song_hidden", "tagged_by_others_filter_used", "tagged_by_others_playlists_chosen", "community_teaser_viewed", "community_teaser_connect_clicked"] as const;
+const EVENTS = ["tagify_opened", "tagify_present", "tagging_completed", "rating_completed", "tracks_viewed", "albums_viewed", "artists_viewed", "playlists_viewed", "tag_manager_opened", "export_requested", "import_requested", "import_submitted", "settings_opened", "stats_opened", "local_files_opened", "community_opened", "cloud_sync_opened", "update_banner_shown", "update_instructions_opened", "update_download_clicked", "update_banner_dismissed", "community_publish_prompt_shown", "community_publish_prompt_reminder_shown", "community_publish_prompt_snoozed", "community_publish_prompt_published", "community_profile_published", "community_publish_kept_private", "community_share_opened", "community_sharing_stopped", "community_sharing_resumed", "community_connect_prompt_shown", "community_connect_prompt_dismissed", "community_setup_opened", "community_connect_started", "community_connect_completed", "community_connect_failed", "invite_opened", "invite_link_copied", "first_run_shown", "first_run_song_picked", "first_run_members_checked", "first_run_members_tag_added", "community_library_check_completed", "community_library_tag_added", "first_run_payoff_shown", "first_run_payoff_reached", "first_run_tip_shown", "first_run_tip_done", "welcome_popup_shown", "taste_packs_shown", "taste_pack_added", "taste_packs_skipped", "rewind_prompt_shown", "rewind_prompt_opened", "phone_app_panel_opened", "phone_app_store_clicked", "phone_app_button_hidden", "android_notify_requested", "android_release_notice_shown", "community_rating_sharing_asked", "community_rating_sharing_answered", "track_list_others_opened", "track_list_members_tag_added", "track_list_community_link_opened", "track_list_sort_changed", "smart_playlist_created", "smart_playlist_refreshed", "note_saved", "bulk_tag_applied", "suggested_tag_used", "auto_tags_applied", "energy_set", "tag_filter_used", "album_apply_to_tracks", "tagged_by_others_song_played", "tagged_by_others_tag_toggled", "tagged_by_others_song_hidden", "tagged_by_others_filter_used", "tagged_by_others_playlists_chosen", "community_teaser_viewed", "community_teaser_connect_clicked", "tagged_by_others_view_opened", "community_tag_search_completed", "community_song_saved_to_liked", "first_session_ended"] as const;
 export type ProductEventName = typeof EVENTS[number];
 // Details are fixed, coarse values so an event never carries content, versions or links.
 const DETAILS = {
   update_kind: ["patch", "minor", "major"],
   method: ["direct", "release_page", "command"],
   sync_state: ["connected", "disconnected", "not_connected"],
-  entry: ["prompt", "community", "sync", "invite", "rewind", "library_check", "teaser_tab", "teaser_rows", "teaser_track_details", "teaser_tag_search", "phone_app"],
+  entry: ["prompt", "community", "sync", "invite", "rewind", "library_check", "teaser_tab", "teaser_rows", "teaser_track_details", "teaser_tag_search", "phone_app", "tab", "filter_link", "restored"],
   relationship: ["first_link", "reconnect", "account_switch"],
   stage: ["start", "finish"],
   invite_entry: ["action_bar", "milestone"],
@@ -51,12 +52,24 @@ const DETAILS = {
   filter_kind: ["tag", "artist", "not_tagged"],
   playlists_chosen: ["1", "2-4", "5-9", "10-24", "25-99", "100+"],
   folders_used: ["yes", "no"],
+  // The two lists under "Tagged by others", and Community's answers to a tag search.
+  view: ["your_songs", "new_to_you"],
+  result_bucket: ["0", "1-9", "10-99", "100+"],
+  locked: ["none", "connect", "share"],
+  tags_bucket: ["1", "2-3", "4+"],
   // Community teasers for people who aren't connected: songs other members tagged among their newest Liked Songs.
   found_bucket: ["1-9", "10-49", "50-99", "100-249", "250+"],
   answer: ["yes", "no"],
   // First-run tips (docs/ONBOARDING_FIRST_RUN_PLAN_2026-11.md section 10).
   tip: ["play", "tag", "manage", "tagged", "others", "playlist", "smart", "rate"],
   how: ["action", "got_it", "skipped"],
+  // The end of a brand-new account's first session (firstSession.ts).
+  tagged: ["yes", "no"],
+  rated: ["yes", "no"],
+  songs_viewed: ["0", "1", "2-4", "5-9", "10-24", "25+"],
+  last_tip: ["none", "play", "tag", "manage", "tagged", "others", "playlist", "smart", "rate"],
+  minutes: ["0", "1", "2-4", "5-9", "10-19", "20-39", "40-59", "60+"],
+  ended_by: ["closed", "idle", "next_open"],
 } as const;
 type DetailKey = keyof typeof DETAILS;
 export type ProductEventDetails = { [K in DetailKey]?: typeof DETAILS[K][number] };
@@ -99,8 +112,12 @@ const EVENT_DETAILS: Partial<Record<ProductEventName, readonly DetailKey[]>> = {
   tagged_by_others_song_hidden: ["hide_action"],
   tagged_by_others_filter_used: ["filter_kind"],
   tagged_by_others_playlists_chosen: ["playlists_chosen", "folders_used"],
+  tagged_by_others_view_opened: ["view", "entry"],
+  community_tag_search_completed: ["result_bucket", "locked", "tags_bucket"],
+  community_song_saved_to_liked: ["entry"],
   community_rating_sharing_asked: ["surface"],
   community_rating_sharing_answered: ["answer", "surface"],
+  first_session_ended: ["tagged", "rated", "songs_viewed", "last_tip", "how", "minutes", "ended_by"],
 };
 const BASE_PROPERTIES = ["app_version", "spotify_version", "installation_id", "$process_person_profile", "$geoip_disable", "$ip"];
 const SPOTIFY_VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}(\.\d{1,6})?$/;
@@ -276,7 +293,8 @@ export function releaseAggregateRequest(account: string, controller: AbortContro
   if (runtime.aggregateRequests.get(account) === controller) runtime.aggregateRequests.delete(account);
 }
 
-export function recordProductEvent(account: string, event: ProductEventName, details: ProductEventDetails = {}): void {
+/** `at` dates an event that happened earlier (a first session reported on the next start); it must be within the queue's 7 days. */
+export function recordProductEvent(account: string, event: ProductEventName, details: ProductEventDetails = {}, at?: number): void {
   try {
     const state = read(account);
     const settings = configuration();
@@ -291,11 +309,13 @@ export function recordProductEvent(account: string, event: ProductEventName, det
     if (state.installationId && Date.parse(state.installationExpiresAt || "") > Date.now()) properties.installation_id = state.installationId;
     if (state.projectToken !== settings.token) state.events = [];
     state.projectToken = settings.token;
-    state.events.push({ uuid: crypto.randomUUID(), event, timestamp: new Date().toISOString(), distinct_id: `tagify-account-${account}`, properties });
+    const timestamp = at !== undefined && at <= Date.now() && at > Date.now() - MAX_AGE ? new Date(at).toISOString() : new Date().toISOString();
+    state.events.push({ uuid: crypto.randomUUID(), event, timestamp, distinct_id: `tagify-account-${account}`, properties });
     state.events = state.events.slice(-MAX_EVENTS);
     localStorage.setItem(PREFIX + account, JSON.stringify(state));
     if (event === "tagify_opened") runtime.openedDays.set(account, day);
     if (event === "tagify_present") localStorage.setItem(PRESENT_DAY_PREFIX + account, day);
+    observeFirstSessionEvent(account, event, details);
     schedule(account);
   } catch { /* Optional measurements never interrupt editing. */ }
 }
@@ -322,6 +342,21 @@ function schedule(account: string, failures = 0, delay = 1000): void {
       schedule(account, sent ? 0 : failures + 1, Math.max(sent ? 1000 : [5000, 30000, 120000][failures] ?? 3600000, runtime.pausedUntil - Date.now()));
     }
   }, delay));
+}
+
+/**
+ * Sends queued events once the page can't be in use anymore: Spotify closing or the first session ending
+ * while Spotify is hidden. `keepalive` lets the request outlive the page; the events stay queued until a
+ * normal send acknowledges them, and PostHog keeps one copy of an event sent twice (same uuid).
+ */
+export function sendProductEventsNow(account: string): void {
+  try {
+    const state = read(account);
+    const settings = configuration();
+    if (!state.enabled || !settings || !state.events.length || state.projectToken !== settings.token || !navigator.onLine || Date.now() < runtime.pausedUntil) return;
+    void fetch(`${settings.host}/batch/`, { method: "POST", headers: { "Content-Type": "application/json" }, keepalive: true,
+      body: JSON.stringify({ api_key: settings.token, batch: state.events.slice(-20) }), redirect: "error", credentials: "omit" }).catch(() => { /* Sent again by the queue. */ });
+  } catch { /* Optional measurements never interrupt closing. */ }
 }
 
 export async function flushProductEvents(account: string): Promise<boolean> {
